@@ -7,6 +7,7 @@ import pLimit from 'p-limit'
 import path from 'path'
 
 const CAPTIONS_FOLDER = './captions'
+const SKIPLIST_FILE = path.join(CAPTIONS_FOLDER, 'skiplist.json')
 
 type Video = {
 	id: string
@@ -318,6 +319,12 @@ const downloadCaptionForVideo = async (videoId: string, yt: Innertube, maxRetrie
 	}))
 }
 
+enum CaptionDownloadResult {
+	AlreadyDownloaded,
+	Success,
+	NoCaptions,
+	Error
+}
 /**
  * Downloads the caption for a given YouTube video and saves it to disk.
  *
@@ -326,27 +333,75 @@ const downloadCaptionForVideo = async (videoId: string, yt: Innertube, maxRetrie
  * @param {Innertube} yt The YouTubei.js instance to use for fetching video information.
  * @param {number} [maxRetries=3] The maximum number of retries for fetching video info and transcript.
  */
-const downloadAndSaveCaption = async (videoId: string, channelId: string, yt: Innertube, maxRetries: number = 3) => {
-	// If it's already downloaded, return
+const downloadAndSaveCaption = async (
+	videoId: string,
+	channelId: string,
+	yt: Innertube,
+	maxRetries: number = 3
+): Promise<CaptionDownloadResult> => {
 	const captionFile = path.join(CAPTIONS_FOLDER, channelId, `${videoId}.json`)
+
 	if (fs.existsSync(captionFile)) {
-		return
+		return CaptionDownloadResult.AlreadyDownloaded
 	}
 
-	const caption = await downloadCaptionForVideo(videoId, yt, maxRetries)
-	if (!caption) return
+	try {
+		const caption = await downloadCaptionForVideo(videoId, yt, maxRetries)
+		if (!caption) {
+			logger.warn(`No captions found for video ${videoId}.`)
+			return CaptionDownloadResult.NoCaptions
+		}
+		const channelFolder = path.join(CAPTIONS_FOLDER, channelId)
+		fs.mkdirSync(channelFolder, { recursive: true })
+		fs.writeFileSync(captionFile, JSON.stringify(caption, null, 2))
+		logger.info(`Wrote captions for video ${videoId} to ${captionFile}`)
+		return CaptionDownloadResult.Success
+	} catch (err) {
+		logger.error(`Error downloading caption for video ${videoId}:`, err)
+		return CaptionDownloadResult.Error
+	}
+}
 
-	// Write the captions to a file
-	const channelFolder = path.join(CAPTIONS_FOLDER, channelId)
-	fs.mkdirSync(channelFolder, { recursive: true })
-	fs.writeFileSync(captionFile, JSON.stringify(caption, null, 2))
-	logger.info(`Wrote captions for video ${videoId} to ${captionFile}`)
+class SkiplistManager {
+	skiplist: Set<string>
+	private readonly file: string
+
+	constructor(file: string) {
+		this.file = file
+		this.skiplist = this.load()
+	}
+
+	private load(): Set<string> {
+		try {
+			fs.mkdirSync(CAPTIONS_FOLDER, { recursive: true })
+			const data = fs.readFileSync(this.file, 'utf-8')
+			return new Set(JSON.parse(data))
+		} catch (e) {
+			return new Set()
+		}
+	}
+
+	has(id: string): boolean {
+		return this.skiplist.has(id)
+	}
+
+	add(id: string) {
+		this.skiplist.add(id)
+		this.save()
+	}
+
+	save() {
+		fs.mkdirSync(CAPTIONS_FOLDER, { recursive: true })
+		fs.writeFileSync(this.file, JSON.stringify([...this.skiplist], null, 2))
+	}
 }
 
 async function main() {
 	try {
 		const resolvedConfig = await getResolvedConfig()
 		const limit = pLimit(3)
+		const skiplistManager = new SkiplistManager(SKIPLIST_FILE)
+
 		const videos = await Promise.all(
 			resolvedConfig.map((channel) =>
 				limit(async () => {
@@ -371,7 +426,14 @@ async function main() {
 		await Promise.all(
 			videosWithChannel.map(({ channel, video }) =>
 				captionDownloadLimit(async () => {
-					await downloadAndSaveCaption(video.id, channel.channelId!, yt, 3)
+					if (skiplistManager.has(video.id)) {
+						logger.warn(`Skipping video ${video.id} as it is in the skiplist.`)
+						return
+					}
+					const result = await downloadAndSaveCaption(video.id, channel.channelId!, yt, 3)
+					if (result === CaptionDownloadResult.NoCaptions) {
+						skiplistManager.add(video.id)
+					}
 				})
 			)
 		)
