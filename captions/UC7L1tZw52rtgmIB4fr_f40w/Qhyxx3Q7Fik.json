@@ -1,0 +1,1452 @@
+[
+  {
+    "text": "okay uh hey everyone um so we're really excited to be here today to talk to you about flask fast",
+    "start": "4860",
+    "end": "11700"
+  },
+  {
+    "text": "flexible and scalable data loading for ML training using Ray data",
+    "start": "11700",
+    "end": "17400"
+  },
+  {
+    "text": "so first just a little bit about us I'm Stephanie and this is Scott and we're both software engineers at any school",
+    "start": "17400",
+    "end": "23520"
+  },
+  {
+    "text": "working on the ray data and core teams and we're really excited to be here today to talk to you about some of our",
+    "start": "23520",
+    "end": "29400"
+  },
+  {
+    "text": "open source work so hopefully by the end of this talk you'll understand the role of role of",
+    "start": "29400",
+    "end": "35940"
+  },
+  {
+    "text": "the role of Ray data in ml training workloads how the design of Ray data has",
+    "start": "35940",
+    "end": "41520"
+  },
+  {
+    "text": "an advantage in this kind of workload and also looking at some performance benchmarks comparing Ray data to some",
+    "start": "41520",
+    "end": "47460"
+  },
+  {
+    "text": "other open source data loaders that you may have used in the past including Pi torch data loader ntf data",
+    "start": "47460",
+    "end": "54780"
+  },
+  {
+    "text": "okay so first what exactly is this data loading problem well in data loading for ML training",
+    "start": "54780",
+    "end": "63140"
+  },
+  {
+    "text": "generally what you have is uh sorry I think the slides oh okay the data",
+    "start": "63140",
+    "end": "70920"
+  },
+  {
+    "text": "loading for ML training setup basically looks something like this where you have some GPU trainers in a cluster and you",
+    "start": "70920",
+    "end": "77880"
+  },
+  {
+    "text": "have a data set that's stored either on local disk or cloud storage and what you want to do is here you",
+    "start": "77880",
+    "end": "85259"
+  },
+  {
+    "text": "actually want to load all of your data into memory and stream that to your GPU trainers",
+    "start": "85259",
+    "end": "90659"
+  },
+  {
+    "text": "now there's a few different things that make this challenging to do so first of all you want this data loading process",
+    "start": "90659",
+    "end": "97320"
+  },
+  {
+    "text": "to be fast because as soon as one of these batches of data becomes ready for",
+    "start": "97320",
+    "end": "103140"
+  },
+  {
+    "text": "training you want to load that into the GPU as quickly as possible and by the time the GPU is ready again to process",
+    "start": "103140",
+    "end": "108900"
+  },
+  {
+    "text": "the next batch of data you want that batch of data to already be ready in memory",
+    "start": "108900",
+    "end": "114299"
+  },
+  {
+    "text": "and so basically what you want to do here is actually overlap that data loading process with the GPU training",
+    "start": "114299",
+    "end": "120780"
+  },
+  {
+    "text": "you also want this to scale so here we have this large data set that's stored say on cloud storage and we also have a",
+    "start": "120780",
+    "end": "128700"
+  },
+  {
+    "text": "cluster of multiple trainers and so what that means here is that we can't necessarily just fit all of that data in",
+    "start": "128700",
+    "end": "135360"
+  },
+  {
+    "text": "memory we actually want to stream that data set through a memory into the GPU trainers",
+    "start": "135360",
+    "end": "142379"
+  },
+  {
+    "text": "and in this case because we have these multiple GPU trainers we also want to in",
+    "start": "142379",
+    "end": "147780"
+  },
+  {
+    "text": "some cases to actually transfer that data over the network so say between cloud storage and each GPU",
+    "start": "147780",
+    "end": "154500"
+  },
+  {
+    "text": "trainer and then finally we want this process to be flexible",
+    "start": "154500",
+    "end": "159540"
+  },
+  {
+    "text": "so today the pre-processing that you want to do during this data loading step is becoming more and more complicated",
+    "start": "159540",
+    "end": "165959"
+  },
+  {
+    "text": "and so you can have data that might have different storage locations different modalities like text or audio or video",
+    "start": "165959",
+    "end": "173400"
+  },
+  {
+    "text": "and also different pre-processing functions and those different pre-processing functions will also have",
+    "start": "173400",
+    "end": "178860"
+  },
+  {
+    "text": "very different resource requirements so some might be Memory intensive While others are CPU intensive",
+    "start": "178860",
+    "end": "185340"
+  },
+  {
+    "text": "and then of course there's also the data ordering so in some cases you might want to randomly Shuffle the data set if you",
+    "start": "185340",
+    "end": "191819"
+  },
+  {
+    "text": "have multiple trainers then you want to partition the data set across your trainers evenly so what that looks like here putting",
+    "start": "191819",
+    "end": "198480"
+  },
+  {
+    "text": "this all together is that as these these batches of data get processed we want to load them into",
+    "start": "198480",
+    "end": "205620"
+  },
+  {
+    "text": "the GPU trainers as quickly as possible and also balance the data across the trainers",
+    "start": "205620",
+    "end": "210720"
+  },
+  {
+    "text": "and in the background we want to continue loading more data into memory while these gpus are training",
+    "start": "210720",
+    "end": "218580"
+  },
+  {
+    "text": "so let's take a look at how Ray data can meet some of the goals in this workload",
+    "start": "218580",
+    "end": "224400"
+  },
+  {
+    "text": "so first of all Ray data is fast here this is showing a plot of GPU",
+    "start": "224400",
+    "end": "230459"
+  },
+  {
+    "text": "utilization in a 16 node array cluster and here we're just training resnet 50",
+    "start": "230459",
+    "end": "236180"
+  },
+  {
+    "text": "on an S3 data set with a bunch of raw images in it and what we can see here is that we're",
+    "start": "236180",
+    "end": "242220"
+  },
+  {
+    "text": "able to keep the GPU utilization at close to 100 even for this relatively",
+    "start": "242220",
+    "end": "247799"
+  },
+  {
+    "text": "small model one of the reasons we're able to do this is because Ray data is actually loading",
+    "start": "247799",
+    "end": "254340"
+  },
+  {
+    "text": "all of this data from S3 in the background and we're able to scale this out to keep up with the GPU utilization",
+    "start": "254340",
+    "end": "261180"
+  },
+  {
+    "text": "by paralyzing these reads from S3 and then finally one of the most",
+    "start": "261180",
+    "end": "266699"
+  },
+  {
+    "text": "important things here is that Ray data is actually controlling how much memory is getting used during this process and",
+    "start": "266699",
+    "end": "272520"
+  },
+  {
+    "text": "so you can see that the memory usage here on the CPUs actually stays about constant throughout the the training job",
+    "start": "272520",
+    "end": "280500"
+  },
+  {
+    "text": "and so the things that make this possible so there's two important things here one is the fact that we're using",
+    "start": "280500",
+    "end": "286560"
+  },
+  {
+    "text": "streaming execution so this is a 10 terabyte data set that's not going to fit in memory which means we're actually",
+    "start": "286560",
+    "end": "292259"
+  },
+  {
+    "text": "streaming that data set through the cluster memory and to the gpus we're also using raised shared memory",
+    "start": "292259",
+    "end": "299820"
+  },
+  {
+    "text": "objects store here which allows us to read this pre-processed data with zero copies",
+    "start": "299820",
+    "end": "306780"
+  },
+  {
+    "text": "okay so that was a little bit about how Ray data can give you the performance that you need",
+    "start": "306780",
+    "end": "312060"
+  },
+  {
+    "text": "and later in this talk Scott will also show you some benchmarks looking at the scalability of Ray data and two of the",
+    "start": "312060",
+    "end": "319380"
+  },
+  {
+    "text": "most important things here are one the ability to use heterogeneous clusters made up of both GPU nodes and CPU only",
+    "start": "319380",
+    "end": "326759"
+  },
+  {
+    "text": "nodes and that's what's going to allow us to scale out even further past where",
+    "start": "326759",
+    "end": "331800"
+  },
+  {
+    "text": "most data loaders today can do Ray data is also flexible so the",
+    "start": "331800",
+    "end": "338340"
+  },
+  {
+    "text": "in-memory format that we use is standardized on Apache Arrow and this is an interoperable format that",
+    "start": "338340",
+    "end": "345419"
+  },
+  {
+    "text": "makes it easy to work with other popular data formats like numpy and parquet with",
+    "start": "345419",
+    "end": "350639"
+  },
+  {
+    "text": "different data modalities such as text or video or audio and also with all of",
+    "start": "350639",
+    "end": "355860"
+  },
+  {
+    "text": "the popular model Frameworks like Pi torch tensorflow and hugging phase",
+    "start": "355860",
+    "end": "361280"
+  },
+  {
+    "text": "Ray data lets you build these arbitrary data pre-processing pipelines and it",
+    "start": "361280",
+    "end": "366539"
+  },
+  {
+    "text": "comes with a simple query planner that allows you to do things like group by",
+    "start": "366539",
+    "end": "372139"
+  },
+  {
+    "text": "okay so today we're already seeing some early traction among Ray data users with",
+    "start": "372539",
+    "end": "378120"
+  },
+  {
+    "text": "people using Ray data to scale out their data loading so in many cases we're seeing that the",
+    "start": "378120",
+    "end": "383639"
+  },
+  {
+    "text": "reasons people are using it are to improve the performance of their data loading stack so we can keep up with",
+    "start": "383639",
+    "end": "389819"
+  },
+  {
+    "text": "their GPU utilization to scale out to larger and larger data sets and also to",
+    "start": "389819",
+    "end": "395520"
+  },
+  {
+    "text": "improve the iteration speed looking at different data data set and model experiments",
+    "start": "395520",
+    "end": "402319"
+  },
+  {
+    "text": "now before we talk more about the design of raid data I also want to give a little bit about some of the features",
+    "start": "402660",
+    "end": "408600"
+  },
+  {
+    "text": "that radiator has compared to other popular data loaders so one of the main differences that",
+    "start": "408600",
+    "end": "415440"
+  },
+  {
+    "text": "sticks out in the implementation is that raid data is built on record and that gives us a bunch of these generic",
+    "start": "415440",
+    "end": "422400"
+  },
+  {
+    "text": "distributed execution features basically for free so we'll take a look at some of those",
+    "start": "422400",
+    "end": "428100"
+  },
+  {
+    "text": "later when we do a deep dive in the design Ray data also has really great data",
+    "start": "428100",
+    "end": "434280"
+  },
+  {
+    "text": "format flexibility so I mentioned earlier that it's built on Apache Arrow",
+    "start": "434280",
+    "end": "439560"
+  },
+  {
+    "text": "it actually also allows you to write out your pre-processed data sets so you can do things like convert easily from an",
+    "start": "439560",
+    "end": "445860"
+  },
+  {
+    "text": "image data set to a parquet data set and you can even use it for batch inference which you'll see in some later",
+    "start": "445860",
+    "end": "451979"
+  },
+  {
+    "text": "talks in the summit array data gives you Auto partitioning so you can choose between statically",
+    "start": "451979",
+    "end": "458340"
+  },
+  {
+    "text": "partitioning your data set before training starts or dynamically doing it",
+    "start": "458340",
+    "end": "463380"
+  },
+  {
+    "text": "so letting Ray data decide where data should go based on when it's ready",
+    "start": "463380",
+    "end": "469099"
+  },
+  {
+    "text": "Scott will show you some benchmarks later on looking at some of the more advanced speed and scale features that",
+    "start": "469919",
+    "end": "476280"
+  },
+  {
+    "text": "Ray data has so that includes being able to Cache your data set at any stage in",
+    "start": "476280",
+    "end": "481440"
+  },
+  {
+    "text": "the pre-processing pipeline as well as being able to use these heterogeneous clusters made up of both CPUs and gpus",
+    "start": "481440",
+    "end": "488759"
+  },
+  {
+    "text": "to scale out even further and then finally Ray data has some other",
+    "start": "488759",
+    "end": "495780"
+  },
+  {
+    "text": "features here that become really useful once you are starting to scale out to even larger data sets or larger clusters",
+    "start": "495780",
+    "end": "502139"
+  },
+  {
+    "text": "now for today we'll be focusing mainly on these first rows but feel free to ask us afterwards about these other features",
+    "start": "502139",
+    "end": "510259"
+  },
+  {
+    "text": "Okay cool so first I'll talk a little bit about the ray data design and how it compares to some other multi-processing",
+    "start": "510599",
+    "end": "517140"
+  },
+  {
+    "text": "based data loaders so first taking a look at the API and",
+    "start": "517140",
+    "end": "522240"
+  },
+  {
+    "text": "Ray data so what you get here is some basic read apis that let you",
+    "start": "522240",
+    "end": "528120"
+  },
+  {
+    "text": "read from popular formats so in this case we're reading from raw images stored in S3",
+    "start": "528120",
+    "end": "534080"
+  },
+  {
+    "text": "and here we're applying this arbitrary or sorry this UDF to each image in that",
+    "start": "534080",
+    "end": "539940"
+  },
+  {
+    "text": "data set so in this case we're randomly cropping and flipping each image",
+    "start": "539940",
+    "end": "545820"
+  },
+  {
+    "text": "from this we can then take this data set which is executed lazily and we can",
+    "start": "545820",
+    "end": "550920"
+  },
+  {
+    "text": "create an iterator in this case we're iterating over torch batches and so here is where you might insert your training",
+    "start": "550920",
+    "end": "557940"
+  },
+  {
+    "text": "code and in practice what you would actually do here is use for a train to execute this training Loop but just for the",
+    "start": "557940",
+    "end": "564240"
+  },
+  {
+    "text": "purposes of this example you can kind of think of this as the main data set API",
+    "start": "564240",
+    "end": "570300"
+  },
+  {
+    "text": "okay so there's a few different design decisions that are happening under this API so there's first of all how are the",
+    "start": "570300",
+    "end": "576899"
+  },
+  {
+    "text": "workers implemented for the data loading how does data get passed from the",
+    "start": "576899",
+    "end": "582000"
+  },
+  {
+    "text": "workers to the trainers and then how does work actually get assigned to those workers",
+    "start": "582000",
+    "end": "587700"
+  },
+  {
+    "text": "so to understand where Ray data does well here we can actually look at how sorry one second how multi-processing",
+    "start": "587700",
+    "end": "596279"
+  },
+  {
+    "text": "based data loaders work instead all right so in multi-processing data",
+    "start": "596279",
+    "end": "602640"
+  },
+  {
+    "text": "loaders of course the workers are implemented with the python multi-processing Library",
+    "start": "602640",
+    "end": "607860"
+  },
+  {
+    "text": "and so what that means here is that on this node we have these two gpus but",
+    "start": "607860",
+    "end": "614279"
+  },
+  {
+    "text": "each of them is only going to have its own data loader so we can't share a data loader between the different gpus",
+    "start": "614279",
+    "end": "620940"
+  },
+  {
+    "text": "so one thing we might do here is take the CPUs that are available maybe give each GPU two of those CPUs",
+    "start": "620940",
+    "end": "628260"
+  },
+  {
+    "text": "and so these multi-processing data loaders will start two different python processes in the background to load and",
+    "start": "628260",
+    "end": "635220"
+  },
+  {
+    "text": "pre-process the data the data in this case is going to get passed directly from these",
+    "start": "635220",
+    "end": "641220"
+  },
+  {
+    "text": "multi-processing workers to GPU memory and one of the most important things here is that the work here actually gets",
+    "start": "641220",
+    "end": "648540"
+  },
+  {
+    "text": "assigned to the workers before any of the training starts so what that means is that you actually have to do quite a",
+    "start": "648540",
+    "end": "654899"
+  },
+  {
+    "text": "bit of manual tuning to achieve certain things so for data partitioning for example you'll have to decide which data",
+    "start": "654899",
+    "end": "661860"
+  },
+  {
+    "text": "is going to go to which trainer before any of the training starts and for things like performance you'll",
+    "start": "661860",
+    "end": "668040"
+  },
+  {
+    "text": "have to think about how many workers to use for each data loader so you want to use enough workers that you get",
+    "start": "668040",
+    "end": "674040"
+  },
+  {
+    "text": "performance that keeps up with your gpus but you also don't want to use too many workers because then you might run out",
+    "start": "674040",
+    "end": "680459"
+  },
+  {
+    "text": "of memory so in the ray data design",
+    "start": "680459",
+    "end": "685620"
+  },
+  {
+    "text": "we're actually going to depend on Ray core to do a lot of these generic multi-core distributed compute things",
+    "start": "685620",
+    "end": "691079"
+  },
+  {
+    "text": "for us and then Ray data is going to build on top of that to give you some of these data loading specific things",
+    "start": "691079",
+    "end": "698100"
+  },
+  {
+    "text": "so here the the course here will actually be managed by Ray core so Ray core will start workers as necessary to",
+    "start": "698100",
+    "end": "705180"
+  },
+  {
+    "text": "keep up with the work that's being assigned Ray also has the shared memory Object",
+    "start": "705180",
+    "end": "710880"
+  },
+  {
+    "text": "Store which in this case acts as kind of this buffer between the workers and the GPU memory",
+    "start": "710880",
+    "end": "717360"
+  },
+  {
+    "text": "and then finally here the most important thing is that the work here is actually assigned to the workers as these smaller",
+    "start": "717360",
+    "end": "724560"
+  },
+  {
+    "text": "tasks so a task might be some small partition of your larger data set",
+    "start": "724560",
+    "end": "729839"
+  },
+  {
+    "text": "and then these task outputs are going to get spread on the fly to the gpus based on which data is ready first",
+    "start": "729839",
+    "end": "737339"
+  },
+  {
+    "text": "so here what that looks like is Ray data is going to assign one of these tasks to each worker",
+    "start": "737339",
+    "end": "743700"
+  },
+  {
+    "text": "and as these workers produce results in the shared memory store so this might be a series of batches",
+    "start": "743700",
+    "end": "750600"
+  },
+  {
+    "text": "we're going to feed those to the gpus as they become ready and here now we can",
+    "start": "750600",
+    "end": "755880"
+  },
+  {
+    "text": "actually free up those workers for additional tasks meanwhile those other tasks are going to",
+    "start": "755880",
+    "end": "761399"
+  },
+  {
+    "text": "finish so once the gpus become ready again they can just get the data that they need from the shared memory store",
+    "start": "761399",
+    "end": "769500"
+  },
+  {
+    "text": "okay so here there are actually a couple overheads that we're adding compared to the multi-processing only design so one",
+    "start": "769500",
+    "end": "776279"
+  },
+  {
+    "text": "thing for example is that we have to copy that data from the worker memory to the shared memory first",
+    "start": "776279",
+    "end": "782760"
+  },
+  {
+    "text": "we also have a small amount of rate core task overhead so less than one millisecond for each of those tasks",
+    "start": "782760",
+    "end": "790079"
+  },
+  {
+    "text": "but in return we get a bunch of really nice features for free so we can automatically partition this data set",
+    "start": "790079",
+    "end": "796500"
+  },
+  {
+    "text": "across the GPU trainers we can have the ray data scheduler actually control the",
+    "start": "796500",
+    "end": "802019"
+  },
+  {
+    "text": "execution to dynamically load balance the work and also make sure that the total memory usage stays controlled",
+    "start": "802019",
+    "end": "810779"
+  },
+  {
+    "text": "we can also recover from failures here without having to restart because here if one of those individual tasks fails",
+    "start": "810779",
+    "end": "817440"
+  },
+  {
+    "text": "we can just restart that task without having to restart the whole thing and so basically here we're getting a",
+    "start": "817440",
+    "end": "824160"
+  },
+  {
+    "text": "lot of these distributed Futures a distributed future features from my core for free",
+    "start": "824160",
+    "end": "831560"
+  },
+  {
+    "text": "and so just to show a little bit about how that works here is the exact same setup as before but now in a distributed",
+    "start": "831660",
+    "end": "838920"
+  },
+  {
+    "text": "setting where the GPU trainers are on different nodes so CMS before the rate tasks are going",
+    "start": "838920",
+    "end": "844800"
+  },
+  {
+    "text": "to create this these pre-processed results and Ray data in this case is actually",
+    "start": "844800",
+    "end": "850380"
+  },
+  {
+    "text": "going to Route these batches based on where the nearest GPU is so here",
+    "start": "850380",
+    "end": "855660"
+  },
+  {
+    "text": "we can decide to actually uh move the the pre-processed batches to",
+    "start": "855660",
+    "end": "861060"
+  },
+  {
+    "text": "the nearest gpus the other nice thing that we can do here is we can actually cache those Ray data",
+    "start": "861060",
+    "end": "867899"
+  },
+  {
+    "text": "sets by using this ds.materialize call that's provided by Ray data and here",
+    "start": "867899",
+    "end": "873360"
+  },
+  {
+    "text": "what that looks like is actually very similar to the previous setup the only difference is that we're not cleaning up",
+    "start": "873360",
+    "end": "879060"
+  },
+  {
+    "text": "this data that's in the shared memory store as we go and so what's cool here is that we can",
+    "start": "879060",
+    "end": "885420"
+  },
+  {
+    "text": "actually use this this setup to Cache the data at any stage of the pre-processing and Ray core will even",
+    "start": "885420",
+    "end": "891899"
+  },
+  {
+    "text": "automatically spill this data to disk if the object store becomes full and that allows you to avoid out of memory",
+    "start": "891899",
+    "end": "898079"
+  },
+  {
+    "text": "failures and then finally the last thing I'll show is how we can",
+    "start": "898079",
+    "end": "903779"
+  },
+  {
+    "text": "use Ray data to scale scale out with heterogeneous clusters and this is actually again the same setup as before",
+    "start": "903779",
+    "end": "910500"
+  },
+  {
+    "text": "but now there's no GPU on the second node and so what we can do is actually still",
+    "start": "910500",
+    "end": "916079"
+  },
+  {
+    "text": "execute on the CPUs on this node and then transfer this data over to the GPU",
+    "start": "916079",
+    "end": "921240"
+  },
+  {
+    "text": "node in the background as the training continues okay so next Scott will walk you through",
+    "start": "921240",
+    "end": "927660"
+  },
+  {
+    "text": "some benchmarks looking at how that works out in practice awesome yeah so now I'll be talking",
+    "start": "927660",
+    "end": "934019"
+  },
+  {
+    "text": "about some of the Benchmark results comparing Ray data to the other data loading solutions that we've discussed",
+    "start": "934019",
+    "end": "939959"
+  },
+  {
+    "text": "so for this Benchmark the primary task that we'll be using is the ml perf image classification task which is essentially",
+    "start": "939959",
+    "end": "946740"
+  },
+  {
+    "text": "just reading images and training at restf50 model and for this Benchmark we're going to be comparing Ray data with pi torch data",
+    "start": "946740",
+    "end": "953279"
+  },
+  {
+    "text": "loader and the high level steps that we're going to be doing on this Benchmark are first to load the images from S3 then applying a pre-processing",
+    "start": "953279",
+    "end": "960480"
+  },
+  {
+    "text": "function to each of the images and finally reading in those images with a pytorch trainer and for these benchmarks",
+    "start": "960480",
+    "end": "967920"
+  },
+  {
+    "text": "uh the things that we want to highlight from the ray data side are scalability support for heterogeneous clusters as",
+    "start": "967920",
+    "end": "973560"
+  },
+  {
+    "text": "well as data set caching right so let's take a look at the",
+    "start": "973560",
+    "end": "979260"
+  },
+  {
+    "text": "implementation uh comparing Ray data and pytorch data loader so for the first step we're going to be loading these",
+    "start": "979260",
+    "end": "985139"
+  },
+  {
+    "text": "images from S3 with three data you can simply use the read images API and just",
+    "start": "985139",
+    "end": "990240"
+  },
+  {
+    "text": "pass it the S3 path for pi torch we found that to use the built-in S3 data",
+    "start": "990240",
+    "end": "995279"
+  },
+  {
+    "text": "loader we had to implement our own custom file loader to make things work in a distributed setting",
+    "start": "995279",
+    "end": "1003279"
+  },
+  {
+    "text": "second we apply a preprocessing function to each of the images again with Ray data it's very simple we can use the",
+    "start": "1003680",
+    "end": "1010040"
+  },
+  {
+    "text": "built-in map API to apply the function to each image on the pytorch side we",
+    "start": "1010040",
+    "end": "1015380"
+  },
+  {
+    "text": "have something very similar where you can use the map function to apply whatever UDF over each row",
+    "start": "1015380",
+    "end": "1021680"
+  },
+  {
+    "text": "and it's important to note that on the Ray Side we have a query Optimizer that Stephanie mentioned before what this",
+    "start": "1021680",
+    "end": "1027438"
+  },
+  {
+    "text": "does is it basically fuses certain steps in the dataset pipeline if possible to",
+    "start": "1027439",
+    "end": "1033260"
+  },
+  {
+    "text": "optimize streaming execution so in this case what we'll do under the hood is we'll be combining the read images and",
+    "start": "1033260",
+    "end": "1040100"
+  },
+  {
+    "text": "the the pre-processing function into a single step but the user doesn't need to worry about this as Ray data does all",
+    "start": "1040100",
+    "end": "1046938"
+  },
+  {
+    "text": "this under the hood finally for the last step we're going to",
+    "start": "1046939",
+    "end": "1052100"
+  },
+  {
+    "text": "be ingesting these uh images with raytrain we're going to be using the racetrain torch trainer and just as a",
+    "start": "1052100",
+    "end": "1058340"
+  },
+  {
+    "text": "quick summary raytrain is a distributed deep learning library built on top of Ray core and so it provides a lot of the",
+    "start": "1058340",
+    "end": "1064820"
+  },
+  {
+    "text": "similar advantages that we get from Ray data as well such as flexibility scalability and fault tolerance and for",
+    "start": "1064820",
+    "end": "1072500"
+  },
+  {
+    "text": "this we're going to be using the torch trainer it's very simple to use as well we simply pass it a function that does",
+    "start": "1072500",
+    "end": "1078740"
+  },
+  {
+    "text": "the train loop on each worker and then within this function we're just going to be iterating over either the ray data",
+    "start": "1078740",
+    "end": "1084679"
+  },
+  {
+    "text": "sets or the torch data loader",
+    "start": "1084679",
+    "end": "1088299"
+  },
+  {
+    "text": "cool so now let's take a look at the scalability results comparing Ray data to torch data loader so for this",
+    "start": "1090380",
+    "end": "1096440"
+  },
+  {
+    "text": "Benchmark we're comparing the number we're increasing the number of nodes from 1 to 16 to see how radiator does",
+    "start": "1096440",
+    "end": "1103640"
+  },
+  {
+    "text": "against torch data loader in Reading images from S3 in terms of the data set we're going to be using the imagenet",
+    "start": "1103640",
+    "end": "1109820"
+  },
+  {
+    "text": "data set stored as raw images on S3 and we'll have each trainer read about",
+    "start": "1109820",
+    "end": "1115100"
+  },
+  {
+    "text": "10 gigabytes of images so for example in the four node case we're going to be reading about 40 gigabytes of data in",
+    "start": "1115100",
+    "end": "1120500"
+  },
+  {
+    "text": "total and so in the OneNote case we can see that the torch data loader does",
+    "start": "1120500",
+    "end": "1125960"
+  },
+  {
+    "text": "outperform Ray data this is due to several overhead from the ray core side that",
+    "start": "1125960",
+    "end": "1132799"
+  },
+  {
+    "text": "Stephanie mentioned before such as uh writing to object store and then but as",
+    "start": "1132799",
+    "end": "1138200"
+  },
+  {
+    "text": "we scale the number of nodes we see that radiator is able to keep up with torch",
+    "start": "1138200",
+    "end": "1144080"
+  },
+  {
+    "text": "and even out scales forged data once we get to the 16 node case",
+    "start": "1144080",
+    "end": "1149919"
+  },
+  {
+    "text": "taking a step back I just wanted to highlight some of the pain points working with pytorch versus real data in",
+    "start": "1152600",
+    "end": "1159740"
+  },
+  {
+    "text": "terms of the data loading the data loader we found that again that the implementation of the existing or the",
+    "start": "1159740",
+    "end": "1166460"
+  },
+  {
+    "text": "built-in uh S3 data loader was not sufficient in order to work in a distributed setting and so we built our",
+    "start": "1166460",
+    "end": "1172520"
+  },
+  {
+    "text": "own file loader on top of this uh in order to make things work in addition we have to do some tuning with a number of",
+    "start": "1172520",
+    "end": "1178820"
+  },
+  {
+    "text": "workers with a torch side because we found that when we just used the torch",
+    "start": "1178820",
+    "end": "1184039"
+  },
+  {
+    "text": "out of default or by default we found that the number of workers was too small and we were not getting a full GPU",
+    "start": "1184039",
+    "end": "1190160"
+  },
+  {
+    "text": "utilization so when we increase the number of workers we actually ran into a GPU out of memory issues and so we had",
+    "start": "1190160",
+    "end": "1196940"
+  },
+  {
+    "text": "to do some tuning of the number of workers in order to get things to work uh finally another benefit of using Ray",
+    "start": "1196940",
+    "end": "1204980"
+  },
+  {
+    "text": "data over torch is that we can do the partitioning of the data automatically whereas on the torch side we have to",
+    "start": "1204980",
+    "end": "1210440"
+  },
+  {
+    "text": "decide uh which part partition of the data will go to each worker",
+    "start": "1210440",
+    "end": "1216340"
+  },
+  {
+    "text": "next I want to go in to one of the edges that Ray data provides which is support",
+    "start": "1217880",
+    "end": "1223280"
+  },
+  {
+    "text": "for heterogeneous clusters and so as we mentioned before Ray data is able to",
+    "start": "1223280",
+    "end": "1228500"
+  },
+  {
+    "text": "make use of clusters with both both CPU and GPU nodes in order to maximize",
+    "start": "1228500",
+    "end": "1234020"
+  },
+  {
+    "text": "efficiency and usage and so in this case we see with the CPU nodes which can",
+    "start": "1234020",
+    "end": "1239120"
+  },
+  {
+    "text": "handle the data processing as well as the GPU nodes which handle both the model training and the data processing",
+    "start": "1239120",
+    "end": "1244419"
+  },
+  {
+    "text": "Ray data is able to make use of both types of nodes in order to maximize the reports and it's important to note that",
+    "start": "1244419",
+    "end": "1252080"
+  },
+  {
+    "text": "heterogeneity is not currently supported by other open source data loaders that we discussed such as pytorch data loader",
+    "start": "1252080",
+    "end": "1257960"
+  },
+  {
+    "text": "hugging phase datasets and Mosaic extreme data sets",
+    "start": "1257960",
+    "end": "1262900"
+  },
+  {
+    "text": "and so going back to our first Benchmark we now added some extra CPU nodes into",
+    "start": "1263960",
+    "end": "1269120"
+  },
+  {
+    "text": "the 16 node case and so one thing to note here is that there's no code change here it's simply a configuration change",
+    "start": "1269120",
+    "end": "1275840"
+  },
+  {
+    "text": "in adding additional machines and with the extra CPUs we're able to maximize",
+    "start": "1275840",
+    "end": "1281419"
+  },
+  {
+    "text": "throughput and get almost double the output that we saw in the 16 node case",
+    "start": "1281419",
+    "end": "1286640"
+  },
+  {
+    "text": "without using these extra CPU nodes",
+    "start": "1286640",
+    "end": "1290799"
+  },
+  {
+    "text": "finally the last thing I wanted to talk about was a data ability rate data's ability to cache flexibly and so it's",
+    "start": "1293240",
+    "end": "1300380"
+  },
+  {
+    "text": "able to Cache the data set at any stage of the pre-processing pipeline in order to speed up data loading",
+    "start": "1300380",
+    "end": "1306440"
+  },
+  {
+    "text": "so we've implemented two variants of caching here on the left we're caching the input images and so before we do the",
+    "start": "1306440",
+    "end": "1314000"
+  },
+  {
+    "text": "map we're saving these images and then for each iteration over that data set",
+    "start": "1314000",
+    "end": "1319340"
+  },
+  {
+    "text": "then we'll be applying the pre-processing image so we get a slightly different image each time we go over the data sets on the right hand",
+    "start": "1319340",
+    "end": "1325580"
+  },
+  {
+    "text": "side we're caching the data set after we apply the preprocessing and so we'll have the same exact same that's data set",
+    "start": "1325580",
+    "end": "1332900"
+  },
+  {
+    "text": "for each iteration over the data set and then Compares in comparison to other",
+    "start": "1332900",
+    "end": "1339320"
+  },
+  {
+    "text": "data loaders the data loaders which rely on multi-processing don't have support",
+    "start": "1339320",
+    "end": "1344600"
+  },
+  {
+    "text": "for in-memory caching they currently only have uh caching for like writing to local disk",
+    "start": "1344600",
+    "end": "1351760"
+  },
+  {
+    "text": "and so comparing what we were comparing the results from just to caching and using heterogeneous caching or sorry",
+    "start": "1352880",
+    "end": "1359720"
+  },
+  {
+    "text": "heterogeneous clusters to the first Benchmark we can really see how much performance we can squeeze out of array",
+    "start": "1359720",
+    "end": "1366620"
+  },
+  {
+    "text": "so taking a look at just the results from the caching in blue we have the results from the 16 node case in the",
+    "start": "1366620",
+    "end": "1372740"
+  },
+  {
+    "text": "first Benchmark without any caching and then in purple we have the variant",
+    "start": "1372740",
+    "end": "1378559"
+  },
+  {
+    "text": "where we're caching raw images so in this case we don't see much of a speed up because we not only have the",
+    "start": "1378559",
+    "end": "1384020"
+  },
+  {
+    "text": "additional overhead of caching the raw images we're also still running the pre-processing function for each iteration over the data set",
+    "start": "1384020",
+    "end": "1390740"
+  },
+  {
+    "text": "however in the case where we cache the pre-processed images we see almost a seven next increase in throughput and of",
+    "start": "1390740",
+    "end": "1396980"
+  },
+  {
+    "text": "course this comes from the fact that we're caching these images which are already pre-processed and though so we",
+    "start": "1396980",
+    "end": "1402080"
+  },
+  {
+    "text": "don't need to apply that processing function each time",
+    "start": "1402080",
+    "end": "1407620"
+  },
+  {
+    "text": "finally we can combine this with using heterogeneous clusters and we see that",
+    "start": "1408140",
+    "end": "1413240"
+  },
+  {
+    "text": "for the no caching and the cache raw images cases we see an increase in throughput and the extra CPUs that we're",
+    "start": "1413240",
+    "end": "1420320"
+  },
+  {
+    "text": "adding here alleviate some of the extra overhead that we were discussing before",
+    "start": "1420320",
+    "end": "1426520"
+  },
+  {
+    "text": "finally I wanted to go over some of the key features related to machine learning that are relevant to Ray data are that",
+    "start": "1429620",
+    "end": "1436520"
+  },
+  {
+    "text": "on Ray data and ACL so just to highlight some of the features that we haven't discussed yet we have the ability to",
+    "start": "1436520",
+    "end": "1443600"
+  },
+  {
+    "text": "save a data set that's already in memory for example you may want to process some data and then save that into a different",
+    "start": "1443600",
+    "end": "1449480"
+  },
+  {
+    "text": "format and then another benefit that we have is this ability to recover from out of",
+    "start": "1449480",
+    "end": "1454940"
+  },
+  {
+    "text": "memory failures uh not on any skill side we have dedicated apis for video and audio files",
+    "start": "1454940",
+    "end": "1461600"
+  },
+  {
+    "text": "which are becoming more and more relevant today as well as support for local and Global Shuffle",
+    "start": "1461600",
+    "end": "1466940"
+  },
+  {
+    "text": "and faster reads from data stored on cloud",
+    "start": "1466940",
+    "end": "1471700"
+  },
+  {
+    "text": "awesome to recap Ray data is a fast scalable and flexible solution for ML data loading which is unmatched by other",
+    "start": "1474020",
+    "end": "1480620"
+  },
+  {
+    "text": "open source data loaders and I also wanted to highlight a few related talks coming up at Ray Summit so",
+    "start": "1480620",
+    "end": "1487280"
+  },
+  {
+    "text": "later today we have a talk from our Ray train team going over just a",
+    "start": "1487280",
+    "end": "1494059"
+  },
+  {
+    "text": "deep dive of raytrain and then we have another talk today from instacart on how",
+    "start": "1494059",
+    "end": "1499220"
+  },
+  {
+    "text": "they use ready to scale their computer vision models as well as two talks",
+    "start": "1499220",
+    "end": "1504380"
+  },
+  {
+    "text": "tomorrow one going into a deep dive of streaming Ray data streaming and another one going to offline batch inference",
+    "start": "1504380",
+    "end": "1510980"
+  },
+  {
+    "text": "using Ray data so yeah hopefully you can check those talks out we've also included a few",
+    "start": "1510980",
+    "end": "1516500"
+  },
+  {
+    "text": "links to our resources including Ray data documentation as well as a doc specifically for the integration between",
+    "start": "1516500",
+    "end": "1522799"
+  },
+  {
+    "text": "raytrain and Ray data yeah thank you so much for coming",
+    "start": "1522799",
+    "end": "1527960"
+  },
+  {
+    "text": "foreign",
+    "start": "1527960",
+    "end": "1530620"
+  },
+  {
+    "text": "but something for others to",
+    "start": "1550640",
+    "end": "1556299"
+  },
+  {
+    "text": "empowering data can borrow that sort of applications where you just want to process data because like if you have sufficient ly",
+    "start": "1557299",
+    "end": "1563360"
+  },
+  {
+    "text": "reach set of Mumbai we will have a join right of this",
+    "start": "1563360",
+    "end": "1570500"
+  },
+  {
+    "text": "one becomes a generally a processing engine and as there are other talks about",
+    "start": "1570500",
+    "end": "1576460"
+  },
+  {
+    "text": "thinking about that sort of Publications going deeper into that a generic data process",
+    "start": "1581020",
+    "end": "1586820"
+  },
+  {
+    "text": "sure uh yeah I can answer that question so the I think the question is basically about the fact that like raid data as we",
+    "start": "1586820",
+    "end": "1594440"
+  },
+  {
+    "text": "talked about it here actually has a number of features outside of just the data loading problem and how are we",
+    "start": "1594440",
+    "end": "1600140"
+  },
+  {
+    "text": "thinking about uh sort of generic large-scale data processing in our roadmap is that right yeah so I think",
+    "start": "1600140",
+    "end": "1606679"
+  },
+  {
+    "text": "for now our Focus right now is mainly on looking at cases where we think that the",
+    "start": "1606679",
+    "end": "1611720"
+  },
+  {
+    "text": "data processing for ML applications story is not yet well supported by other",
+    "start": "1611720",
+    "end": "1616820"
+  },
+  {
+    "text": "Solutions out there and so that's why we have like such a big Focus here on looking at data loading problems I will",
+    "start": "1616820",
+    "end": "1623240"
+  },
+  {
+    "text": "say that I think you know in general we're seeing that this data loading problem and the data pre-processing",
+    "start": "1623240",
+    "end": "1628520"
+  },
+  {
+    "text": "problem is becoming more and more complicated for people and so I wouldn't say that it's on our",
+    "start": "1628520",
+    "end": "1633740"
+  },
+  {
+    "text": "immediate roadmap but definitely we do want to help people work with their data sets more easily so some of the things",
+    "start": "1633740",
+    "end": "1639559"
+  },
+  {
+    "text": "that people are starting to do is actually using redata to de-duplicate and randomly Shuffle their data sets",
+    "start": "1639559",
+    "end": "1645140"
+  },
+  {
+    "text": "offline and so we're looking at some some of those kind of more specific use cases where",
+    "start": "1645140",
+    "end": "1650779"
+  },
+  {
+    "text": "looking at operations that you would commonly want to do on a data set meant for ML",
+    "start": "1650779",
+    "end": "1657100"
+  },
+  {
+    "text": "yeah maybe you nest there's a line somewhere",
+    "start": "1659240",
+    "end": "1664360"
+  },
+  {
+    "text": "somewhere is that work for anything else like it's like uh yeah I can answer that",
+    "start": "1668419",
+    "end": "1675140"
+  },
+  {
+    "text": "question so so the question is about uh like yeah basically what data formats does eurocopy work for uh so I think",
+    "start": "1675140",
+    "end": "1682100"
+  },
+  {
+    "text": "unfortunately there is a limitation with torch where torch tensors actually cannot be red zero copy but what we do",
+    "start": "1682100",
+    "end": "1688760"
+  },
+  {
+    "text": "instead is actually store things as numpy or arrow and then you can convert with zero copies to a torch tensor so",
+    "start": "1688760",
+    "end": "1695360"
+  },
+  {
+    "text": "that's actually exactly what Ray data does under the hood",
+    "start": "1695360",
+    "end": "1699639"
+  },
+  {
+    "text": "yes",
+    "start": "1701120",
+    "end": "1703658"
+  },
+  {
+    "text": "are you able to use what sorry memory did you say streamed memory memory",
+    "start": "1706220",
+    "end": "1712159"
+  },
+  {
+    "text": "pinned memory oh pinned memory oh do you want to answer or um oh sure uh",
+    "start": "1712159",
+    "end": "1717620"
+  },
+  {
+    "text": "yeah I can so are we able to use pin memory um so yeah basically what the ray",
+    "start": "1717620",
+    "end": "1722960"
+  },
+  {
+    "text": "data that iterator that you saw what that does is it actually will move the data that you're reading to GPU memory",
+    "start": "1722960",
+    "end": "1730039"
+  },
+  {
+    "text": "in the background so there's actually a parameter you can use also that specifies how many batches to prefetch",
+    "start": "1730039",
+    "end": "1736400"
+  },
+  {
+    "text": "and yeah so that will pin in GPU memory for you",
+    "start": "1736400",
+    "end": "1741158"
+  },
+  {
+    "text": "you find like a python classes cannot be like directly",
+    "start": "1750760",
+    "end": "1756980"
+  },
+  {
+    "text": "so I wonder if you haven't found like a try to support something",
+    "start": "1756980",
+    "end": "1762220"
+  },
+  {
+    "text": "Cloud we don't use the main things about something like that you can follow kind of like",
+    "start": "1762320",
+    "end": "1767480"
+  },
+  {
+    "text": "rollback or like Orem in easily you follow that design and it can be guarantee",
+    "start": "1767480",
+    "end": "1774820"
+  },
+  {
+    "text": "uh sorry could you repeat that question so it's yeah but",
+    "start": "1778940",
+    "end": "1786519"
+  },
+  {
+    "text": "it's actually cannot be directly the object you know it cannot be so if you do some respect",
+    "start": "1788419",
+    "end": "1797200"
+  },
+  {
+    "text": "I see uh yeah so I think the question is about kind of supporting arbitrary python objects is that right or",
+    "start": "1800179",
+    "end": "1808360"
+  },
+  {
+    "text": "Divine and according to your API the data tasks actually similar ly similar class but it's",
+    "start": "1812840",
+    "end": "1820399"
+  },
+  {
+    "text": "hard I see I see this is related to like serializability of I think like objects",
+    "start": "1820399",
+    "end": "1827000"
+  },
+  {
+    "text": "that get put into reality right yeah yeah",
+    "start": "1827000",
+    "end": "1830620"
+  },
+  {
+    "text": "so I think unfortunately the series like making serialization work fast and",
+    "start": "1836179",
+    "end": "1842600"
+  },
+  {
+    "text": "general is a pretty difficult problem I would say um I think yeah if you have like",
+    "start": "1842600",
+    "end": "1848600"
+  },
+  {
+    "text": "specific use cases feel free to follow up with us on GitHub afterwards because I can't promise that will work for sure",
+    "start": "1848600",
+    "end": "1854480"
+  },
+  {
+    "text": "but there should be a way around it so yeah I mean I think like being able to have custom serialization is definitely",
+    "start": "1854480",
+    "end": "1861200"
+  },
+  {
+    "text": "something that we care about",
+    "start": "1861200",
+    "end": "1863980"
+  },
+  {
+    "text": "I think we're coming up on time but please uh feel free to contact us after um we'll be happy to answer any",
+    "start": "1867159",
+    "end": "1872720"
+  },
+  {
+    "text": "questions yeah yeah",
+    "start": "1872720",
+    "end": "1875440"
+  }
+]

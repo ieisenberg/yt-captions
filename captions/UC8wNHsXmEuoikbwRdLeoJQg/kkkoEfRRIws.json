@@ -1,0 +1,3407 @@
+[
+  {
+    "text": "All right. Welcome back everybody. I don't remember when the last time we actually streamed was, but",
+    "start": "3766",
+    "end": "9599"
+  },
+  {
+    "text": "I think it has been a while that we've streamed. It's been a while since we actually streamed like cluster design work.",
+    "start": "11300",
+    "end": "19265"
+  },
+  {
+    "text": "And in that time, we've made some progress on implementing some of these",
+    "start": "20300",
+    "end": "25599"
+  },
+  {
+    "text": "APIs. I think today our goal is to try to focus on the shard manager piece of the",
+    "start": "25599",
+    "end": "34266"
+  },
+  {
+    "text": "puzzle. And maybe we can talk a little bit about like what the shard manager is",
+    "start": "34266",
+    "end": "41198"
+  },
+  {
+    "text": "actually responsible for in the cluster. And then we can sort of dive into the",
+    "start": "41199",
+    "end": "47433"
+  },
+  {
+    "text": "implementation that I'm working on. So the shard manager is responsible for",
+    "start": "47433",
+    "end": "54500"
+  },
+  {
+    "text": "managing the assignments of shards to pods.",
+    "start": "54500",
+    "end": "59366"
+  },
+  {
+    "text": "So if we maybe like look at the interface of the shard manager like data",
+    "start": "60099",
+    "end": "65599"
+  },
+  {
+    "text": "type, we could probably get a good idea of the things that it's capable of doing. So one of the things that the shard",
+    "start": "65633",
+    "end": "73333"
+  },
+  {
+    "text": "manager is capable of reporting on is the assignments that are currently",
+    "start": "73333",
+    "end": "79566"
+  },
+  {
+    "text": "present in the cluster. So get assignments on the shard manager returns a hash map of shard",
+    "start": "79566",
+    "end": "85400"
+  },
+  {
+    "text": "identifiers to an option of pod address because there may be shards in the",
+    "start": "85400",
+    "end": "90766"
+  },
+  {
+    "text": "cluster identified by a shard ID that haven't yet been assigned to a pod. So in that case, you'd have a shard ID",
+    "start": "90766",
+    "end": "97599"
+  },
+  {
+    "text": "mapped to option.none. Otherwise, you have the shard ID mapped to the option of the pod address,",
+    "start": "97599",
+    "end": "102300"
+  },
+  {
+    "text": "some of the pod address. So we can get the shard assignments of the cluster.",
+    "start": "102866",
+    "end": "108799"
+  },
+  {
+    "text": "We can get sharding events, but these aren't really that important at the moment.",
+    "start": "109300",
+    "end": "113699"
+  },
+  {
+    "text": "We can register new pods with the cluster as well as unregister previously",
+    "start": "114966",
+    "end": "120033"
+  },
+  {
+    "text": "existing pods from the cluster. And unregistering pods also unassigns all",
+    "start": "120033",
+    "end": "126666"
+  },
+  {
+    "text": "the shards from that pod and then the cluster would rebalance those shards",
+    "start": "126666",
+    "end": "132166"
+  },
+  {
+    "text": "to other pods within the cluster. We can also trigger a rebalance manually",
+    "start": "132166",
+    "end": "138900"
+  },
+  {
+    "text": "with the shard manager. And I should probably add to this little JS doc here the same JS doc that I",
+    "start": "138900",
+    "end": "147433"
+  },
+  {
+    "text": "have sitting in the actual implementation. Rebalance.",
+    "start": "147633",
+    "end": "152400"
+  },
+  {
+    "text": "So rebalancing will trigger reassignment of shards across pods in the cluster.",
+    "start": "158633",
+    "end": "165233"
+  },
+  {
+    "text": "It'll try to balance shards across the registered pods. And if we have this immediate parameter,",
+    "start": "165666",
+    "end": "172599"
+  },
+  {
+    "text": "and if the immediate parameter is true, shards will attempt to be rebalanced immediately.",
+    "start": "173033",
+    "end": "177400"
+  },
+  {
+    "text": "I think it's probably easier to understand what that parameter means in the context of when immediate is false.",
+    "start": "179666",
+    "end": "184166"
+  },
+  {
+    "text": "So if immediate is false, shards will be rebalanced according to the rebalance rate.",
+    "start": "184966",
+    "end": "189733"
+  },
+  {
+    "text": "So in most cases, we don't want all shards to be rebalanced instantaneously",
+    "start": "190233",
+    "end": "196300"
+  },
+  {
+    "text": "across the cluster. We want it to happen over a particular period of time.",
+    "start": "196300",
+    "end": "200900"
+  },
+  {
+    "text": "And so the rebalance rate allows us to control how fast shards are actually rebalanced across the cluster.",
+    "start": "201633",
+    "end": "207500"
+  },
+  {
+    "text": "But there are cases where we do want to do it immediately. For example, when we actually unregister",
+    "start": "208633",
+    "end": "213766"
+  },
+  {
+    "text": "a pod, which is right here, this unregister method, you can see that one of the things that we do here is--",
+    "start": "213766",
+    "end": "220833"
+  },
+  {
+    "text": "Let me just-- It's basically in that case, we will have shards that are unassigned.",
+    "start": "221166",
+    "end": "226400"
+  },
+  {
+    "text": "Right. So we want to immediately reassign those shards. Precisely. Yeah. So in this case, we'd be rebalancing",
+    "start": "227199",
+    "end": "235566"
+  },
+  {
+    "text": "instantaneously trying to get those shards as assigned to new pods as quickly as possible.",
+    "start": "235566",
+    "end": "240366"
+  },
+  {
+    "text": "What else? Let's go back to the interface. By the way, just a little comment that",
+    "start": "243066",
+    "end": "250900"
+  },
+  {
+    "text": "I'm looking at the code on the right side. I think we have some for demon in the wild.",
+    "start": "250900",
+    "end": "257799"
+  },
+  {
+    "text": "Those fibers will not be monitored, will not be--",
+    "start": "259333",
+    "end": "263900"
+  },
+  {
+    "text": "Like if you shut down or stuff, probably we should at some point track the",
+    "start": "264800",
+    "end": "271166"
+  },
+  {
+    "text": "fibers into a proper lifecycle thing. Yeah. So there are quite a few instances where",
+    "start": "271166",
+    "end": "279366"
+  },
+  {
+    "text": "we forked demon fibers inside the Shard Manager, and I haven't replaced them with a scoped fiber yet.",
+    "start": "279366",
+    "end": "286900"
+  },
+  {
+    "text": "But one of the next passes of improvements I want to do is proper lifecycle tracking of all the",
+    "start": "287733",
+    "end": "293566"
+  },
+  {
+    "text": "fibers we're spinning up. Because in Shardcake, they spin up a lot of demon fibers, but I think it might be",
+    "start": "293566",
+    "end": "298833"
+  },
+  {
+    "text": "better to track those fibers, like lifecycles within a scope or something like that. Either on a scope or one of the data",
+    "start": "298833",
+    "end": "307766"
+  },
+  {
+    "text": "types that Tim created like a fiber map, fiber set, stuff like that.",
+    "start": "307766",
+    "end": "313400"
+  },
+  {
+    "text": "Exactly. So I think that's kind of like a next iteration. For this current iteration, my focus is",
+    "start": "314099",
+    "end": "322400"
+  },
+  {
+    "text": "like basically making sure that rebalancing works and that it's relatively performant when it occurs.",
+    "start": "322400",
+    "end": "328699"
+  },
+  {
+    "text": "It's not an operation that needs to be extremely performant, but we want it to",
+    "start": "328966",
+    "end": "334000"
+  },
+  {
+    "text": "be as quick as we can. But anyways, the last piece of the Shard",
+    "start": "334000",
+    "end": "340900"
+  },
+  {
+    "text": "Manager here is kind of the interface that you have in the Shard Manager to the Pod Health API.",
+    "start": "340900",
+    "end": "346900"
+  },
+  {
+    "text": "So Shard Manager can notify the cluster.",
+    "start": "348800",
+    "end": "354166"
+  },
+  {
+    "text": "Sorry, Mattia's commenting on me. Definitely diverging from Shardcake.",
+    "start": "354933",
+    "end": "360666"
+  },
+  {
+    "text": "I moved every spawn fiber into a per pod scope. Yeah, I think that we need to discuss. When we get to the actual implementation",
+    "start": "360666",
+    "end": "369466"
+  },
+  {
+    "text": "of behaviors and things like that, we need to really decide what the lifecycle of each",
+    "start": "369466",
+    "end": "374533"
+  },
+  {
+    "text": "fiber that we're spinning up is going to look like. But I think that's a later problem.",
+    "start": "374533",
+    "end": "379966"
+  },
+  {
+    "text": "I want to focus more on making sure that rebalancing works, assigning registering pods works,",
+    "start": "380166",
+    "end": "385066"
+  },
+  {
+    "text": "unregistering pods works. And then we can start getting into the",
+    "start": "385300",
+    "end": "390466"
+  },
+  {
+    "text": "weeds about how the lifecycle of the fibers that we're spinning up to do those things should be tracked.",
+    "start": "390466",
+    "end": "396333"
+  },
+  {
+    "text": "But anyways, last piece of the puzzle here on the Shard Manager, interface to the Pod Health API. So the cluster can notify-- or the Shard",
+    "start": "397966",
+    "end": "406133"
+  },
+  {
+    "text": "Manager can notify the rest of the cluster about unhealthy pods. And they can also check the health of all",
+    "start": "406133",
+    "end": "412800"
+  },
+  {
+    "text": "the pods in the cluster. So yeah, I think just talking in general",
+    "start": "412800",
+    "end": "422565"
+  },
+  {
+    "text": "about how you actually spin up a Shard",
+    "start": "422566",
+    "end": "428900"
+  },
+  {
+    "text": "Manager, one of the things that I did is I moved-- when you actually",
+    "start": "428900",
+    "end": "434033"
+  },
+  {
+    "text": "create a Shard Manager layer, I moved the config into just a parameter",
+    "start": "434033",
+    "end": "439366"
+  },
+  {
+    "text": "that you pass to the layer as opposed to a separate layer that you have to specify.",
+    "start": "439366",
+    "end": "443400"
+  },
+  {
+    "text": "I'm not sure if it's going to make 100% sense to do it that way. But at the moment, it felt pretty ergonomic.",
+    "start": "445033",
+    "end": "450066"
+  },
+  {
+    "text": "And we'll see what I mean by that when we look at the tests or the simulation",
+    "start": "450433",
+    "end": "455800"
+  },
+  {
+    "text": "tests that I set up. But yeah, I think maybe one other",
+    "start": "455800",
+    "end": "462065"
+  },
+  {
+    "text": "interesting piece to talk about with the Shard Manager is the actual Shard Manager state object.",
+    "start": "462066",
+    "end": "467233"
+  },
+  {
+    "text": "So how the Shard Manager keeps track of both registered pods and Shard",
+    "start": "468466",
+    "end": "475500"
+  },
+  {
+    "text": "assignments. So in the Shard Manager, we have this state object.",
+    "start": "475500",
+    "end": "481866"
+  },
+  {
+    "text": "And this represents the state of the Shard Manager at a given point in time. So the state maintains two maps.",
+    "start": "484433",
+    "end": "491099"
+  },
+  {
+    "text": "One is the mapping between a pod address and a pod.",
+    "start": "492433",
+    "end": "496033"
+  },
+  {
+    "text": "And the pod, in that case, is enhanced with a tiny bit of metadata just basically when that pod was actually",
+    "start": "497466",
+    "end": "503300"
+  },
+  {
+    "text": "registered with the cluster, like the timestamp that the pod was actually registered. And then the shards-- so",
+    "start": "503300",
+    "end": "511565"
+  },
+  {
+    "text": "this is the pods map down here. And then the shards map stores the mapping between Shard IDs and the pods",
+    "start": "511566",
+    "end": "518399"
+  },
+  {
+    "text": "they're assigned to. Like I mentioned before, you can actually access this as a hash map external to",
+    "start": "518399",
+    "end": "525399"
+  },
+  {
+    "text": "the Shard Manager, or from the interface of the Shard Manager, I should say. I think there are some additional methods I might add to the interface here",
+    "start": "525466",
+    "end": "532500"
+  },
+  {
+    "text": "like getting all the pods and everything like that from the Shard Manager. But for the moment, this is what the",
+    "start": "532500",
+    "end": "540333"
+  },
+  {
+    "text": "Shard Manager state looks like. The first iteration I went through of this, I actually had maintained the pod",
+    "start": "540333",
+    "end": "548332"
+  },
+  {
+    "text": "and shard mappings as a hash map. So I had pods sitting here as like a hash",
+    "start": "548500",
+    "end": "554199"
+  },
+  {
+    "text": "map of pod address with metadata.",
+    "start": "554199",
+    "end": "559032"
+  },
+  {
+    "text": "And similarly with the shards, I had this",
+    "start": "561100",
+    "end": "566233"
+  },
+  {
+    "text": "as a Shard ID option on the address.",
+    "start": "566233",
+    "end": "571899"
+  },
+  {
+    "text": "But I don't know, it just-- in the tests,",
+    "start": "574566",
+    "end": "578433"
+  },
+  {
+    "text": "because we were creating so many new--",
+    "start": "579699",
+    "end": "584032"
+  },
+  {
+    "text": "because HashMap is immutable and we were creating so many new HashMaps every time we were doing an operation, like",
+    "start": "585466",
+    "end": "590833"
+  },
+  {
+    "text": "filtering a HashMap or reducing over a HashMap or grouping up a HashMap or something like that, even in the",
+    "start": "590833",
+    "end": "598699"
+  },
+  {
+    "text": "tests, I started to notice certain operations were running slowly. So I actually converted the state over to",
+    "start": "598699",
+    "end": "607766"
+  },
+  {
+    "text": "just a plain JavaScript map for now. And essentially the pods map is the",
+    "start": "607766",
+    "end": "615532"
+  },
+  {
+    "text": "string representation of a pod address. So for those of you familiar with schema,",
+    "start": "615533",
+    "end": "621233"
+  },
+  {
+    "text": "essentially I can actually just look at-- oh, hang on. We can actually just look at",
+    "start": "622233",
+    "end": "628500"
+  },
+  {
+    "text": "what I mean in the pod address.",
+    "start": "628500",
+    "end": "632866"
+  },
+  {
+    "text": "So the pod address data type is just the host and port for that particular pod.",
+    "start": "635466",
+    "end": "641233"
+  },
+  {
+    "text": "And I added some methods here just to perform synchronous encoding and decoding",
+    "start": "641899",
+    "end": "647500"
+  },
+  {
+    "text": "of the pod address. So basically we just get a JSON representation as the keys to this map.",
+    "start": "647500",
+    "end": "654899"
+  },
+  {
+    "text": "So over here, instead of having a pod address as the key,",
+    "start": "655466",
+    "end": "660199"
+  },
+  {
+    "text": "instead we end up with the JSON representation of that.",
+    "start": "660800",
+    "end": "665800"
+  },
+  {
+    "text": "So you go to host, whatever it is, and",
+    "start": "666133",
+    "end": "673533"
+  },
+  {
+    "text": "then port as the key is--",
+    "start": "673533",
+    "end": "678933"
+  },
+  {
+    "text": "and this is a string.",
+    "start": "679500",
+    "end": "680199"
+  },
+  {
+    "text": "And I've already-- I've started working on moving the tests to adapt to this pattern",
+    "start": "684733",
+    "end": "690600"
+  },
+  {
+    "text": "because I just finished converting the shard manager in this commit I'm working on",
+    "start": "690600",
+    "end": "697800"
+  },
+  {
+    "text": "to use this new state. And I started working on converting the",
+    "start": "698100",
+    "end": "704166"
+  },
+  {
+    "text": "tests over to using this new state. And I've already noticed a small-- or it's not really small.",
+    "start": "704166",
+    "end": "709699"
+  },
+  {
+    "text": "It was a relatively significant speed up of one of the tests that I noticed was already running slowly.",
+    "start": "709699",
+    "end": "714600"
+  },
+  {
+    "text": "Quick question. The second map that you have there, it's",
+    "start": "716466",
+    "end": "722066"
+  },
+  {
+    "text": "indexed on shard ID. Yeah, shard ID is an object.",
+    "start": "722066",
+    "end": "727433"
+  },
+  {
+    "text": "Or-- oh, no, it's",
+    "start": "727500",
+    "end": "735733"
+  },
+  {
+    "text": "just a brand new string. That's fine. Yeah. So I figured where I could, I would keep",
+    "start": "735733",
+    "end": "742666"
+  },
+  {
+    "text": "it indexed by the actual data type.",
+    "start": "742666",
+    "end": "744833"
+  },
+  {
+    "text": "But anyways, the state is kind of interesting. So I thought it would be worthwhile to",
+    "start": "748199",
+    "end": "754233"
+  },
+  {
+    "text": "just look at it for a minute. So if we ignore the two constructors that",
+    "start": "754233",
+    "end": "761600"
+  },
+  {
+    "text": "I've set up, one of the interesting operations you can do on the shard manager state is",
+    "start": "761600",
+    "end": "768600"
+  },
+  {
+    "text": "group up the shards by their address, which is kind of interesting. So basically taking-- the original-- the",
+    "start": "768600",
+    "end": "779633"
+  },
+  {
+    "text": "mapping that the state stores is a shard ID",
+    "start": "779633",
+    "end": "783333"
+  },
+  {
+    "text": "to an optional pod address. But what if we want to get something like",
+    "start": "784733",
+    "end": "791300"
+  },
+  {
+    "text": "a pod address to a set of shards?",
+    "start": "791300",
+    "end": "797532"
+  },
+  {
+    "text": "Right? So basically, like-- this operation-- No, you don't. Yeah, basically, it",
+    "start": "798500",
+    "end": "805000"
+  },
+  {
+    "text": "does come in quite handy, being able to get all the shards assigned to a particular pod.",
+    "start": "805000",
+    "end": "810199"
+  },
+  {
+    "text": "And so I'm not going to go through this code line by line, but it is kind of like an interesting",
+    "start": "812500",
+    "end": "819633"
+  },
+  {
+    "text": "operation that we can perform to get the mapping between pods and the",
+    "start": "819633",
+    "end": "826100"
+  },
+  {
+    "text": "shards that are assigned to them. What else? So pods themselves,",
+    "start": "826100",
+    "end": "832166"
+  },
+  {
+    "text": "something else that's interesting, is pods have a version, which in",
+    "start": "832500",
+    "end": "838699"
+  },
+  {
+    "text": "shardcake is like a semver string, but it doesn't really need to be.",
+    "start": "838699",
+    "end": "844699"
+  },
+  {
+    "text": "It can just be like a monotonic integer. For now, I just made it like an integer.",
+    "start": "844899",
+    "end": "850399"
+  },
+  {
+    "text": "We can always make it a semver string if we want to, but it's really just used as a hint to the cluster",
+    "start": "850933",
+    "end": "857633"
+  },
+  {
+    "text": "to signal when the cluster might be getting upgraded",
+    "start": "859466",
+    "end": "864199"
+  },
+  {
+    "text": "so that when the cluster is performing a rebalance, it'll essentially skip pods that don't",
+    "start": "865466",
+    "end": "871600"
+  },
+  {
+    "text": "have the max version assigned to them so that you don't have them. Most importantly, I'm not",
+    "start": "871600",
+    "end": "878000"
+  },
+  {
+    "text": "sure there's any advantage in having a semver string here because",
+    "start": "878000",
+    "end": "883933"
+  },
+  {
+    "text": "you don't want to do compact checking. Even if I patch update the cluster,",
+    "start": "883933",
+    "end": "891633"
+  },
+  {
+    "text": "I still want to move the whole cluster to the new version, so rebalancing should pick up the new one.",
+    "start": "892466",
+    "end": "899733"
+  },
+  {
+    "text": "It's like a strict check, but I think the integer is fine.",
+    "start": "900733",
+    "end": "906133"
+  },
+  {
+    "text": "This was actually Mattia's idea. I have to give him credit, just making this like an integer. Because I think in Mattia's",
+    "start": "906899",
+    "end": "912600"
+  },
+  {
+    "text": "iteration, it did support semver, but in speaking with him, we were both like,",
+    "start": "912600",
+    "end": "919100"
+  },
+  {
+    "text": "\"This could just be like an integer,\" and it would serve the same purpose and make the code a lot simpler.",
+    "start": "919566",
+    "end": "924066"
+  },
+  {
+    "text": "So I ended up doing that for this iteration, and it does make things pretty nice.",
+    "start": "925433",
+    "end": "932133"
+  },
+  {
+    "text": "And again, the pod version is just a hint during rebalancing to basically skip pods that might be in",
+    "start": "933766",
+    "end": "940466"
+  },
+  {
+    "text": "the middle of being upgraded. What else is interesting?",
+    "start": "940466",
+    "end": "945800"
+  },
+  {
+    "text": "Semver because shardcake did, but no, we-- Yeah, exactly. Just a hint for rebalancing.",
+    "start": "948600",
+    "end": "953666"
+  },
+  {
+    "text": "So maybe it'd be worthwhile to go through the code for rebalancing the shard manager.",
+    "start": "954300",
+    "end": "963000"
+  },
+  {
+    "text": "Rebalance.",
+    "start": "965466",
+    "end": "966033"
+  },
+  {
+    "text": "So the state of the shard manager, which",
+    "start": "974500",
+    "end": "979733"
+  },
+  {
+    "text": "is just that state object I showed you folks before, is stored in a synchronized ref",
+    "start": "979733",
+    "end": "984333"
+  },
+  {
+    "text": "because there are times",
+    "start": "985466",
+    "end": "990533"
+  },
+  {
+    "text": "where we want to make sure that we atomically access the state to perform an update.",
+    "start": "990533",
+    "end": "997199"
+  },
+  {
+    "text": "So for example, we'll sort of see it in a little bit, but there's a method in the shard manager",
+    "start": "997933",
+    "end": "1005500"
+  },
+  {
+    "text": "that updates shard assignments. So basically, it takes in a",
+    "start": "1005500",
+    "end": "1011666"
+  },
+  {
+    "text": "set of shards and a pod address, and we want to perform the--",
+    "start": "1011666",
+    "end": "1018333"
+  },
+  {
+    "text": "basically, we want to perform the act of registering those shards with that address in an atomic manner.",
+    "start": "1019666",
+    "end": "1026500"
+  },
+  {
+    "text": "So updating those shard assignments to that new pod address happens without any",
+    "start": "1027466",
+    "end": "1034332"
+  },
+  {
+    "text": "other fibers or anything being able to simultaneously manipulate the shard manager state.",
+    "start": "1034333",
+    "end": "1039899"
+  },
+  {
+    "text": "But quick question. All of the work that I see here is",
+    "start": "1042000",
+    "end": "1049199"
+  },
+  {
+    "text": "completely synchronous. In this case, it is synchronous.",
+    "start": "1049199",
+    "end": "1053866"
+  },
+  {
+    "text": "an update here would be fine. In shardcake, I think that",
+    "start": "1055466",
+    "end": "1061466"
+  },
+  {
+    "text": "there is somewhere in here",
+    "start": "1061466",
+    "end": "1067799"
+  },
+  {
+    "text": "where we use the--",
+    "start": "1068466",
+    "end": "1069766"
+  },
+  {
+    "text": "well, I mean, we use update effect here just to make it easier to return an error. But if you get an option of none here--",
+    "start": "1075600",
+    "end": "1085033"
+  },
+  {
+    "text": "in shard cake, it is asynchronous inside the rebalance. Are you sure?",
+    "start": "1087199",
+    "end": "1092266"
+  },
+  {
+    "text": "I need to look.",
+    "start": "1093500",
+    "end": "1094199"
+  },
+  {
+    "text": "Let's take a look. Update state.",
+    "start": "1100033",
+    "end": "1106466"
+  },
+  {
+    "text": "The work done inside updating the shard state is synchronous.",
+    "start": "1119833",
+    "end": "1125033"
+  },
+  {
+    "text": "Like this, in shardcake, they basically do the same operation. They check if the pods within the state",
+    "start": "1125766",
+    "end": "1138166"
+  },
+  {
+    "text": "have this particular address. And if this pod is not registered with",
+    "start": "1138166",
+    "end": "1143799"
+  },
+  {
+    "text": "the cluster, they return an error. Otherwise, they map over the shards and",
+    "start": "1143800",
+    "end": "1154132"
+  },
+  {
+    "text": "update the assignments. So it is-- I mean, it is synchronous there.",
+    "start": "1154133",
+    "end": "1159433"
+  },
+  {
+    "text": "I think the reason they use update-- in their case, update-zio-- in our case, update-effect-- is basically",
+    "start": "1159500",
+    "end": "1164898"
+  },
+  {
+    "text": "to be able to return an error. Mattia is saying that it is asynchronous",
+    "start": "1164899",
+    "end": "1170299"
+  },
+  {
+    "text": "because it calls the pods API. It's not asynchronous inside the update.",
+    "start": "1170300",
+    "end": "1176366"
+  },
+  {
+    "text": "Like it is asynchronous. They call the pod API to",
+    "start": "1178533",
+    "end": "1183565"
+  },
+  {
+    "text": "unassign shards or assign shards. And then they update the",
+    "start": "1183566",
+    "end": "1189633"
+  },
+  {
+    "text": "shard state after that. There's a clear-- like if all the updates",
+    "start": "1189633",
+    "end": "1195333"
+  },
+  {
+    "text": "are completely synchronous, then we should not use a synchronous ref because that has a cost.",
+    "start": "1195333",
+    "end": "1201766"
+  },
+  {
+    "text": "And if there's no interleaving, like in--",
+    "start": "1203333",
+    "end": "1208500"
+  },
+  {
+    "text": "the issue is let me go back. In Scala, where this is coming from in",
+    "start": "1209833",
+    "end": "1215632"
+  },
+  {
+    "text": "Zio, you might have concurrent updates that happen in parallel.",
+    "start": "1215633",
+    "end": "1220800"
+  },
+  {
+    "text": "In JavaScript, that's not possible. There's nothing that can be interleaved between a closure call.",
+    "start": "1221966",
+    "end": "1228066"
+  },
+  {
+    "text": "So if all the update is synchronous, then a ref is completely fine. The only case we would need a synchronous",
+    "start": "1228699",
+    "end": "1235533"
+  },
+  {
+    "text": "ref is if the update itself is effectful.",
+    "start": "1235533",
+    "end": "1240033"
+  },
+  {
+    "text": "Returning an error here, I'm not sure it's justified,",
+    "start": "1240733",
+    "end": "1245000"
+  },
+  {
+    "text": "but quite literally, like don't update and either throw an exception or do something similar",
+    "start": "1245866",
+    "end": "1252699"
+  },
+  {
+    "text": "on the update interface. But I think we can start in this way and",
+    "start": "1252699",
+    "end": "1258466"
+  },
+  {
+    "text": "eventually optimize it. I think that what Mattia is referring to, by the way, is--",
+    "start": "1258466",
+    "end": "1263898"
+  },
+  {
+    "text": "so register pod-- oops, sorry.",
+    "start": "1264533",
+    "end": "1268033"
+  },
+  {
+    "text": "Pods. So here's one situation",
+    "start": "1269600",
+    "end": "1276232"
+  },
+  {
+    "text": "where we call the pods API and then we update the shards after calling the pods API.",
+    "start": "1276233",
+    "end": "1281732"
+  },
+  {
+    "text": "And then there's another situation. Basically the same thing. Instead of unassigning shards, we do the",
+    "start": "1281733",
+    "end": "1287132"
+  },
+  {
+    "text": "same thing when we assign shards. Assigning shards. And then we perform the updating the",
+    "start": "1287133",
+    "end": "1292299"
+  },
+  {
+    "text": "assignments inside the shard manager. So I think the asynchronous call happens",
+    "start": "1292300",
+    "end": "1300233"
+  },
+  {
+    "text": "before we update the shard manager state. Like calling the pods API doesn't happen",
+    "start": "1300233",
+    "end": "1307165"
+  },
+  {
+    "text": "as part of the updating",
+    "start": "1307166",
+    "end": "1312233"
+  },
+  {
+    "text": "of the shard manager state. That makes sense. The asynchronous ref would be acceptable",
+    "start": "1312233",
+    "end": "1318466"
+  },
+  {
+    "text": "if that call is part of the atomic operation. But if that call is not part of the",
+    "start": "1318466",
+    "end": "1325100"
+  },
+  {
+    "text": "atomic operation, then a ref is more-- is slightly more performant.",
+    "start": "1325100",
+    "end": "1331699"
+  },
+  {
+    "text": "It's not a huge deal, but there is basically a semaphore which is taken and released.",
+    "start": "1332800",
+    "end": "1340000"
+  },
+  {
+    "text": "Like four or five ops versus literally just an atomic update.",
+    "start": "1341500",
+    "end": "1346899"
+  },
+  {
+    "text": "But anyway, those are like next iteration cycle, I guess.",
+    "start": "1348133",
+    "end": "1352898"
+  },
+  {
+    "text": "Yeah, I mean, I think that we basically just need to make",
+    "start": "1354266",
+    "end": "1359433"
+  },
+  {
+    "text": "sure that there's nowhere that we actually do a concurrent-- like",
+    "start": "1359433",
+    "end": "1365066"
+  },
+  {
+    "text": "an asynchronous call inside an update. I don't think there is. But I kept it as a synchronized ref",
+    "start": "1365066",
+    "end": "1371000"
+  },
+  {
+    "text": "because kind of like you said, it didn't seem like the right time to make that optimization.",
+    "start": "1371000",
+    "end": "1375732"
+  },
+  {
+    "text": "But anyways, maybe-- I don't know what you think the best use of time would be,",
+    "start": "1378199",
+    "end": "1383732"
+  },
+  {
+    "text": "but I thought it'd be maybe interesting to go through like-- first, maybe we can talk about how the",
+    "start": "1384199",
+    "end": "1390299"
+  },
+  {
+    "text": "shard manager is initialized currently, and then we can go through some of the ops that it can perform.",
+    "start": "1390300",
+    "end": "1395033"
+  },
+  {
+    "text": "I think we could also have a look at the test suite.",
+    "start": "1396500",
+    "end": "1401100"
+  },
+  {
+    "text": "Sure. Kind of understand the use cases very well.",
+    "start": "1402100",
+    "end": "1409000"
+  },
+  {
+    "text": "Again, for the folks that are just connecting now, the shard manager in the cluster is",
+    "start": "1409466",
+    "end": "1417199"
+  },
+  {
+    "text": "supposed to be a single instance, and the responsibility of the shard",
+    "start": "1417199",
+    "end": "1422399"
+  },
+  {
+    "text": "manager is to allocate shards to pods.",
+    "start": "1422399",
+    "end": "1427666"
+  },
+  {
+    "text": "A pod is basically a JavaScript process. We're using Kubernetes-like names, but",
+    "start": "1428766",
+    "end": "1436766"
+  },
+  {
+    "text": "pods are JavaScript processes, and you can have a cluster of them.",
+    "start": "1436800",
+    "end": "1443233"
+  },
+  {
+    "text": "How entities are executed on pods, the",
+    "start": "1444466",
+    "end": "1449533"
+  },
+  {
+    "text": "mapping, for efficiency reasons, we loop through shards.",
+    "start": "1449533",
+    "end": "1455633"
+  },
+  {
+    "text": "Basically, we have a fixed number of shards in a cluster. They are configurable. They can be 64,000 or whatever number,",
+    "start": "1456266",
+    "end": "1464699"
+  },
+  {
+    "text": "and each entity is hushed, and based on the hush, we assign it to a shard.",
+    "start": "1465933",
+    "end": "1471733"
+  },
+  {
+    "text": "That operation is static, and that can happen. Basically, the client can know directly",
+    "start": "1472500",
+    "end": "1479533"
+  },
+  {
+    "text": "which shard to communicate to. The mapping between a shard and a pod is",
+    "start": "1479533",
+    "end": "1487466"
+  },
+  {
+    "text": "what the shard manager is controlling. You have a single entity within the",
+    "start": "1487466",
+    "end": "1492666"
+  },
+  {
+    "text": "cluster that is responsible for this allocation. The logic is very nice",
+    "start": "1492666",
+    "end": "1498466"
+  },
+  {
+    "text": "because it is a single process, and one may think, \"Okay, it's a single process,",
+    "start": "1498466",
+    "end": "1504300"
+  },
+  {
+    "text": "and it impacts availability on the cluster. You have a single point of failure.\"",
+    "start": "1504566",
+    "end": "1510133"
+  },
+  {
+    "text": "In reality, even if the shard manager goes down, given that the shard allocations are fixed,",
+    "start": "1510633",
+    "end": "1517333"
+  },
+  {
+    "text": "as long as you don't have pods that go down while the shard manager is down,",
+    "start": "1518566",
+    "end": "1523800"
+  },
+  {
+    "text": "everything is operational. This makes it highly available even in",
+    "start": "1524300",
+    "end": "1531300"
+  },
+  {
+    "text": "the circumstance of the shard manager going down. Having a single process for the shard",
+    "start": "1531300",
+    "end": "1536600"
+  },
+  {
+    "text": "manager makes the assignments much easier, and we basically don't need a zookeeper",
+    "start": "1536600",
+    "end": "1543166"
+  },
+  {
+    "text": "or a distributed state management solution or stuff like that.",
+    "start": "1543166",
+    "end": "1547366"
+  },
+  {
+    "text": "Really, at some point, we might want to implement stuff like Raft to make even the shard manager more",
+    "start": "1548300",
+    "end": "1554132"
+  },
+  {
+    "text": "highly available, but this is the start. The shard manager is kind of the",
+    "start": "1554133",
+    "end": "1560833"
+  },
+  {
+    "text": "centerpiece where all the coordination happens. Everything else is statically allocated,",
+    "start": "1560833",
+    "end": "1568733"
+  },
+  {
+    "text": "and they can execute independently. It's kind of the trickiest part of the",
+    "start": "1569100",
+    "end": "1575333"
+  },
+  {
+    "text": "system to some extent. That's why I was curious on the test suite.",
+    "start": "1575333",
+    "end": "1582366"
+  },
+  {
+    "text": "Yeah, no. We can take a look at some of the tests I've written so far.",
+    "start": "1584766",
+    "end": "1589300"
+  },
+  {
+    "text": "Shard manager is the only writer who changes the network topology of entities. Yeah. Pods can also be",
+    "start": "1593699",
+    "end": "1600433"
+  },
+  {
+    "text": "registered by the shard manager. I don't know if you mentioned that. I think you focused mostly on the shard assignments,",
+    "start": "1600433",
+    "end": "1605433"
+  },
+  {
+    "text": "but the only the shard manager is capable of registering new pods, which makes sense, as you",
+    "start": "1605466",
+    "end": "1611666"
+  },
+  {
+    "text": "pointed out, with the cluster. And the keeper of the cluster.",
+    "start": "1611666",
+    "end": "1618100"
+  },
+  {
+    "text": "Exactly. Mattia, I haven't encountered a use case",
+    "start": "1619033",
+    "end": "1625832"
+  },
+  {
+    "text": "for this registered app thingy yet. Maybe you can comment on if you know what",
+    "start": "1625833",
+    "end": "1632299"
+  },
+  {
+    "text": "the metadata that's attached to pods is useful for.",
+    "start": "1632300",
+    "end": "1636699"
+  },
+  {
+    "text": "I just kind of wanted to know if there's a use case for registered app that I haven't come across yet.",
+    "start": "1637633",
+    "end": "1642332"
+  },
+  {
+    "text": "But anyways, in the test suite right now, we have three pods that we kind of",
+    "start": "1642866",
+    "end": "1649733"
+  },
+  {
+    "text": "statically define up at the top. Each one of these has a different host",
+    "start": "1649733",
+    "end": "1655366"
+  },
+  {
+    "text": "and port, but they all have the same version. At the moment, there's two groups of",
+    "start": "1655366",
+    "end": "1665533"
+  },
+  {
+    "text": "tests in this test suite. One tests specifically like rebalancing.",
+    "start": "1665533",
+    "end": "1669033"
+  },
+  {
+    "text": "And one is kind of a simulation test suite where we actually have more of",
+    "start": "1670766",
+    "end": "1676033"
+  },
+  {
+    "text": "round trips happening through the shard manager. So at the moment, since I've reworked the",
+    "start": "1676033",
+    "end": "1682898"
+  },
+  {
+    "text": "tests for the new state, I haven't gone through",
+    "start": "1682899",
+    "end": "1688266"
+  },
+  {
+    "text": "the simulation tests yet. I've only gone through the rebalanced test suite, but we can take a look at this.",
+    "start": "1688266",
+    "end": "1693533"
+  },
+  {
+    "text": "So this first test here takes a look at specifically does the shard manager",
+    "start": "1694100",
+    "end": "1699600"
+  },
+  {
+    "text": "rebalance unbalanced assignments. So right now we set up two maps where we",
+    "start": "1699600",
+    "end": "1706033"
+  },
+  {
+    "text": "have essentially pod one and pod two registered with the shard manager. And then we have two shards that we",
+    "start": "1706033",
+    "end": "1712433"
+  },
+  {
+    "text": "create, both of which we register with pod one. And clearly this is an unbalanced cluster",
+    "start": "1712433",
+    "end": "1718833"
+  },
+  {
+    "text": "because we have one pod with two shards and one pod with no shards. So we can call, we can create our state",
+    "start": "1718833",
+    "end": "1726898"
+  },
+  {
+    "text": "here and then call one of the methods inside shard manager, which I'll pull up, but we don't have to",
+    "start": "1726899",
+    "end": "1732433"
+  },
+  {
+    "text": "necessarily go through.",
+    "start": "1732433",
+    "end": "1734766"
+  },
+  {
+    "text": "So let's take a look decide.",
+    "start": "1755566",
+    "end": "1757733"
+  },
+  {
+    "text": "These two methods in here basically figure out the assignments and",
+    "start": "1762866",
+    "end": "1769233"
+  },
+  {
+    "text": "unassignments that have to happen for a particular pod. So we essentially get two maps back where",
+    "start": "1769233",
+    "end": "1777033"
+  },
+  {
+    "text": "we have a mapping of pod addresses to the shards that have to be assigned to that pod.",
+    "start": "1777033",
+    "end": "1783133"
+  },
+  {
+    "text": "And similarly the unassignments for a particular pod. And we have two methods in here that",
+    "start": "1783933",
+    "end": "1789000"
+  },
+  {
+    "text": "essentially are called in two different situations. One is when we have pods with unassigned shards.",
+    "start": "1789000",
+    "end": "1794366"
+  },
+  {
+    "text": "One is for when we have pods with unbalanced shards. But the semantics of one that gets",
+    "start": "1794866",
+    "end": "1803433"
+  },
+  {
+    "text": "called, when each one gets called, we can look at in a second.",
+    "start": "1803433",
+    "end": "1806633"
+  },
+  {
+    "text": "But in this case we have register at was",
+    "start": "1809833",
+    "end": "1815266"
+  },
+  {
+    "text": "planned just for metrics estimated the average pod life since register. Okay.",
+    "start": "1815266",
+    "end": "1820232"
+  },
+  {
+    "text": "Very cool. That's a use case. Yeah, that is a good use case. And actually there have been like metrics",
+    "start": "1821866",
+    "end": "1828433"
+  },
+  {
+    "text": "added since to shard cake and I've started to incorporate them into the",
+    "start": "1828433",
+    "end": "1833766"
+  },
+  {
+    "text": "shard manager as well. There's actually like shard manager specific metrics and then there's also metrics for like the pods themselves.",
+    "start": "1833766",
+    "end": "1842033"
+  },
+  {
+    "text": "But anyways, getting back to this test. So we have two pods, one with two shards, one with no shards.",
+    "start": "1844300",
+    "end": "1850433"
+  },
+  {
+    "text": "So when we try to decide the assignments, we should end up with essentially the",
+    "start": "1850466",
+    "end": "1858266"
+  },
+  {
+    "text": "cluster deciding to create an assignment of one of the shards to the second pod,",
+    "start": "1858266",
+    "end": "1865033"
+  },
+  {
+    "text": "which had no shards previously. And then pod one should be be getting an",
+    "start": "1865033",
+    "end": "1870299"
+  },
+  {
+    "text": "unassignment of a shard. So essentially moving one shard from one pod to the other in this particular case.",
+    "start": "1870300",
+    "end": "1876133"
+  },
+  {
+    "text": "And I can actually just run tests",
+    "start": "1878100",
+    "end": "1882299"
+  },
+  {
+    "text": "So at the moment, we have in the",
+    "start": "1886366",
+    "end": "1891600"
+  },
+  {
+    "text": "rebalancing test suite, everything is working currently. And this test down here is the one I was",
+    "start": "1891600",
+    "end": "1896800"
+  },
+  {
+    "text": "referencing at the beginning when we were talking about why I swapped to kind of a vanilla JavaScript map from our hash map.",
+    "start": "1896800",
+    "end": "1903933"
+  },
+  {
+    "text": "That test I think was taking somewhere around like four seconds or so because we",
+    "start": "1904466",
+    "end": "1910500"
+  },
+  {
+    "text": "were doing a lot of like copying and recreating hash maps",
+    "start": "1910500",
+    "end": "1915800"
+  },
+  {
+    "text": "and things like that. We still do a lot of copying and recreating maps in this test, which is why it takes like 600 millis, but it's",
+    "start": "1915800",
+    "end": "1923566"
+  },
+  {
+    "text": "definitely a lot quicker now. All right. To an extent, we should",
+    "start": "1923566",
+    "end": "1928899"
+  },
+  {
+    "text": "probably also understand why it's kind of slow in the hash map because the hash map",
+    "start": "1928899",
+    "end": "1936733"
+  },
+  {
+    "text": "is a persistent data structure. So you don't copy it.",
+    "start": "1936733",
+    "end": "1941899"
+  },
+  {
+    "text": "You modify parts of the tree, which should not be a lot slower.",
+    "start": "1942133",
+    "end": "1949232"
+  },
+  {
+    "text": "I'm curious if we can maybe benchmark where the issues are coming from.",
+    "start": "1950466",
+    "end": "1959132"
+  },
+  {
+    "text": "Tim is really a good hardener of performance.",
+    "start": "1959699",
+    "end": "1964800"
+  },
+  {
+    "text": "Tim, if you're watching this later, please help us with hash map.",
+    "start": "1965899",
+    "end": "1972799"
+  },
+  {
+    "text": "So the first test here is kind of simple. We're just testing that if the cluster is",
+    "start": "1974466",
+    "end": "1980165"
+  },
+  {
+    "text": "unbalanced, it should rebalance itself. In the second test here, we're basically",
+    "start": "1980166",
+    "end": "1987500"
+  },
+  {
+    "text": "testing that if we have a pod in the cluster and the cluster is unbalanced,",
+    "start": "1987500",
+    "end": "1992899"
+  },
+  {
+    "text": "but the pod has an older version, excuse me, that we don't rebalance to this pod,",
+    "start": "1993199",
+    "end": "2001065"
+  },
+  {
+    "text": "basically, because we never want to. We never want to send shards to a pod that's running an older version because",
+    "start": "2001066",
+    "end": "2007600"
+  },
+  {
+    "text": "obviously it's running an older version of stuff, and we're probably in the middle of a cluster",
+    "start": "2007600",
+    "end": "2012766"
+  },
+  {
+    "text": "update or something like that. So very similar to the first test, we set",
+    "start": "2012766",
+    "end": "2018199"
+  },
+  {
+    "text": "up our two states here, and we're basically testing that both the",
+    "start": "2018199",
+    "end": "2024233"
+  },
+  {
+    "text": "unassignments and assignments that we get back from deciding how to rebalance should both be empty.",
+    "start": "2024233",
+    "end": "2029799"
+  },
+  {
+    "text": "Milad? No. State.make is just a static",
+    "start": "2034966",
+    "end": "2041732"
+  },
+  {
+    "text": "constructor I put on the custom shard manager state object.",
+    "start": "2041733",
+    "end": "2045533"
+  },
+  {
+    "text": "We could also--originally, I had the constructor for state as a private",
+    "start": "2047100",
+    "end": "2053699"
+  },
+  {
+    "text": "constructor, but I ended up needing the vanilla constructor anyways. So make could literally just be new state",
+    "start": "2053699",
+    "end": "2059433"
+  },
+  {
+    "text": "instead of state.make. It's doing the same thing right now, so I should probably actually remove make because",
+    "start": "2059433",
+    "end": "2067732"
+  },
+  {
+    "text": "it's doing the same thing as the vanilla constructor at the moment.",
+    "start": "2067733",
+    "end": "2070000"
+  },
+  {
+    "text": "And then we have a third test here, which is basically testing that if the cluster is already balanced, we shouldn't",
+    "start": "2074133",
+    "end": "2080433"
+  },
+  {
+    "text": "rebalance the cluster. So similarly, in this case, we've got two pods, but we've got a shard on each pod.",
+    "start": "2080433",
+    "end": "2085932"
+  },
+  {
+    "text": "So when we decide how to rebalance, we shouldn't get any new assignments or unassignments.",
+    "start": "2085933",
+    "end": "2091432"
+  },
+  {
+    "text": "This is kind of like an optimization that",
+    "start": "2092466",
+    "end": "2098199"
+  },
+  {
+    "text": "we do inside rebalancing, which is basically like we have two pods, right?",
+    "start": "2098199",
+    "end": "2106199"
+  },
+  {
+    "text": "And we have three shards. So in this case, like, it wouldn't make sense to ping pong a shard between these",
+    "start": "2106600",
+    "end": "2113699"
+  },
+  {
+    "text": "pods every time we rebalance. This doesn't make any sense to do that.",
+    "start": "2113699",
+    "end": "2118500"
+  },
+  {
+    "text": "It would be like an unnecessary operation. It's unbalanced, but not too much",
+    "start": "2119333",
+    "end": "2125033"
+  },
+  {
+    "text": "unbalanced to justify a re-sharding. Exactly. So in this case, like, we're basically testing that when we have one",
+    "start": "2125033",
+    "end": "2131833"
+  },
+  {
+    "text": "pod with two shards and one pod with one pod with two shards, one pod with one",
+    "start": "2131833",
+    "end": "2137933"
+  },
+  {
+    "text": "shard, that we don't constantly send one of the shards between those pods. That's an unnecessary rebalance.",
+    "start": "2137933",
+    "end": "2144399"
+  },
+  {
+    "text": "I guess this is regardless of the cluster size. You could have four pods, three",
+    "start": "2144933",
+    "end": "2151566"
+  },
+  {
+    "text": "with one, one with two, and you have the same situation. Exactly. So then we actually do the exact",
+    "start": "2151566",
+    "end": "2158800"
+  },
+  {
+    "text": "thing that you said. If there's a more than one shard difference, we test that we actually do rebalance in this",
+    "start": "2158800",
+    "end": "2164299"
+  },
+  {
+    "text": "situation where we have two pods, but we have three shards assigned to one pod and",
+    "start": "2164300",
+    "end": "2169533"
+  },
+  {
+    "text": "one shard assigned to the fourth pod. So this is very similar to the first test that we set up, but it's basically like a",
+    "start": "2169533",
+    "end": "2176600"
+  },
+  {
+    "text": "sanity check to make sure that when we have many shards assigned to one pod, that we do rebalance when there's more",
+    "start": "2176600",
+    "end": "2182466"
+  },
+  {
+    "text": "than a one shard difference. And yes, Mattia, we could set a threshold.",
+    "start": "2182466",
+    "end": "2187432"
+  },
+  {
+    "text": "So I think at the moment, there's actual",
+    "start": "2188466",
+    "end": "2196166"
+  },
+  {
+    "text": "specific logic. I forget where it is. I think it's in pick new pods for this.",
+    "start": "2196166",
+    "end": "2204500"
+  },
+  {
+    "text": "It is in here somewhere. If the new pod has one less as many or",
+    "start": "2209866",
+    "end": "2215433"
+  },
+  {
+    "text": "more shards, shards than the old pod don't do anything. This is essentially the place where we currently do this. So",
+    "start": "2215433",
+    "end": "2221633"
+  },
+  {
+    "text": "if there's a one shard difference, I don't think we currently do anything. Well, we don't currently do anything. But",
+    "start": "2221633",
+    "end": "2227833"
+  },
+  {
+    "text": "if there's more than a one shard difference, we do something. Isn't there a config? I don't remember. Let me look.",
+    "start": "2227833",
+    "end": "2235433"
+  },
+  {
+    "text": "Port, number of shards, rebalance interval, rebalance retry interval, rebalance rate. No. At the moment, it's",
+    "start": "2238633",
+    "end": "2247333"
+  },
+  {
+    "text": "literally just a static check. Like a one shard difference doesn't trigger rebalancing. Anyways, moving on. In this test, we are",
+    "start": "2247333",
+    "end": "2262399"
+  },
+  {
+    "text": "making sure that we're picking the pod with less shards. We could actually",
+    "start": "2262399",
+    "end": "2267599"
+  },
+  {
+    "text": "probably make this test more robust. But right now, basically, we have three pods",
+    "start": "2267600",
+    "end": "2272799"
+  },
+  {
+    "text": "in the cluster. We have two pods assigned to pod one, and we have one pod assigned to pod two.",
+    "start": "2272800",
+    "end": "2278833"
+  },
+  {
+    "text": "And we're basically making sure that We're sending one shard to the third pod,",
+    "start": "2278833",
+    "end": "2284233"
+  },
+  {
+    "text": "which currently has none, and taking a shard away from pod one, which currently has two, so that we end up with a",
+    "start": "2284233",
+    "end": "2290500"
+  },
+  {
+    "text": "perfectly balanced cluster.",
+    "start": "2290500",
+    "end": "2291699"
+  },
+  {
+    "text": "And then kind of a sanity check shouldn't rebalance if there are no pods. Right. So.",
+    "start": "2296699",
+    "end": "2302299"
+  },
+  {
+    "text": "Yeah, finally rebalance. Indeed. This test is kind of the more",
+    "start": "2304466",
+    "end": "2311233"
+  },
+  {
+    "text": "intensive one, where we're basically testing that the cluster should balance",
+    "start": "2311233",
+    "end": "2316800"
+  },
+  {
+    "text": "well when we have many nodes that are starting in sequence. So.",
+    "start": "2316800",
+    "end": "2321432"
+  },
+  {
+    "text": "The logic might be a tiny bit hard to follow, but basically we start out with a",
+    "start": "2322466",
+    "end": "2330733"
+  },
+  {
+    "text": "state here where we have no pods registered with the cluster, and we have",
+    "start": "2330733",
+    "end": "2336533"
+  },
+  {
+    "text": "300 shards in the cluster. So we basically have no pods 300 shards. Right.",
+    "start": "2336533",
+    "end": "2342133"
+  },
+  {
+    "text": "And here we're spinning up. We're basically creating a 30 pods. We're",
+    "start": "2348566",
+    "end": "2356133"
+  },
+  {
+    "text": "spinning up 30 pods, and we're reducing over the original state. We create an",
+    "start": "2356133",
+    "end": "2362100"
+  },
+  {
+    "text": "address for the pod. We create the pod with metadata. And then.",
+    "start": "2362100",
+    "end": "2366800"
+  },
+  {
+    "text": "We create the new shards and new pods for the next state that we're going to create",
+    "start": "2370199",
+    "end": "2376399"
+  },
+  {
+    "text": "We add this address to like",
+    "start": "2376399",
+    "end": "2382233"
+  },
+  {
+    "text": "We basically add this pod to the state of the cluster. ",
+    "start": "2382233",
+    "end": "2387399"
+  },
+  {
+    "text": "Again stop me if something doesn't make sense",
+    "start": "2389266",
+    "end": "2392266"
+  },
+  {
+    "text": "We add this pod to the state of the cluster And then, now that we have",
+    "start": "2399966",
+    "end": "2405899"
+  },
+  {
+    "text": "that pod like added to the cluster, we basically do the work of deciding if we need to make an assignment or",
+    "start": "2405899",
+    "end": "2411799"
+  },
+  {
+    "text": "unassignments from the cluster. And this is the actual, this is the",
+    "start": "2411800",
+    "end": "2417366"
+  },
+  {
+    "text": "logic, I believe that's in in the actual shard manager  to decide like when we have to call which method",
+    "start": "2417366",
+    "end": "2424566"
+  },
+  {
+    "text": " I think that we also check  if we're doing the assignments immediately or not.",
+    "start": "2426866",
+    "end": "2430833"
+  },
+  {
+    "text": "But basically, this was actually a bug in the shard cake tests that I found that",
+    "start": "2432833",
+    "end": "2438600"
+  },
+  {
+    "text": "I'm actually going to contact Pierre about at some point. Right now, their",
+    "start": "2438600",
+    "end": "2443733"
+  },
+  {
+    "text": "tests will always pass for this because they're always calling. I",
+    "start": "2443733",
+    "end": "2449399"
+  },
+  {
+    "text": "think it's the unbalanced method. Or maybe it was the other one. But basically, like they always end up with",
+    "start": "2449399",
+    "end": "2455333"
+  },
+  {
+    "text": "like an empty state. But because it's like, eventually you end up with the way that they're doing their assertion, you",
+    "start": "2455333",
+    "end": "2461000"
+  },
+  {
+    "text": "end up with an option. Like, it's always going to be true. So I actually have to",
+    "start": "2461000",
+    "end": "2466465"
+  },
+  {
+    "text": "get in touch with Pierre and let him know.",
+    "start": "2466466",
+    "end": "2468899"
+  },
+  {
+    "text": "Anyways, so as we're spinning up pods, we figure out if we need to make any assignments. And if we don't do or don't,",
+    "start": "2471533",
+    "end": "2479399"
+  },
+  {
+    "text": "we update the shards in the state. And so we basically go through and unassign any",
+    "start": "2479699",
+    "end": "2486333"
+  },
+  {
+    "text": "shards that need to be unassigned. We assign any shards that need to be assigned. And then we return a new state.",
+    "start": "2486333",
+    "end": "2491265"
+  },
+  {
+    "text": "So as we reduce over these 30 pods that we're spinning up, we're basically making sure that all of-",
+    "start": "2491933",
+    "end": "2497765"
+  },
+  {
+    "text": "That we end up with a balanced cluster at the end. So at the very end here, we take",
+    "start": "2498699",
+    "end": "2504533"
+  },
+  {
+    "text": "the results after reducing over all the pods. We calculate how many shards are",
+    "start": "2504533",
+    "end": "2510000"
+  },
+  {
+    "text": "assigned to each pod. We make sure that we have 30 pods in the cluster.",
+    "start": "2510000",
+    "end": "2514800"
+  },
+  {
+    "text": "And then we make sure that every pod should have a size of 10. Because with a",
+    "start": "2515533",
+    "end": "2521733"
+  },
+  {
+    "text": "perfectly balanced cluster, 300 shards to 30 pods, every pod should have 10 shards.",
+    "start": "2521733",
+    "end": "2526632"
+  },
+  {
+    "text": "That gives us 300 total shards. Apologies, just a quick question. Those",
+    "start": "2527433",
+    "end": "2535033"
+  },
+  {
+    "text": "tests just test the assignment functions.",
+    "start": "2535033",
+    "end": "2541133"
+  },
+  {
+    "text": "So basically the decisions that the shard manager is going to take. That's not,",
+    "start": "2541433",
+    "end": "2548933"
+  },
+  {
+    "text": "though, the actual process that goes on in the shard manager upon allocating or",
+    "start": "2548933",
+    "end": "2556333"
+  },
+  {
+    "text": "deallocating shards. Because when we deallocate a shard from a pod, we need to wait for confirmation",
+    "start": "2556333",
+    "end": "2562300"
+  },
+  {
+    "text": "that the pod actually reassigned the shard. Otherwise we risk ending up with",
+    "start": "2562300",
+    "end": "2568800"
+  },
+  {
+    "text": "two pods that think they have shard assigned. Yeah, this is basically testing all of",
+    "start": "2568800",
+    "end": "2576300"
+  },
+  {
+    "text": "the synchronous rebalancing work. Because it's still like a complex algorithm. So we want to make sure that we're like",
+    "start": "2576300",
+    "end": "2581766"
+  },
+  {
+    "text": "actually doing everything properly. But I started to write. And I guess at the end, you just compare",
+    "start": "2581766",
+    "end": "2588500"
+  },
+  {
+    "text": "previous state with wanted state. And you",
+    "start": "2588500",
+    "end": "2594000"
+  },
+  {
+    "text": "then call the pods APIs to get to the new version.",
+    "start": "2594000",
+    "end": "2599432"
+  },
+  {
+    "text": "Yeah, I mean, if we look at the in the actual implementation here, if we actually look at the register.",
+    "start": "2600466",
+    "end": "2612666"
+  },
+  {
+    "text": "Or the.",
+    "start": "2614833",
+    "end": "2615833"
+  },
+  {
+    "text": "The actual rebalance. If we actually went through the whole rebalance algorithm.",
+    "start": "2620100",
+    "end": "2626233"
+  },
+  {
+    "text": "There's quite a bit of stuff that's being done. The first thing that's done is basically what we do inside the tests,",
+    "start": "2627666",
+    "end": "2633966"
+  },
+  {
+    "text": "except we also check if we need to do it immediately or not. Because if we don't, then we can obviously do the rebalancing according to",
+    "start": "2633966",
+    "end": "2640033"
+  },
+  {
+    "text": "the rate. Otherwise we need to do it immediately. But there's like a whole bunch of other logic in here where we",
+    "start": "2640033",
+    "end": "2646432"
+  },
+  {
+    "text": "test. We first ping the pods. We test if the pods are actually available.",
+    "start": "2646433",
+    "end": "2650466"
+  },
+  {
+    "text": "We remove any pods that are not healthy. Like there's a whole bunch of work that goes on inside the rebalancing algorithm.",
+    "start": "2651466",
+    "end": "2657932"
+  },
+  {
+    "text": "But the tests that we just ran through is literally just the synchronous work for rebalancing.",
+    "start": "2658433",
+    "end": "2664233"
+  },
+  {
+    "text": "But to your point, Mike, there are some",
+    "start": "2664466",
+    "end": "2670733"
+  },
+  {
+    "text": "simulation tests I started working on, which currently I'm skipping because I",
+    "start": "2670733",
+    "end": "2675799"
+  },
+  {
+    "text": "don't know if they're going to work because I changed the way the state looks. But here we do some actual simulation tests where.",
+    "start": "2675800",
+    "end": "2687533"
+  },
+  {
+    "text": "We basically go through the full rebalancing, registering pods, et cetera.",
+    "start": "2687533",
+    "end": "2695600"
+  },
+  {
+    "text": "So we can look at some of this and there's a lot missing from these",
+    "start": "2697399",
+    "end": "2705100"
+  },
+  {
+    "text": "simulation tests. I think I've only written like three so far. But there's a ton of stuff that's uncovered currently because I literally just started doing this.",
+    "start": "2705100",
+    "end": "2714033"
+  },
+  {
+    "text": "Yeah, I mean, of course. It's one of those things that I guess needs to be well tested.",
+    "start": "2714199",
+    "end": "2719965"
+  },
+  {
+    "text": "Indeed. This needs to be extremely well tested. So to be clear, one of the",
+    "start": "2721100",
+    "end": "2727699"
+  },
+  {
+    "text": "guarantees that cluster has is that you're going to have only one instance of",
+    "start": "2727699",
+    "end": "2735100"
+  },
+  {
+    "text": "your entity behavior running at any point in time. And this is",
+    "start": "2735100",
+    "end": "2741366"
+  },
+  {
+    "text": "This is fundamental for actor systems because it's what allows you to basically",
+    "start": "2741366",
+    "end": "2748466"
+  },
+  {
+    "text": "use single-writer principles, which means",
+    "start": "2748466",
+    "end": "2754100"
+  },
+  {
+    "text": "you don't really have to care about locking. And it's what allows for insanely good",
+    "start": "2754100",
+    "end": "2762233"
+  },
+  {
+    "text": "performances at scale. You can have millions of actors each actor does",
+    "start": "2762233",
+    "end": "2769533"
+  },
+  {
+    "text": "independent things and they don't need to coordinate between each other. They don't need to basically you",
+    "start": "2769533",
+    "end": "2775800"
+  },
+  {
+    "text": "never need to lock stuff. And that's only possible because you have",
+    "start": "2775800",
+    "end": "2782500"
+  },
+  {
+    "text": "the guarantee that only one instance of your process is running within the",
+    "start": "2782500",
+    "end": "2787733"
+  },
+  {
+    "text": "cluster. And this is guaranteed by having",
+    "start": "2787733",
+    "end": "2793233"
+  },
+  {
+    "text": "an instant, basically an entity linked to a shard.",
+    "start": "2793233",
+    "end": "2798433"
+  },
+  {
+    "text": "So one entity points to one shard. One shard can have many entities, but one",
+    "start": "2799466",
+    "end": "2805599"
+  },
+  {
+    "text": "entity will only ever live within one shard. And one shard will only ever be",
+    "start": "2805600",
+    "end": "2811300"
+  },
+  {
+    "text": "allocated to one pod, never allocated to two pods. Because if a shard gets allocated to two",
+    "start": "2811300",
+    "end": "2818133"
+  },
+  {
+    "text": "pods, then you lose the guarantee of the single-writer principle on the entity. So",
+    "start": "2818133",
+    "end": "2824300"
+  },
+  {
+    "text": "all of this work is really the heart of the cluster, which is why I'm saying",
+    "start": "2824300",
+    "end": "2831533"
+  },
+  {
+    "text": "this. It has to be tested. It has to be 100% coverage at a minimum. Yeah. Now there is a lot of work to do on",
+    "start": "2831533",
+    "end": "2839733"
+  },
+  {
+    "text": "the tests, but I think there's already a",
+    "start": "2839733",
+    "end": "2845199"
+  },
+  {
+    "text": "good coverage for at least the synchronous part of rebalancing. When we",
+    "start": "2845199",
+    "end": "2850566"
+  },
+  {
+    "text": "need to figure out, do we need to assign or unassign shards to a particular pod?",
+    "start": "2850566",
+    "end": "2856432"
+  },
+  {
+    "text": "I think we already have a pretty good coverage for that. But there's a ton of work that needs to be done for simulating",
+    "start": "2856500",
+    "end": "2862800"
+  },
+  {
+    "text": "the actual shard manager. But I have started some of it. So when you actually construct a shard manager, the layer that",
+    "start": "2862800",
+    "end": "2870366"
+  },
+  {
+    "text": "provides a shard manager, you can provide the config dynamically",
+    "start": "2870366",
+    "end": "2877100"
+  },
+  {
+    "text": "inside the layer constructor. So you can specify which port you want the shard manager running, or maybe you",
+    "start": "2877100",
+    "end": "2884366"
+  },
+  {
+    "text": "want to change, I don't know how often the pod is pinged. I don't know. But for",
+    "start": "2884366",
+    "end": "2893500"
+  },
+  {
+    "text": "now, we just leave it with the defaults. Thanks, Dillon.",
+    "start": "2893500",
+    "end": "2905433"
+  },
+  {
+    "text": "Dillon, pay attention.",
+    "start": "2907433",
+    "end": "2909433"
+  },
+  {
+    "text": "So anyways, a lot of the other layers that the shard manager depends on right",
+    "start": "2912733",
+    "end": "2919633"
+  },
+  {
+    "text": "now in the current simulation tests are just no op layers. So they either always",
+    "start": "2919633",
+    "end": "2926399"
+  },
+  {
+    "text": "like return true or always return healthy or return empty maps from storage or whatever.",
+    "start": "2926399",
+    "end": "2932333"
+  },
+  {
+    "text": "In a true, fully whatever test suite, we'd have tests that really incorporate",
+    "start": "2932466",
+    "end": "2940166"
+  },
+  {
+    "text": "all of these different things. But for",
+    "start": "2940166",
+    "end": "2945933"
+  },
+  {
+    "text": "now, I just have a few simple simulation tests set up that are basically the same",
+    "start": "2945933",
+    "end": "2952399"
+  },
+  {
+    "text": "ones I think that shard cake has with a few things changed. So the shard manager itself depends on a",
+    "start": "2952399",
+    "end": "2962233"
+  },
+  {
+    "text": "couple of things. So it depends on having access to cluster storage, obviously. It",
+    "start": "2962233",
+    "end": "2968066"
+  },
+  {
+    "text": "also depends on a pod health API, which is external to the shard manager. So you can provide.",
+    "start": "2968066",
+    "end": "2973933"
+  },
+  {
+    "text": "You can basically provide different implementations to check whether or not a pod is healthy. So if you're running in",
+    "start": "2974366",
+    "end": "2982066"
+  },
+  {
+    "text": "case, maybe you'd have like a it's pod health API or a pod. It's pod health API or if you're running locally with multiple different",
+    "start": "2982066",
+    "end": "2988500"
+  },
+  {
+    "text": "processes, maybe you'd have like a process manager that's checking if pods are healthy or whatever.",
+    "start": "2988500",
+    "end": "2992300"
+  },
+  {
+    "text": "And then the actual pods API needs to be provided as well. So the thing that actually communicates with the individual",
+    "start": "2994466",
+    "end": "2999699"
+  },
+  {
+    "text": "pods. So these three things are required by the shard manager in order to be able to function. And we in the tests",
+    "start": "2999699",
+    "end": "3006833"
+  },
+  {
+    "text": "currently provide a local pod health. API or a local pod health layer.",
+    "start": "3006833",
+    "end": "3014800"
+  },
+  {
+    "text": "A no op. The layer for pods and a no op layer for storage.",
+    "start": "3016233",
+    "end": "3022100"
+  },
+  {
+    "text": "And then this test live layer is used in most of the tests, except for the last",
+    "start": "3023399",
+    "end": "3029000"
+  },
+  {
+    "text": "one, which we'll take a look at in a second. But.",
+    "start": "3029000",
+    "end": "3033265"
+  },
+  {
+    "text": "Maybe we can look quickly at this like simulate function.",
+    "start": "3035466",
+    "end": "3039466"
+  },
+  {
+    "text": "So. This simulate function basically takes in.",
+    "start": "3040500",
+    "end": "3045333"
+  },
+  {
+    "text": "A read only array of simulation events. So basically things that we want to",
+    "start": "3045666",
+    "end": "3051566"
+  },
+  {
+    "text": "trigger some behavior in the cluster. So it's again this is like for testing purposes to make some things easier.",
+    "start": "3051566",
+    "end": "3057233"
+  },
+  {
+    "text": "But basically the simulation events that we have available to us are either currently we can",
+    "start": "3057733",
+    "end": "3064199"
+  },
+  {
+    "text": "register pod or unregister pod. And that's because at the moment the only",
+    "start": "3064199",
+    "end": "3069500"
+  },
+  {
+    "text": "two things that require simulation events that I've written.",
+    "start": "3069500",
+    "end": "3072300"
+  },
+  {
+    "text": "Yes. For sure. But in the simulation tests like there are so many tests that need to",
+    "start": "3076166",
+    "end": "3082233"
+  },
+  {
+    "text": "be added to the simulation stuff. It's there's a lot.",
+    "start": "3082233",
+    "end": "3086199"
+  },
+  {
+    "text": "At the moment. My simulation tests are just testing scale up and scale down.",
+    "start": "3087566",
+    "end": "3092433"
+  },
+  {
+    "text": "And then persisting state to storage. But. So we have two simulation events here.",
+    "start": "3094966",
+    "end": "3102233"
+  },
+  {
+    "text": "When we register pod we basically just call manager.register and then similarly",
+    "start": "3103333",
+    "end": "3109933"
+  },
+  {
+    "text": "when we unregister pod we're just calling unregister on the shard manager.",
+    "start": "3109933",
+    "end": "3113366"
+  },
+  {
+    "text": "And simulate basically just iterates over these events. Handles them and that's that's really it.",
+    "start": "3116000",
+    "end": "3122733"
+  },
+  {
+    "text": "So. Again these tests haven't been touched yet since I updated the state.",
+    "start": "3124100",
+    "end": "3130466"
+  },
+  {
+    "text": "So we could run them and see if they work but.",
+    "start": "3131466",
+    "end": "3134599"
+  },
+  {
+    "text": "I have to do the test to see to see if the. Yeah yeah let's just changes where.",
+    "start": "3137133",
+    "end": "3142399"
+  },
+  {
+    "text": "Or it's a good way to fail live. Oh no.",
+    "start": "3146033",
+    "end": "3151066"
+  },
+  {
+    "text": "Yep. Kind of what I was expecting but.",
+    "start": "3156833",
+    "end": "3161100"
+  },
+  {
+    "text": "Let's talk about the tests first and then maybe we can like look into why some of",
+    "start": "3164633",
+    "end": "3170233"
+  },
+  {
+    "text": "these things are failing.",
+    "start": "3170233",
+    "end": "3171000"
+  },
+  {
+    "text": "In the first test here we're basically setting up 20 pods.",
+    "start": "3175366",
+    "end": "3179733"
+  },
+  {
+    "text": "We're setting up like 20 pods and then registering them all. This register pod method is just defined",
+    "start": "3180399",
+    "end": "3188300"
+  },
+  {
+    "text": "down here. It's a helper to just construct a pod and then register call",
+    "start": "3188300",
+    "end": "3193533"
+  },
+  {
+    "text": "create the simulation event for registering the pod.",
+    "start": "3193533",
+    "end": "3196866"
+  },
+  {
+    "text": "And we wait 10 minutes because with the",
+    "start": "3200233",
+    "end": "3206299"
+  },
+  {
+    "text": "test clock we wait 10 minutes because we.",
+    "start": "3206300",
+    "end": "3209066"
+  },
+  {
+    "text": "We're not rebalancing immediately so we want to basically wait for the cluster to settle.",
+    "start": "3212466",
+    "end": "3217266"
+  },
+  {
+    "text": "And then in an ideal world if everything wasn't failing since I updated the tests.",
+    "start": "3218266",
+    "end": "3222933"
+  },
+  {
+    "text": "We would have we would grab the assignments from the manager so all of the shard assignments here",
+    "start": "3224066",
+    "end": "3229633"
+  },
+  {
+    "text": "and we would end up with. Essentially 12 shards per pod because the",
+    "start": "3229633",
+    "end": "3239833"
+  },
+  {
+    "text": "default number at the moment this can be changed the default number of shards that we spin up is 300.",
+    "start": "3239833",
+    "end": "3245166"
+  },
+  {
+    "text": "I know Mike and I have like we've talked about like making this number much larger for now it's 300 we can always change it.",
+    "start": "3246600",
+    "end": "3254733"
+  },
+  {
+    "text": "But. For testing purposes it doesn't it doesn't really doesn't really matter the",
+    "start": "3255433",
+    "end": "3262432"
+  },
+  {
+    "text": "only thing that would matter is checking that the performance doesn't like go to",
+    "start": "3262433",
+    "end": "3269166"
+  },
+  {
+    "text": "zero if that number grows. But the point of having more more shards",
+    "start": "3269166",
+    "end": "3277100"
+  },
+  {
+    "text": "than we currently have is because. Re-sharding a cluster is",
+    "start": "3277100",
+    "end": "3282765"
+  },
+  {
+    "text": "a very tedious operation. So given we persist all the messages and",
+    "start": "3282766",
+    "end": "3290233"
+  },
+  {
+    "text": "so on and so forth to restarting the cluster means quite literally rewriting the whole event history.",
+    "start": "3290233",
+    "end": "3296633"
+  },
+  {
+    "text": "Or at least changing changing some fields in the whole event history which could be",
+    "start": "3296633",
+    "end": "3303300"
+  },
+  {
+    "text": "a fairly fairly intensive operation and. We should probably do it for the audience",
+    "start": "3303300",
+    "end": "3310632"
+  },
+  {
+    "text": "Mike you might want to just clarify the difference between rebalancing and resharding.",
+    "start": "3310633",
+    "end": "3314633"
+  },
+  {
+    "text": "Yes, absolutely. So rebalancing is the operation of changing the allocation",
+    "start": "3316333",
+    "end": "3322599"
+  },
+  {
+    "text": "between shards and pods. So if if the topology of the cluster changes which means you're adding new",
+    "start": "3322600",
+    "end": "3329366"
+  },
+  {
+    "text": "nodes or you're removing nodes then you're rebalancing the same shards onto",
+    "start": "3329366",
+    "end": "3335799"
+  },
+  {
+    "text": "onto a different topology of pods. Re-sharding a cluster means change the",
+    "start": "3335800",
+    "end": "3343500"
+  },
+  {
+    "text": "physical number of shards. When would that be necessary?",
+    "start": "3343500",
+    "end": "3348533"
+  },
+  {
+    "text": "Let's say you for example start with I don't know 16 shards you think okay 16 shards probably start the cluster with",
+    "start": "3348533",
+    "end": "3356199"
+  },
+  {
+    "text": "single node or like three nodes you have enough.",
+    "start": "3356199",
+    "end": "3360300"
+  },
+  {
+    "text": "shards to be well distributed but then at some point in time your your your company",
+    "start": "3361466",
+    "end": "3367500"
+  },
+  {
+    "text": "grows and you find yourself with a cluster that has 32 nodes.",
+    "start": "3367500",
+    "end": "3373100"
+  },
+  {
+    "text": "If you have 16 shards only 16 nodes at the maximum are alive.",
+    "start": "3374233",
+    "end": "3379000"
+  },
+  {
+    "text": "And given that entities are distributed.",
+    "start": "3380500",
+    "end": "3385633"
+  },
+  {
+    "text": "By hashing the entity identifier and",
+    "start": "3387800",
+    "end": "3393033"
+  },
+  {
+    "text": "assigning a shard to that if you only have a few shards you might",
+    "start": "3393033",
+    "end": "3398066"
+  },
+  {
+    "text": "end up with a single shard that. Has many that has many entities",
+    "start": "3398066",
+    "end": "3403733"
+  },
+  {
+    "text": "allocated while another shard doesn't have that many. It's kind of like a hash map with with",
+    "start": "3403733",
+    "end": "3409932"
+  },
+  {
+    "text": "just a few buckets you want the number of buckets to be enough to cover potentially",
+    "start": "3409933",
+    "end": "3417199"
+  },
+  {
+    "text": "the whole lifetime of of your cluster and if you have a number like a thousand",
+    "start": "3417199",
+    "end": "3422566"
+  },
+  {
+    "text": "twenty four or two thousand forty eight shards. That's enough for three nodes that's",
+    "start": "3422566",
+    "end": "3429366"
+  },
+  {
+    "text": "enough for a hundred nodes that's enough for three hundred. So at the end of the day we should",
+    "start": "3429366",
+    "end": "3434933"
+  },
+  {
+    "text": "probably make the default something like two thousand forty eight or or even a bit",
+    "start": "3434933",
+    "end": "3441399"
+  },
+  {
+    "text": "larger to to basically guarantee that you never end up actually having to re-shard.",
+    "start": "3441399",
+    "end": "3448433"
+  },
+  {
+    "text": "That's. And to be honest even making it a configuration is kind of.",
+    "start": "3449466",
+    "end": "3455265"
+  },
+  {
+    "text": "It's one of the configurations that you're not supposed to touch that much.",
+    "start": "3456566",
+    "end": "3461600"
+  },
+  {
+    "text": "You're only supposed to touch it if you if you realize you have quite literally some issues that that",
+    "start": "3462633",
+    "end": "3470699"
+  },
+  {
+    "text": "requires you to to change it.",
+    "start": "3470699",
+    "end": "3472432"
+  },
+  {
+    "text": "Mattia is saying something I'll put it on the screen.",
+    "start": "3476266",
+    "end": "3480000"
+  },
+  {
+    "text": "Also restarting is usually an operation that one does when data scales up quickly.",
+    "start": "3481366",
+    "end": "3486199"
+  },
+  {
+    "text": "We use your growth so should be performed with a smallest time of the",
+    "start": "3486466",
+    "end": "3492666"
+  },
+  {
+    "text": "cluster being down possible. Yes. And it is kind of hard to",
+    "start": "3492666",
+    "end": "3498099"
+  },
+  {
+    "text": "do in that in that situation. Which is why the the best way to do",
+    "start": "3498100",
+    "end": "3504133"
+  },
+  {
+    "text": "re-sharding is not to reshard at all is to start with a cluster that already has shards.",
+    "start": "3504133",
+    "end": "3510333"
+  },
+  {
+    "text": "It's similar to folks that know for example how Kafka works. You have a topic and a",
+    "start": "3511699",
+    "end": "3518066"
+  },
+  {
+    "text": "topic has partitions. You want your topics to start with the right number of partitions because",
+    "start": "3518066",
+    "end": "3524133"
+  },
+  {
+    "text": "re-partitioning the topic requires the cluster to to be down. For a period of time.",
+    "start": "3524133",
+    "end": "3530399"
+  },
+  {
+    "text": "Yeah. The best way to solve a problem always not having it. Yes indeed.",
+    "start": "3531566",
+    "end": "3536765"
+  },
+  {
+    "text": "That's exactly what I meant. Yeah.",
+    "start": "3537733",
+    "end": "3541566"
+  },
+  {
+    "text": "So. Then I'm trying to figure out what I did to break my simulation tests.",
+    "start": "3543733",
+    "end": "3550699"
+  },
+  {
+    "text": "It's definitely something to do with the changes I made to state. We can at least walk through the test and",
+    "start": "3550699",
+    "end": "3557233"
+  },
+  {
+    "text": "I can show you folks like what the what we're trying to test here.",
+    "start": "3557233",
+    "end": "3561233"
+  },
+  {
+    "text": "But as I mentioned we simulate setting up 20 pods or registering 20 pods wait for",
+    "start": "3563466",
+    "end": "3568533"
+  },
+  {
+    "text": "the cluster to settle. And then the idea is that with the default number currently at.",
+    "start": "3568533",
+    "end": "3575166"
+  },
+  {
+    "text": "With the default number currently at 300 shards. If we set up 20 pods we want",
+    "start": "3576466",
+    "end": "3582600"
+  },
+  {
+    "text": "every pod to have 15 shards. We want every pod to be assigned to the cluster.",
+    "start": "3582600",
+    "end": "3588199"
+  },
+  {
+    "text": "This should probably just be registered. Or all pods like have assignments maybe.",
+    "start": "3588500",
+    "end": "3594666"
+  },
+  {
+    "text": "But the idea is like we want all 20 of these pods to have assignments and we want all of them to have 15 shards.",
+    "start": "3595399",
+    "end": "3601166"
+  },
+  {
+    "text": "Because they've been like successfully like rebalanced. To have that many.",
+    "start": "3601666",
+    "end": "3607000"
+  },
+  {
+    "text": "And then. To test like scaling up we then simulate",
+    "start": "3607866",
+    "end": "3613899"
+  },
+  {
+    "text": "adding another five pods to the cluster. We wait 20 seconds.",
+    "start": "3613899",
+    "end": "3618133"
+  },
+  {
+    "text": "Which is not enough time based on the default rebalance rate to fully like",
+    "start": "3619466",
+    "end": "3624699"
+  },
+  {
+    "text": "rebalance the cluster. But it should start rebalancing the cluster. So we basically test that each of the new",
+    "start": "3624699",
+    "end": "3630699"
+  },
+  {
+    "text": "pods receives six shards. Which is what we should have with the",
+    "start": "3630699",
+    "end": "3636733"
+  },
+  {
+    "text": "default rebalance rate. And then if we wait the rest of the time",
+    "start": "3636733",
+    "end": "3643233"
+  },
+  {
+    "text": "for the cluster to settle. Then we grab the assignments a third time.",
+    "start": "3643233",
+    "end": "3648632"
+  },
+  {
+    "text": "Then we should have 25 pods each with 12 shards.",
+    "start": "3648833",
+    "end": "3653266"
+  },
+  {
+    "text": "Probably going to have to go through the like shard manager and figure out like where I broke this.",
+    "start": "3657100",
+    "end": "3661699"
+  },
+  {
+    "text": "But that's what I get for changing the entire way That state works in the shard manager before we streamed.",
+    "start": "3663733",
+    "end": "3669399"
+  },
+  {
+    "text": "If I reverted this back to the HashMap implementation you folks could see it passing.",
+    "start": "3671666",
+    "end": "3676033"
+  },
+  {
+    "text": "But. By the way. Please can you branch off a new branch.",
+    "start": "3678399",
+    "end": "3686100"
+  },
+  {
+    "text": "Where you stop the changes at the point where the test takes too much. Because I'd like to check after after our",
+    "start": "3686833",
+    "end": "3695899"
+  },
+  {
+    "text": "call at a different point in time. Why is it actually taking long.",
+    "start": "3695899",
+    "end": "3700266"
+  },
+  {
+    "text": "Because it might be that we are just hushing in a wrong way or you know there may be changes that makes it faster even",
+    "start": "3701166",
+    "end": "3709433"
+  },
+  {
+    "text": "without even without changing the data structures.",
+    "start": "3709433",
+    "end": "3713633"
+  },
+  {
+    "text": "It would be helpful anyway. No that's an ideal. Test output structures where. Well I was going to say because in an",
+    "start": "3714566",
+    "end": "3720800"
+  },
+  {
+    "text": "ideal world using HashMap and HashSet would be nice because they just have the operations already on",
+    "start": "3720800",
+    "end": "3726466"
+  },
+  {
+    "text": "them that we want to use. But yes I can do that. I'll make a copy of my branch because the",
+    "start": "3726466",
+    "end": "3734599"
+  },
+  {
+    "text": "last commit in GitHub currently is where I had everything working",
+    "start": "3734600",
+    "end": "3740299"
+  },
+  {
+    "text": "with HashMap and HashSet.",
+    "start": "3740300",
+    "end": "3741500"
+  },
+  {
+    "text": "The other simulation test. That is gonna watch this stream later.",
+    "start": "3746033",
+    "end": "3750432"
+  },
+  {
+    "text": "He knows what's the target to optimize. Exactly.",
+    "start": "3751466",
+    "end": "3755432"
+  },
+  {
+    "text": "The other simulation tests I have in here are the inverse of the first one. So instead of scaling up we start with 25",
+    "start": "3757466",
+    "end": "3764033"
+  },
+  {
+    "text": "pods and then test scaling down. Basically the exact same",
+    "start": "3764033",
+    "end": "3769133"
+  },
+  {
+    "text": "like a logic in reverse. And then the third test that I set up here is.",
+    "start": "3769133",
+    "end": "3774466"
+  },
+  {
+    "text": "Essentially a test that looks at. Do we successfully persist the shard",
+    "start": "3776766",
+    "end": "3784166"
+  },
+  {
+    "text": "manager state to the cluster storage if the shard manager gets restarted.",
+    "start": "3784166",
+    "end": "3788432"
+  },
+  {
+    "text": "So. Essentially like when we when we restart",
+    "start": "3789800",
+    "end": "3796866"
+  },
+  {
+    "text": "the shard manager one of the things that it should do on shutdown is persist everything to cluster storage.",
+    "start": "3796866",
+    "end": "3802366"
+  },
+  {
+    "text": "If it's shutting down obviously like cleanly. So if we look at here at finalizer.",
+    "start": "3802833",
+    "end": "3809233"
+  },
+  {
+    "text": "It persists its shard. Just just to start in a different state basically. Exactly. So when we restart the shard",
+    "start": "3812266",
+    "end": "3818766"
+  },
+  {
+    "text": "manager it rehydrates from cluster storage is basically like as part of shard manager initialization it reads",
+    "start": "3818766",
+    "end": "3824733"
+  },
+  {
+    "text": "from cluster storage pulls down all of the current shard assignments and pod",
+    "start": "3824733",
+    "end": "3829933"
+  },
+  {
+    "text": "assignments that it knows about. And hydrates the state with those things.",
+    "start": "3829933",
+    "end": "3835466"
+  },
+  {
+    "text": "Then similarly we add a finalizer here so that if we shut down the shard manager.",
+    "start": "3835466",
+    "end": "3840599"
+  },
+  {
+    "text": "It should persist those things to cluster storage.",
+    "start": "3842100",
+    "end": "3846699"
+  },
+  {
+    "text": "Yeah so. What we're testing here is basically that",
+    "start": "3850300",
+    "end": "3857166"
+  },
+  {
+    "text": "like we set up a shard manager. Then we let it run and shut down.",
+    "start": "3857166",
+    "end": "3863000"
+  },
+  {
+    "text": "So we run the setup simulation and then this is the test simulation",
+    "start": "3863000",
+    "end": "3869199"
+  },
+  {
+    "text": "where we grab the same storage. Which we're providing to the wrapping",
+    "start": "3869199",
+    "end": "3874300"
+  },
+  {
+    "text": "test which stores everything in memory and just make sure that.",
+    "start": "3874300",
+    "end": "3879599"
+  },
+  {
+    "text": "That these things are that the essentially the storage has stuff in it",
+    "start": "3879600",
+    "end": "3885399"
+  },
+  {
+    "text": "like we're making sure that we should have and making this test more robust would just involve like making sure that the correct",
+    "start": "3885399",
+    "end": "3891833"
+  },
+  {
+    "text": "pods and shard assignments are present for now I just was checking that there was actually something we were getting",
+    "start": "3891833",
+    "end": "3897300"
+  },
+  {
+    "text": "back from cluster storage. But yeah there's a ton of work to do.",
+    "start": "3897300",
+    "end": "3903533"
+  },
+  {
+    "text": "At some point we should even evaluate if. Like if all the.",
+    "start": "3903533",
+    "end": "3910833"
+  },
+  {
+    "text": "All the state should actually be always persisted because.",
+    "start": "3912033",
+    "end": "3916666"
+  },
+  {
+    "text": "The shard manager is kind of event sourced. In a way.",
+    "start": "3918500",
+    "end": "3923799"
+  },
+  {
+    "text": "It basically takes the decisions as a as a sequence of as a sequence of events.",
+    "start": "3925000",
+    "end": "3931966"
+  },
+  {
+    "text": "We could quite literally always store. The events before.",
+    "start": "3933199",
+    "end": "3937666"
+  },
+  {
+    "text": "Before even starting the processing. So when when it starts back.",
+    "start": "3938733",
+    "end": "3944533"
+  },
+  {
+    "text": "It can always get to the to the previous state. That could be an optimization we lose a",
+    "start": "3945333",
+    "end": "3952500"
+  },
+  {
+    "text": "little bit of time in like. Don't take the decisions immediately but",
+    "start": "3952500",
+    "end": "3958133"
+  },
+  {
+    "text": "what we gain is we are sure that. The state is always consistent.",
+    "start": "3958133",
+    "end": "3963933"
+  },
+  {
+    "text": "Just similar to what we do with persistence of the messages in the in the entities.",
+    "start": "3965166",
+    "end": "3970599"
+  },
+  {
+    "text": "We're not trying to get maximum speed. We're trying to get maximum maximum",
+    "start": "3972033",
+    "end": "3978000"
+  },
+  {
+    "text": "consistency basically. Yeah maximum reliability. Yeah I mean we can ",
+    "start": "3978000",
+    "end": "3985066"
+  },
+  {
+    "text": "I think that's a lot of sense. But there's definitely a lot of like",
+    "start": "3985066",
+    "end": "3992299"
+  },
+  {
+    "text": "simulation tests that need to be added because we're basically testing nothing related to like the interaction of these",
+    "start": "3992300",
+    "end": "3999133"
+  },
+  {
+    "text": "components aside from with storage.",
+    "start": "3999133",
+    "end": "4000933"
+  },
+  {
+    "text": "But.",
+    "start": "4004733",
+    "end": "4005099"
+  },
+  {
+    "text": "That way Raft would be easier like with an event Source log or the event log.",
+    "start": "4010233",
+    "end": "4015566"
+  },
+  {
+    "text": "Well with Raft you. You basically never lose the state because you have a cluster of shard managers.",
+    "start": "4015933",
+    "end": "4023199"
+  },
+  {
+    "text": "So one manager can go down while the other the other two are are up.",
+    "start": "4023733",
+    "end": "4029399"
+  },
+  {
+    "text": "But on the other side it has it has other other drawbacks  apologies the other message was \"also if a log gets too long one could also use one snapshot event\"",
+    "start": "4030399",
+    "end": "4042033"
+  },
+  {
+    "text": "Of course like like any event sourcing you you persist a recent enough snapshot",
+    "start": "4042033",
+    "end": "4048100"
+  },
+  {
+    "text": "and you persist the list of events that every every 25 event every hundred event ",
+    "start": "4048100",
+    "end": "4054533"
+  },
+  {
+    "text": "you persist all state and rehydrate",
+    "start": "4054533",
+    "end": "4060399"
+  },
+  {
+    "text": " the state plus replay the last the last X event. That's that's one way of doing it.",
+    "start": "4060399",
+    "end": "4066433"
+  },
+  {
+    "text": "But anyway all of this is further down",
+    "start": "4066433",
+    "end": "4073199"
+  },
+  {
+    "text": "the line at the moment we don't we don't really care if we lose the state upon",
+    "start": "4073199",
+    "end": "4079633"
+  },
+  {
+    "text": "upon restart because losing the state of the shard manager doesn't mean damaging the cluster just means that the new",
+    "start": "4079633",
+    "end": "4087433"
+  },
+  {
+    "text": "shard allocations may look differently from the previous ones and and you have a rebalance which is only",
+    "start": "4087433",
+    "end": "4095233"
+  },
+  {
+    "text": "due to the shard manager. Being restarted. Yeah because because the pods actually",
+    "start": "4095233",
+    "end": "4100899"
+  },
+  {
+    "text": "are disconnected from like the shard manager can force a rebalance but the but",
+    "start": "4100899",
+    "end": "4107233"
+  },
+  {
+    "text": "the pods are actually reading their assignments directly from cluster storage. They're not necessarily getting it",
+    "start": "4107233",
+    "end": "4114132"
+  },
+  {
+    "text": "directly from the shard manager. If that makes sense.",
+    "start": "4114133",
+    "end": "4119100"
+  },
+  {
+    "text": "That's why I like the when a pod starts up it's getting all of its assignments",
+    "start": "4119466",
+    "end": "4126266"
+  },
+  {
+    "text": "initially from cluster storage. Then at that point like I think the shard",
+    "start": "4126266",
+    "end": "4131299"
+  },
+  {
+    "text": "manager is like you can actually look here. So it's I mean they",
+    "start": "4131300",
+    "end": "4137600"
+  },
+  {
+    "text": "have to be in sync right. But I'm saying like let's say the shard manager goes down right like the pods",
+    "start": "4137600",
+    "end": "4144500"
+  },
+  {
+    "text": "when the pod is hydrated it's always going to be hydrated with the state from cluster storage.",
+    "start": "4144500",
+    "end": "4149566"
+  },
+  {
+    "text": "And then if the pod gets assigned or unassigned shards like yes the shard manager does that.",
+    "start": "4149566",
+    "end": "4154099"
+  },
+  {
+    "text": "But to your point like much earlier if a shard manager goes down the cluster can still be operational because the pods",
+    "start": "4154966",
+    "end": "4162365"
+  },
+  {
+    "text": "will have the cached assignments from the most. Yeah in sync shared storage the pods",
+    "start": "4162366",
+    "end": "4170399"
+  },
+  {
+    "text": "always have that cached like shard assignments from whatever the last time",
+    "start": "4170399",
+    "end": "4176899"
+  },
+  {
+    "text": "they communicated with the shard manager was. Or they read directly from cluster",
+    "start": "4176899",
+    "end": "4182799"
+  },
+  {
+    "text": "storage if they you know.",
+    "start": "4182800",
+    "end": "4186932"
+  },
+  {
+    "text": "I think like one of the awkward things right now with converting like I'll talk",
+    "start": "4190633",
+    "end": "4197000"
+  },
+  {
+    "text": "about like that yes we got a perf maybe a tiny bit of performance with using a",
+    "start": "4197000",
+    "end": "4202800"
+  },
+  {
+    "text": "vanilla JavaScript map. So you know obviously if there's there's",
+    "start": "4202800",
+    "end": "4207966"
+  },
+  {
+    "text": "perf work to be done on hash the hash hash star data types in effect but.",
+    "start": "4207966",
+    "end": "4213166"
+  },
+  {
+    "text": "We hear the hash star algorithms I wrote the algorithm so I'm not I'm not a",
+    "start": "4214333",
+    "end": "4220766"
+  },
+  {
+    "text": "performance expert I probably fucked up everything goes every single thing that I could have.",
+    "start": "4220766",
+    "end": "4226966"
+  },
+  {
+    "text": "But Tim is very smart. They work but yeah pun intended. The only awkward thing that like comes up",
+    "start": "4228199",
+    "end": "4237199"
+  },
+  {
+    "text": "with switching to like a map and set like vanilla map and set based API is the like",
+    "start": "4237199",
+    "end": "4245666"
+  },
+  {
+    "text": "having to convert back and forth between like the stringified representation of",
+    "start": "4245666",
+    "end": "4250765"
+  },
+  {
+    "text": "pod address as opposed to just like you know being able to use it directly as a key. And then also the API is that the service",
+    "start": "4250766",
+    "end": "4260033"
+  },
+  {
+    "text": "API is that are not in the shard manager that expect. A pod address or a hash set or a hash map",
+    "start": "4260033",
+    "end": "4268366"
+  },
+  {
+    "text": "or whatever like communicating with the pods API is for example those expect the hash map or hash set to be passed in so",
+    "start": "4268366",
+    "end": "4275300"
+  },
+  {
+    "text": "it's like there's a lot of like converting back and forth that has to happen in certain places and that's like the only awkward thing at the moment.",
+    "start": "4275300",
+    "end": "4281500"
+  },
+  {
+    "text": "I mean I think at the end of the day either we end up with.",
+    "start": "4281500",
+    "end": "4288433"
+  },
+  {
+    "text": "With the hash maps and hash sets or if",
+    "start": "4288733",
+    "end": "4294500"
+  },
+  {
+    "text": "for whatever reason we can't get to an acceptable level of performance for this",
+    "start": "4294500",
+    "end": "4299800"
+  },
+  {
+    "text": "for this specific case because at the end of the day those are small structures",
+    "start": "4299800",
+    "end": "4304833"
+  },
+  {
+    "text": "you're basically storing either shards to pods or. And like get fixed.",
+    "start": "4304833",
+    "end": "4312533"
+  },
+  {
+    "text": "It's sized. Structures they're not like hash maps are",
+    "start": "4313500",
+    "end": "4318866"
+  },
+  {
+    "text": "really good when you might have a median median entries and of course you don't",
+    "start": "4318866",
+    "end": "4324266"
+  },
+  {
+    "text": "want to copy a median entries upon upon every change but if you have 2000 3000",
+    "start": "4324266",
+    "end": "4330566"
+  },
+  {
+    "text": "elements in a map copying it won't won't be a big deal when when you make a change.",
+    "start": "4330566",
+    "end": "4337266"
+  },
+  {
+    "text": "Because most of the time you read just a few times you actually end up changing",
+    "start": "4337266",
+    "end": "4342433"
+  },
+  {
+    "text": "changing state and when you change state you can make a full copy and then mutate",
+    "start": "4342433",
+    "end": "4347698"
+  },
+  {
+    "text": "mutate the thing so that's where you might gain a little bit of performance now if.",
+    "start": "4347699",
+    "end": "4355066"
+  },
+  {
+    "text": "If we can't use the hash. The hash map slash hash set",
+    "start": "4357500",
+    "end": "4362966"
+  },
+  {
+    "text": "structures we can all also think about.",
+    "start": "4362966",
+    "end": "4366698"
+  },
+  {
+    "text": "Two structures that are called index map and index set so an index map would",
+    "start": "4368966",
+    "end": "4374333"
+  },
+  {
+    "text": "basically have a backing map  and would be a map of string to a tuple of.",
+    "start": "4374333",
+    "end": "4381399"
+  },
+  {
+    "text": "The key. Plus the value and then interface where",
+    "start": "4381399",
+    "end": "4387333"
+  },
+  {
+    "text": "you actually always interact with the actual key so the the indexing is done",
+    "start": "4387333",
+    "end": "4394766"
+  },
+  {
+    "text": "internally to the structure  the API doesn't doesn't even see it.",
+    "start": "4394766",
+    "end": "4400733"
+  },
+  {
+    "text": "I haven't added those because my my hope was that we could get away with hash",
+    "start": "4400733",
+    "end": "4406833"
+  },
+  {
+    "text": "maps and hash sets and but but those structures exist it's not it's not rocket",
+    "start": "4406833",
+    "end": "4413766"
+  },
+  {
+    "text": "science I could quite literally hack a morning and have those and have those in the in the core for the",
+    "start": "4413766",
+    "end": "4420800"
+  },
+  {
+    "text": "cases where where we need those. Because there are other places for example in core where we initially used",
+    "start": "4420800",
+    "end": "4428000"
+  },
+  {
+    "text": "hash maps and then we switched to maps precisely for this for this reason.",
+    "start": "4428000",
+    "end": "4434566"
+  },
+  {
+    "text": "Because look up pathway faster. I think it's worth like doing a perf pass or on on the hash map and hash set or",
+    "start": "4436233",
+    "end": "4443933"
+  },
+  {
+    "text": "really just hash map  because I think hash set is based on hash map but. I think it's worth doing a perf pass on",
+    "start": "4443933",
+    "end": "4451166"
+  },
+  {
+    "text": "it but yeah I mean it's it's. It I think either approach is fine it's",
+    "start": "4451166",
+    "end": "4457300"
+  },
+  {
+    "text": "just whatever is going to make because the logic in here starts to get pretty complex and so the least the less number",
+    "start": "4457300",
+    "end": "4464600"
+  },
+  {
+    "text": "of times you have to like convert something back and forth the better.",
+    "start": "4464600",
+    "end": "4468533"
+  },
+  {
+    "text": "Anyways yeah that is what I wanted to cover today I thought it would be an interesting discussion I want to get so",
+    "start": "4473733",
+    "end": "4480399"
+  },
+  {
+    "text": "that my next steps are basically to get like the simulation tests working again.",
+    "start": "4480399",
+    "end": "4485166"
+  },
+  {
+    "text": "And once the simulation tests are working again I'll probably add some more like tests.",
+    "start": "4486800",
+    "end": "4492199"
+  },
+  {
+    "text": "Like simulation tests that go that.",
+    "start": "4493500",
+    "end": "4496333"
+  },
+  {
+    "text": "Look into like how other services are actually interacting with the shard manager make sure that like the interplay between like the pods API and the shard",
+    "start": "4499033",
+    "end": "4505466"
+  },
+  {
+    "text": "manager pods health everything is working the way that we expect.",
+    "start": "4505466",
+    "end": "4508099"
+  },
+  {
+    "text": "And then I'll probably like the next time that we chat maybe.",
+    "start": "4510500",
+    "end": "4515166"
+  },
+  {
+    "text": "We can start looking again at the. At the actual entities ",
+    "start": "4516000",
+    "end": "4521066"
+  },
+  {
+    "text": "and like what's going on on the pods themselves.  Once the shard manager is in a place that",
+    "start": "4521066",
+    "end": "4527300"
+  },
+  {
+    "text": "we can actually use it so. Good.",
+    "start": "4527300",
+    "end": "4531566"
+  },
+  {
+    "text": "Yeah. That's not too far considering this is quite literally the most complex.",
+    "start": "4532633",
+    "end": "4538399"
+  },
+  {
+    "text": "The most complex piece. Yeah I'm pretty happy that we're already where we are so.",
+    "start": "4539600",
+    "end": "4545366"
+  },
+  {
+    "text": "Yeah I hope everybody found our discussion today interesting. And hopefully we'll be able to get back",
+    "start": "4545533",
+    "end": "4554033"
+  },
+  {
+    "text": "on a regular schedule. Indeed. And I guess we'll keep streaming also on",
+    "start": "4554033",
+    "end": "4561100"
+  },
+  {
+    "text": "on Twitter slash X is apparently we have 450 people currently watching this.",
+    "start": "4561100",
+    "end": "4567266"
+  },
+  {
+    "text": "Hi everyone. See you next time. Thank you for watching. Take care everybody.",
+    "start": "4569533",
+    "end": "4575133"
+  },
+  {
+    "text": "Take care folks.",
+    "start": "4576066",
+    "end": "4576466"
+  }
+]

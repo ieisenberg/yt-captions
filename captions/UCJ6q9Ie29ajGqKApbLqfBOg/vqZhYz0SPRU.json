@@ -1,0 +1,1985 @@
+[
+  {
+    "start": "0",
+    "end": "135000"
+  },
+  {
+    "text": "[Music]",
+    "start": "3740",
+    "end": "13539"
+  },
+  {
+    "text": "hi folks i'm matthew reilly i'm a software engineer at google and today i'm going to talk about the",
+    "start": "16080",
+    "end": "21600"
+  },
+  {
+    "text": "work we've done to mitigate speculative execution side channel vulnerabilities in fuchsia",
+    "start": "21600",
+    "end": "28240"
+  },
+  {
+    "text": "before i get started i want to make sure to recognize the folks who were actually responsible for most of the work i'll be",
+    "start": "28240",
+    "end": "33280"
+  },
+  {
+    "text": "presenting the mitigations we're going to talk about were implemented by venkatesh srinivas and anthony steinhauser wrote",
+    "start": "33280",
+    "end": "40480"
+  },
+  {
+    "text": "most of the tests in the safe side project that we're going to talk about later writing on os has never been",
+    "start": "40480",
+    "end": "47120"
+  },
+  {
+    "text": "easy but for a long time now it at least seemed like something anyone could try",
+    "start": "47120",
+    "end": "52719"
+  },
+  {
+    "text": "you know the docs are right there go ahead and set up your page tables put some instructions in the right place",
+    "start": "52719",
+    "end": "58320"
+  },
+  {
+    "text": "and bam your toy os can print to the screen start swapping",
+    "start": "58320",
+    "end": "63920"
+  },
+  {
+    "text": "cr3 like the software developers manual told you to and you'll be on your way to having two whole processes",
+    "start": "63920",
+    "end": "70479"
+  },
+  {
+    "text": "but with the rise of speculative execution side channel bugs the relationship between the os and the",
+    "start": "70479",
+    "end": "76080"
+  },
+  {
+    "text": "processor has gotten a lot more complicated some boundaries that we used to think the processor would enforce are now",
+    "start": "76080",
+    "end": "82400"
+  },
+  {
+    "text": "joint efforts between the os and the cpu and every new attack just makes things",
+    "start": "82400",
+    "end": "88000"
+  },
+  {
+    "text": "harder because it's always easier to find details about the attack than about how to mitigate it my hope",
+    "start": "88000",
+    "end": "95040"
+  },
+  {
+    "text": "for this talk is that it could have served as a blueprint when we were first working on dealing with these attacks in fuchsia",
+    "start": "95040",
+    "end": "101920"
+  },
+  {
+    "text": "we'll go over a bunch of different vulnerabilities and talk about what it looks like to fix them first though let me give a",
+    "start": "101920",
+    "end": "108560"
+  },
+  {
+    "text": "quick overview of fuchsia fuchsia is a new open source operating system from google",
+    "start": "108560",
+    "end": "114720"
+  },
+  {
+    "text": "it runs on 64-bit x86 and arm and it's built around a micro kernel called zircon",
+    "start": "114720",
+    "end": "120560"
+  },
+  {
+    "text": "as a micro kernel its drivers run as user space processes rather than in kernel mode and in",
+    "start": "120560",
+    "end": "126960"
+  },
+  {
+    "text": "addition to process-based multitasking zircon implements a hypervisor",
+    "start": "126960",
+    "end": "132000"
+  },
+  {
+    "text": "to run vms with hardware virtualization next i need to do a really quick tour",
+    "start": "132000",
+    "end": "139280"
+  },
+  {
+    "text": "through some cpu concepts we're going to need later on the job of a cpu",
+    "start": "139280",
+    "end": "145120"
+  },
+  {
+    "text": "is to manage some architectural state the contents of registers and memory",
+    "start": "145120",
+    "end": "150239"
+  },
+  {
+    "text": "and then update that state according to a sequence of instructions some instructions are slow like a memory",
+    "start": "150239",
+    "end": "156319"
+  },
+  {
+    "text": "access that needs to go all the way to ram to hide that slowness the cpu reads",
+    "start": "156319",
+    "end": "161680"
+  },
+  {
+    "text": "ahead and puts a lot of upcoming instructions into a reorder buffer",
+    "start": "161680",
+    "end": "166720"
+  },
+  {
+    "text": "the cpu figures out the dependencies between these inflight instructions and schedules them to run as soon as",
+    "start": "166720",
+    "end": "172480"
+  },
+  {
+    "text": "their inputs are ready instructions that have finished executing will retire",
+    "start": "172480",
+    "end": "178080"
+  },
+  {
+    "text": "one by one in program order committing their changes back to the architectural state this works",
+    "start": "178080",
+    "end": "185840"
+  },
+  {
+    "text": "and it makes things faster but we can only read so far ahead before we get to a branch and we're not",
+    "start": "185840",
+    "end": "192239"
+  },
+  {
+    "text": "sure which instruction to read next to keep the reorder buffer fed we use",
+    "start": "192239",
+    "end": "197360"
+  },
+  {
+    "text": "branch prediction a set of heuristics that look at how the program's behaved so far",
+    "start": "197360",
+    "end": "203120"
+  },
+  {
+    "text": "to guess where control is going to end up next we follow that guess and we start",
+    "start": "203120",
+    "end": "208400"
+  },
+  {
+    "text": "executing instructions speculatively this can happen recursively and we can end up several predicted branches deep",
+    "start": "208400",
+    "end": "216879"
+  },
+  {
+    "text": "the results of the speculatively executed instructions are kept in the reorder buffer eventually the branch resolves if it",
+    "start": "217200",
+    "end": "224720"
+  },
+  {
+    "text": "turns out we guessed right great the instructions retire and we keep going but if we guess wrong we need to throw",
+    "start": "224720",
+    "end": "232480"
+  },
+  {
+    "text": "away the results rewind and start again in computer architecture terms",
+    "start": "232480",
+    "end": "238000"
+  },
+  {
+    "text": "the misspeculated or transiently executed instructions are squashed thankfully branch",
+    "start": "238000",
+    "end": "244319"
+  },
+  {
+    "text": "predictors have gotten pretty good and we don't usually end up throwing away a lot of work",
+    "start": "244319",
+    "end": "250000"
+  },
+  {
+    "text": "some instructions can fault based on their inputs think of a memory access or a divide",
+    "start": "250000",
+    "end": "255200"
+  },
+  {
+    "text": "those instructions have an implicit control flow edge out to a fault handler but cpus tend to be",
+    "start": "255200",
+    "end": "261680"
+  },
+  {
+    "text": "optimistic they assume these instructions won't fault and they go on executing instructions speculatively after them",
+    "start": "261680",
+    "end": "269280"
+  },
+  {
+    "text": "if it turns out they do fault remember that the processor has to wait to raise that fault until all of the previous instructions",
+    "start": "269280",
+    "end": "276000"
+  },
+  {
+    "text": "retire so the architectural state is consistent when the fault handler runs now that",
+    "start": "276000",
+    "end": "282560"
+  },
+  {
+    "text": "we've talked about speculative execution let's move on to side channels now defining side channels is a bit",
+    "start": "282560",
+    "end": "288240"
+  },
+  {
+    "text": "squishy but for our purposes we'll say that a side channel occurs when a system",
+    "start": "288240",
+    "end": "294000"
+  },
+  {
+    "text": "gives off information unintentionally because of details outside its core",
+    "start": "294000",
+    "end": "299040"
+  },
+  {
+    "text": "abstraction some of you have probably heard of van eck freaking",
+    "start": "299040",
+    "end": "305360"
+  },
+  {
+    "text": "this is an attack that lets you recreate the image from a far away crt by capturing the em radiation from its",
+    "start": "305360",
+    "end": "311919"
+  },
+  {
+    "text": "scanning electron beam the monitor was designed to be a monitor",
+    "start": "311919",
+    "end": "317199"
+  },
+  {
+    "text": "and its designers only thought of it as a monitor but it ended up being a pretty effective",
+    "start": "317199",
+    "end": "322720"
+  },
+  {
+    "text": "transmitter because of the way it was implemented cpus can leak a lot of information",
+    "start": "322720",
+    "end": "329120"
+  },
+  {
+    "text": "through side channels some of them require physical measurement of the chip like watching its temperature or power usage",
+    "start": "329120",
+    "end": "336000"
+  },
+  {
+    "text": "but others can be detected just by running code on the same machine we call these software observable side",
+    "start": "336000",
+    "end": "343199"
+  },
+  {
+    "text": "channels one of the most effective software observable side channels available to us",
+    "start": "343199",
+    "end": "348880"
+  },
+  {
+    "text": "right now is cache timing as we know reading from ram is slow",
+    "start": "348880",
+    "end": "354400"
+  },
+  {
+    "text": "so to speed things up cpus cache recent memory accesses but because the whole point is that",
+    "start": "354400",
+    "end": "360160"
+  },
+  {
+    "text": "reading from cache is faster you can now tell whether something was accessed recently",
+    "start": "360160",
+    "end": "365520"
+  },
+  {
+    "text": "by measuring how quickly you can read it you can also bring your own data into cache and then",
+    "start": "365520",
+    "end": "370639"
+  },
+  {
+    "text": "measure to see which parts of it have been evicted due to memory accesses elsewhere either",
+    "start": "370639",
+    "end": "375759"
+  },
+  {
+    "text": "way the cache introduces a side channel that leaks memory accesses read by other code executing on the",
+    "start": "375759",
+    "end": "382560"
+  },
+  {
+    "text": "system how does this become a speculative execution side channel",
+    "start": "382560",
+    "end": "388800"
+  },
+  {
+    "text": "well remember that when branch prediction sends us somewhere to keep fetching and executing instructions we",
+    "start": "388800",
+    "end": "394080"
+  },
+  {
+    "text": "hold on to all that work in the reorder buffer we don't know whether to commit it yet but",
+    "start": "394080",
+    "end": "399840"
+  },
+  {
+    "text": "in the meantime some of these instructions are accessing memory some of those memory accesses are at",
+    "start": "399840",
+    "end": "406400"
+  },
+  {
+    "text": "addresses computed from speculatively loaded data and all of those memory accesses are",
+    "start": "406400",
+    "end": "413120"
+  },
+  {
+    "text": "going through the cache they'll stay in the cache even if the processor realizes it made a bad guess",
+    "start": "413120",
+    "end": "419919"
+  },
+  {
+    "text": "and rewinds things back to try again putting that all together we can use the",
+    "start": "419919",
+    "end": "427039"
+  },
+  {
+    "text": "cache side channel to leak values that were computed in the speculative domain",
+    "start": "427039",
+    "end": "432400"
+  },
+  {
+    "text": "even if they were computed by mistake that turns out to be really powerful",
+    "start": "432400",
+    "end": "437919"
+  },
+  {
+    "text": "because processors make a lot of simplifying assumptions about how code will run in the common case as long as those assumptions are",
+    "start": "437919",
+    "end": "445440"
+  },
+  {
+    "text": "right often enough and as long as the processor can recognize when the assumptions were wrong and roll things",
+    "start": "445440",
+    "end": "451199"
+  },
+  {
+    "text": "back there's no harm done but now we have a way to see the values that come out",
+    "start": "451199",
+    "end": "457280"
+  },
+  {
+    "text": "when the assumptions are wrong and that is the fundamental basis for all of the",
+    "start": "457280",
+    "end": "462400"
+  },
+  {
+    "text": "attacks we're going to talk about here's a preview of the attacks we'll",
+    "start": "462400",
+    "end": "468720"
+  },
+  {
+    "start": "465000",
+    "end": "805000"
+  },
+  {
+    "text": "cover i know everyone has a favorite and i apologize if yours didn't make the list but these are the ones where the",
+    "start": "468720",
+    "end": "474560"
+  },
+  {
+    "text": "mitigation meaningfully affected fusio's implementation so they're the ones we think are most interesting to talk about",
+    "start": "474560",
+    "end": "481759"
+  },
+  {
+    "text": "let's start with one of the most straightforward attacks meltdown meltdown affects a lot of intel processors and some arm processors too",
+    "start": "481759",
+    "end": "489599"
+  },
+  {
+    "text": "in a meltdown attack a user process can cause the cpu to perform a speculative load of kernel memory",
+    "start": "489599",
+    "end": "496400"
+  },
+  {
+    "text": "then leak that value through a cache side channel so that it can be read by the user process",
+    "start": "496400",
+    "end": "501520"
+  },
+  {
+    "text": "this breaks the boundary between user and kernel mode now you might ask zircon's a microkernel",
+    "start": "501520",
+    "end": "507120"
+  },
+  {
+    "text": "all its drivers run in user mode what interesting things do we have in kernel memory well",
+    "start": "507120",
+    "end": "512800"
+  },
+  {
+    "text": "we have the fizz map which is a full linear mapping of the system's physical memory into the kernel's address space so",
+    "start": "512800",
+    "end": "518880"
+  },
+  {
+    "text": "that's game over but even if we didn't have the fizz map there are at least two kinds of data in",
+    "start": "518880",
+    "end": "524000"
+  },
+  {
+    "text": "kernel memory that we want to protect from user mode the first is data that's being sent through channels for inter-process",
+    "start": "524000",
+    "end": "529839"
+  },
+  {
+    "text": "communication messages queue and kernel memory before they're delivered to their destination in user space",
+    "start": "529839",
+    "end": "536080"
+  },
+  {
+    "text": "the second is state for the system's secure random number generator which we need to protect so processes",
+    "start": "536080",
+    "end": "541519"
+  },
+  {
+    "text": "can generate keys that other processes can't guess so we need to repair the security boundary",
+    "start": "541519",
+    "end": "547279"
+  },
+  {
+    "text": "and prevent user processes from reading kernel memory how do we do it well one way is to make",
+    "start": "547279",
+    "end": "553360"
+  },
+  {
+    "text": "sure that user mode can't find the memory on x86 and arm and",
+    "start": "553360",
+    "end": "558480"
+  },
+  {
+    "text": "pretty much everywhere else the kernel is responsible for setting up page tables that define the mapping between virtual",
+    "start": "558480",
+    "end": "564640"
+  },
+  {
+    "text": "and physical memory these are the same page tables that have the permission bit that the processor isn't enforcing",
+    "start": "564640",
+    "end": "570959"
+  },
+  {
+    "text": "instead of using one set of page tables with different permissions for user and kernel memory",
+    "start": "570959",
+    "end": "576480"
+  },
+  {
+    "text": "we're going to use two one that's active while the user process is running and which has no mappings for the kernel",
+    "start": "576480",
+    "end": "583519"
+  },
+  {
+    "text": "and another that's active when the kernel is running and that one can see the whole address space",
+    "start": "583519",
+    "end": "589120"
+  },
+  {
+    "text": "the fix sounds easy at a high level but the implementation can be tricky for one thing if the kernel isn't mapped",
+    "start": "589120",
+    "end": "595839"
+  },
+  {
+    "text": "in the user page tables how do system calls work we actually need to map a small number of kernel",
+    "start": "595839",
+    "end": "601279"
+  },
+  {
+    "text": "code pages into the user mode view to act as trampolines from user mode to kernel mode they swap",
+    "start": "601279",
+    "end": "608240"
+  },
+  {
+    "text": "in the kernel page tables then keep going the kernels view also needs to be able to see user memory so",
+    "start": "608240",
+    "end": "614720"
+  },
+  {
+    "text": "that system calls can read arguments and fill user buffers but for defense in depth the kernel maps",
+    "start": "614720",
+    "end": "621040"
+  },
+  {
+    "text": "everything from user mode as no execute so that even if we mess up and return to user mode without properly swapping the",
+    "start": "621040",
+    "end": "627120"
+  },
+  {
+    "text": "page tables back the process won't be able to do anything but crash might seem like changing page tables",
+    "start": "627120",
+    "end": "633440"
+  },
+  {
+    "text": "around like this would be expensive and for older processors it was changing the page tables used to invalidate the",
+    "start": "633440",
+    "end": "639360"
+  },
+  {
+    "text": "entire tlb that's the translation look aside buffer where the processor caches virtual to physical mappings",
+    "start": "639360",
+    "end": "647360"
+  },
+  {
+    "text": "that tlb flush was necessary so that a newly activated process wouldn't happen to see pages that the",
+    "start": "647360",
+    "end": "653040"
+  },
+  {
+    "text": "last process had mapped on newer processors though tlb entries are tagged with a process context",
+    "start": "653040",
+    "end": "659519"
+  },
+  {
+    "text": "or address space identifier those tags are managed by the os if a lookup happens and the tag in the",
+    "start": "659519",
+    "end": "666240"
+  },
+  {
+    "text": "tlb doesn't match it doesn't return a result that makes it safe for us to skip the tlb flush",
+    "start": "666240",
+    "end": "672720"
+  },
+  {
+    "text": "so that's meltdown a compromise of the boundary between user and kernel memory that we were able to fix by changing how",
+    "start": "672720",
+    "end": "678959"
+  },
+  {
+    "text": "we use page tables next we're going to talk about some attacks that let you hijack speculative",
+    "start": "678959",
+    "end": "684000"
+  },
+  {
+    "text": "execution and point it at instructions of your choosing which usually means letting a target",
+    "start": "684000",
+    "end": "689200"
+  },
+  {
+    "text": "leak memory for you first up is retospec an attack that uses",
+    "start": "689200",
+    "end": "694800"
+  },
+  {
+    "text": "the rsb the return stack buffer this is a predictor that remembers",
+    "start": "694800",
+    "end": "700079"
+  },
+  {
+    "text": "where function calls came from so that execution can go back there when we hit a return",
+    "start": "700079",
+    "end": "705200"
+  },
+  {
+    "text": "this can be a lot faster than waiting for the return address on the stack to get pulled in from cache or from ram",
+    "start": "705200",
+    "end": "712639"
+  },
+  {
+    "text": "the rsb works great when one thread is executing uninterrupted but when a contact switch happens it's",
+    "start": "712639",
+    "end": "719839"
+  },
+  {
+    "text": "possible for the rsp to become unbalanced specifically it's possible for a to contact switch into a thread",
+    "start": "719839",
+    "end": "725760"
+  },
+  {
+    "text": "that immediately executes a return and that return will end up predicted to go to an",
+    "start": "725760",
+    "end": "732399"
+  },
+  {
+    "text": "address put in the rrsp by the last thread this is a problem especially if the",
+    "start": "732399",
+    "end": "737839"
+  },
+  {
+    "text": "newly executing thread happens to be running in a more privileged mode like the kernel",
+    "start": "737839",
+    "end": "744160"
+  },
+  {
+    "text": "the solution is straightforward if not especially elegant we just fill or stuff the rsb with",
+    "start": "744160",
+    "end": "750880"
+  },
+  {
+    "text": "enough entries that it forgets everything from the thread it came from we do this with a long chained sequence",
+    "start": "750880",
+    "end": "757440"
+  },
+  {
+    "text": "of calls with no returns in fuchsia we do this on every context switch and right after we exit from a",
+    "start": "757440",
+    "end": "764240"
+  },
+  {
+    "text": "virtual machine back into the hypervisor the virtual machine was running its own code with its own calls and rets",
+    "start": "764240",
+    "end": "770560"
+  },
+  {
+    "text": "we don't want that influencing the hypervisor it might surprise you that we don't need",
+    "start": "770560",
+    "end": "775600"
+  },
+  {
+    "text": "to stuff the rsb every time we enter the kernel but we're safe because the kernel's",
+    "start": "775600",
+    "end": "780720"
+  },
+  {
+    "text": "calls and rats are balanced as long as a contact switch doesn't happen the kernel won't ever use an",
+    "start": "780720",
+    "end": "786000"
+  },
+  {
+    "text": "address in the rsb that it didn't put there and if we do contact switch we'll stuff",
+    "start": "786000",
+    "end": "791839"
+  },
+  {
+    "text": "the rsb next we're going to talk about specter variant 2 branch target injection",
+    "start": "791839",
+    "end": "799040"
+  },
+  {
+    "text": "but first let's touch on another tool the processor uses for speculative execution the indirect branch predictor the",
+    "start": "799040",
+    "end": "806720"
+  },
+  {
+    "start": "805000",
+    "end": "843000"
+  },
+  {
+    "text": "processor uses this predictor to speed up branches to an address that's computed at runtime",
+    "start": "806720",
+    "end": "811839"
+  },
+  {
+    "text": "think function pointers used for callbacks or virtual member functions in c plus when the processor executes one of",
+    "start": "811839",
+    "end": "819040"
+  },
+  {
+    "text": "those branches it notes the source and target addresses in a data structure called the branch target buffer",
+    "start": "819040",
+    "end": "825920"
+  },
+  {
+    "text": "since space is at a premium that buffer probably doesn't remember the whole source address",
+    "start": "825920",
+    "end": "831519"
+  },
+  {
+    "text": "and yes it turns out that code can induce collisions in the branch target buffer and change the address that indirect",
+    "start": "831519",
+    "end": "837519"
+  },
+  {
+    "text": "calls in other contexts will speculate to and that's spectre variant two",
+    "start": "837519",
+    "end": "844000"
+  },
+  {
+    "start": "843000",
+    "end": "1050000"
+  },
+  {
+    "text": "this is really bad it allows a hostile user process to steer speculative execution in the",
+    "start": "844000",
+    "end": "849680"
+  },
+  {
+    "text": "kernel to an address entirely of the attackers choosing the attacker can easily find an",
+    "start": "849680",
+    "end": "856480"
+  },
+  {
+    "text": "instruction sequence to leak the memory they care about other vms and the hypervisor are vulnerable too",
+    "start": "856480",
+    "end": "863440"
+  },
+  {
+    "text": "since this is a since this is an attack against the branch predictor implementation mitigations depend a lot",
+    "start": "863440",
+    "end": "870079"
+  },
+  {
+    "text": "on the specific processor you're on let's talk about x86 first and start with the earliest",
+    "start": "870079",
+    "end": "875600"
+  },
+  {
+    "text": "and most generic mitigation available on that architecture retpilling we want to prevent hostile",
+    "start": "875600",
+    "end": "882480"
+  },
+  {
+    "text": "branch target entries from steering speculative execution one solution is to control the entries",
+    "start": "882480",
+    "end": "888880"
+  },
+  {
+    "text": "and we'll get to that but if we can't do that the next best thing is to prevent those entries from",
+    "start": "888880",
+    "end": "894959"
+  },
+  {
+    "text": "being used to do that her to pull a crazy trick we're going to convince the processor to",
+    "start": "894959",
+    "end": "901519"
+  },
+  {
+    "text": "use the wrong predictor this is a ret pilling a return",
+    "start": "901519",
+    "end": "907440"
+  },
+  {
+    "text": "trampoline it implements an indirect branch without using an indirect branch instead",
+    "start": "907440",
+    "end": "914560"
+  },
+  {
+    "text": "we do a call from here to here which pushes the return address on the stack",
+    "start": "914560",
+    "end": "919920"
+  },
+  {
+    "text": "and onto the return stack buffer next we replace the return address at",
+    "start": "919920",
+    "end": "925760"
+  },
+  {
+    "text": "the top of the stack with the address we actually want to jump to but that doesn't update the",
+    "start": "925760",
+    "end": "931279"
+  },
+  {
+    "text": "return stack buffer finally we do the return and here's",
+    "start": "931279",
+    "end": "936800"
+  },
+  {
+    "text": "where speculative execution and the real control flow diverge speculative execution is always going to",
+    "start": "936800",
+    "end": "943360"
+  },
+  {
+    "text": "follow the rsb's prediction which tells it to go back here where speculation will",
+    "start": "943360",
+    "end": "948959"
+  },
+  {
+    "text": "stall in an infinite loop once the processor catches up and realizes it went to the wrong place",
+    "start": "948959",
+    "end": "955600"
+  },
+  {
+    "text": "it will end up going to the real target address that it read from stack memory the branch target buffer was never",
+    "start": "955600",
+    "end": "961440"
+  },
+  {
+    "text": "consulted and so it can't be used to steer speculative execution to an evil place",
+    "start": "961440",
+    "end": "967600"
+  },
+  {
+    "text": "okay that's a lie it turns out that the branch target buffer could be consulted if we're not careful remember how the",
+    "start": "967600",
+    "end": "974160"
+  },
+  {
+    "text": "return stack buffer can get unbalanced well what if we contact switch into the",
+    "start": "974160",
+    "end": "979839"
+  },
+  {
+    "text": "middle of a the return stack buffer could be empty and when that happens some cpus will go",
+    "start": "979839",
+    "end": "986800"
+  },
+  {
+    "text": "the extra mile and check the branch target buffer to see where to go next that happens on skylake and later intel",
+    "start": "986800",
+    "end": "993040"
+  },
+  {
+    "text": "processors for example thankfully anywhere that could have happened we've already gone to the",
+    "start": "993040",
+    "end": "998639"
+  },
+  {
+    "text": "trouble of filling the rsb with benign entries so we know it can underflow we're safe",
+    "start": "998639",
+    "end": "1005440"
+  },
+  {
+    "text": "okay no doubt replane is a cute device but how do we actually apply it to defend our kernel and hypervisor",
+    "start": "1005440",
+    "end": "1012720"
+  },
+  {
+    "text": "for that we need the compiler's help the compiler clang in our case accepts a new flag that says whenever",
+    "start": "1012720",
+    "end": "1019839"
+  },
+  {
+    "text": "you want to compile an indirect jump or call instead put the address in a register and jump to a reptilian thunk",
+    "start": "1019839",
+    "end": "1027839"
+  },
+  {
+    "text": "this solves spectre variant 2 for the kernel and the hypervisor we still have at least two problems",
+    "start": "1027839",
+    "end": "1034798"
+  },
+  {
+    "text": "first we can recompile the os but we haven't done anything to protect processes or vms from each other",
+    "start": "1034799",
+    "end": "1040720"
+  },
+  {
+    "text": "and second sending speculative execution into a busy loop is not free we can see the performance",
+    "start": "1040720",
+    "end": "1046480"
+  },
+  {
+    "text": "overhead in compute heavy workloads to address the first problem cross process and",
+    "start": "1046480",
+    "end": "1052400"
+  },
+  {
+    "start": "1050000",
+    "end": "1144000"
+  },
+  {
+    "text": "cross vm attacks intel and amd ships microcode updates to add an ibpb",
+    "start": "1052400",
+    "end": "1058000"
+  },
+  {
+    "text": "command indirect branch prediction barrier this command is triggered by tickling a",
+    "start": "1058000",
+    "end": "1063520"
+  },
+  {
+    "text": "bit in an msr the model specific register ibpb clears the state of the predictor",
+    "start": "1063520",
+    "end": "1069360"
+  },
+  {
+    "text": "so the code that runs afterward cannot be affected by code that ran before on the same logical processor",
+    "start": "1069360",
+    "end": "1075200"
+  },
+  {
+    "text": "we use ibpb when switching between processes or vms",
+    "start": "1075200",
+    "end": "1080400"
+  },
+  {
+    "text": "one thing though did you edge the part about the same logical processor as it turns out a lot of chips share the",
+    "start": "1080400",
+    "end": "1087440"
+  },
+  {
+    "text": "same indirect branch predictor across logical processors on a physical core so a hostile user process can influence",
+    "start": "1087440",
+    "end": "1094799"
+  },
+  {
+    "text": "any other process it happens to get co-scheduled with to fix this processors provided another",
+    "start": "1094799",
+    "end": "1100799"
+  },
+  {
+    "text": "msr called stibp single thread indirect branch predictor once that's enabled for a logical",
+    "start": "1100799",
+    "end": "1107280"
+  },
+  {
+    "text": "processor its indirect branch predictions will never be affected by code running on other logical",
+    "start": "1107280",
+    "end": "1112799"
+  },
+  {
+    "text": "processors predictors are never shared across physical cores so we don't need to worry about that",
+    "start": "1112799",
+    "end": "1119440"
+  },
+  {
+    "text": "okay so we've solved cross process and cross vm but we'd still like to avoid paying the",
+    "start": "1119440",
+    "end": "1124960"
+  },
+  {
+    "text": "cost of rett plane in the kernel maybe we can just clear the branch predictor with ivpb every time we go",
+    "start": "1124960",
+    "end": "1130480"
+  },
+  {
+    "text": "into the kernel that would work but the performance cost is tremendous",
+    "start": "1130480",
+    "end": "1135679"
+  },
+  {
+    "text": "we need a way to keep branch predictor state without allowing interference across privilege",
+    "start": "1135679",
+    "end": "1141840"
+  },
+  {
+    "text": "levels to help us along intel and amd provided another command",
+    "start": "1141840",
+    "end": "1146960"
+  },
+  {
+    "start": "1144000",
+    "end": "1229000"
+  },
+  {
+    "text": "called ibrs indirect branch restricted speculation as long as we trigger this every time we",
+    "start": "1146960",
+    "end": "1153440"
+  },
+  {
+    "text": "change to a higher privilege level user to kernel or vm to hypervisor the processor guarantees",
+    "start": "1153440",
+    "end": "1159360"
+  },
+  {
+    "text": "that previous code running at a lower privilege level will not influence how indirect branches are predicted and",
+    "start": "1159360",
+    "end": "1166320"
+  },
+  {
+    "text": "that's great on processors that support ibrs we can stop using red plane",
+    "start": "1166320",
+    "end": "1171679"
+  },
+  {
+    "text": "even better setting ibrs prevents sibling threads from influencing our branch predictors",
+    "start": "1171679",
+    "end": "1176720"
+  },
+  {
+    "text": "so we can say goodbye to stibb except we might be running on a processor that",
+    "start": "1176720",
+    "end": "1182880"
+  },
+  {
+    "text": "didn't get microcode to support ibrs so we need to keep all that stuff around",
+    "start": "1182880",
+    "end": "1187919"
+  },
+  {
+    "text": "and dynamically enable or disable it at boot all our indirect branches will still go",
+    "start": "1187919",
+    "end": "1193440"
+  },
+  {
+    "text": "to thunks but with ibrs we just swap in a thunk that does the branch one thing to be very",
+    "start": "1193440",
+    "end": "1200720"
+  },
+  {
+    "text": "careful of ibrs is all about changes in privilege levels",
+    "start": "1200720",
+    "end": "1206480"
+  },
+  {
+    "text": "it doesn't do anything to protect processes or vms from each other",
+    "start": "1206480",
+    "end": "1211679"
+  },
+  {
+    "text": "we still need ibp on context switch all right now everyone is keeping their",
+    "start": "1211679",
+    "end": "1217039"
+  },
+  {
+    "text": "branch predictions to themselves are we good well it turns out that writing an msr to",
+    "start": "1217039",
+    "end": "1223600"
+  },
+  {
+    "text": "trigger ibrs on every privileged transition transition is still not cheap",
+    "start": "1223600",
+    "end": "1228960"
+  },
+  {
+    "text": "so some intel processors now offer enhanced ibrs this new and improved mode only needs to",
+    "start": "1228960",
+    "end": "1236000"
+  },
+  {
+    "start": "1229000",
+    "end": "1294000"
+  },
+  {
+    "text": "be enabled once no more writing msrs on every switch to higher privilege and it still gives us all the stibp",
+    "start": "1236000",
+    "end": "1243200"
+  },
+  {
+    "text": "magic but surprise enhanced ibrs giveth and enhanced ibrs taketh away",
+    "start": "1243200",
+    "end": "1250559"
+  },
+  {
+    "text": "processors with enhanced ibrs no longer guarantee that filling the return stack buffer is enough to prevent it from being used",
+    "start": "1250559",
+    "end": "1257200"
+  },
+  {
+    "text": "for cross privilege level attacks instead we need to make sure we're using",
+    "start": "1257200",
+    "end": "1262400"
+  },
+  {
+    "text": "a different security feature called smep supervisor mode execution prevention",
+    "start": "1262400",
+    "end": "1268400"
+  },
+  {
+    "text": "that feature which is enabled with a bit in cr4 prevents code and kernel mode from",
+    "start": "1268400",
+    "end": "1274159"
+  },
+  {
+    "text": "executing anything outside the kernel even speculatively since user code can",
+    "start": "1274159",
+    "end": "1280480"
+  },
+  {
+    "text": "only put its own addresses into the rsb smap prevents user mode from adding any",
+    "start": "1280480",
+    "end": "1285919"
+  },
+  {
+    "text": "rsb entries that the kernel will follow sound spectre variant 2 on x86",
+    "start": "1285919",
+    "end": "1293200"
+  },
+  {
+    "text": "the story on arm is a lot simpler all the same attacks still apply processes vms the kernel and the",
+    "start": "1293200",
+    "end": "1298799"
+  },
+  {
+    "text": "hypervisor are all vulnerable but we have a much smaller set of tools available really just one",
+    "start": "1298799",
+    "end": "1305520"
+  },
+  {
+    "text": "an update to the arm trusted firmware that clears all branch predictor state anytime we",
+    "start": "1305520",
+    "end": "1311039"
+  },
+  {
+    "text": "enter el3 that's the most privileged exception level on arm and the place where the firmware runs",
+    "start": "1311039",
+    "end": "1317520"
+  },
+  {
+    "text": "arm added an optimized entry point just for this purpose but right now in fuchsia we execute the get firmware",
+    "start": "1317520",
+    "end": "1323600"
+  },
+  {
+    "text": "version call and it clears everything for us clearing the entire predictor is a pretty big",
+    "start": "1323600",
+    "end": "1329200"
+  },
+  {
+    "text": "hammer we only want to do it when we have to arm says it should be done on context switch and on exception entry",
+    "start": "1329200",
+    "end": "1337600"
+  },
+  {
+    "text": "from an exception level where it is judged that code might be used to attack a higher level",
+    "start": "1337600",
+    "end": "1342720"
+  },
+  {
+    "text": "i have to admit i do not know what that means their docs do provide a bit more detail",
+    "start": "1342720",
+    "end": "1351280"
+  },
+  {
+    "text": "they say we can map user pages as privileged execute never which is sort of like a finer grained",
+    "start": "1351280",
+    "end": "1356559"
+  },
+  {
+    "text": "s-map and then we don't need to worry about speculation from the kernel into user code",
+    "start": "1356559",
+    "end": "1362159"
+  },
+  {
+    "text": "interestingly though that note was only added to their documentation in june of this year all that said it's still not obvious if",
+    "start": "1362159",
+    "end": "1368640"
+  },
+  {
+    "text": "we need to worry about user mode poisoning kernel branches with unintended kernel targets",
+    "start": "1368640",
+    "end": "1374480"
+  },
+  {
+    "text": "to try to figure that out we looked at arms commits to the linux kernel they clear the bench branch predictor on",
+    "start": "1374480",
+    "end": "1380240"
+  },
+  {
+    "text": "context switch just like the docs say they also clear the predictor after a",
+    "start": "1380240",
+    "end": "1385280"
+  },
+  {
+    "text": "user mode exception where the instruction pointer has ended up in kernel code so",
+    "start": "1385280",
+    "end": "1390320"
+  },
+  {
+    "text": "not a system call just user code jumping into a kernel page this might be what the docs meant by",
+    "start": "1390320",
+    "end": "1396799"
+  },
+  {
+    "text": "judging that we might be under attack our best inference",
+    "start": "1396799",
+    "end": "1402080"
+  },
+  {
+    "text": "is that the branch predictor on arm only remembers exact branch targets and the kernel is preventing user mode",
+    "start": "1402080",
+    "end": "1408480"
+  },
+  {
+    "text": "from training the predictor to go to a kernel address by clearing the predictor state every time user mode tries to jump into the",
+    "start": "1408480",
+    "end": "1414880"
+  },
+  {
+    "text": "kernel for now we do what linux does if we learn any better",
+    "start": "1414880",
+    "end": "1420240"
+  },
+  {
+    "text": "our mitigations will change that's all for spectra variant 2 on x86",
+    "start": "1420240",
+    "end": "1427200"
+  },
+  {
+    "text": "and arm we did it take a breath next we're going to talk about an intel",
+    "start": "1427200",
+    "end": "1433440"
+  },
+  {
+    "text": "specific vulnerability called l1tf l1 terminal fault",
+    "start": "1433440",
+    "end": "1438640"
+  },
+  {
+    "start": "1434000",
+    "end": "1562000"
+  },
+  {
+    "text": "to understand what's going on here let's take a quick look at how address translation works on x86 to start we have a virtual",
+    "start": "1438640",
+    "end": "1446720"
+  },
+  {
+    "text": "address the page tables managed by the os map that virtual address to a physical address",
+    "start": "1446720",
+    "end": "1452559"
+  },
+  {
+    "text": "if we're in a vm that's actually a guest physical address and we will map it to a host physical address",
+    "start": "1452559",
+    "end": "1457840"
+  },
+  {
+    "text": "using another layer called extended page tables that last host physical address is",
+    "start": "1457840",
+    "end": "1464159"
+  },
+  {
+    "text": "what's actually used to access memory in an l1tf attack we craft a page table",
+    "start": "1464159",
+    "end": "1470960"
+  },
+  {
+    "text": "entry that has its present bit clear or which has a reserve bit set which makes it invalid",
+    "start": "1470960",
+    "end": "1476559"
+  },
+  {
+    "text": "when we try to access the corresponding virtual address the processor will walk the page tables reach our invalid entry and raise a",
+    "start": "1476559",
+    "end": "1483440"
+  },
+  {
+    "text": "terminal fault that causes translation to stop immediately the processor just makes a note that",
+    "start": "1483440",
+    "end": "1489520"
+  },
+  {
+    "text": "this access should raise a page fault when it retires but because of the special way this",
+    "start": "1489520",
+    "end": "1495840"
+  },
+  {
+    "text": "translation failed the processor is not prevented from speculating as though the page walk succeeded",
+    "start": "1495840",
+    "end": "1501760"
+  },
+  {
+    "text": "and a physical address was found specifically whatever physical address happened to be in that invalid page",
+    "start": "1501760",
+    "end": "1507600"
+  },
+  {
+    "text": "table entry if that address is in the l1 data cache the data will be loaded speculatively",
+    "start": "1507600",
+    "end": "1514720"
+  },
+  {
+    "text": "forwarded to dependent instructions and then can be leaked through a side channel this is tremendously bad first",
+    "start": "1514720",
+    "end": "1522080"
+  },
+  {
+    "text": "it means that if an os kernel uses the present bit to implement demand paging the process whose page was taken away",
+    "start": "1522080",
+    "end": "1528720"
+  },
+  {
+    "text": "will be able to read whatever the os decides to put in that physical memory much",
+    "start": "1528720",
+    "end": "1534799"
+  },
+  {
+    "text": "worse though is that we don't just bypass kernel protections we also skip the ept mapping that",
+    "start": "1534799",
+    "end": "1542640"
+  },
+  {
+    "text": "controls which physical memory a vm can access so now a hostile vm",
+    "start": "1542640",
+    "end": "1548480"
+  },
+  {
+    "text": "which has full control over page table entries can access any data in l1 if it happens",
+    "start": "1548480",
+    "end": "1554240"
+  },
+  {
+    "text": "to find a matching physical address this is the full compromise of all memory protection on the system",
+    "start": "1554240",
+    "end": "1562559"
+  },
+  {
+    "start": "1562000",
+    "end": "1634000"
+  },
+  {
+    "text": "mitigating this attack from a hostile process is pretty easy we just change the code that manages page table entries so the physical",
+    "start": "1562559",
+    "end": "1569039"
+  },
+  {
+    "text": "address is zeroed when the page isn't present we can also invert the entry which lets us continue",
+    "start": "1569039",
+    "end": "1574320"
+  },
+  {
+    "text": "to store the physical address in the pte but neutralizes the threat because addresses with the high bit set",
+    "start": "1574320",
+    "end": "1580400"
+  },
+  {
+    "text": "point outside of physical memory but mitigating l1 tf attacks from hostile",
+    "start": "1580400",
+    "end": "1586880"
+  },
+  {
+    "text": "vms is not as easy in fact it turns out there is",
+    "start": "1586880",
+    "end": "1592320"
+  },
+  {
+    "text": "no way to prevent a hostile vm from reading anything it chooses out of l1",
+    "start": "1592320",
+    "end": "1598559"
+  },
+  {
+    "text": "the only option we have is to make sure there's nothing for them to read we have to clear all one cache there are",
+    "start": "1598559",
+    "end": "1605520"
+  },
+  {
+    "text": "already instructions to evict data from caches but we don't want to empty every cache level just l1",
+    "start": "1605520",
+    "end": "1612159"
+  },
+  {
+    "text": "to help us do that intel shipped a microcode update that adds a new l1d flush command as always we trigger it by writing to an",
+    "start": "1612159",
+    "end": "1618960"
+  },
+  {
+    "text": "msr our hypervisor uses that command right before we enter a vm",
+    "start": "1618960",
+    "end": "1624720"
+  },
+  {
+    "text": "clearing the l1 cache makes it safe for us to start the guest fee cpu since we won't leave anything behind for",
+    "start": "1624720",
+    "end": "1630480"
+  },
+  {
+    "text": "it to read but unfortunately we're not even close to done the l1 cache",
+    "start": "1630480",
+    "end": "1636000"
+  },
+  {
+    "text": "is shared across logical processors on a physical core so while that guest vm is",
+    "start": "1636000",
+    "end": "1641360"
+  },
+  {
+    "text": "running it will be able to pick up anything that its sibling hyper threads bring in brings into l1",
+    "start": "1641360",
+    "end": "1646720"
+  },
+  {
+    "text": "that means data from other vms or from the hypervisor one option is to turn off hyperthreading",
+    "start": "1646720",
+    "end": "1653760"
+  },
+  {
+    "text": "though that obviously comes with a pretty significant loss of performance another option is to change our",
+    "start": "1653760",
+    "end": "1659840"
+  },
+  {
+    "text": "scheduler so that different vms are never scheduled together on the same",
+    "start": "1659840",
+    "end": "1664880"
+  },
+  {
+    "text": "physical core this is called core scheduling and while it's not free it's generally",
+    "start": "1664880",
+    "end": "1670799"
+  },
+  {
+    "text": "considered to have less performance impact than turning off hyper-threading altogether we haven't implemented it in fuchsia yet",
+    "start": "1670799",
+    "end": "1677919"
+  },
+  {
+    "text": "but it's a feature in other hypervisors like kvm zen and hyper-v l1tf is an attack of",
+    "start": "1677919",
+    "end": "1684799"
+  },
+  {
+    "text": "opportunity it requires data to be brought into l1 to be vulnerable the next attack we'll talk about mds is",
+    "start": "1684799",
+    "end": "1691919"
+  },
+  {
+    "start": "1690000",
+    "end": "1871000"
+  },
+  {
+    "text": "even more time dependent mds microarchitectural data sampling",
+    "start": "1691919",
+    "end": "1697520"
+  },
+  {
+    "text": "refers to a whole class of attacks which happen to be unique to intel processors",
+    "start": "1697520",
+    "end": "1702720"
+  },
+  {
+    "text": "in these attacks different temporary buffers inside the cpu are made available to speculative",
+    "start": "1702720",
+    "end": "1708880"
+  },
+  {
+    "text": "execution while they still have old values in them as one example the processor uses the line fill buffer",
+    "start": "1708880",
+    "end": "1716480"
+  },
+  {
+    "text": "to track requests to bring data into the l1 cache let's say we issue a read to memory",
+    "start": "1716480",
+    "end": "1722240"
+  },
+  {
+    "text": "that's not an l1 when the processor first sees that the read won't hit l1 it chooses an entry in",
+    "start": "1722240",
+    "end": "1727919"
+  },
+  {
+    "text": "the line fill buffer to track it let's also say that memory read is actually going to fault maybe the",
+    "start": "1727919",
+    "end": "1733039"
+  },
+  {
+    "text": "permission bits are wrong once the processor figures out that the read is going to fault",
+    "start": "1733039",
+    "end": "1738399"
+  },
+  {
+    "text": "it sets a bit in the line fill buffer to say fault but it doesn't overwrite the entries",
+    "start": "1738399",
+    "end": "1744000"
+  },
+  {
+    "text": "data and until the load retires and actually raises the fault",
+    "start": "1744000",
+    "end": "1749279"
+  },
+  {
+    "text": "speculative execution can continue and it will see whatever value happened to be in the entry before there are similar",
+    "start": "1749279",
+    "end": "1756559"
+  },
+  {
+    "text": "attacks possible for other buffers in the processor like with lntf the solution is a",
+    "start": "1756559",
+    "end": "1762159"
+  },
+  {
+    "text": "microcode update that gives us a new way to clear those buffers before we start running a new thread",
+    "start": "1762159",
+    "end": "1767760"
+  },
+  {
+    "text": "that might attack us in this case it's not a new msr instead intel dusted off an old unused",
+    "start": "1767760",
+    "end": "1774080"
+  },
+  {
+    "text": "instruction and gave brand new super powers ver w which checks if a memory segment is",
+    "start": "1774080",
+    "end": "1779679"
+  },
+  {
+    "text": "writable now clears all of the processor's temporary buffers",
+    "start": "1779679",
+    "end": "1785200"
+  },
+  {
+    "text": "remember that l1tf was easy to mitigate within an os but hard to fix across vms mds",
+    "start": "1785200",
+    "end": "1791600"
+  },
+  {
+    "text": "is worse there's no easy os mitigation we need to apply the fix every time we",
+    "start": "1791600",
+    "end": "1797600"
+  },
+  {
+    "text": "exit the kernel and every time we're about to enter a guest vm helpfully for the latter case at least",
+    "start": "1797600",
+    "end": "1803520"
+  },
+  {
+    "text": "the l1d flush command for l1tf was augmented so it also flushes buffers vulnerable to",
+    "start": "1803520",
+    "end": "1808960"
+  },
+  {
+    "text": "mds and stop me if you've heard this one we need to worry about hyper threading",
+    "start": "1808960",
+    "end": "1815360"
+  },
+  {
+    "text": "a lot of these buffers are shared across logical processors and there's no way to partition them",
+    "start": "1815360",
+    "end": "1820799"
+  },
+  {
+    "text": "for vms the answer is core scheduling but now we even need core scheduling for processes on the same kernel",
+    "start": "1820799",
+    "end": "1828159"
+  },
+  {
+    "text": "as i mentioned fuchsia does not implement core scheduling for vms yet and no os that i know of implements",
+    "start": "1828159",
+    "end": "1834399"
+  },
+  {
+    "text": "course scheduling for processes on a single kernel although i have reason to believe that's going to change earlier this year",
+    "start": "1834399",
+    "end": "1841279"
+  },
+  {
+    "text": "project zero was able to show a real-life attack against chrome that used mds across hyper threads",
+    "start": "1841279",
+    "end": "1847840"
+  },
+  {
+    "text": "one last note on mds as it relates to fuchsia specifically clearing all these buffers takes a lot",
+    "start": "1847840",
+    "end": "1852960"
+  },
+  {
+    "text": "of time more than 200 nanoseconds on some chips which doubles the fastest round trip time for",
+    "start": "1852960",
+    "end": "1859279"
+  },
+  {
+    "text": "a system call on fuchsia that's not great for any operating system but it's especially hard",
+    "start": "1859279",
+    "end": "1864480"
+  },
+  {
+    "text": "on a micro kernel os because we depend so heavily on message passing between user mode drivers okay",
+    "start": "1864480",
+    "end": "1872320"
+  },
+  {
+    "start": "1871000",
+    "end": "1934000"
+  },
+  {
+    "text": "i have one more attack to talk about and even though it has the number one in it i saved it for last because it is the",
+    "start": "1872320",
+    "end": "1878320"
+  },
+  {
+    "text": "hardest to mitigate now sure the work we've had to do so far hasn't been trivial",
+    "start": "1878320",
+    "end": "1884559"
+  },
+  {
+    "text": "meltdown required us to change how we manage page tables spectre variant 2 required compiler",
+    "start": "1884559",
+    "end": "1889760"
+  },
+  {
+    "text": "changes and l1 and tf l1ts and mds required us to build a whole new scheduler but at least we",
+    "start": "1889760",
+    "end": "1896399"
+  },
+  {
+    "text": "were able to implement platform level mitigations for those vulnerabilities",
+    "start": "1896399",
+    "end": "1901440"
+  },
+  {
+    "text": "as we'll speed as we'll see spectre variant one is not going away that easily",
+    "start": "1901440",
+    "end": "1906480"
+  },
+  {
+    "text": "remember that spectre variant 2 and retispec let us hijack the speculative control flow of other code",
+    "start": "1906480",
+    "end": "1912000"
+  },
+  {
+    "text": "and send it to addresses we chose they let us inject branch targets by attacking the implementation",
+    "start": "1912000",
+    "end": "1918320"
+  },
+  {
+    "text": "of the branch predictor and creating collisions spectra variant 1 is an attack against",
+    "start": "1918320",
+    "end": "1924159"
+  },
+  {
+    "text": "branch prediction itself every implementation is vulnerable almost by definition",
+    "start": "1924159",
+    "end": "1931440"
+  },
+  {
+    "text": "let's look at a simple example let's imagine this is a bounce check early in a system call",
+    "start": "1931440",
+    "end": "1936480"
+  },
+  {
+    "start": "1934000",
+    "end": "2051000"
+  },
+  {
+    "text": "handler we read a value if it's in bounds but what happens if i call this a",
+    "start": "1936480",
+    "end": "1941840"
+  },
+  {
+    "text": "hundred times with a valid index and then the hundred and first time with something wildly out of bounds",
+    "start": "1941840",
+    "end": "1948240"
+  },
+  {
+    "text": "let's assume it takes a long time to access that numb buffer's upper bound maybe it's",
+    "start": "1948240",
+    "end": "1953760"
+  },
+  {
+    "text": "often main memory maybe because an attacker forced it to be evicted out of the cache",
+    "start": "1953760",
+    "end": "1959679"
+  },
+  {
+    "text": "if the upper bound isn't immediately available the branch predictor is going to take over",
+    "start": "1959679",
+    "end": "1964880"
+  },
+  {
+    "text": "and send us down the path it's been trained to think is the right one we will end up using that attacker",
+    "start": "1964880",
+    "end": "1971360"
+  },
+  {
+    "text": "controlled index to access out of bounds memory and then leaking the contents of that memory",
+    "start": "1971360",
+    "end": "1976960"
+  },
+  {
+    "text": "through a cache side channel let me repeat something important this is not an attack against a branch",
+    "start": "1976960",
+    "end": "1984720"
+  },
+  {
+    "text": "predictor this is an attack against branch prediction the only ways",
+    "start": "1984720",
+    "end": "1989760"
+  },
+  {
+    "text": "we've found to completely mitigate spectre variant one end up invalidating decades of gains and processor",
+    "start": "1989760",
+    "end": "1995440"
+  },
+  {
+    "text": "performance since we're talking about kernel code today i won't get into some of the more advanced application level mitigations",
+    "start": "1995440",
+    "end": "2001519"
+  },
+  {
+    "text": "that we have available like speculative load hardening and clang instead let's talk about how we make",
+    "start": "2001519",
+    "end": "2007039"
+  },
+  {
+    "text": "this bounce check safe we need to introduce a new primitive",
+    "start": "2007039",
+    "end": "2012320"
+  },
+  {
+    "text": "that replaces the branch with a conditional move conditional moves aren't predicted at",
+    "start": "2012320",
+    "end": "2017679"
+  },
+  {
+    "text": "least not on x86 or arm this primitive lets us replace the control flow dependency",
+    "start": "2017679",
+    "end": "2023360"
+  },
+  {
+    "text": "with a data flow dependency why do we have to implement this in assembly though can't we just use the",
+    "start": "2023360",
+    "end": "2029760"
+  },
+  {
+    "text": "ternary operator in c to avoid if else unfortunately the compiler is well within its rights to introduce a branch",
+    "start": "2029760",
+    "end": "2035840"
+  },
+  {
+    "text": "even if we didn't write one we need to use assembly so we control exactly how this is compiled",
+    "start": "2035840",
+    "end": "2042720"
+  },
+  {
+    "text": "now i'm sorry to say that writing the primitive is the easy part the hard part is figuring out where to",
+    "start": "2042720",
+    "end": "2048960"
+  },
+  {
+    "text": "use it sure maybe it's obvious that we need it here because we're at the beginning of the system call",
+    "start": "2048960",
+    "end": "2055280"
+  },
+  {
+    "text": "here is what it looks like to rewrite this implementation to be safe against vector variant one",
+    "start": "2055280",
+    "end": "2060398"
+  },
+  {
+    "text": "but what if the bounce check is three layers deep in a library function that's used by a driver implementation",
+    "start": "2060399",
+    "end": "2067919"
+  },
+  {
+    "text": "tools have been developed to try to find these sites but in our experience they either under-report or don't work at scale",
+    "start": "2067919",
+    "end": "2075679"
+  },
+  {
+    "text": "we believe that the right tool for this job will combine dynamic analysis fuzzing and data flow tracking to",
+    "start": "2075679",
+    "end": "2083280"
+  },
+  {
+    "text": "determine what branches are exploitable and trainable across a security boundary",
+    "start": "2083280",
+    "end": "2088720"
+  },
+  {
+    "text": "and we're working on that now i should mention one last piece of the mitigation puzzle",
+    "start": "2088720",
+    "end": "2095200"
+  },
+  {
+    "text": "this one comes up when fighting variant 1 but also applies to specter variant 2 and other attacks where we're taking",
+    "start": "2095200",
+    "end": "2101599"
+  },
+  {
+    "text": "advantage of speculation behavior in a victim in cases like that we can",
+    "start": "2101599",
+    "end": "2106720"
+  },
+  {
+    "text": "add speculation barriers instruction sequences that cause the processor to make sure",
+    "start": "2106720",
+    "end": "2111760"
+  },
+  {
+    "text": "all previous instructions have retired before even starting on later ones",
+    "start": "2111760",
+    "end": "2117200"
+  },
+  {
+    "text": "this can be a useful tool but it's hard to know exactly where to add them to make things safe",
+    "start": "2117200",
+    "end": "2122400"
+  },
+  {
+    "text": "and putting them in too many places kills performance oh and if you run an amd do make sure to",
+    "start": "2122400",
+    "end": "2128400"
+  },
+  {
+    "text": "set the magic msr that makes elfen's serializing instruction instead of a no-op so",
+    "start": "2128400",
+    "end": "2136160"
+  },
+  {
+    "text": "those are the attacks i wanted to talk to you about today here are some of the mitigations we've added for them in fuchsia",
+    "start": "2136160",
+    "end": "2142160"
+  },
+  {
+    "text": "but the engineering work to keep fuchsia secure doesn't stop when the mitigations are checked in",
+    "start": "2142160",
+    "end": "2148160"
+  },
+  {
+    "text": "we need to make sure they work and we need to make sure they keep working mitigations are just another kind of os",
+    "start": "2148160",
+    "end": "2153520"
+  },
+  {
+    "text": "feature that add a lot of complicated new code so how do we test them to solve that",
+    "start": "2153520",
+    "end": "2159760"
+  },
+  {
+    "text": "we've started work on a new project called safe side it's an open source suite of programs that demonstrate the",
+    "start": "2159760",
+    "end": "2165839"
+  },
+  {
+    "text": "sort of inconvenient microarchitectural behaviors we talked about today these aren't just",
+    "start": "2165839",
+    "end": "2172000"
+  },
+  {
+    "text": "proofs of concept these are robust engineering quality artifacts that we can use to test side channel",
+    "start": "2172000",
+    "end": "2178560"
+  },
+  {
+    "text": "mitigations end to end we're still working on adding coverage for new side channels and new platforms",
+    "start": "2178560",
+    "end": "2185440"
+  },
+  {
+    "text": "but our current tests have already found some impactful bugs including a failure in linux's",
+    "start": "2185440",
+    "end": "2190640"
+  },
+  {
+    "text": "mitigation for spectre variant 2 that broke isolation between chrome renderer processes",
+    "start": "2190640",
+    "end": "2197280"
+  },
+  {
+    "text": "i hope you'll take a look and try running it on your os of choice we would also welcome your help in",
+    "start": "2197280",
+    "end": "2202960"
+  },
+  {
+    "text": "improving what these tests cover wrapping up today we talked about what",
+    "start": "2202960",
+    "end": "2210160"
+  },
+  {
+    "text": "it's like to try to build a secure os in a world where the architectural manual tells you less",
+    "start": "2210160",
+    "end": "2215599"
+  },
+  {
+    "text": "and less of what you really need to know i walked through how we've mitigated several speculative execution side",
+    "start": "2215599",
+    "end": "2222400"
+  },
+  {
+    "text": "channel vulnerabilities in the zircon micro kernel and i told you about safe side a project",
+    "start": "2222400",
+    "end": "2227520"
+  },
+  {
+    "text": "that we hope will help os developers build and maintain reliable mitigations",
+    "start": "2227520",
+    "end": "2233920"
+  },
+  {
+    "text": "to close i'd like to leave you with the three tactics that we found most effective",
+    "start": "2233920",
+    "end": "2239040"
+  },
+  {
+    "text": "in building mitigations that we believed in first read everything you can from every",
+    "start": "2239040",
+    "end": "2245280"
+  },
+  {
+    "text": "reputable source read the original attack paper with its awesome name and very necessary logo",
+    "start": "2245280",
+    "end": "2251839"
+  },
+  {
+    "text": "read the responses and deep dives and white papers from every processor vendor even if you're not targeting",
+    "start": "2251839",
+    "end": "2257359"
+  },
+  {
+    "text": "all of their architectures in at least one case we found the best explanation of one vendor's mitigation was written",
+    "start": "2257359",
+    "end": "2263040"
+  },
+  {
+    "text": "by a different vendor second look at what linux does maybe",
+    "start": "2263040",
+    "end": "2268079"
+  },
+  {
+    "text": "that sounds weird in a talk about fuchsia and zircon but at this point linux is basically the reference implementation kernel",
+    "start": "2268079",
+    "end": "2274720"
+  },
+  {
+    "text": "and fixes for side channel vulnerabilities are often checked into the linux kernel by the vendors themselves",
+    "start": "2274720",
+    "end": "2280720"
+  },
+  {
+    "text": "those fixes often require some trade-offs or design choices that aren't made clear from the",
+    "start": "2280720",
+    "end": "2286079"
+  },
+  {
+    "text": "vendor's documentation so along with the code and the comments make sure to read the commit messages",
+    "start": "2286079",
+    "end": "2293520"
+  },
+  {
+    "text": "i suppose it's possible there's also useful information on the discussion in the linux kernel mailing list",
+    "start": "2293520",
+    "end": "2298720"
+  },
+  {
+    "text": "but i cannot in good conscience recommend that anyone read lkml",
+    "start": "2298720",
+    "end": "2304160"
+  },
+  {
+    "text": "third and finally test you would be astonished how uncommon",
+    "start": "2304160",
+    "end": "2309839"
+  },
+  {
+    "text": "this is use safe side or some original proof of concept code or just something you cooked up to make",
+    "start": "2309839",
+    "end": "2316079"
+  },
+  {
+    "text": "sure that your mitigation fixes the problem that you think it does and that it keeps fixing that problem",
+    "start": "2316079",
+    "end": "2321839"
+  },
+  {
+    "text": "over time on every platform you support this stuff is subtle and fragile",
+    "start": "2321839",
+    "end": "2330240"
+  },
+  {
+    "text": "and with that i want to thank you for listening and for coming along on our journey of discovery i wish you many happy",
+    "start": "2330240",
+    "end": "2337520"
+  },
+  {
+    "text": "accurately predicted returns",
+    "start": "2337520",
+    "end": "2341839"
+  },
+  {
+    "text": "hey folks thanks past matt uh and thanks to all of you for following through however much of that you did",
+    "start": "2342560",
+    "end": "2349200"
+  },
+  {
+    "text": "uh i am very eager for feedback on what you might want to learn more about",
+    "start": "2349200",
+    "end": "2354640"
+  },
+  {
+    "text": "you can get a hold of me mattdr.google.com or twitter i've been following the chat and the question",
+    "start": "2354640",
+    "end": "2360160"
+  },
+  {
+    "text": "stream i haven't seen anything much but i will be in the text chat for the rest",
+    "start": "2360160",
+    "end": "2365280"
+  },
+  {
+    "text": "of the hour so if anything comes up there please let me know but uh yeah feedback there's a poll on how you like",
+    "start": "2365280",
+    "end": "2371920"
+  },
+  {
+    "text": "the presentation let the black hat folks know and uh yeah thank you again",
+    "start": "2371920",
+    "end": "2380160"
+  }
+]

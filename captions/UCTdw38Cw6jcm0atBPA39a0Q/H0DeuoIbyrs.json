@@ -1,0 +1,2722 @@
+[
+  {
+    "text": "okay hello hello everyone how are you this afternoon I hope you're not tired because we got quite a lot to do so",
+    "start": "30",
+    "end": "7680"
+  },
+  {
+    "text": "let's actually begin what you can see in the screen right now is a typical answer for a pretty common sushar dotnet",
+    "start": "7680",
+    "end": "15630"
+  },
+  {
+    "text": "interview question namely were stored objects were stored value types and were",
+    "start": "15630",
+    "end": "20640"
+  },
+  {
+    "text": "store reference types in dotnet platform and typical answer is value types are on the stack reference types are on the",
+    "start": "20640",
+    "end": "27210"
+  },
+  {
+    "text": "heap you could say that you could answer it in this way and this would be probably right however throughout this",
+    "start": "27210",
+    "end": "33780"
+  },
+  {
+    "text": "talk what we are going to do is we'll discuss whether this question is actually good whether it does make sense",
+    "start": "33780",
+    "end": "40410"
+  },
+  {
+    "text": "to ask question like this and whether we can bend the rules and somehow modify",
+    "start": "40410",
+    "end": "45809"
+  },
+  {
+    "text": "the default allocator in dotnet and allocate objects wherever we want so my name is Adam Freeman ik and I'd like to",
+    "start": "45809",
+    "end": "52199"
+  },
+  {
+    "text": "welcome you to this presentation and invite you to the world of unsafe where we are going to actually do a lot of",
+    "start": "52199",
+    "end": "59039"
+  },
+  {
+    "text": "low-level nice tricks around the memory allocation allocate objects on stack or",
+    "start": "59039",
+    "end": "65010"
+  },
+  {
+    "text": "anywhere else implement custom data structures performing better than least",
+    "start": "65010",
+    "end": "70320"
+  },
+  {
+    "text": "of T distributed with dotnet and do some more hijacking before we actually begin",
+    "start": "70320",
+    "end": "76650"
+  },
+  {
+    "text": "few words about me I was a dot a developer for over five years now I'm more of a big data scholar machine",
+    "start": "76650",
+    "end": "83220"
+  },
+  {
+    "text": "learning guy at Amazon I'm a blogger public speaker feel free to drop me a line on Twitter and take a look at my",
+    "start": "83220",
+    "end": "89159"
+  },
+  {
+    "text": "blog this whole presentation is on my blog also there are quite a few more",
+    "start": "89159",
+    "end": "94740"
+  },
+  {
+    "text": "posts describing the things I'm going to show you today so feel free to take a",
+    "start": "94740",
+    "end": "100380"
+  },
+  {
+    "text": "look afterwards if you are interested ok agenda of this talk so because what we",
+    "start": "100380",
+    "end": "107820"
+  },
+  {
+    "text": "are going to do is will actually implement custom memory allocation mechanism in dotnet will allocate",
+    "start": "107820",
+    "end": "114450"
+  },
+  {
+    "text": "reference types on the stack will actually actually allocate objects anywhere we like will hijack new",
+    "start": "114450",
+    "end": "121320"
+  },
+  {
+    "text": "operator in dotnet to reroute the allocation mechanism to use our own code",
+    "start": "121320",
+    "end": "126780"
+  },
+  {
+    "text": "so in order to do all of these things what we need to start with is the details of how it works under the",
+    "start": "126780",
+    "end": "133849"
+  },
+  {
+    "text": "so we'll take a look at the memory structure up the allocation mechanisms and primitives which are during dotnet",
+    "start": "133849",
+    "end": "140030"
+  },
+  {
+    "text": "and we'll see some magical keywords which are for instance not recognized by resharper but still available in dotnet",
+    "start": "140030",
+    "end": "147439"
+  },
+  {
+    "text": "since dotnet version 1 then what we are going to do is we will see a lot of",
+    "start": "147439",
+    "end": "153170"
+  },
+  {
+    "text": "demos showing what we are actually modifying will see some mashing codes some intermediate language as well will",
+    "start": "153170",
+    "end": "160669"
+  },
+  {
+    "text": "debug some memory and work with windy back and all of that just to allocate",
+    "start": "160669",
+    "end": "167689"
+  },
+  {
+    "text": "objects using new operator and hijack this operator to use it the way we would like so let's begin we started with a",
+    "start": "167689",
+    "end": "175849"
+  },
+  {
+    "text": "question where are objects stored in dope net and if we take a look at the dotnet Akama standard it actually does",
+    "start": "175849",
+    "end": "183349"
+  },
+  {
+    "text": "not enforce that the reference types must be stored on a heap it's typically that they are stored on a heap but it",
+    "start": "183349",
+    "end": "190280"
+  },
+  {
+    "text": "does not require that actually the operating systems out there which do not have heap at all so if we would like to",
+    "start": "190280",
+    "end": "198139"
+  },
+  {
+    "text": "implement dotnet for those operating systems we need to somehow either implement the heap on our own or",
+    "start": "198139",
+    "end": "204049"
+  },
+  {
+    "text": "actually go with stack allocation all the way down also when it comes to value",
+    "start": "204049",
+    "end": "209150"
+  },
+  {
+    "text": "types we know that they are stored on a stack like by default however if a value",
+    "start": "209150",
+    "end": "215239"
+  },
+  {
+    "text": "type is a part of a reference type like integer is a field of a class it's stored on heap as well",
+    "start": "215239",
+    "end": "220579"
+  },
+  {
+    "text": "so generally value types can be stored anywhere in dotnet and this is by design the question is how can we allocate the",
+    "start": "220579",
+    "end": "228259"
+  },
+  {
+    "text": "dotnet dotnet reference type on a stack this is not something we can do by",
+    "start": "228259",
+    "end": "233389"
+  },
+  {
+    "text": "default there were proposed add-ons to Roslyn or to dotnet platform to be able",
+    "start": "233389",
+    "end": "238759"
+  },
+  {
+    "text": "to allocate the objects on the stack there is ongoing working dotnet core to support escape analysis to move",
+    "start": "238759",
+    "end": "245750"
+  },
+  {
+    "text": "reference types to the stack where it's possible however as of now we cannot do this by default but we are going to do",
+    "start": "245750",
+    "end": "252620"
+  },
+  {
+    "text": "this in this talk so the thing about standard is it does not require that the",
+    "start": "252620",
+    "end": "258919"
+  },
+  {
+    "text": "reference types are allocated on a heap so now the question is is asking that",
+    "start": "258919",
+    "end": "265099"
+  },
+  {
+    "text": "where our value types or reference types stored enough maybe we should instead ask the question like where are they",
+    "start": "265099",
+    "end": "271700"
+  },
+  {
+    "text": "stored in dotnet framework version this in Windows version this on architecture",
+    "start": "271700",
+    "end": "277070"
+  },
+  {
+    "text": "version this using pad version this blah blah blah to specify which implementation are we actually talking",
+    "start": "277070",
+    "end": "283370"
+  },
+  {
+    "text": "about but then if we ask this question during interview this is probably answer will get because who cares why ever we",
+    "start": "283370",
+    "end": "290840"
+  },
+  {
+    "text": "should ask spec all those specific details about the platform you are using because on one hand it's good to know",
+    "start": "290840",
+    "end": "297770"
+  },
+  {
+    "text": "how it works under the hood on the other hand it's not very very required in day",
+    "start": "297770",
+    "end": "303140"
+  },
+  {
+    "text": "to day work especially in business lines applications so this was just a digression like university scientific",
+    "start": "303140",
+    "end": "309980"
+  },
+  {
+    "text": "one let's now go to the internals whenever we have a new object what we",
+    "start": "309980",
+    "end": "316040"
+  },
+  {
+    "text": "used to say is when we have a line VAR o equals new object we says we say that o",
+    "start": "316040",
+    "end": "322280"
+  },
+  {
+    "text": "is our object and this is not true and this talk we need to be a bit more",
+    "start": "322280",
+    "end": "327470"
+  },
+  {
+    "text": "specific and we need to have this differentiation between a reference and",
+    "start": "327470",
+    "end": "332750"
+  },
+  {
+    "text": "an object the object is on the right side of this equation VAR o is just a",
+    "start": "332750",
+    "end": "338660"
+  },
+  {
+    "text": "reference pointing to the object so objects are allocated on a heap but what",
+    "start": "338660",
+    "end": "343820"
+  },
+  {
+    "text": "we hold in the variable o and the slide is actually a managed pointer which",
+    "start": "343820",
+    "end": "349370"
+  },
+  {
+    "text": "points to the object which points to the object which on this slide is marked as",
+    "start": "349370",
+    "end": "354500"
+  },
+  {
+    "text": "this rectangle in the middle this is our object but o is just this pointer the",
+    "start": "354500",
+    "end": "360950"
+  },
+  {
+    "text": "size of this pointer depends on the architecture it can be 4 bytes 8 bytes whatever else depending on the",
+    "start": "360950",
+    "end": "366410"
+  },
+  {
+    "text": "architecture and the thing about the object is that it stores the data only",
+    "start": "366410",
+    "end": "371450"
+  },
+  {
+    "text": "the data no methods methods are stored somewhere completely different and will actually take a look later how methods",
+    "start": "371450",
+    "end": "378290"
+  },
+  {
+    "text": "are stored in dotnet but with object instances what we have we only have the data so the fields describing the the",
+    "start": "378290",
+    "end": "385250"
+  },
+  {
+    "text": "actual things we store in the objects but there are two more things related",
+    "start": "385250",
+    "end": "390260"
+  },
+  {
+    "text": "with with every object actually we know there is a thing called reflection in dotnet so we can ask the object hey",
+    "start": "390260",
+    "end": "397490"
+  },
+  {
+    "text": "which type are you what are you basically and this works in runtime it's not compiled",
+    "start": "397490",
+    "end": "403510"
+  },
+  {
+    "text": "time it's not during the compilation it must be realized and performed when",
+    "start": "403510",
+    "end": "408880"
+  },
+  {
+    "text": "running the application so every object must have act tag which is called in dotnet world actually like execution",
+    "start": "408880",
+    "end": "416800"
+  },
+  {
+    "text": "engine class or type handle or runtime type information just like here our TTI",
+    "start": "416800",
+    "end": "422350"
+  },
+  {
+    "text": "there are multiple names explaining exactly the same thing there is a tag related to an object associated with the",
+    "start": "422350",
+    "end": "429400"
+  },
+  {
+    "text": "object so the object knows what it is and actually our reference is pointing",
+    "start": "429400",
+    "end": "434920"
+  },
+  {
+    "text": "to the stack to this our TTI address and on the right side of this slide what we have is the description of the object",
+    "start": "434920",
+    "end": "443110"
+  },
+  {
+    "text": "which we can use during runtime using reflection to actually figure out all the details of the object so which",
+    "start": "443110",
+    "end": "449620"
+  },
+  {
+    "text": "methods it has which failed it has properties interfaces inheritance hierarchy everything else everything is",
+    "start": "449620",
+    "end": "456220"
+  },
+  {
+    "text": "stored there so thanks to that in runtime we can ask the object give me",
+    "start": "456220",
+    "end": "461680"
+  },
+  {
+    "text": "your tag and then we can figure out the type of this object we cannot do this with value types because value types do",
+    "start": "461680",
+    "end": "468250"
+  },
+  {
+    "text": "not have our TTI address they do not have this execution engine class associated so the only thing we know",
+    "start": "468250",
+    "end": "474820"
+  },
+  {
+    "text": "about value types is this is just some value we don't know the type one Maya",
+    "start": "474820",
+    "end": "480370"
+  },
+  {
+    "text": "one might ask how it's actually possible to call get type on value type in Dubna",
+    "start": "480370",
+    "end": "485740"
+  },
+  {
+    "text": "done the answer is boxing whenever we box a value type we actually have a",
+    "start": "485740",
+    "end": "491500"
+  },
+  {
+    "text": "separate class describing this box integer or box double or whatever else but there is one more thing one more",
+    "start": "491500",
+    "end": "498400"
+  },
+  {
+    "text": "thing with every object which we can see actually here this is the sink blank",
+    "start": "498400",
+    "end": "503560"
+  },
+  {
+    "text": "address which is one integer just before the RTT eye of the object just before",
+    "start": "503560",
+    "end": "509980"
+  },
+  {
+    "text": "the type of the object this thing is used to store details about like hash",
+    "start": "509980",
+    "end": "515500"
+  },
+  {
+    "text": "code or locking mechanisms or some metadata of the object if they are pre",
+    "start": "515500",
+    "end": "521110"
+  },
+  {
+    "text": "computed or if this data is too big is just an address pointer to some other metadata associated with this object",
+    "start": "521110",
+    "end": "528010"
+  },
+  {
+    "text": "what is interesting here it's actually before the object whenever we take a look at the pointer",
+    "start": "528010",
+    "end": "534830"
+  },
+  {
+    "text": "points to the middle of the object not to the sink block the sink block is effectively physically stored one",
+    "start": "534830",
+    "end": "540769"
+  },
+  {
+    "text": "integer before the object so this is how it works under the hood this is our object what we are going to do is our",
+    "start": "540769",
+    "end": "548209"
+  },
+  {
+    "text": "main goal for now is to allocate this Fink on a stack we want to do this so we",
+    "start": "548209",
+    "end": "553820"
+  },
+  {
+    "text": "need to now figure out what we want to allocate on the stack so there are three things we would like to allocate single",
+    "start": "553820",
+    "end": "559730"
+  },
+  {
+    "text": "log address our TTI of the object and all the fields it has those things we",
+    "start": "559730",
+    "end": "565459"
+  },
+  {
+    "text": "need to allocate on a stack and then we need to somehow grab a reference to this",
+    "start": "565459",
+    "end": "570769"
+  },
+  {
+    "text": "object while it's on a stack and to do this what we are going to do is we'll",
+    "start": "570769",
+    "end": "576079"
+  },
+  {
+    "text": "use the key word which is unknown to resharper and which is there since dotnet one and namely it's make ref this",
+    "start": "576079",
+    "end": "583040"
+  },
+  {
+    "text": "is an excerpt from MSD and documentation what this keyword does it's actually a",
+    "start": "583040",
+    "end": "589550"
+  },
+  {
+    "text": "bit tricky because what make Rev returns is a typed reference which sounds very similar to a reference but it's",
+    "start": "589550",
+    "end": "595850"
+  },
+  {
+    "text": "completely different type of reference is a reference to a reference so it's",
+    "start": "595850",
+    "end": "601130"
+  },
+  {
+    "text": "pointer to pointer thanks to this instruction we could get a pointer to pointer to the object and find using",
+    "start": "601130",
+    "end": "608089"
+  },
+  {
+    "text": "this pointer to pointer we can modify the original reference to reroute it to",
+    "start": "608089",
+    "end": "613370"
+  },
+  {
+    "text": "somewhere else there is also another keyword which is called ref value which does the opposite we give it the pointer",
+    "start": "613370",
+    "end": "619610"
+  },
+  {
+    "text": "to the pointer to the object and it returns as the reference to the object which is effectively a pointer so those",
+    "start": "619610",
+    "end": "625850"
+  },
+  {
+    "text": "things we are going to use and if I if you are lost how it works under the hood we were no more because there is yet",
+    "start": "625850",
+    "end": "632750"
+  },
+  {
+    "text": "another pointer going on because we cannot just use typed reference because we have type safety what we need to do",
+    "start": "632750",
+    "end": "638990"
+  },
+  {
+    "text": "is we need to get a pointer to a pointer to a pointer to the object so we can then call a treat it as an integer and",
+    "start": "638990",
+    "end": "646579"
+  },
+  {
+    "text": "then modify everything else so once again we have a new object we start on",
+    "start": "646579",
+    "end": "652100"
+  },
+  {
+    "text": "the left side here new object this on a heap somewhere it holds some value here the peak that is 65 yes some value then",
+    "start": "652100",
+    "end": "659899"
+  },
+  {
+    "text": "we have a reference normal c-sharp reference nothing new here which we call object o this is just a pointer which",
+    "start": "659899",
+    "end": "666709"
+  },
+  {
+    "text": "has a value 5,000 because points to the object which is stored at the address 5,000 then we get a pointer",
+    "start": "666709",
+    "end": "674240"
+  },
+  {
+    "text": "to the pointer to the object which is typed reference which we get with underscore underscore maker F this is",
+    "start": "674240",
+    "end": "680270"
+  },
+  {
+    "text": "pointer with value 6000 as our reference was at address 6000 pointing to the others 5000 and speaking as fast as I",
+    "start": "680270",
+    "end": "686990"
+  },
+  {
+    "text": "can just to make a lot of our confusion here but then we get yet another pointer so we get the pointer to the pointer to",
+    "start": "686990",
+    "end": "692300"
+  },
+  {
+    "text": "the pointer to the object I hope you get the idea I know it's a bit tricky but with the code is getting much easier so",
+    "start": "692300",
+    "end": "698540"
+  },
+  {
+    "text": "let's actually see the code but before we see the code we would like to make",
+    "start": "698540",
+    "end": "703790"
+  },
+  {
+    "text": "sure that okay we know what we are doing and we are actually convinced that we are doing what we want to do so few GC",
+    "start": "703790",
+    "end": "710780"
+  },
+  {
+    "text": "facts garbage collector facts so there are three generations in dotnet framework I'll be using the.net framework throughout this talk namely",
+    "start": "710780",
+    "end": "718130"
+  },
+  {
+    "text": "generation zero one and two there is a thing called large object heap which stores object which are at least",
+    "start": "718130",
+    "end": "724340"
+  },
+  {
+    "text": "eighty-five thousand bytes long so either very big objects or like big",
+    "start": "724340",
+    "end": "729860"
+  },
+  {
+    "text": "arrays etc also there is a very nice use case 1000 array with 1000 doubles is",
+    "start": "729860",
+    "end": "736670"
+  },
+  {
+    "text": "also stored in large or large object heap like a fun fact and large of the heap is an it is in generation 2 we are",
+    "start": "736670",
+    "end": "744950"
+  },
+  {
+    "text": "going to use this fact to figure out actually whether our objects are stored",
+    "start": "744950",
+    "end": "749960"
+  },
+  {
+    "text": "where we want them to be allocated or not and trivia for you just before we actually go to the code is which",
+    "start": "749960",
+    "end": "757550"
+  },
+  {
+    "text": "generation is a stack you probably know you can call GC get generation and it",
+    "start": "757550",
+    "end": "763220"
+  },
+  {
+    "text": "returns you with generation is this object in the question is what is it going to tell us when we ask for an",
+    "start": "763220",
+    "end": "769790"
+  },
+  {
+    "text": "object which is stored in a stack let's begin so first demo and what we are",
+    "start": "769790",
+    "end": "777410"
+  },
+  {
+    "text": "going to do is we are going to cheat just a little because we are not going to allocate the object on a stack yet",
+    "start": "777410",
+    "end": "783920"
+  },
+  {
+    "text": "what we are going to do is we'll just copy the object to the stack later in one of the later demos we'll be able to",
+    "start": "783920",
+    "end": "789589"
+  },
+  {
+    "text": "allocate objects from scratch but as for now we will just make it a little simpler so let's begin we have this very",
+    "start": "789589",
+    "end": "795589"
+  },
+  {
+    "text": "simple class poker which has one integer field with one non virtual method called",
+    "start": "795589",
+    "end": "800600"
+  },
+  {
+    "text": "right field with one v2 over write to string and with some destructor yes nothing fancy here what",
+    "start": "800600",
+    "end": "807439"
+  },
+  {
+    "text": "we want to do is we create a new object here which is allocated on the heap is",
+    "start": "807439",
+    "end": "813619"
+  },
+  {
+    "text": "that correct that that's correct then we create another reference pointing to the same object so we'll",
+    "start": "813619",
+    "end": "820279"
+  },
+  {
+    "text": "have two references pointing to one object on a heap then what we are going",
+    "start": "820279",
+    "end": "825439"
+  },
+  {
+    "text": "to do is we'll allocate some memory on a stack initialize it to bad food literal",
+    "start": "825439",
+    "end": "831559"
+  },
+  {
+    "text": "just to be able to see this literal in the debugger to see that we are looking at the correct memory and then what we",
+    "start": "831559",
+    "end": "838670"
+  },
+  {
+    "text": "are doing here is we are doing some pointer magic just like I said what we",
+    "start": "838670",
+    "end": "843920"
+  },
+  {
+    "text": "are doing here is we start with with our hip poker this is a pointer to an object",
+    "start": "843920",
+    "end": "850220"
+  },
+  {
+    "text": "then we get the pointer to this pointer using my craft so now we have pointer to",
+    "start": "850220",
+    "end": "857089"
+  },
+  {
+    "text": "the pointer to the object then what we do is we get address of this effectively",
+    "start": "857089",
+    "end": "863239"
+  },
+  {
+    "text": "getting yet another pointer so pointer to the pointer to the pointer to the",
+    "start": "863239",
+    "end": "868369"
+  },
+  {
+    "text": "object now what we can do is we can cast those things two pointers to integers",
+    "start": "868369",
+    "end": "873379"
+  },
+  {
+    "text": "just to trick the compiler so type safety is that we can just compile this",
+    "start": "873379",
+    "end": "879169"
+  },
+  {
+    "text": "code it doesn't scream about wrong types here so we just the reference those cuss",
+    "start": "879169",
+    "end": "884629"
+  },
+  {
+    "text": "to integer pointers etc we subtract for that's because I told you the sink block",
+    "start": "884629",
+    "end": "890389"
+  },
+  {
+    "text": "is before the object and it's one integer which on my platform because I'm compiling this on any CPU is four bytes",
+    "start": "890389",
+    "end": "897769"
+  },
+  {
+    "text": "long so we need to subtract four bytes and then we have a pointer which",
+    "start": "897769",
+    "end": "903220"
+  },
+  {
+    "text": "actually points to the very beginning of the object and then we print things like",
+    "start": "903220",
+    "end": "908989"
+  },
+  {
+    "text": "the RTT I address and some other things and we just wait here in red line so",
+    "start": "908989",
+    "end": "914269"
+  },
+  {
+    "text": "let's start it so it printed out something and what we are going to do right now is we will launch in debug",
+    "start": "914269",
+    "end": "920720"
+  },
+  {
+    "text": "attach to the process for those of you who are not familiar with this tool in",
+    "start": "920720",
+    "end": "928100"
+  },
+  {
+    "text": "Windows there is the bugging engine installed directly in the operating",
+    "start": "928100",
+    "end": "933619"
+  },
+  {
+    "text": "system you don't need to install anything and as especially with Visual Studio is not installing anything for you just to make",
+    "start": "933619",
+    "end": "941240"
+  },
+  {
+    "text": "the debugging possible it's possible they're always what you need to do to be able to debug something is you need to",
+    "start": "941240",
+    "end": "947480"
+  },
+  {
+    "text": "have some form of an interface on top of this debugging engine Visual Studio is",
+    "start": "947480",
+    "end": "953000"
+  },
+  {
+    "text": "one interface there are many more for instance there is dotnet spy there is windy bug there are some console",
+    "start": "953000",
+    "end": "959090"
+  },
+  {
+    "text": "debuggers things which you can use just to start your debugging session the thing is why am I using windy bug",
+    "start": "959090",
+    "end": "964850"
+  },
+  {
+    "text": "instead of Visual Studio is that there is an extension distributed with dotnet",
+    "start": "964850",
+    "end": "970190"
+  },
+  {
+    "text": "framework which is called sauce which is son of strike this extension is able to",
+    "start": "970190",
+    "end": "976280"
+  },
+  {
+    "text": "read them raw byte structure in the of your application and show it to you",
+    "start": "976280",
+    "end": "982010"
+  },
+  {
+    "text": "something which you could do in Visual Studio I think until 2012 which is not",
+    "start": "982010",
+    "end": "987140"
+  },
+  {
+    "text": "possible anymore so what I'm doing is I'm using exactly the same debugging engine which you are using with Visual",
+    "start": "987140",
+    "end": "993020"
+  },
+  {
+    "text": "Studio is just some different UI because I'm using some different extensions to Danny ng so first thing I'm going to do",
+    "start": "993020",
+    "end": "1001060"
+  },
+  {
+    "text": "is I'm loading the plug-in the source allowing me to read the memory then I",
+    "start": "1001060",
+    "end": "1006910"
+  },
+  {
+    "text": "change the change my fret and then what I'm going to do is actually I want to dump the whole stack and everything",
+    "start": "1006910",
+    "end": "1013630"
+  },
+  {
+    "text": "there let's make this hopefully a bit bigger but Ike yeah now now a bit better",
+    "start": "1013630",
+    "end": "1020560"
+  },
+  {
+    "text": "is this readable at the end yep cool okay what we got here is I started this",
+    "start": "1020560",
+    "end": "1025870"
+  },
+  {
+    "text": "application and we are now in this line console red line so what we can see here is yes we do have our call stack this is",
+    "start": "1025870",
+    "end": "1032829"
+  },
+  {
+    "text": "program main this is a red line red line if we scroll to the right we should actually no we do not see the lines here",
+    "start": "1032829",
+    "end": "1039819"
+  },
+  {
+    "text": "we do not but we okay let's just assume that I'm telling you the truth but you can see that red line is here so",
+    "start": "1039819",
+    "end": "1046000"
+  },
+  {
+    "text": "it looks like this is correct so what I have here is all the objects everything which is there in memory and you can see",
+    "start": "1046000",
+    "end": "1052690"
+  },
+  {
+    "text": "things here which are allocated so I have heap poker and I do have original",
+    "start": "1052690",
+    "end": "1058300"
+  },
+  {
+    "text": "poker so I do have those two variables those two reference is pointing to the same object and as you can see here",
+    "start": "1058300",
+    "end": "1065100"
+  },
+  {
+    "text": "addresses here are the same because they point to the same object so what I can do right now I can just",
+    "start": "1065100",
+    "end": "1072190"
+  },
+  {
+    "text": "dump this object and you can see that it has one filled with value which is given here which is value five so you can see",
+    "start": "1072190",
+    "end": "1079299"
+  },
+  {
+    "text": "exactly the same thing I allocated here so we do have value five and also you",
+    "start": "1079299",
+    "end": "1084850"
+  },
+  {
+    "text": "can see the address of this object is here and the method table so our TTI address is here so our TTI ends with D",
+    "start": "1084850",
+    "end": "1092020"
+  },
+  {
+    "text": "before and object is 8 3 8 if we now go here and take a look at the output of",
+    "start": "1092020",
+    "end": "1098380"
+  },
+  {
+    "text": "our application we can see that a method and value is exactly the same yes this",
+    "start": "1098380",
+    "end": "1104590"
+  },
+  {
+    "text": "pointer may be four bytes earlier just because of the same book but we are actually looking at the correct data so",
+    "start": "1104590",
+    "end": "1110679"
+  },
+  {
+    "text": "what we want to do now is we want to copy this object to the stack let's see our stuck here when I dump the address",
+    "start": "1110679",
+    "end": "1117880"
+  },
+  {
+    "text": "of our stack frame you can see 10 bad food literals I told you we are",
+    "start": "1117880",
+    "end": "1123549"
+  },
+  {
+    "text": "allocating some bad food on a stack just to see this memory in the bugger this is what we are looking at so so far so good",
+    "start": "1123549",
+    "end": "1131440"
+  },
+  {
+    "text": "let's carry on so I just resumed this application and hit enter and what our application is now doing is it's going",
+    "start": "1131440",
+    "end": "1139750"
+  },
+  {
+    "text": "to copy the object to the stack so what it does it uses this magical pecados",
+    "start": "1139750",
+    "end": "1146559"
+  },
+  {
+    "text": "variable so we read the bytes we print them out and we allocate them in this",
+    "start": "1146559",
+    "end": "1152169"
+  },
+  {
+    "text": "array which we allocated on the stack so we are just copying free integers why free integers one sink block were one",
+    "start": "1152169",
+    "end": "1159880"
+  },
+  {
+    "text": "our TDI address and one field of the object which is just the only integer we have in our pocket class which is here",
+    "start": "1159880",
+    "end": "1166900"
+  },
+  {
+    "text": "so we are copying free integers to the stack and now we can since we have done",
+    "start": "1166900",
+    "end": "1172539"
+  },
+  {
+    "text": "it already what we can do is we can break in D in the application in our",
+    "start": "1172539",
+    "end": "1177820"
+  },
+  {
+    "text": "debugger and try to dump the stack again and this time you see that free bad food",
+    "start": "1177820",
+    "end": "1183460"
+  },
+  {
+    "text": "retailer literals are gone now we copied free values and oddly enough this thing",
+    "start": "1183460",
+    "end": "1189190"
+  },
+  {
+    "text": "is exactly the thing we saw in the output this is our our TDI address so now we have a proper object on a stack",
+    "start": "1189190",
+    "end": "1196539"
+  },
+  {
+    "text": "those three integers are the object what we now want to do is we need to grab a",
+    "start": "1196539",
+    "end": "1201669"
+  },
+  {
+    "text": "reference to this object so we can use this normally so we resume our application again we hit enter here at",
+    "start": "1201669",
+    "end": "1208510"
+  },
+  {
+    "text": "what we are doing in this line yep in this line we set the reference which was",
+    "start": "1208510",
+    "end": "1217179"
+  },
+  {
+    "text": "originally there so it points to the address which is inside the array stored",
+    "start": "1217179",
+    "end": "1222429"
+  },
+  {
+    "text": "on the stack how it works we do have our type addres Firenze which we created using make ref so we",
+    "start": "1222429",
+    "end": "1229029"
+  },
+  {
+    "text": "just need to get this pointer to pointer to pointer to you to object but instead of going all the indirection levels we",
+    "start": "1229029",
+    "end": "1235929"
+  },
+  {
+    "text": "just need to go from pointer to the pointer to the pointer to the pointer and modify dead one value because this",
+    "start": "1235929",
+    "end": "1242350"
+  },
+  {
+    "text": "is reference pointing to the heap we will just reroute it to the stack so believe it or not this is what we are",
+    "start": "1242350",
+    "end": "1247840"
+  },
+  {
+    "text": "actually doing here with this magical pointer operations what we can do now is",
+    "start": "1247840",
+    "end": "1253270"
+  },
+  {
+    "text": "we can break again and what we would like to do we would like to change the",
+    "start": "1253270",
+    "end": "1258520"
+  },
+  {
+    "text": "fret again and dump the stuck with all the variables again and now what we see here those two value are different",
+    "start": "1258520",
+    "end": "1265480"
+  },
+  {
+    "text": "because our original pocket still points to the heap but our hip pocket let me",
+    "start": "1265480",
+    "end": "1270970"
+  },
+  {
+    "text": "yep our hip poker is very close to this value and this value is actually the",
+    "start": "1270970",
+    "end": "1276730"
+  },
+  {
+    "text": "beginning of our stack frame in this method so we modified this one reference and now we have a reference pointing to",
+    "start": "1276730",
+    "end": "1283299"
+  },
+  {
+    "text": "the object on stack so we can resume our application and actually what we could",
+    "start": "1283299",
+    "end": "1289240"
+  },
+  {
+    "text": "do as well is we can create a stack poker using this array value keyword which is redundant here we don't need to",
+    "start": "1289240",
+    "end": "1295630"
+  },
+  {
+    "text": "create a new reference but if you would like to go with Rev value this is the way to go so now what we would like to",
+    "start": "1295630",
+    "end": "1300909"
+  },
+  {
+    "text": "do is we have our object on the stack we would like this object to be normal ordinary object working the same way as",
+    "start": "1300909",
+    "end": "1308770"
+  },
+  {
+    "text": "the object on the heap so what we would like it to be able to do we would like to be able to read and write fields to",
+    "start": "1308770",
+    "end": "1314620"
+  },
+  {
+    "text": "call study a virtual non virtual methods we would like it to be to be we could we",
+    "start": "1314620",
+    "end": "1321250"
+  },
+  {
+    "text": "would like to lock it lock the objects so use the sync block correctly as well so now we are just testing whether",
+    "start": "1321250",
+    "end": "1326950"
+  },
+  {
+    "text": "things work here so what we do is we just print the field and we call nan view to our method from the original",
+    "start": "1326950",
+    "end": "1333399"
+  },
+  {
+    "text": "paka in the stack pecan so let me just hit enter here sorry nollie devalue was five we copied the",
+    "start": "1333399",
+    "end": "1339490"
+  },
+  {
+    "text": "value to the stack we can see 5 here 5 there then one me modify those fields on",
+    "start": "1339490",
+    "end": "1345460"
+  },
+  {
+    "text": "the heap on the high on the stack two three five three fours we print them out again it's exactly the same and to",
+    "start": "1345460",
+    "end": "1352419"
+  },
+  {
+    "text": "convince you even more that this object is on the stack we can modify it just by modifying",
+    "start": "1352419",
+    "end": "1359260"
+  },
+  {
+    "text": "values in this array of integers which was allocated on the stack so we know",
+    "start": "1359260",
+    "end": "1364510"
+  },
+  {
+    "text": "this field is at the index two we modify this field and yes the object was",
+    "start": "1364510",
+    "end": "1370600"
+  },
+  {
+    "text": "modified then we would like to actually be able to call view to our methods which is to string here so we just go to",
+    "start": "1370600",
+    "end": "1376990"
+  },
+  {
+    "text": "string and to string in my implementation is very simple because it just returns field to string so whenever",
+    "start": "1376990",
+    "end": "1383440"
+  },
+  {
+    "text": "we do this we should actually see the same at the same field again so we have three five three three times free then",
+    "start": "1383440",
+    "end": "1390160"
+  },
+  {
+    "text": "we display object types just to make sure that the RTT eye reflection everything around works correctly and we",
+    "start": "1390160",
+    "end": "1396429"
+  },
+  {
+    "text": "can see make ref Paco this is my poker class so it's the same and ultimately we",
+    "start": "1396429",
+    "end": "1401650"
+  },
+  {
+    "text": "would like our locking to work correctly so we would like to be able to modify sink block so I have two tasks one of",
+    "start": "1401650",
+    "end": "1408429"
+  },
+  {
+    "text": "them will lock a lock stack Paco then other tasks will try to log the same",
+    "start": "1408429",
+    "end": "1413470"
+  },
+  {
+    "text": "object but there will be some time out here for two seconds so when I hit enter here oh sorry I just missed generation",
+    "start": "1413470",
+    "end": "1421350"
+  },
+  {
+    "text": "answering the trivia where is stack stack is in generation 2 why is that",
+    "start": "1421350",
+    "end": "1427030"
+  },
+  {
+    "text": "because it's implementation detail that whatever address doclet checks the",
+    "start": "1427030",
+    "end": "1432850"
+  },
+  {
+    "text": "addresses if the address is in generation 0 actually dotnet tries to",
+    "start": "1432850",
+    "end": "1438220"
+  },
+  {
+    "text": "check the boundaries it knows where the generation 0 is so it's checked that checks the boundaries because the object",
+    "start": "1438220",
+    "end": "1445090"
+  },
+  {
+    "text": "is not in generation 0 it checks the boundaries for generation 1 since the object is not in generation 1 by default",
+    "start": "1445090",
+    "end": "1451059"
+  },
+  {
+    "text": "it must be in generation 2 we just only hack this a little bit so it's actually like a side-effect not something they",
+    "start": "1451059",
+    "end": "1457419"
+  },
+  {
+    "text": "explicitly encoded but this is how it works and returning to this locking so I",
+    "start": "1457419",
+    "end": "1462700"
+  },
+  {
+    "text": "hit enter again and you can see that I'm taking some logs and then after 2 seconds locks are released taken again",
+    "start": "1462700",
+    "end": "1468580"
+  },
+  {
+    "text": "etc so it looks like the object war correctly and ultimately what we could",
+    "start": "1468580",
+    "end": "1473590"
+  },
+  {
+    "text": "do is we could just register the object or finalization so it's cleanup by the garbage collector I'm not doing this",
+    "start": "1473590",
+    "end": "1479560"
+  },
+  {
+    "text": "here because this thing crashes pretty often as we are releasing object which",
+    "start": "1479560",
+    "end": "1484810"
+  },
+  {
+    "text": "is on the stack so the stack may not be available there so let's just recompile this and see how it goes this time last",
+    "start": "1484810",
+    "end": "1492580"
+  },
+  {
+    "text": "time it unfortunately crashed sometimes so hopefully this time it works again so",
+    "start": "1492580",
+    "end": "1499570"
+  },
+  {
+    "text": "let's just few seconds until it compiles with this visual studio working in",
+    "start": "1499570",
+    "end": "1505150"
+  },
+  {
+    "text": "virtual machine which makes it even slower than typically and let's go through this application again",
+    "start": "1505150",
+    "end": "1511120"
+  },
+  {
+    "text": "so now logs and we hit enter no this time it did not crash so you can see",
+    "start": "1511120",
+    "end": "1517150"
+  },
+  {
+    "text": "that garbage collector actually called the destructor and the object was cleaned up but generally you should not",
+    "start": "1517150",
+    "end": "1523480"
+  },
+  {
+    "text": "be doing this as this may crash your application cool so raise your hands if",
+    "start": "1523480",
+    "end": "1530350"
+  },
+  {
+    "text": "you are convinced we allocated the object on stack yes I can see some hands in the air cool because right now what",
+    "start": "1530350",
+    "end": "1537160"
+  },
+  {
+    "text": "we are going to do is we are going to do even more fancy think so generally you know how list of T works in dotnet it",
+    "start": "1537160",
+    "end": "1545350"
+  },
+  {
+    "text": "works not by storing the objects it stores the references so in C++ world it",
+    "start": "1545350",
+    "end": "1551140"
+  },
+  {
+    "text": "would be something like vector of short pointers or whatever pointers are now fashionable there but it just stores the",
+    "start": "1551140",
+    "end": "1557860"
+  },
+  {
+    "text": "references so whenever we would like to iterate through these objects so with what we do is we go to reference object",
+    "start": "1557860",
+    "end": "1564940"
+  },
+  {
+    "text": "reference object reference object so we have this ping-pong style what we are going to do is we'll implement list",
+    "start": "1564940",
+    "end": "1570850"
+  },
+  {
+    "text": "which stores the object inside its content so when iterating through the list will",
+    "start": "1570850",
+    "end": "1576670"
+  },
+  {
+    "text": "not do the ping-pong will just go object object object linearly the working hypothesis here is if we allocate",
+    "start": "1576670",
+    "end": "1583630"
+  },
+  {
+    "text": "objects next to each other during iteration we should do it faster than",
+    "start": "1583630",
+    "end": "1589360"
+  },
+  {
+    "text": "list of T why because of CPU caches etc etc so let's actually see what we are",
+    "start": "1589360",
+    "end": "1596290"
+  },
+  {
+    "text": "doing and how it works so let me just close this demo open yet another one",
+    "start": "1596290",
+    "end": "1602190"
+  },
+  {
+    "text": "okay and I'll started in the bagra and this explained you what it does so",
+    "start": "1602190",
+    "end": "1607710"
+  },
+  {
+    "text": "we have a poker class with 16 integers and what we are going to do is we'll test free collections are a list of T",
+    "start": "1607710",
+    "end": "1615330"
+  },
+  {
+    "text": "and our unsaved list so for each test we actually generate a poker with some",
+    "start": "1615330",
+    "end": "1621690"
+  },
+  {
+    "text": "values which are dependent which depend on the iteration and then when testing array in this example we create an array",
+    "start": "1621690",
+    "end": "1628650"
+  },
+  {
+    "text": "of objects we create pocos allocate them we measure this with stopwatch and print",
+    "start": "1628650",
+    "end": "1634559"
+  },
+  {
+    "text": "the insertion time at the end we reset the stopwatch and then with iterate of our objects and calculate the sum of all",
+    "start": "1634559",
+    "end": "1641370"
+  },
+  {
+    "text": "the fields and then stop the stopwatch print the result print the time we do the same for a list of T we pre",
+    "start": "1641370",
+    "end": "1648330"
+  },
+  {
+    "text": "allocated the list with the elements so we do not spend time or reallocating the list and ultimately we do the same with",
+    "start": "1648330",
+    "end": "1655260"
+  },
+  {
+    "text": "unsaved list and my test is being run three times for each collection with",
+    "start": "1655260",
+    "end": "1660539"
+  },
+  {
+    "text": "twenty million elements even though it says debug here is running in release",
+    "start": "1660539",
+    "end": "1665610"
+  },
+  {
+    "text": "just this one project and also since this is running in virtual machine results might be a little skewed but you",
+    "start": "1665610",
+    "end": "1671669"
+  },
+  {
+    "text": "can find in my blog a post actually measuring this with benchmark dotnet and",
+    "start": "1671669",
+    "end": "1676770"
+  },
+  {
+    "text": "confirming that this tends to be faster in some cases and Fillmore thinks about",
+    "start": "1676770",
+    "end": "1682049"
+  },
+  {
+    "text": "unsafe least what we do here is we have an array of integers which we use for",
+    "start": "1682049",
+    "end": "1687179"
+  },
+  {
+    "text": "storing our objects so we need to accept the the array the size of the array how",
+    "start": "1687179",
+    "end": "1692549"
+  },
+  {
+    "text": "many elements we would like to allocate and how big every element is and then when adding we do the same magic with my",
+    "start": "1692549",
+    "end": "1699090"
+  },
+  {
+    "text": "craft pointers to pointers to pointers copy things and then we also prepare a",
+    "start": "1699090",
+    "end": "1704870"
+  },
+  {
+    "text": "reference pointing to this object and we store it in our array helper array here",
+    "start": "1704870",
+    "end": "1710970"
+  },
+  {
+    "text": "so we do not need to recalculate this reference every time when we try to access the object so what we are going",
+    "start": "1710970",
+    "end": "1717720"
+  },
+  {
+    "text": "what we have as a result so you can see that first we are going with array insertion time is something between 4 &",
+    "start": "1717720",
+    "end": "1725610"
+  },
+  {
+    "text": "8 generally this is typically around 4 and 1/2 second iteration time is around",
+    "start": "1725610",
+    "end": "1731720"
+  },
+  {
+    "text": "200 milliseconds typically here it's a little lower apparently for at least we",
+    "start": "1731720",
+    "end": "1738120"
+  },
+  {
+    "text": "can see that least very similar results around four seconds but what we can see for unsaved list is",
+    "start": "1738120",
+    "end": "1744690"
+  },
+  {
+    "text": "that insertion is almost three times faster so first and also iteration is",
+    "start": "1744690",
+    "end": "1752070"
+  },
+  {
+    "text": "very similar to two lists of T and to a normal array so what we can see is our",
+    "start": "1752070",
+    "end": "1758070"
+  },
+  {
+    "text": "working hypothesis was not confirmed iteration was not faster with our",
+    "start": "1758070",
+    "end": "1764100"
+  },
+  {
+    "text": "unsaved list but insertion was faster which is actually very interesting since",
+    "start": "1764100",
+    "end": "1769530"
+  },
+  {
+    "text": "now instead of storing just one reference when adding an object to a list what we do is we copy like 60",
+    "start": "1769530",
+    "end": "1777270"
+  },
+  {
+    "text": "something bytes to the list and still it's much faster so I encourage you to",
+    "start": "1777270",
+    "end": "1783180"
+  },
+  {
+    "text": "run experiment on your machines to confirm those results or see that they",
+    "start": "1783180",
+    "end": "1788670"
+  },
+  {
+    "text": "are different actually this demo is based on a demo which was created in Java world there",
+    "start": "1788670",
+    "end": "1794820"
+  },
+  {
+    "text": "was a blogger who implemented a very similar thing in JVM because in JVM you",
+    "start": "1794820",
+    "end": "1800130"
+  },
+  {
+    "text": "also can a allocate memory the way you like anywhere you like and there this",
+    "start": "1800130",
+    "end": "1806100"
+  },
+  {
+    "text": "working hypothesis that iteration through object is faster was confirmed then there the guy got results showing",
+    "start": "1806100",
+    "end": "1813810"
+  },
+  {
+    "text": "that iterating is faster whereas adding items to a list is much slower here I",
+    "start": "1813810",
+    "end": "1819060"
+  },
+  {
+    "text": "get some different results so this is actually interesting if you are",
+    "start": "1819060",
+    "end": "1824070"
+  },
+  {
+    "text": "interested how it works under the hood you can D compile the code and see some machine code like this to figure out",
+    "start": "1824070",
+    "end": "1829980"
+  },
+  {
+    "text": "whether there is a vectorization or whatever else but we can skip this amid this for now so that was demo number 2",
+    "start": "1829980",
+    "end": "1838710"
+  },
+  {
+    "text": "so in first demo we allocated object on a stack what we actually did even though",
+    "start": "1838710",
+    "end": "1845340"
+  },
+  {
+    "text": "we did not emphasize this is we allocated the object anywhere we wanted",
+    "start": "1845340",
+    "end": "1850850"
+  },
+  {
+    "text": "anywhere it is not that we need to allocate it on a stack we can allocate it anywhere we like so in demo tool we",
+    "start": "1850850",
+    "end": "1857370"
+  },
+  {
+    "text": "use this to implement this list now the next step is actually to implement a",
+    "start": "1857370",
+    "end": "1862610"
+  },
+  {
+    "text": "full-blown normal memory allocator in.net this is the thing which we are going to do now so what we are going to",
+    "start": "1862610",
+    "end": "1870030"
+  },
+  {
+    "text": "do is let me just close things here and let me just set a start up yet",
+    "start": "1870030",
+    "end": "1876630"
+  },
+  {
+    "text": "another demo and run it so I told you in",
+    "start": "1876630",
+    "end": "1882059"
+  },
+  {
+    "text": "first demo that we allocate object on a stack which was not true actually we were just copying the object to the",
+    "start": "1882059",
+    "end": "1888149"
+  },
+  {
+    "text": "stack what we would like to do is we would like to be able to create this object from scratch and also have some",
+    "start": "1888149",
+    "end": "1895409"
+  },
+  {
+    "text": "compiler support when doing that yes we do not want to run in this unsafe world constantly so what I would like to do is",
+    "start": "1895409",
+    "end": "1902640"
+  },
+  {
+    "text": "whenever I have this object showing all the possible things primitives in am set",
+    "start": "1902640",
+    "end": "1907679"
+  },
+  {
+    "text": "cetera et cetera I would like to allocate it in this way because I cannot just call new object",
+    "start": "1907679",
+    "end": "1914880"
+  },
+  {
+    "text": "and pass the constructor parameters because I don't use new in my case what",
+    "start": "1914880",
+    "end": "1920520"
+  },
+  {
+    "text": "I would like to do is I suggest we can use an expression here instead of",
+    "start": "1920520",
+    "end": "1926010"
+  },
+  {
+    "text": "creating this object and then copying it we just described how to create the",
+    "start": "1926010",
+    "end": "1931289"
+  },
+  {
+    "text": "object using expression of func of the tab we would like to allocate and then pass all the parameters here thanks to",
+    "start": "1931289",
+    "end": "1938159"
+  },
+  {
+    "text": "that we can later examine this expression evaluate all the arguments and allocate the objects the way we",
+    "start": "1938159",
+    "end": "1945059"
+  },
+  {
+    "text": "would like so what we are actually doing here just showing you that this object is created and it has all the values and",
+    "start": "1945059",
+    "end": "1952200"
+  },
+  {
+    "text": "we can also deallocate it using by calling our allocator explicitly the",
+    "start": "1952200",
+    "end": "1957720"
+  },
+  {
+    "text": "only thing which we didn't know in demo one is how big the object is and what is",
+    "start": "1957720",
+    "end": "1963090"
+  },
+  {
+    "text": "the RTT eye what is the type handle of this object so what we are actually doing in our allocator to get a type",
+    "start": "1963090",
+    "end": "1970799"
+  },
+  {
+    "text": "handle to get our TTI address this is actually pretty easy we can just go with reflection get type and hood value and",
+    "start": "1970799",
+    "end": "1977700"
+  },
+  {
+    "text": "this is it so we want to allocate this object and now we have the type handle so we know",
+    "start": "1977700",
+    "end": "1983100"
+  },
+  {
+    "text": "how to allocate the type of this object but to get the object size what we need to do is we actually need to rely on",
+    "start": "1983100",
+    "end": "1990240"
+  },
+  {
+    "text": "some details of how the objects have the metadata is stored under the hood so if",
+    "start": "1990240",
+    "end": "1997169"
+  },
+  {
+    "text": "you D compile the code or go with debugger you can actually see that the size of the object is stored around here",
+    "start": "1997169",
+    "end": "2004909"
+  },
+  {
+    "text": "so you just get the type kondou which is pointer to the metadata of the object you need to read word",
+    "start": "2004909",
+    "end": "2010910"
+  },
+  {
+    "text": "integer which is which is four or eight bytes after the beginning and this is",
+    "start": "2010910",
+    "end": "2016309"
+  },
+  {
+    "text": "your size this is just the integer so we do this and then what we do is we can",
+    "start": "2016309",
+    "end": "2021920"
+  },
+  {
+    "text": "implement the allocator any way we we like any way we are used to like when",
+    "start": "2021920",
+    "end": "2027290"
+  },
+  {
+    "text": "writing in C so we can go with simple implementation of free lists so we get just a get a free chunk of the memory",
+    "start": "2027290",
+    "end": "2035090"
+  },
+  {
+    "text": "then we allocate this chunk if we don't have a variable memory right now we create a new object we remove it from",
+    "start": "2035090",
+    "end": "2042080"
+  },
+  {
+    "text": "calling the destructor just to be a little safer we also pin the object so it's not moved",
+    "start": "2042080",
+    "end": "2048290"
+  },
+  {
+    "text": "by the garbage collector otherwise our references would be broken and we store",
+    "start": "2048290",
+    "end": "2053388"
+  },
+  {
+    "text": "the chunks etc etc the last thing which we need to do is we would like to call a",
+    "start": "2053389",
+    "end": "2058580"
+  },
+  {
+    "text": "constructor yes how to do it so actually to call a constructor let me just figure",
+    "start": "2058580",
+    "end": "2065240"
+  },
+  {
+    "text": "out where the constructor is hold we can go two ways either we go with reflection",
+    "start": "2065240",
+    "end": "2071270"
+  },
+  {
+    "text": "actually you can call a constructor for an object multiple times with reflection you can also create objects without",
+    "start": "2071270",
+    "end": "2078169"
+  },
+  {
+    "text": "calling a constructor that's like another digression so either we go with reflection or we can go with with a code",
+    "start": "2078169",
+    "end": "2087580"
+  },
+  {
+    "text": "calling the constructor but generating intermediate language code yes so what",
+    "start": "2087580",
+    "end": "2093378"
+  },
+  {
+    "text": "we do is we create a dynamic method we emit we get IO generator we emit all the",
+    "start": "2093379",
+    "end": "2099230"
+  },
+  {
+    "text": "opcodes to actually evaluate the arguments if the arguments are value type we need to unbox them and then we",
+    "start": "2099230",
+    "end": "2107120"
+  },
+  {
+    "text": "just call the constructor and we return the object that's all we need to do and this actually works under the hood and",
+    "start": "2107120",
+    "end": "2113780"
+  },
+  {
+    "text": "we can create allocate the object anywhere we like and play with any allocator implementations we would like",
+    "start": "2113780",
+    "end": "2120950"
+  },
+  {
+    "text": "yes so we can go with free lists or with a different allocation policies like",
+    "start": "2120950",
+    "end": "2126230"
+  },
+  {
+    "text": "best bet or or lowest chunk etc etc that's it that's it when it comes to",
+    "start": "2126230",
+    "end": "2133190"
+  },
+  {
+    "text": "demo number three so now we can see that we have a full-blown allocator so we are",
+    "start": "2133190",
+    "end": "2139609"
+  },
+  {
+    "text": "happy now but there is just one thing which really irritates us we need to write this",
+    "start": "2139609",
+    "end": "2146000"
+  },
+  {
+    "text": "expression tree we need to pass this lambda to create the object what we would like to do actually is we would",
+    "start": "2146000",
+    "end": "2152930"
+  },
+  {
+    "text": "like to say new something and get this something allocated the way we like and",
+    "start": "2152930",
+    "end": "2158600"
+  },
+  {
+    "text": "in the place we like so let's actually see what does this new operator do adults under the hood so",
+    "start": "2158600",
+    "end": "2166630"
+  },
+  {
+    "text": "when you go to documentation what you can see here is that new object which is actually instruction code by the new",
+    "start": "2166630",
+    "end": "2173180"
+  },
+  {
+    "text": "operator in c-sharp it allocates a new instance of the class associated with constructor constructor here is actually",
+    "start": "2173180",
+    "end": "2181250"
+  },
+  {
+    "text": "a type handle which we pass so we pass the type describing what we want to",
+    "start": "2181250",
+    "end": "2186470"
+  },
+  {
+    "text": "allocate and then it's used to create the object and call it constructor it also initializes all the fields to 0 etc",
+    "start": "2186470",
+    "end": "2193880"
+  },
+  {
+    "text": "and calls the constructor the proper constructor so what we have is exactly",
+    "start": "2193880",
+    "end": "2199910"
+  },
+  {
+    "text": "the same what we did in demo number 3 we had a some free chunk of memory which was zeroed somewhere somewhere before",
+    "start": "2199910",
+    "end": "2207530"
+  },
+  {
+    "text": "getting it so we create we allocated the type handle of the object so we store",
+    "start": "2207530",
+    "end": "2212960"
+  },
+  {
+    "text": "the type of our instance which we are allocating we call the constructor and",
+    "start": "2212960",
+    "end": "2217970"
+  },
+  {
+    "text": "then we return the reference to this object so it happens that we are actually doing exactly the same thing as",
+    "start": "2217970",
+    "end": "2225350"
+  },
+  {
+    "text": "the new object instruction is doing under the hood so the last missing bit",
+    "start": "2225350",
+    "end": "2230720"
+  },
+  {
+    "text": "here is how to convince new object to call our code instead of allocating",
+    "start": "2230720",
+    "end": "2236150"
+  },
+  {
+    "text": "memory it used to do so before getting to all those things we will do it",
+    "start": "2236150",
+    "end": "2243800"
+  },
+  {
+    "text": "manually so let me just prepare our my last demo and set it as start a project",
+    "start": "2243800",
+    "end": "2251030"
+  },
+  {
+    "text": "what we are going to do here is we will use the allocator we wrote in previous",
+    "start": "2251030",
+    "end": "2256820"
+  },
+  {
+    "text": "demo and what we are going to do is first we allocate the object using this",
+    "start": "2256820",
+    "end": "2262850"
+  },
+  {
+    "text": "a locator just to make sure that the object is in generation 2 so we know its",
+    "start": "2262850",
+    "end": "2267890"
+  },
+  {
+    "text": "allocated by this a locator not by the normal new thing and its allocated in",
+    "start": "2267890",
+    "end": "2273200"
+  },
+  {
+    "text": "the place we would like to be then we create new object just normal ordinary new object we hijack new",
+    "start": "2273200",
+    "end": "2281420"
+  },
+  {
+    "text": "operator and we allocate yet another object the expected output of this when",
+    "start": "2281420",
+    "end": "2287450"
+  },
+  {
+    "text": "we print out all the generations for the objects is when we run this first a",
+    "start": "2287450",
+    "end": "2293359"
+  },
+  {
+    "text": "locator should be in generation zero because this is in line one six seven this is just a normal object allocated",
+    "start": "2293359",
+    "end": "2300019"
+  },
+  {
+    "text": "in generation zero yes then we allocate object using our a locator this object",
+    "start": "2300019",
+    "end": "2305479"
+  },
+  {
+    "text": "should go to generation - then we allocate to normal objects using new",
+    "start": "2305479",
+    "end": "2311239"
+  },
+  {
+    "text": "operator first of them should be allocated in generation zero and Dia the",
+    "start": "2311239",
+    "end": "2316249"
+  },
+  {
+    "text": "latter should be allocated in generation two after we hijack the the new operator since the hijacking is committed out",
+    "start": "2316249",
+    "end": "2323450"
+  },
+  {
+    "text": "here both of them are allocated in generation zero right now but what we can do if we uncomment this fink and",
+    "start": "2323450",
+    "end": "2330789"
+  },
+  {
+    "text": "recompile this discard the difference right now should be actually in this line because when we now hijack the new",
+    "start": "2330789",
+    "end": "2338059"
+  },
+  {
+    "text": "operator you can see that the last object is allocated by our a locator in",
+    "start": "2338059",
+    "end": "2343819"
+  },
+  {
+    "text": "generation 2 and the only thing we did was hijacking the new operator let's",
+    "start": "2343819",
+    "end": "2349670"
+  },
+  {
+    "text": "comment this out and do this by hand so let me start this up and recompile this application and start it again it's now",
+    "start": "2349670",
+    "end": "2356450"
+  },
+  {
+    "text": "waiting in this red line in this line just before allocating last object what",
+    "start": "2356450",
+    "end": "2362210"
+  },
+  {
+    "text": "we are going to do is we are going to use win debug again to see actually what",
+    "start": "2362210",
+    "end": "2367969"
+  },
+  {
+    "text": "happens under the hood so first let let's load sauce and then what we would",
+    "start": "2367969",
+    "end": "2374479"
+  },
+  {
+    "text": "like to do is I would like to decompile this main method to see what mashing code is running under the hood what is",
+    "start": "2374479",
+    "end": "2381559"
+  },
+  {
+    "text": "happening there so I do have a cheat sheet here to copy the commands to",
+    "start": "2381559",
+    "end": "2386749"
+  },
+  {
+    "text": "actually find the the object where it is or actually the metadata of this method",
+    "start": "2386749",
+    "end": "2392630"
+  },
+  {
+    "text": "so what it prints out here it shows that the method is in this assembly this",
+    "start": "2392630",
+    "end": "2397700"
+  },
+  {
+    "text": "module the method name is programmed at main and the treated code of the of this",
+    "start": "2397700",
+    "end": "2402769"
+  },
+  {
+    "text": "method is here so let's now D compile this code and you can see",
+    "start": "2402769",
+    "end": "2408079"
+  },
+  {
+    "text": "this is normal mashing code no assembly no see no intermediate language what we",
+    "start": "2408079",
+    "end": "2415939"
+  },
+  {
+    "text": "are doing here is we are looking at the normal machine code robots so what we",
+    "start": "2415939",
+    "end": "2421429"
+  },
+  {
+    "text": "want to do is we would like to see what is happening in this line yes in line",
+    "start": "2421429",
+    "end": "2426729"
+  },
+  {
+    "text": "171 we do have lines printed out here so we can see that line one seven one is",
+    "start": "2426729",
+    "end": "2432229"
+  },
+  {
+    "text": "compiled to this part and this part because it's not very readable I will",
+    "start": "2432229",
+    "end": "2437719"
+  },
+  {
+    "text": "show it to you using slides so what we do here is we are actually doing the",
+    "start": "2437719",
+    "end": "2444650"
+  },
+  {
+    "text": "things which new object documentation told us to do so first we store a we",
+    "start": "2444650",
+    "end": "2451339"
+  },
+  {
+    "text": "move to ECX address we move there the type of the object we would like to allocate this is this constructor which",
+    "start": "2451339",
+    "end": "2458599"
+  },
+  {
+    "text": "was mentioned by the documentation and then what we do is we call dotnet helper code Corinne for help news fast here",
+    "start": "2458599",
+    "end": "2465679"
+  },
+  {
+    "text": "when we get the output which is returned to us in EAX register we just store it",
+    "start": "2465679",
+    "end": "2472009"
+  },
+  {
+    "text": "somewhere and then we call the constructor of this object yes so calling the constructor is this part",
+    "start": "2472009",
+    "end": "2479019"
+  },
+  {
+    "text": "allocating is the first two lines so what we would like to do here is when we",
+    "start": "2479019",
+    "end": "2484609"
+  },
+  {
+    "text": "go back to our our code what we would like to do is we would like to get this address and see what it does under the",
+    "start": "2484609",
+    "end": "2492049"
+  },
+  {
+    "text": "hood I will show you this code once again on the slides but before that let's just write this address as dotnet",
+    "start": "2492049",
+    "end": "2499249"
+  },
+  {
+    "text": "a locator method so we know where it was so let's go back to slides when we do",
+    "start": "2499249",
+    "end": "2504349"
+  },
+  {
+    "text": "compile this code what it does it just does the exactly the same things as we",
+    "start": "2504349",
+    "end": "2510859"
+  },
+  {
+    "text": "did in them free so first it just gets the free chunk of memory and checks how",
+    "start": "2510859",
+    "end": "2516739"
+  },
+  {
+    "text": "many bytes they are still available in this chunk of memory so it gets the",
+    "start": "2516739",
+    "end": "2521779"
+  },
+  {
+    "text": "object size when you imagine a chunk of memory there is a pointer pointing somewhere in the middle saying that I",
+    "start": "2521779",
+    "end": "2528529"
+  },
+  {
+    "text": "used this beginning of this chunk and this part of this chunk is still available to me so I just get this",
+    "start": "2528529",
+    "end": "2534650"
+  },
+  {
+    "text": "pointer added the size and then I check whether I moved out of this chunk or not if I did not then I can just",
+    "start": "2534650",
+    "end": "2542030"
+  },
+  {
+    "text": "it means that the object fits here it can be allocated here so what we actually do is we do some bookkeeping we",
+    "start": "2542030",
+    "end": "2549170"
+  },
+  {
+    "text": "update the pointer to the to the last byte allocated we calculate the beginning address of the object and we",
+    "start": "2549170",
+    "end": "2555710"
+  },
+  {
+    "text": "just return it but if we jumped out of this free chunk then we actually need to",
+    "start": "2555710",
+    "end": "2561650"
+  },
+  {
+    "text": "call the last line here which is JIT underscore new which is like a proper method going to operating system hey I",
+    "start": "2561650",
+    "end": "2568100"
+  },
+  {
+    "text": "need some more memory please give me a setter etcetera and then allocate the object what we would like to do is we",
+    "start": "2568100",
+    "end": "2574040"
+  },
+  {
+    "text": "would like to replace this first part of this method and instead of allocating it in the chunks with dotnet knows about we",
+    "start": "2574040",
+    "end": "2580940"
+  },
+  {
+    "text": "would like to allocate them using our a locator so let's go to the code and",
+    "start": "2580940",
+    "end": "2586790"
+  },
+  {
+    "text": "oddly enough you may say actually I do have a method which is very similar to",
+    "start": "2586790",
+    "end": "2594920"
+  },
+  {
+    "text": "the method with dotnet calls very similar in terms of method signature how",
+    "start": "2594920",
+    "end": "2599990"
+  },
+  {
+    "text": "we were calling the method in dotnet if you take a look here is we just pass one",
+    "start": "2599990",
+    "end": "2605660"
+  },
+  {
+    "text": "parameter through ECX address this is the type of the object we would like to allocate so you can see that I have a",
+    "start": "2605660",
+    "end": "2611930"
+  },
+  {
+    "text": "method which is static and accepts exactly one parameter why is it static how many parameters",
+    "start": "2611930",
+    "end": "2618800"
+  },
+  {
+    "text": "would this method have if it was not static - because it would get implicit",
+    "start": "2618800",
+    "end": "2625250"
+  },
+  {
+    "text": "this pointer because we are not we do not want this parameter it's static so",
+    "start": "2625250",
+    "end": "2630410"
+  },
+  {
+    "text": "we get one pointer and we return exactly one pointer so the signature matches the",
+    "start": "2630410",
+    "end": "2635420"
+  },
+  {
+    "text": "method we would like to do what we do next is we just get the object size etc",
+    "start": "2635420",
+    "end": "2643190"
+  },
+  {
+    "text": "do some magic with a microp with pointers we allocate this object and we",
+    "start": "2643190",
+    "end": "2648770"
+  },
+  {
+    "text": "are done so the thing is how to convince dotnet to call this method instead of the original one and we can do this by",
+    "start": "2648770",
+    "end": "2655640"
+  },
+  {
+    "text": "modifying the machine code so what we need to do is let's figure out where our",
+    "start": "2655640",
+    "end": "2660920"
+  },
+  {
+    "text": "method is in the memory so if I run this command what you can see is that my",
+    "start": "2660920",
+    "end": "2667510"
+  },
+  {
+    "text": "allocate method is at this address if I now dump this method you can see it has",
+    "start": "2667510",
+    "end": "2673040"
+  },
+  {
+    "text": "lines around 89 91 so if we go to 89 it's actually here",
+    "start": "2673040",
+    "end": "2678589"
+  },
+  {
+    "text": "yeah this is the method which we are looking at right now so we can also see that this is our method for allocation",
+    "start": "2678589",
+    "end": "2686480"
+  },
+  {
+    "text": "what we can do right now let's modify the original method let's modify the dotnet method so I am now in the mashing",
+    "start": "2686480",
+    "end": "2696079"
+  },
+  {
+    "text": "code modification mode and what I want to do is I would like to modify first line of the dotnet method and do jump",
+    "start": "2696079",
+    "end": "2703420"
+  },
+  {
+    "text": "sorry for that let me make this a little bigger would what I would like to do is",
+    "start": "2703420",
+    "end": "2709849"
+  },
+  {
+    "text": "I would like to do the jump to our method so I modify the code",
+    "start": "2709849",
+    "end": "2716650"
+  },
+  {
+    "text": "sorry for that syntax error and now I",
+    "start": "2716650",
+    "end": "2722690"
+  },
+  {
+    "text": "exited this mode and my application probably crashed I need to enter this modification mode again modify it with",
+    "start": "2722690",
+    "end": "2730339"
+  },
+  {
+    "text": "this address and I'm good I'm done let's now decompile the dotnet method again just to make sure that we modified",
+    "start": "2730339",
+    "end": "2737390"
+  },
+  {
+    "text": "it correctly and yes if we now take a look at this code which we marked as the dotnet method we can see the jump is",
+    "start": "2737390",
+    "end": "2744589"
+  },
+  {
+    "text": "here and we are jumping to address 0 which is here so it looks like we are",
+    "start": "2744589",
+    "end": "2750049"
+  },
+  {
+    "text": "all good as something I did not make any typos here etc when I now hit enter in",
+    "start": "2750049",
+    "end": "2756020"
+  },
+  {
+    "text": "this you can see that yes in fact we allocated this object in generation 2",
+    "start": "2756020",
+    "end": "2762230"
+  },
+  {
+    "text": "what we did is we just jumped from the dotnet code to our allocator return the",
+    "start": "2762230",
+    "end": "2768200"
+  },
+  {
+    "text": "object and we are good to go this is how we did it but we did it manually let's now do this automatically so what I'm",
+    "start": "2768200",
+    "end": "2775400"
+  },
+  {
+    "text": "going to do is I am actually going to uncomment this line around this",
+    "start": "2775400",
+    "end": "2780410"
+  },
+  {
+    "text": "application and it's still waiting in this read line read line line yes what I",
+    "start": "2780410",
+    "end": "2787130"
+  },
+  {
+    "text": "would like to do is I would like to attach to this process to generic unsafe a lock and what I would like to do is I",
+    "start": "2787130",
+    "end": "2794180"
+  },
+  {
+    "text": "want to show you that hey this actually works the way I explained you so I'm",
+    "start": "2794180",
+    "end": "2799250"
+  },
+  {
+    "text": "hitting a I'm hitting I'm hitting what hitting enter here we are now in this",
+    "start": "2799250",
+    "end": "2804559"
+  },
+  {
+    "text": "line new object I add a breakpoint here to go to this console.writeline and I also write a other breakpoint here",
+    "start": "2804559",
+    "end": "2811250"
+  },
+  {
+    "text": "if the method if the operator was not hijacked we will just go to line 179 yes",
+    "start": "2811250",
+    "end": "2817880"
+  },
+  {
+    "text": "so now I hit continue and we are in our allocated method we can also see with",
+    "start": "2817880",
+    "end": "2823340"
+  },
+  {
+    "text": "our code stack call stack that we came from new object to our method here but",
+    "start": "2823340",
+    "end": "2828680"
+  },
+  {
+    "text": "that's not enough if I hit continue again I add breakpoint here to the next",
+    "start": "2828680",
+    "end": "2834800"
+  },
+  {
+    "text": "console I'd line method execution when I hit continue we are in a row allocate",
+    "start": "2834800",
+    "end": "2840200"
+  },
+  {
+    "text": "again why is that because in this line we are actually concatenating some",
+    "start": "2840200",
+    "end": "2846110"
+  },
+  {
+    "text": "strings so we do allocate new object so all the allocated objects are actually going through our a locator so when I",
+    "start": "2846110",
+    "end": "2853850"
+  },
+  {
+    "text": "hit continue few more times you can actually see that I'm still in this in our allocate method and there is some",
+    "start": "2853850",
+    "end": "2860390"
+  },
+  {
+    "text": "external code here because I do have enabled just my code so it's not showing me the dotnet internals under the hood",
+    "start": "2860390",
+    "end": "2867700"
+  },
+  {
+    "text": "so it looks like it's working now the question is how it works and the hijack part is actually pretty",
+    "start": "2867700",
+    "end": "2874369"
+  },
+  {
+    "text": "easy we do the same things we did manually so we have a very simple method",
+    "start": "2874369",
+    "end": "2880340"
+  },
+  {
+    "text": "which is not in lined by the just-in-time compiler we just creates a new object what I do next is I get the",
+    "start": "2880340",
+    "end": "2888619"
+  },
+  {
+    "text": "method of the address of this method I just compile it so it's available and",
+    "start": "2888619",
+    "end": "2894440"
+  },
+  {
+    "text": "then I know where the call to the dot net method is actually inside the",
+    "start": "2894440",
+    "end": "2900710"
+  },
+  {
+    "text": "machine code so I know the offset this code is prepared just for my",
+    "start": "2900710",
+    "end": "2905840"
+  },
+  {
+    "text": "architecture and debug and release mode if you would like to use this in different architectures like 64-bit",
+    "start": "2905840",
+    "end": "2912020"
+  },
+  {
+    "text": "architecture IEM architecture etc you need to add some if and if here just to",
+    "start": "2912020",
+    "end": "2918650"
+  },
+  {
+    "text": "make it just to support more more more architectures what we do next is because",
+    "start": "2918650",
+    "end": "2924800"
+  },
+  {
+    "text": "we know the address of the dotnet method we know the address of our method what we actually need to do is when we return",
+    "start": "2924800",
+    "end": "2933260"
+  },
+  {
+    "text": "the address we need to generate a piece of machine code this is one level lower",
+    "start": "2933260",
+    "end": "2939200"
+  },
+  {
+    "text": "than the assembly code because we need to also take care of which jump instruction we are actually",
+    "start": "2939200",
+    "end": "2945200"
+  },
+  {
+    "text": "using so we generate few bytes actually performing the jump the relative short",
+    "start": "2945200",
+    "end": "2951080"
+  },
+  {
+    "text": "jump with this offset with these addresses we store those bytes in memory modifying the original dotnet method and",
+    "start": "2951080",
+    "end": "2958190"
+  },
+  {
+    "text": "we're good to go and having said all of that that would be actually it there is",
+    "start": "2958190",
+    "end": "2968690"
+  },
+  {
+    "text": "a QR code pointing to my blog serious explaining all those things you can also",
+    "start": "2968690",
+    "end": "2974570"
+  },
+  {
+    "text": "find those slides there so if you want feel free to just scan this code there are also some some more posts",
+    "start": "2974570",
+    "end": "2982070"
+  },
+  {
+    "text": "explaining how to actually implement a locator which works by allocating on a stack using fod and rewriting the",
+    "start": "2982070",
+    "end": "2989510"
+  },
+  {
+    "text": "assembly code under the hood and a lot of more interesting things about mario",
+    "start": "2989510",
+    "end": "2996170"
+  },
+  {
+    "text": "memory management dotnet internals etc etc questions do you have any questions",
+    "start": "2996170",
+    "end": "3003180"
+  },
+  {
+    "text": "here was first question please",
+    "start": "3003180",
+    "end": "3007170"
+  },
+  {
+    "text": "cool the question is how does the new span in dotnet core fit here actually",
+    "start": "3009480",
+    "end": "3016930"
+  },
+  {
+    "text": "what I did is you can do very similar things with span and it looks like span",
+    "start": "3016930",
+    "end": "3023710"
+  },
+  {
+    "text": "is exactly the same things I'm doing here but they are just safe compiler",
+    "start": "3023710",
+    "end": "3028720"
+  },
+  {
+    "text": "knows what you are trying to do so it tries to stop you when you break things because I'm just generating mashing code",
+    "start": "3028720",
+    "end": "3035230"
+  },
+  {
+    "text": "like by hand this is unsafe as the title suggests it can crash and actually when",
+    "start": "3035230",
+    "end": "3040690"
+  },
+  {
+    "text": "preparing those demos it crashed pretty often it's only now which is working",
+    "start": "3040690",
+    "end": "3045730"
+  },
+  {
+    "text": "nice but with span you get the advantages of what I shown here but you have much better time say a type safety",
+    "start": "3045730",
+    "end": "3053170"
+  },
+  {
+    "text": "so actually very similar ideas and also I believe here here this last link on",
+    "start": "3053170",
+    "end": "3061090"
+  },
+  {
+    "text": "this slide is pointing to a rosaline stack a lock proposal which was there like four years ago which was actually",
+    "start": "3061090",
+    "end": "3067750"
+  },
+  {
+    "text": "trying to do what I did just automatically by the compiler so generally those things align you only",
+    "start": "3067750",
+    "end": "3074080"
+  },
+  {
+    "text": "get better type safety another question yes gathered so the",
+    "start": "3074080",
+    "end": "3106990"
+  },
+  {
+    "text": "question is basically where would we like to use this so it's say if it does not crush and it's actually better it is",
+    "start": "3106990",
+    "end": "3114640"
+  },
+  {
+    "text": "used a lot and actually it's connected related to the span of two things in game development in image processing in",
+    "start": "3114640",
+    "end": "3122500"
+  },
+  {
+    "text": "video streaming etc in those areas you pretty often need to actually go and",
+    "start": "3122500",
+    "end": "3127630"
+  },
+  {
+    "text": "read the memory directly using pointers to not copy bytes here and there to do",
+    "start": "3127630",
+    "end": "3133000"
+  },
+  {
+    "text": "that previously you had to use things like this actually one Maya one might ask why even",
+    "start": "3133000",
+    "end": "3139330"
+  },
+  {
+    "text": "bother with this microwave was this keyword do what is this keyword doing in dotnet at all before we had generics",
+    "start": "3139330",
+    "end": "3146110"
+  },
+  {
+    "text": "whenever you passed a value type to a method which was supposed to accept anything you get boxing so to avoid the",
+    "start": "3146110",
+    "end": "3153520"
+  },
+  {
+    "text": "boxing you could go with typed references to read the objects directly since we have generics right now we do",
+    "start": "3153520",
+    "end": "3159580"
+  },
+  {
+    "text": "not have boxing this use case is not like very common anymore but also at that time it was exactly the same you",
+    "start": "3159580",
+    "end": "3166750"
+  },
+  {
+    "text": "wanted to get some performance boost just just by avoiding copying of the memory here and there this is the same",
+    "start": "3166750",
+    "end": "3173020"
+  },
+  {
+    "text": "with spam you can use span to read the memory directly it's only slightly better because of type safety so",
+    "start": "3173020",
+    "end": "3179770"
+  },
+  {
+    "text": "wherever you actually want to process some data wafer and avoided redundant",
+    "start": "3179770",
+    "end": "3184870"
+  },
+  {
+    "text": "copies there it's actually a place for those things and there they are actually",
+    "start": "3184870",
+    "end": "3190390"
+  },
+  {
+    "text": "used I know there is a one big company working on some queueing system which is using things like that to manage the",
+    "start": "3190390",
+    "end": "3197860"
+  },
+  {
+    "text": "memory directly and to allocate objects directly so yeah this is not something",
+    "start": "3197860",
+    "end": "3203350"
+  },
+  {
+    "text": "which is not used at all probably when you use this you may want to go with C++",
+    "start": "3203350",
+    "end": "3208660"
+  },
+  {
+    "text": "and soompi invokes but if you want to stick with c-sharp you can do this easily with",
+    "start": "3208660",
+    "end": "3214359"
+  },
+  {
+    "text": "just unsafe and pointers etc any more",
+    "start": "3214359",
+    "end": "3220059"
+  },
+  {
+    "text": "questions yes",
+    "start": "3220059",
+    "end": "3225029"
+  },
+  {
+    "text": "which part exactly cool what we did in",
+    "start": "3231789",
+    "end": "3243099"
+  },
+  {
+    "text": "demo one is we just copied the object if you would use the same you would do the shallow copy not the big copy shallow",
+    "start": "3243099",
+    "end": "3249910"
+  },
+  {
+    "text": "copy would it work if some other code would allocate objects yes because we modified the new allocation mechanism it",
+    "start": "3249910",
+    "end": "3256630"
+  },
+  {
+    "text": "would work would the garbage collector clean up the objects properly if you",
+    "start": "3256630",
+    "end": "3262089"
+  },
+  {
+    "text": "have nested objects some of them allocated by dotnet some of them allocated by you this probably would not",
+    "start": "3262089",
+    "end": "3268420"
+  },
+  {
+    "text": "work because I'm just freeing only the objects I allocated but for all the other objects GC should clean them up at",
+    "start": "3268420",
+    "end": "3276279"
+  },
+  {
+    "text": "the right moment sometimes in the future so I would generally say like 95 percent it should work I did not test this",
+    "start": "3276279",
+    "end": "3283359"
+  },
+  {
+    "text": "extensively it may be crushing it some scenarios but generally yes this should work any more questions if there are no",
+    "start": "3283359",
+    "end": "3293049"
+  },
+  {
+    "text": "more questions feel free to I'll be wandering around here so you can talk to",
+    "start": "3293049",
+    "end": "3298150"
+  },
+  {
+    "text": "me after this after this talk and some more references for you if you are interested in dotnet internals of any",
+    "start": "3298150",
+    "end": "3305319"
+  },
+  {
+    "text": "type those are books which I highly recommend reading starting with going from top to bottom like from the highest",
+    "start": "3305319",
+    "end": "3312730"
+  },
+  {
+    "text": "low level to the lowest low level you can start with CLR via c-sharp it's like",
+    "start": "3312730",
+    "end": "3317940"
+  },
+  {
+    "text": "you could say alimentary book about low level and then actually what you need to",
+    "start": "3317940",
+    "end": "3323259"
+  },
+  {
+    "text": "do is read more and more about Windows operating system internals so Windows via C Spillers plus Windows internals",
+    "start": "3323259",
+    "end": "3329680"
+  },
+  {
+    "text": "etc if you want to know how to use wind debug how to either read the memory I",
+    "start": "3329680",
+    "end": "3335259"
+  },
+  {
+    "text": "did throughout this talk or how to track memory leaks or a deadlocks etc in debug",
+    "start": "3335259",
+    "end": "3341829"
+  },
+  {
+    "text": "is a great tool for doing that there are two books by Mario Hubert and I think there are also two Pluralsight",
+    "start": "3341829",
+    "end": "3347770"
+  },
+  {
+    "text": "courses with the same titles namely advanced Windows debugging and advanced dotnet debugging if you would like to go",
+    "start": "3347770",
+    "end": "3355210"
+  },
+  {
+    "text": "with like customizing the dotnet I mean changed their way how it allocates the",
+    "start": "3355210",
+    "end": "3360370"
+  },
+  {
+    "text": "memory how it creates the Fred etc etc you can do this by by modifying the shim",
+    "start": "3360370",
+    "end": "3367270"
+  },
+  {
+    "text": "which creates dotnet a dotnet process for you and this is nicely described as customizing the Microsoft CLR if you are",
+    "start": "3367270",
+    "end": "3374800"
+  },
+  {
+    "text": "also interested in like dotnet internals of memory structure of how it manages the memory etc everything around that",
+    "start": "3374800",
+    "end": "3381550"
+  },
+  {
+    "text": "there are two nice books shirts or CLI which describes the project rotor which",
+    "start": "3381550",
+    "end": "3387520"
+  },
+  {
+    "text": "is actually open-source dotnet ten years ago for research purposes and also book",
+    "start": "3387520",
+    "end": "3393550"
+  },
+  {
+    "text": "of the run time if you're interested in all the memory under the hood expert dotnet ill assembler great book",
+    "start": "3393550",
+    "end": "3399400"
+  },
+  {
+    "text": "explaining all the single bits of memory and generally if you like those",
+    "start": "3399400",
+    "end": "3404800"
+  },
+  {
+    "text": "low-level things maybe just to read about them not necessarily use in your applications great blog the old new",
+    "start": "3404800",
+    "end": "3410950"
+  },
+  {
+    "text": "thing where the when Raymond Chen explains all the architectures debugging etc if you're interested in things I did",
+    "start": "3410950",
+    "end": "3419470"
+  },
+  {
+    "text": "throughout this talk here are some links pointing to to allocators to hijacking new hijacking any functions in dotnet",
+    "start": "3419470",
+    "end": "3425920"
+  },
+  {
+    "text": "etc or running machine codes and if you are finally interested just waiting for",
+    "start": "3425920",
+    "end": "3432280"
+  },
+  {
+    "text": "some before few people to capture their photos and if you are interested in like",
+    "start": "3432280",
+    "end": "3439270"
+  },
+  {
+    "text": "the allocation which I told you generally there's some nice materials as",
+    "start": "3439270",
+    "end": "3445330"
+  },
+  {
+    "text": "well like debugging demos or dotnet memory structure or playing with unsafe in JVM this is actually the unsafe least",
+    "start": "3445330",
+    "end": "3452350"
+  },
+  {
+    "text": "in JVM world which I mentioned make Rev stack a lock etc all those things just",
+    "start": "3452350",
+    "end": "3458650"
+  },
+  {
+    "text": "as I said those slides are on my blog so you can find them there and yeah I think",
+    "start": "3458650",
+    "end": "3465010"
+  },
+  {
+    "text": "that would be it having said all of that I think it's time to call it the day my name is Adam full moon egg and I'd like",
+    "start": "3465010",
+    "end": "3471340"
+  },
+  {
+    "text": "to thank you for attending this talk I hope you enjoyed it thank you you",
+    "start": "3471340",
+    "end": "3476660"
+  },
+  {
+    "text": "[Applause]",
+    "start": "3476660",
+    "end": "3479789"
+  }
+]

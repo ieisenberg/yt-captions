@@ -1,0 +1,1882 @@
+[
+  {
+    "text": "all right good morning everybody I'm Craig Young and I'm going to talk to you about zombie poodle Goldendoodle and",
+    "start": "30",
+    "end": "5490"
+  },
+  {
+    "text": "he'll tell us 1.3 can save us all so a little bit about me for a second the",
+    "start": "5490",
+    "end": "12450"
+  },
+  {
+    "text": "principal security researcher with tripwire hurt and so I developed content for the tripwire IP 360 vulnerability",
+    "start": "12450",
+    "end": "18750"
+  },
+  {
+    "text": "scanner particularly various remote checks I'm also an InfoSec trainer going to be",
+    "start": "18750",
+    "end": "24630"
+  },
+  {
+    "text": "training at blackhat USA this year as well as the secretary conference in Toronto but most importantly I'm a",
+    "start": "24630",
+    "end": "30900"
+  },
+  {
+    "text": "hacker and what I'm going to talk to you about today is some of the research I've done in that capacity so what we'll talk",
+    "start": "30900",
+    "end": "38790"
+  },
+  {
+    "text": "about here I'm going to go over a little bit of the basics of how TLS works and CBC mode encryption specifically we'll",
+    "start": "38790",
+    "end": "47190"
+  },
+  {
+    "text": "look at how padding Oracle's get exploited how to scan for padding Oracle's and specifically how I was able",
+    "start": "47190",
+    "end": "52739"
+  },
+  {
+    "text": "to make my own tool for scanning for padding Oracle's that were previously unknown we'll then go over there some of",
+    "start": "52739",
+    "end": "60120"
+  },
+  {
+    "text": "the findings that I had including zombie poodle and golden doodle and wrap it all up by telling you how TLS 1.3 is going",
+    "start": "60120",
+    "end": "67020"
+  },
+  {
+    "text": "to be your Savior so at basic level everybody should know that TLS is a",
+    "start": "67020",
+    "end": "72810"
+  },
+  {
+    "text": "protocol for being able to establish some private communication channel between two untrusted peers across an",
+    "start": "72810",
+    "end": "81170"
+  },
+  {
+    "text": "untrusted link so the way this starts is that a client is going to send out a",
+    "start": "81170",
+    "end": "86460"
+  },
+  {
+    "text": "client hello message the hello message is going to contain a list of cipher suites that the client says I speak",
+    "start": "86460",
+    "end": "93299"
+  },
+  {
+    "text": "these ciphers and I have these protocols that I support server is going to respond by selecting a protocol version",
+    "start": "93299",
+    "end": "100920"
+  },
+  {
+    "text": "and a cipher suite but what is the cipher suite exactly so this is a set of",
+    "start": "100920",
+    "end": "107009"
+  },
+  {
+    "text": "algorithms that are going to define the secure communication for the TLS protocol so namely you're going to have",
+    "start": "107009",
+    "end": "113790"
+  },
+  {
+    "text": "an algorithm for key exchange and authentication message encryption and also message authentication for the",
+    "start": "113790",
+    "end": "121290"
+  },
+  {
+    "text": "purposes of this talk though we're going to be looking at message encryption this is because we're looking at how to",
+    "start": "121290",
+    "end": "127320"
+  },
+  {
+    "text": "decrypt packets from HTTP sessions so obviously the encryption and the decryption are going to be the most",
+    "start": "127320",
+    "end": "132989"
+  },
+  {
+    "text": "relevant so to talk about that we need to understand cipher types so we've got",
+    "start": "132989",
+    "end": "138480"
+  },
+  {
+    "text": "block ciphers and stream ciphers stream ciphers would be like your RC for cha-cha 20 but your block ciphers are",
+    "start": "138480",
+    "end": "146130"
+  },
+  {
+    "text": "what we're talking about today and the ones that everybody should be familiar with our AES and des in this regard what",
+    "start": "146130",
+    "end": "153570"
+  },
+  {
+    "text": "I mean by a block cipher is that it's only going to operate on fixed length blocks so for DES you've got 64-bit",
+    "start": "153570",
+    "end": "161790"
+  },
+  {
+    "text": "blocks for AES you've got 16 byte blocks 128 bits and if you have less than a",
+    "start": "161790",
+    "end": "169980"
+  },
+  {
+    "text": "block you're going to need to fill it with some extra data that data is referred to as padding when you have",
+    "start": "169980",
+    "end": "176910"
+  },
+  {
+    "text": "more than one block of data however you're going to need to define a mode of operation for the cipher so there are a",
+    "start": "176910",
+    "end": "184890"
+  },
+  {
+    "text": "few of these existing CBC ECB electronic codebook counter mode but the one that",
+    "start": "184890",
+    "end": "191280"
+  },
+  {
+    "text": "we're focusing on today is CBC or cipher block chaining you can see kind of a",
+    "start": "191280",
+    "end": "196950"
+  },
+  {
+    "text": "diagram of how this works this is borrowed from Wikipedia basically though as you encrypt you're going to be",
+    "start": "196950",
+    "end": "203940"
+  },
+  {
+    "text": "binding things back through XOR with the previous ciphertext in a chain we'll get",
+    "start": "203940",
+    "end": "209430"
+  },
+  {
+    "text": "into that in more detail the block diagram is a little confusing so an example of how this works let's say",
+    "start": "209430",
+    "end": "217260"
+  },
+  {
+    "text": "we've got an HTTP request it's this basic get request we're going to use AES",
+    "start": "217260",
+    "end": "223500"
+  },
+  {
+    "text": "encryption for it so it means that we've got 16 byte blocks that we're going to",
+    "start": "223500",
+    "end": "228959"
+  },
+  {
+    "text": "be dealing with and I've set aside a matrix of eight of these blocks as a",
+    "start": "228959",
+    "end": "234299"
+  },
+  {
+    "text": "prediction of how much data we'll need so first we'll fill in the request we",
+    "start": "234299",
+    "end": "239400"
+  },
+  {
+    "text": "give this color to indicate these are the actual plaintext bytes that are going to go up to the application and",
+    "start": "239400",
+    "end": "244790"
+  },
+  {
+    "text": "now we're going to need to authenticate this so we calculate a hash the hash is",
+    "start": "244790",
+    "end": "250650"
+  },
+  {
+    "text": "called a message authentication code and in this case it's 20 bytes because we're talking about AES with sha after we've",
+    "start": "250650",
+    "end": "259709"
+  },
+  {
+    "text": "done this we now see we've got an even number of blocks it's divisible so you might think well do we actually need to",
+    "start": "259709",
+    "end": "265919"
+  },
+  {
+    "text": "pad this message it will work with our CVC mode encryption the answer is definitively yes because if you don't",
+    "start": "265919",
+    "end": "272259"
+  },
+  {
+    "text": "you're going to have ambiguity when you unpack this when you decrypt this you won't know where is the Mac or is this",
+    "start": "272259",
+    "end": "278440"
+  },
+  {
+    "text": "padding at the end and that's because the last byte it's the last weight of the plaintext is actually a padding",
+    "start": "278440",
+    "end": "285099"
+  },
+  {
+    "text": "length specifier now this byte it's not actually considered padding it's a padding length so you can see that I've",
+    "start": "285099",
+    "end": "292990"
+  },
+  {
+    "text": "filled out in that block 0xf or 15 which is because there are 16 blocks or 16",
+    "start": "292990",
+    "end": "299979"
+  },
+  {
+    "text": "bytes rather one of them is your padding length and so then we need 15 more bytes of padding so what value are we going to",
+    "start": "299979",
+    "end": "308229"
+  },
+  {
+    "text": "put in for this paddock well if it's slv-3 it's just going to be random data",
+    "start": "308229",
+    "end": "313830"
+  },
+  {
+    "text": "it can be any non-deterministic bytes the standards just didn't specify that in TLS however meaning starting with TLS",
+    "start": "313830",
+    "end": "322630"
+  },
+  {
+    "text": "1 up till current well you're going to pad this with a determined value so the",
+    "start": "322630",
+    "end": "329080"
+  },
+  {
+    "text": "padding length byte is going to be repeated for each of the padding bytes and this is rather important but we'll",
+    "start": "329080",
+    "end": "334870"
+  },
+  {
+    "text": "see about that a little bit later so back to our example we're now going to",
+    "start": "334870",
+    "end": "340330"
+  },
+  {
+    "text": "follow the TLS model and I've padded out 15 bytes of the hex F which gives us our",
+    "start": "340330",
+    "end": "348340"
+  },
+  {
+    "text": "complete message now we want to send this through for CBC mode encryption and",
+    "start": "348340",
+    "end": "353500"
+  },
+  {
+    "text": "as you can see what's happening here is we're going to start with an initialization vector the initialization",
+    "start": "353500",
+    "end": "359979"
+  },
+  {
+    "text": "vector is not actually shown here but it would either for SSL v3 be CBC residue",
+    "start": "359979",
+    "end": "366490"
+  },
+  {
+    "text": "meaning like the last thing that was being decrypted the last block is going to end up being an input here or in",
+    "start": "366490",
+    "end": "373750"
+  },
+  {
+    "text": "newer protocols it's going to actually be explicitly set at the beginning of your message so you'll have this",
+    "start": "373750",
+    "end": "380349"
+  },
+  {
+    "text": "initialization vector that gets XOR it against the first block of the plaintext and then encrypted through the block",
+    "start": "380349",
+    "end": "386560"
+  },
+  {
+    "text": "cipher the output from that is then going to be used to XOR with the next",
+    "start": "386560",
+    "end": "392169"
+  },
+  {
+    "text": "block of the plaintext before going into the encryption and so on until we've encrypted the entire message so if we",
+    "start": "392169",
+    "end": "400270"
+  },
+  {
+    "text": "want to decrypt obviously it's a pretty trivial reversal so on the encryption side we wreak",
+    "start": "400270",
+    "end": "406659"
+  },
+  {
+    "text": "soaring and that encrypting so to decrypt we need to first decrypt and then XOR the process here this is called",
+    "start": "406659",
+    "end": "415080"
+  },
+  {
+    "text": "Mac then pad then encrypt and this is what cryptographers refer to as",
+    "start": "415080",
+    "end": "421149"
+  },
+  {
+    "text": "malleable encryption and the reason for that is that the use of XOR in this way",
+    "start": "421149",
+    "end": "426490"
+  },
+  {
+    "text": "allows for targeted plaintext manipulation and the fact that the message isn't necessarily fully",
+    "start": "426490",
+    "end": "431949"
+  },
+  {
+    "text": "authenticated so basically what this means is that if you were to flip a bit",
+    "start": "431949",
+    "end": "438339"
+  },
+  {
+    "text": "within a particular ciphertext block it's going to flip a corresponding bit",
+    "start": "438339",
+    "end": "443499"
+  },
+  {
+    "text": "in the next in the plaintext of the next ciphertext block if that makes sense",
+    "start": "443499",
+    "end": "448749"
+  },
+  {
+    "text": "we'll see this Illustrated out in a minute but what you do have to",
+    "start": "448749",
+    "end": "453939"
+  },
+  {
+    "text": "understand here is you can make this targeted change but of course you've now modified a ciphertext that's going to",
+    "start": "453939",
+    "end": "460089"
+  },
+  {
+    "text": "have random results so you will have data before your targeted manipulation",
+    "start": "460089",
+    "end": "465339"
+  },
+  {
+    "text": "getting corrupted it will be unpredictable now back in 2002 sir gave",
+    "start": "465339",
+    "end": "472689"
+  },
+  {
+    "text": "Auden a wrote a paper about padding Oracle attacks and recognized that this",
+    "start": "472689",
+    "end": "478509"
+  },
+  {
+    "text": "was not a good process this Mac than pad that encrypt and unfortunately the TLS",
+    "start": "478509",
+    "end": "485259"
+  },
+  {
+    "text": "designers did not really heed this warning because Tilles 1.1 came out a few years later still doing the same thing TLS 1.2 2008",
+    "start": "485259",
+    "end": "493659"
+  },
+  {
+    "text": "still has Mac then pad then encrypt CBC mode encryption now back to these",
+    "start": "493659",
+    "end": "500529"
+  },
+  {
+    "text": "padding Oracle's what I mean by a padding Oracle is that the server is",
+    "start": "500529",
+    "end": "505719"
+  },
+  {
+    "text": "going to reveal something to the Vic to the attacker about the plaintext that's",
+    "start": "505719",
+    "end": "511809"
+  },
+  {
+    "text": "being processed or something about the cipher text that's being processed so some of the things that an attacker",
+    "start": "511809",
+    "end": "518229"
+  },
+  {
+    "text": "might look for would be can you tell if this message being received by the server has valid padding does it have a",
+    "start": "518229",
+    "end": "524800"
+  },
+  {
+    "text": "valid Mac is it possible that you can know that the value is within a certain range or in other words that a specific",
+    "start": "524800",
+    "end": "530949"
+  },
+  {
+    "text": "bit has been set with it and even sometimes if it's just leaking out the amount of",
+    "start": "530949",
+    "end": "536980"
+  },
+  {
+    "text": "plaintext that's there that can allow an attacker to work backwards and develop some attacks in general when you've got",
+    "start": "536980",
+    "end": "545260"
+  },
+  {
+    "text": "a padding Oracle the risk is an adaptive chosen ciphertext attack there is a",
+    "start": "545260",
+    "end": "551800"
+  },
+  {
+    "text": "caveat there the attacker has to be able to actually observe what's going on on",
+    "start": "551800",
+    "end": "557440"
+  },
+  {
+    "text": "the server so this means that if the server is responding differently to different broken messages it's only",
+    "start": "557440",
+    "end": "565510"
+  },
+  {
+    "text": "going to matter if those messages or if those differences are visible to the attacker so encrypted TLS alerts that's not",
+    "start": "565510",
+    "end": "572560"
+  },
+  {
+    "text": "necessarily going to be distinguishable by the attacker readily it's possible that through some browser tricks you might be able to another thing to",
+    "start": "572560",
+    "end": "580089"
+  },
+  {
+    "text": "mention is that timing attacks work like Lucky thirteen but this is not",
+    "start": "580089",
+    "end": "586120"
+  },
+  {
+    "text": "necessarily the most practical when you're talking about an attacker over the internet because there's a lot of fluctuation of latency you can't always",
+    "start": "586120",
+    "end": "592449"
+  },
+  {
+    "text": "know where it's coming from whether it's coming from a variation in the server's algorithm or something else but",
+    "start": "592449",
+    "end": "599500"
+  },
+  {
+    "text": "generally speaking if the attacker is able to either observe this change by",
+    "start": "599500",
+    "end": "604870"
+  },
+  {
+    "text": "sniffing on the wire or by being within the victim's browser then there's the",
+    "start": "604870",
+    "end": "610420"
+  },
+  {
+    "text": "potential for this attack so to explain this to further elaborate I'm going to go through the case study of how pootle",
+    "start": "610420",
+    "end": "617230"
+  },
+  {
+    "text": "worked so we'll talk about the original poodle vulnerability which is affecting",
+    "start": "617230",
+    "end": "622540"
+  },
+  {
+    "text": "slv-3 the requirements for somebody to exploit this attack you would need to be a man-in-the-middle attack err you're",
+    "start": "622540",
+    "end": "629079"
+  },
+  {
+    "text": "going to need to have a server that's running SSL v3 with CBC mode cipher support and you need to find a victim",
+    "start": "629079",
+    "end": "636160"
+  },
+  {
+    "text": "that's actually logged in to this site with some authentication like meaning it's sending cookies or it's sending a",
+    "start": "636160",
+    "end": "642130"
+  },
+  {
+    "text": "base64 encoded passphrase or some other header with a hash in it that's going to authenticate it the first step in the",
+    "start": "642130",
+    "end": "649810"
+  },
+  {
+    "text": "attack is going to be that the man in the middle will need to downgrade the",
+    "start": "649810",
+    "end": "654819"
+  },
+  {
+    "text": "connection to SSL v3 not going to get into the details on that if you want to know more about that Google TLS fallback",
+    "start": "654819",
+    "end": "661300"
+  },
+  {
+    "text": "dance and you'll get a lot of good information but effectively that's a well-known problem and it is also a well",
+    "start": "661300",
+    "end": "667540"
+  },
+  {
+    "text": "resolved problem so the next step in this attack though is that the attacker is going to need to",
+    "start": "667540",
+    "end": "674350"
+  },
+  {
+    "text": "get some JavaScript running in the browser of their victim doesn't need to be in the origin of the website that",
+    "start": "674350",
+    "end": "680350"
+  },
+  {
+    "text": "they're trying to attack it can just be any origin because we just need to be able to use JavaScript to generate out",
+    "start": "680350",
+    "end": "686980"
+  },
+  {
+    "text": "some requests that are going to include the credentials and where the attacker is able to control some attributes of",
+    "start": "686980",
+    "end": "693009"
+  },
+  {
+    "text": "the request like either amounts of data or types of data that are in the request",
+    "start": "693009",
+    "end": "698189"
+  },
+  {
+    "text": "now once these requests are generated onto the wire the attacker is going to",
+    "start": "698189",
+    "end": "703779"
+  },
+  {
+    "text": "actually kind of move them around so they'll know the offset of some data",
+    "start": "703779",
+    "end": "710230"
+  },
+  {
+    "text": "that they're looking for in the HTTP request and they're going to take that",
+    "start": "710230",
+    "end": "715449"
+  },
+  {
+    "text": "block of ciphertext and copy it over to be the last block of ciphertext meaning",
+    "start": "715449",
+    "end": "721240"
+  },
+  {
+    "text": "it's going to be replacing the padding the resulting record from that is going to be sent off to the server looking",
+    "start": "721240",
+    "end": "727749"
+  },
+  {
+    "text": "something like this so you can see here that ciphertext block 4 is the Wadden",
+    "start": "727749",
+    "end": "733089"
+  },
+  {
+    "text": "that corresponds with plaintext block 4 and that's the one that has our cookie value in it so the attacker is going to",
+    "start": "733089",
+    "end": "740199"
+  },
+  {
+    "text": "take that copy that in place of C 7 there and send this along to the server",
+    "start": "740199",
+    "end": "747100"
+  },
+  {
+    "text": "now when the server decrypts this obviously that last block it's going to",
+    "start": "747100",
+    "end": "753850"
+  },
+  {
+    "text": "end up being pseudo-random data because you're taking some decryption intermediate value and exhorting it with",
+    "start": "753850",
+    "end": "760509"
+  },
+  {
+    "text": "these Mac bytes you can see the equation for what those pseudo random bytes would",
+    "start": "760509",
+    "end": "766779"
+  },
+  {
+    "text": "be it's the decryption of c4 with the XOR against C 6 so the attacker is going",
+    "start": "766779",
+    "end": "774250"
+  },
+  {
+    "text": "to watch what the server does if the server sends a TLS alert that means that",
+    "start": "774250",
+    "end": "779529"
+  },
+  {
+    "text": "the padding was invalid because the padding length ended up not being",
+    "start": "779529",
+    "end": "784809"
+  },
+  {
+    "text": "correct so the Mac was not correct and the server rejects the message if there",
+    "start": "784809",
+    "end": "789939"
+  },
+  {
+    "text": "is no TLS Alert however then it's going to look something like I'm sorry this is",
+    "start": "789939",
+    "end": "795939"
+  },
+  {
+    "text": "a decryption error so yeah here you can see actually if the decryption in most",
+    "start": "795939",
+    "end": "801639"
+  },
+  {
+    "text": "cases is going to end up that that last bite that padding length is not going to line up correctly so you can see here that",
+    "start": "801639",
+    "end": "808150"
+  },
+  {
+    "text": "we've got padding length 14 and when we strip away some bytes for that it's",
+    "start": "808150",
+    "end": "814300"
+  },
+  {
+    "text": "ultimately going to affect the way that the server is interpreting what the Mac bytes were and that Mac will be",
+    "start": "814300",
+    "end": "819430"
+  },
+  {
+    "text": "incorrect this is going to happen about once out of every 256 times it will not",
+    "start": "819430",
+    "end": "826210"
+  },
+  {
+    "text": "have an error so you can kind of think of the poodle attack as being for each byte you're trying to decrypt you're",
+    "start": "826210",
+    "end": "833020"
+  },
+  {
+    "text": "rolling a die with 256 sides and you're hoping that it comes up on the number 15 or 8 if you're working with des on the",
+    "start": "833020",
+    "end": "842770"
+  },
+  {
+    "text": "successful case however we randomly end up having that hex f15 is our padding",
+    "start": "842770",
+    "end": "848860"
+  },
+  {
+    "text": "length so now the packets able to be properly parsed out the MAC address make",
+    "start": "848860",
+    "end": "854110"
+  },
+  {
+    "text": "or the Mac value make sense and so now the attacker does not get an alert and",
+    "start": "854110",
+    "end": "859540"
+  },
+  {
+    "text": "they can make an inference about the data they can actually now decrypt the byte that was the last byte from that",
+    "start": "859540",
+    "end": "866620"
+  },
+  {
+    "text": "one ciphertext block so you can see how this works here we're going to take that",
+    "start": "866620",
+    "end": "872220"
+  },
+  {
+    "text": "15 and XOR with the previous ciphertext block in order to find out what the",
+    "start": "872220",
+    "end": "878260"
+  },
+  {
+    "text": "intermediary decryption value was for that last byte from the targeted ciphertext block from there we can then",
+    "start": "878260",
+    "end": "885490"
+  },
+  {
+    "text": "know what the plaintext value is by taking that intermediary value and X",
+    "start": "885490",
+    "end": "890710"
+  },
+  {
+    "text": "whoring it again with C 3s last byte hopefully this is clear so now from this",
+    "start": "890710",
+    "end": "898780"
+  },
+  {
+    "text": "point the attacker is decrypted one byte and they're going to have to adjust the request so meaning if they add on some",
+    "start": "898780",
+    "end": "907180"
+  },
+  {
+    "text": "bytes to the URL and maybe add or remove some bytes to an extra header that comes",
+    "start": "907180",
+    "end": "912370"
+  },
+  {
+    "text": "after the cookie they can keep it alliant that the bytes from their cookie are going to continuously fall into that",
+    "start": "912370",
+    "end": "919320"
+  },
+  {
+    "text": "expected location where the attacker can try and recover it so again the reason",
+    "start": "919320",
+    "end": "925540"
+  },
+  {
+    "text": "that this is working is because of the Mac then pad then encrypt there is no",
+    "start": "925540",
+    "end": "931270"
+  },
+  {
+    "text": "authentication over the padding bytes within slv-3 this was a flaw within the protocol design and it was",
+    "start": "931270",
+    "end": "939190"
+  },
+  {
+    "text": "corrected with TLS so now that TLS specifies padding bytes we really",
+    "start": "939190",
+    "end": "945310"
+  },
+  {
+    "text": "shouldn't have any more poodle problems everything should be good but back at the time when poodle was disclosed other",
+    "start": "945310",
+    "end": "952180"
+  },
+  {
+    "text": "people got the idea you know you could just use SSL v3 on pad mechanism in a",
+    "start": "952180",
+    "end": "958149"
+  },
+  {
+    "text": "TLS implementation and that would have this problem too so several people made",
+    "start": "958149",
+    "end": "963190"
+  },
+  {
+    "text": "some tools and started scanning the internet and found yeah there were several vendors that were for",
+    "start": "963190",
+    "end": "969910"
+  },
+  {
+    "text": "some reason using the SSL v3 on padding functionality within TLS connections so",
+    "start": "969910",
+    "end": "975850"
+  },
+  {
+    "text": "the result that we have here is poodle is exploitable again but these are not",
+    "start": "975850",
+    "end": "981610"
+  },
+  {
+    "text": "protocol flaws these are implementation flaws so patches come out and everybody should be",
+    "start": "981610",
+    "end": "987790"
+  },
+  {
+    "text": "good right well maybe but maybe not so poodle TLS is specifically this",
+    "start": "987790",
+    "end": "995290"
+  },
+  {
+    "text": "problem of the ssl on pad function being used in TLS so the way that people would",
+    "start": "995290",
+    "end": "1001980"
+  },
+  {
+    "text": "test for this is obviously to just take a client make the client use the SSL v3",
+    "start": "1001980",
+    "end": "1007380"
+  },
+  {
+    "text": "padding functionality and see if you're able to connect to the server if you're able to connect to the server using that",
+    "start": "1007380",
+    "end": "1013920"
+  },
+  {
+    "text": "as Sylvie 3 padding mechanism it means that the server has not actually validated the padding on your finished",
+    "start": "1013920",
+    "end": "1020339"
+  },
+  {
+    "text": "message which probably means that they're just using that SSL v3 on padding function the problem with this",
+    "start": "1020339",
+    "end": "1027300"
+  },
+  {
+    "text": "test I mean so correct this test is good for poodle the problem with it is that",
+    "start": "1027300",
+    "end": "1032459"
+  },
+  {
+    "text": "it doesn't match the reality of what an attack looks like as you saw in the",
+    "start": "1032459",
+    "end": "1038150"
+  },
+  {
+    "text": "workflow that we went through there there was no mention of altering a finished message in the real attack the",
+    "start": "1038150",
+    "end": "1044550"
+  },
+  {
+    "text": "attacker is going to allow that finished message to flow allow the connection to be established and then they're going to",
+    "start": "1044550",
+    "end": "1051240"
+  },
+  {
+    "text": "start messing with the connection after its application down on the line so this",
+    "start": "1051240",
+    "end": "1057120"
+  },
+  {
+    "text": "brought a few questions to mind namely are there actually stacks out there",
+    "start": "1057120",
+    "end": "1062160"
+  },
+  {
+    "text": "TLS stacks that is where they're going to behave differently if I am messing up",
+    "start": "1062160",
+    "end": "1067559"
+  },
+  {
+    "text": "the padding after the and shake as opposed to before or during the handshake and I was also curious",
+    "start": "1067559",
+    "end": "1073720"
+  },
+  {
+    "text": "because I had previously done this research on black campaka Oracle's and we found that there were a number of",
+    "start": "1073720",
+    "end": "1080500"
+  },
+  {
+    "text": "other side channels that people hadn't really been looking at like connection signals and whatnot so I was curious",
+    "start": "1080500",
+    "end": "1086260"
+  },
+  {
+    "text": "about whether CVC padding articles would also have ability to be exploited through less known side channels and",
+    "start": "1086260",
+    "end": "1094390"
+  },
+  {
+    "text": "finally of course I wanted to know if this is actually a problem on the Internet today so this is 2019 we've",
+    "start": "1094390",
+    "end": "1100390"
+  },
+  {
+    "text": "been talking about CVC padding Oracle's for 17 years now so ideally there",
+    "start": "1100390",
+    "end": "1105789"
+  },
+  {
+    "text": "shouldn't really be much of anything on the internet that still has this but to find out I needed to build a new tool",
+    "start": "1105789",
+    "end": "1112179"
+  },
+  {
+    "text": "come up with some new test cases and then do some scanning of top-ranked sites so some internet topless in order",
+    "start": "1112179",
+    "end": "1120549"
+  },
+  {
+    "text": "to get started with the tool I had remembered back to when poodle would first come out and I had found on the",
+    "start": "1120549",
+    "end": "1125980"
+  },
+  {
+    "text": "Imperial violet blog a very cool proof-of-concept from Adam Langley where",
+    "start": "1125980",
+    "end": "1131230"
+  },
+  {
+    "text": "he patched the crypto TLS library with Ingo and basically just told that to",
+    "start": "1131230",
+    "end": "1137169"
+  },
+  {
+    "text": "have a flag to say all right used broken padding and this was pretty effective",
+    "start": "1137169",
+    "end": "1142299"
+  },
+  {
+    "text": "for finding pootle TLS exposures all I needed to do from there really was to",
+    "start": "1142299",
+    "end": "1149010"
+  },
+  {
+    "text": "make the change a little bit less aggressive so rather than just always using this broken padding mode had to",
+    "start": "1149010",
+    "end": "1155260"
+  },
+  {
+    "text": "figure out a way to actually recognize on the connection when there's",
+    "start": "1155260",
+    "end": "1161740"
+  },
+  {
+    "text": "application data as opposed to handshake data the next thing that I was thinking",
+    "start": "1161740",
+    "end": "1169000"
+  },
+  {
+    "text": "about is how to distinguish the different error states so one of the",
+    "start": "1169000",
+    "end": "1174309"
+  },
+  {
+    "text": "things we looked at in robot was the amount of data that was coming back some servers would send to TLS alerts rather",
+    "start": "1174309",
+    "end": "1180429"
+  },
+  {
+    "text": "than one TLS Alert for certain errors and also it's possible like with poodle that you're going to get data back even",
+    "start": "1180429",
+    "end": "1187690"
+  },
+  {
+    "text": "though there were padding errors and that's going to tell you something and another big one is TCP headers so how is",
+    "start": "1187690",
+    "end": "1194740"
+  },
+  {
+    "text": "the connection being established is it being torn down with a reset a fin is the socket just being left open maybe",
+    "start": "1194740",
+    "end": "1202270"
+  },
+  {
+    "text": "you've got something else like a push flag that comes up in random places but again whatever errors",
+    "start": "1202270",
+    "end": "1210400"
+  },
+  {
+    "text": "that we find they do need to be observable at some point for this to actually be exploitable so I'm going to",
+    "start": "1210400",
+    "end": "1218799"
+  },
+  {
+    "text": "tell you about the test cases that I chose in a minute but first to understand what the test cases are this",
+    "start": "1218799",
+    "end": "1225040"
+  },
+  {
+    "text": "means that we're going to complete a handshake and then we're going to send an HTTP request where the padding has",
+    "start": "1225040",
+    "end": "1231160"
+  },
+  {
+    "text": "been broken in specific ways based on these test cases we're then going to observe and record how the system",
+    "start": "1231160",
+    "end": "1238299"
+  },
+  {
+    "text": "responded and you know did the socket abort did it allow me to just time out",
+    "start": "1238299",
+    "end": "1245190"
+  },
+  {
+    "text": "the from each test case the results are going to be compared and it should be",
+    "start": "1245190",
+    "end": "1251470"
+  },
+  {
+    "text": "that for a secure server any error that I throw at it I'm not going to be able to tell the difference of why it triggered that",
+    "start": "1251470",
+    "end": "1258010"
+  },
+  {
+    "text": "error so if I do see something that can be distinguished I'm going to assume",
+    "start": "1258010",
+    "end": "1263590"
+  },
+  {
+    "text": "that that is a vulnerability like I said though inconsistent responses they might",
+    "start": "1263590",
+    "end": "1271150"
+  },
+  {
+    "text": "not be exploitable so something that I do to help improve the accuracy of the",
+    "start": "1271150",
+    "end": "1276640"
+  },
+  {
+    "text": "scans is they assume that all hosts need to be triple checked that if you don't get the same exact responses from a host",
+    "start": "1276640",
+    "end": "1283150"
+  },
+  {
+    "text": "after three rounds of sending each test case that you should consider this interesting but not necessarily",
+    "start": "1283150",
+    "end": "1289809"
+  },
+  {
+    "text": "vulnerable because in reality and attackers probably not gonna be able to do much with that so the test cases that",
+    "start": "1289809",
+    "end": "1297490"
+  },
+  {
+    "text": "I started out with when I started this project in August 2018 we've got four",
+    "start": "1297490",
+    "end": "1304090"
+  },
+  {
+    "text": "test cases to cover basic scenarios that I thought about that could affect these",
+    "start": "1304090",
+    "end": "1310600"
+  },
+  {
+    "text": "so we'll go through these one by one well actually in a second rule so after",
+    "start": "1310600",
+    "end": "1316780"
+  },
+  {
+    "text": "August I spent some time working on this I found some bugs in my code fix some",
+    "start": "1316780",
+    "end": "1323020"
+  },
+  {
+    "text": "problems with edge cases related to certain ciphers being selected and I also expanded my knowledge about padding",
+    "start": "1323020",
+    "end": "1329260"
+  },
+  {
+    "text": "Oracle's I learned more about the beast attack and I learned from colleagues at Roy University book home about an",
+    "start": "1329260",
+    "end": "1336280"
+  },
+  {
+    "text": "openness self law involving zero byte record and finally I challenged some of the assumptions that I made about how these",
+    "start": "1336280",
+    "end": "1342970"
+  },
+  {
+    "text": "things work and I came up with an additional test case and also expanded",
+    "start": "1342970",
+    "end": "1348970"
+  },
+  {
+    "text": "some of my other test cases so in the end we'll talk about datasets of my scans this is the March scan set those",
+    "start": "1348970",
+    "end": "1357130"
+  },
+  {
+    "text": "first four test cases is what will be described as the initial scans so for",
+    "start": "1357130",
+    "end": "1363010"
+  },
+  {
+    "text": "the test cases this first one is going to be having valid padding but an invalid Mac now the reason this is valid",
+    "start": "1363010",
+    "end": "1369730"
+  },
+  {
+    "text": "padding is because it ends with a 0 what that means is that there's zero length or zero bytes needed for padding and the",
+    "start": "1369730",
+    "end": "1377169"
+  },
+  {
+    "text": "server is just going to interpret the rest of the bytes or the twenty or however many is appropriate for this",
+    "start": "1377169",
+    "end": "1383559"
+  },
+  {
+    "text": "particular cipher number of bytes as Mac values so that's not going to be right",
+    "start": "1383559",
+    "end": "1390130"
+  },
+  {
+    "text": "obviously the chances of that ending up being a valid Macker infinitesimally",
+    "start": "1390130",
+    "end": "1395380"
+  },
+  {
+    "text": "small so we can assume that this is invalid Mac with valid padding the",
+    "start": "1395380",
+    "end": "1400600"
+  },
+  {
+    "text": "second test case that I thought about was what happens if the server receives a message but it doesn't actually have",
+    "start": "1400600",
+    "end": "1406870"
+  },
+  {
+    "text": "enough bytes to unpack it so we send say an 80 byte message but we say there's 255 bytes of padding how is it going to",
+    "start": "1406870",
+    "end": "1414490"
+  },
+  {
+    "text": "respond and also just as a note initially I did implement this as just",
+    "start": "1414490",
+    "end": "1420910"
+  },
+  {
+    "text": "having the last block as all FS but when I came back to this in March and",
+    "start": "1420910",
+    "end": "1427690"
+  },
+  {
+    "text": "expanded on my work a little bit I ended up realizing that you really could as an attacker create multiple blocks of",
+    "start": "1427690",
+    "end": "1433990"
+  },
+  {
+    "text": "crafted text and so I extended out this test case to be filling up the entire record with all FS so it is true",
+    "start": "1433990",
+    "end": "1442080"
+  },
+  {
+    "text": "incomplete invalid padding without any record and without any Mac the third",
+    "start": "1442080",
+    "end": "1447820"
+  },
+  {
+    "text": "test case is just basically your poodle test case we've got SSL v3 style padding",
+    "start": "1447820",
+    "end": "1453270"
+  },
+  {
+    "text": "where the server will not be able to validate the bites and test case number",
+    "start": "1453270",
+    "end": "1459040"
+  },
+  {
+    "text": "four is going to be having a missing Mac so that means the padding length is",
+    "start": "1459040",
+    "end": "1464049"
+  },
+  {
+    "text": "going to be exactly the length of the record and once again initially in March",
+    "start": "1464049",
+    "end": "1469600"
+  },
+  {
+    "text": "I started just by doing the last block because that's what a poodle attacker would do with the increased knowledge of beasts I",
+    "start": "1469600",
+    "end": "1477039"
+  },
+  {
+    "text": "ended up expanding this so that all of the blocks would have this value so that",
+    "start": "1477039",
+    "end": "1482119"
+  },
+  {
+    "text": "it would actually be valid padding rather than incomplete padding and then",
+    "start": "1482119",
+    "end": "1489619"
+  },
+  {
+    "text": "finally the last test case that's in here I can't really take credit for this one because this came from your ax Sam",
+    "start": "1489619",
+    "end": "1496759"
+  },
+  {
+    "text": "Roffe ski Robert Margot and Nimrod Avram who I collaborated with on some research",
+    "start": "1496759",
+    "end": "1502339"
+  },
+  {
+    "text": "but basically the idea here is that we've got a zero length record so we're leaving enough data that there is a Mac",
+    "start": "1502339",
+    "end": "1509419"
+  },
+  {
+    "text": "and padding but nothing else and this can trigger some problems with certain OpenSSL builds so I put all these test",
+    "start": "1509419",
+    "end": "1518869"
+  },
+  {
+    "text": "cases into my tool and I started scanning the lab at tripwire to see what",
+    "start": "1518869",
+    "end": "1524359"
+  },
+  {
+    "text": "would come up I found a lot of targets I validate admira Zulte sagessa tripwire IP 360 tool and found that things were",
+    "start": "1524359",
+    "end": "1532700"
+  },
+  {
+    "text": "as expected except one one thing stood out the Cisco is a that had CV 2015",
+    "start": "1532700",
+    "end": "1539169"
+  },
+  {
+    "text": "44:58 this should not have had poodle but it was matching my thing so I looked",
+    "start": "1539169",
+    "end": "1545989"
+  },
+  {
+    "text": "into this bug and found that it had been previously found and called Mase",
+    "start": "1545989",
+    "end": "1552549"
+  },
+  {
+    "text": "basically it's the problem was that the caveum network accelerator in this device was having Mac validation",
+    "start": "1552549",
+    "end": "1559519"
+  },
+  {
+    "text": "disabled now I look at this bug and I see a classic padding Oracle but miter",
+    "start": "1559519",
+    "end": "1567169"
+  },
+  {
+    "text": "looked at this bug and they said could allow a man-in-the-middle attack errs to spoof TLS content Cisco they were more",
+    "start": "1567169",
+    "end": "1575179"
+  },
+  {
+    "text": "direct in saying a successful exploit of this vulnerability does not allow an attacker to decrypt the packets and I",
+    "start": "1575179",
+    "end": "1582259"
+  },
+  {
+    "text": "saw this as a challenge and I took that challenge so to me you should be able to",
+    "start": "1582259",
+    "end": "1589759"
+  },
+  {
+    "text": "exploit this pretty similar to poodle so you've got a man in the middle you've",
+    "start": "1589759",
+    "end": "1596269"
+  },
+  {
+    "text": "got a victim that's using CBC ciphers and ultimately you're going to be able to steal some",
+    "start": "1596269",
+    "end": "1602340"
+  },
+  {
+    "text": "secret information like a session cookie or an authentication header of some other sort the difference is that",
+    "start": "1602340",
+    "end": "1609289"
+  },
+  {
+    "text": "Goldendoodle as I'm going to name this is much faster than poodle because the",
+    "start": "1609289",
+    "end": "1615419"
+  },
+  {
+    "text": "decryption is deterministic as we'll see in a moment so the trick here is that because the Mac bytes are not being",
+    "start": "1615419",
+    "end": "1622770"
+  },
+  {
+    "text": "validated we're actually able to set a guess in that block that I've labeled G",
+    "start": "1622770",
+    "end": "1628590"
+  },
+  {
+    "text": "there and use that to influence the decryption so that we can actually validate whether or not a guess that we",
+    "start": "1628590",
+    "end": "1635669"
+  },
+  {
+    "text": "have for a particular plaintext byte is correct so in that way we can iteratively go through all possible",
+    "start": "1635669",
+    "end": "1641250"
+  },
+  {
+    "text": "characters and brute force decrypt this so you can see there the equation for",
+    "start": "1641250",
+    "end": "1647520"
+  },
+  {
+    "text": "how we're calculating this but basically we're going to guess the plaintext value",
+    "start": "1647520",
+    "end": "1655049"
+  },
+  {
+    "text": "and use that by exhorting with the previous ciphertext to come up with what would have been the block cipher",
+    "start": "1655049",
+    "end": "1661380"
+  },
+  {
+    "text": "decryption output from this targeted ciphertext block if our guess was",
+    "start": "1661380",
+    "end": "1666750"
+  },
+  {
+    "text": "correct now using that we basically just fix that value into our guest spot and",
+    "start": "1666750",
+    "end": "1673340"
+  },
+  {
+    "text": "if it ends up that our guess was correct then these numbers are going to cancel",
+    "start": "1673340",
+    "end": "1678570"
+  },
+  {
+    "text": "out because you're going to be x soaring something against itself that gives you 0 which is going to be your valid",
+    "start": "1678570",
+    "end": "1683850"
+  },
+  {
+    "text": "padding so you can see here this is what it would look like if our guess is",
+    "start": "1683850",
+    "end": "1690299"
+  },
+  {
+    "text": "correct you've got the padding length being 0 the Mac is wrong but the server",
+    "start": "1690299",
+    "end": "1695940"
+  },
+  {
+    "text": "doesn't care so as I was saying the attacker is going to now be able to for",
+    "start": "1695940",
+    "end": "1701940"
+  },
+  {
+    "text": "each intercepted request make a guess or validate a guess for what one targeted",
+    "start": "1701940",
+    "end": "1708059"
+  },
+  {
+    "text": "byte is this means that as opposed to poodle where you've got an average of",
+    "start": "1708059",
+    "end": "1713850"
+  },
+  {
+    "text": "256 requests for every byte with golden doodle any byte could be decrypted in at",
+    "start": "1713850",
+    "end": "1719280"
+  },
+  {
+    "text": "most 255 requests and frankly though because HTTP is a plain text protocol",
+    "start": "1719280",
+    "end": "1725700"
+  },
+  {
+    "text": "you're limited to these printable ASCII characters 95 of them which means that",
+    "start": "1725700",
+    "end": "1731010"
+  },
+  {
+    "text": "you've really only got 90 for maximum requests that you're going to need to do before no any bite that might be realistically",
+    "start": "1731010",
+    "end": "1737909"
+  },
+  {
+    "text": "found within an HTTP packet and there's also other interesting cases like this",
+    "start": "1737909",
+    "end": "1744209"
+  },
+  {
+    "text": "Cisco is a for example the web VPN mode on it it uses a hexadecimal session ID",
+    "start": "1744209",
+    "end": "1750859"
+  },
+  {
+    "text": "all with lowercase I think it is letters so in that case you're talking about 15",
+    "start": "1750859",
+    "end": "1757079"
+  },
+  {
+    "text": "requests for each byte that you're trying to decrypt so I made a perfect concept of this it went very easily I",
+    "start": "1757079",
+    "end": "1764940"
+  },
+  {
+    "text": "did it in Python using IP tables it wasn't like a full realistic exploit scenario but rather just having curl",
+    "start": "1764940",
+    "end": "1771839"
+  },
+  {
+    "text": "being the victim running in a loop and redirecting my traffic through IP tables to my script I tested this on the sslvpn",
+    "start": "1771839",
+    "end": "1780149"
+  },
+  {
+    "text": "interface from an SA running 9.1 subversion 6 and it did in fact work so",
+    "start": "1780149",
+    "end": "1788359"
+  },
+  {
+    "text": "the next finding that I had while I was looking through this is called zombie poodle this is again not poodle but it",
+    "start": "1788359",
+    "end": "1796079"
+  },
+  {
+    "text": "is similar so poodle again is specifically when you're talking about the use of the SSL v3 padding mechanism",
+    "start": "1796079",
+    "end": "1802589"
+  },
+  {
+    "text": "in TLS this is something different what's happening here is you're looking",
+    "start": "1802589",
+    "end": "1809429"
+  },
+  {
+    "text": "for any types of signals that are going to indicate that non-deterministic padding and use those with an algorithm",
+    "start": "1809429",
+    "end": "1817019"
+  },
+  {
+    "text": "that is the same as poodle except the Oracle is going to be different so the",
+    "start": "1817019",
+    "end": "1823320"
+  },
+  {
+    "text": "way that I look at this for at least the most common zombie poodle it's almost like an inversion of the poodle Oracle",
+    "start": "1823320",
+    "end": "1829769"
+  },
+  {
+    "text": "so with poodle you're looking for an alert and when that alert happens it means that your data was not good when",
+    "start": "1829769",
+    "end": "1836849"
+  },
+  {
+    "text": "the alert is not there your data was good a positive Oracle response but with zombie poodle in other words you've got",
+    "start": "1836849",
+    "end": "1842940"
+  },
+  {
+    "text": "it that when you get an alert it actually is oftentimes telling you that your Oracle was positive so I turned my",
+    "start": "1842940",
+    "end": "1851609"
+  },
+  {
+    "text": "scanner onto the Alexa top 1 million and I did this because most of the popular",
+    "start": "1851609",
+    "end": "1857549"
+  },
+  {
+    "text": "stacks that exist on the Internet are going to be found within the Alexa top list here and there's at this point now",
+    "start": "1857549",
+    "end": "1865079"
+  },
+  {
+    "text": "like 85% of the hosts actually do have HTTPS running and as luck would have it I had previous",
+    "start": "1865079",
+    "end": "1871920"
+  },
+  {
+    "text": "datasets from doing research into the blank embark Oracle's last year on robot",
+    "start": "1871920",
+    "end": "1878280"
+  },
+  {
+    "text": "research so I was able to correlate a lot of this data and kind of get a sense for what vendors might be out there",
+    "start": "1878280",
+    "end": "1885320"
+  },
+  {
+    "text": "the first scans that I did were conducted between August and December 2018 and I was able to identify a",
+    "start": "1885320",
+    "end": "1893730"
+  },
+  {
+    "text": "hundred different behaviors among all of the targets a lot of these were like one",
+    "start": "1893730",
+    "end": "1900840"
+  },
+  {
+    "text": "officer to office meaning you would have just this one server happens to have an",
+    "start": "1900840",
+    "end": "1905970"
+  },
+  {
+    "text": "EO F for this one error none of the others do but there were actually 46 of",
+    "start": "1905970",
+    "end": "1911070"
+  },
+  {
+    "text": "them that appeared on at least 10 servers overall there were about 5,800",
+    "start": "1911070",
+    "end": "1917970"
+  },
+  {
+    "text": "that I deemed to be readily exploitable and this is only counting ones that had consistent observable X our Oracles of",
+    "start": "1917970",
+    "end": "1926420"
+  },
+  {
+    "text": "these there were less than a thousand that appeared to me to be like a known",
+    "start": "1926420",
+    "end": "1931830"
+  },
+  {
+    "text": "poodle TLS vulnerability there were about a thousand of them that were Goldendoodle and then the rest of them",
+    "start": "1931830",
+    "end": "1938310"
+  },
+  {
+    "text": "seemed to be zombie poodle when I extended my test tool and did some more",
+    "start": "1938310",
+    "end": "1945450"
+  },
+  {
+    "text": "scans and this is meanwhile after three different public advisories had been released Citrix f5 and Oracle I found 129",
+    "start": "1945450",
+    "end": "1955020"
+  },
+  {
+    "text": "discernible behaviors and part of this is because I extended my validation for what kind of signals I was looking for",
+    "start": "1955020",
+    "end": "1961980"
+  },
+  {
+    "text": "like I added in some code to say after we've sent our record and we've waited a",
+    "start": "1961980",
+    "end": "1967080"
+  },
+  {
+    "text": "little while let's try and close the TLS session which means writing on to the socket which means that we're possibly",
+    "start": "1967080",
+    "end": "1973980"
+  },
+  {
+    "text": "going to get another error condition back that's going to reveal whether the session is still open or whether the remote peer has terminated it other",
+    "start": "1973980",
+    "end": "1981720"
+  },
+  {
+    "text": "improvements that I made I had problems initially that I mentioned where there were edge cases around the Mac length",
+    "start": "1981720",
+    "end": "1988080"
+  },
+  {
+    "text": "for different cipher suites which could have caused me to miss some host and I",
+    "start": "1988080",
+    "end": "1994260"
+  },
+  {
+    "text": "also extended out my test cases so that it wasn't just messing with the last block but also throughout the packet",
+    "start": "1994260",
+    "end": "2001940"
+  },
+  {
+    "text": "in the end with this data set collected earlier this month March 11th to 12th there were nearly 8,000 domains with",
+    "start": "2001940",
+    "end": "2009320"
+  },
+  {
+    "text": "Oracle's but I actually only classified about three thousand six hundred and eighty nine of them about as observable",
+    "start": "2009320",
+    "end": "2016790"
+  },
+  {
+    "text": "and that means the other ones a lot of them were encrypted TLS alerts which means somebody might be able to exploit",
+    "start": "2016790",
+    "end": "2023960"
+  },
+  {
+    "text": "them but it's going to take some JavaScript kung-fu or something so",
+    "start": "2023960",
+    "end": "2030190"
+  },
+  {
+    "text": "overall we're looking at about one point six percent of the TLS enabled Alexa top",
+    "start": "2030190",
+    "end": "2036200"
+  },
+  {
+    "text": "100,000 sites having exploitable TLS padding Oracle's and overall there's",
+    "start": "2036200",
+    "end": "2042830"
+  },
+  {
+    "text": "about 1% this covers a lot of different important sites like couple u.s. credit",
+    "start": "2042830",
+    "end": "2049730"
+  },
+  {
+    "text": "reporting agencies several government agencies military organizations from around the world lots of commerce sites and bill paying",
+    "start": "2049730",
+    "end": "2057950"
+  },
+  {
+    "text": "systems all sorts of things that somebody might actually want to attack and another thing I want to draw your",
+    "start": "2057950",
+    "end": "2064760"
+  },
+  {
+    "text": "attention to here is 1.6% this is for the top 100,000 versus 1% for all of",
+    "start": "2064760",
+    "end": "2071780"
+  },
+  {
+    "text": "them that tells me that again just like with robot the distribution is vulnerable systems is heavier on the",
+    "start": "2071780",
+    "end": "2078919"
+  },
+  {
+    "text": "sites that are more popular which is also probably meaning that these are the sites that are spending more money and",
+    "start": "2078920",
+    "end": "2085389"
+  },
+  {
+    "text": "I'll let you make your own conclusions about that but I feel that this says some things about the value of some of",
+    "start": "2085390",
+    "end": "2092750"
+  },
+  {
+    "text": "these middle boxes and the quality of their implementations so I'll also note",
+    "start": "2092750",
+    "end": "2098420"
+  },
+  {
+    "text": "there are a lot more hosts that are out there that are vulnerable I have direct knowledge that another project is going",
+    "start": "2098420",
+    "end": "2103940"
+  },
+  {
+    "text": "to be revealing that as well some of the things that I missed that I know that I",
+    "start": "2103940",
+    "end": "2109160"
+  },
+  {
+    "text": "missed kind of intentionally there are cases where a padding Oracle is only",
+    "start": "2109160",
+    "end": "2114500"
+  },
+  {
+    "text": "going to exhibit if you select a certain protocol and a certain cipher my test",
+    "start": "2114500",
+    "end": "2120560"
+  },
+  {
+    "text": "was not doing that my test was just connecting and using whatever preference is this the server had the reason for",
+    "start": "2120560",
+    "end": "2127700"
+  },
+  {
+    "text": "this is that in reality if somebody is going to exploit this it's going to be pretty unlikely that they're going to be",
+    "start": "2127700",
+    "end": "2133940"
+  },
+  {
+    "text": "able to force the selection of a particular ciphering protocol version at this point so the most interesting cases are what",
+    "start": "2133940",
+    "end": "2140510"
+  },
+  {
+    "text": "the server's defaults are also I want to note that I've got five test cases here",
+    "start": "2140510",
+    "end": "2146440"
+  },
+  {
+    "text": "there are definitely a lot more things that you could do so there are",
+    "start": "2146440",
+    "end": "2152720"
+  },
+  {
+    "text": "trade-offs with that though I was using a five dollar VPS machine to scan the",
+    "start": "2152720",
+    "end": "2157970"
+  },
+  {
+    "text": "Internet in three days to three days wouldn't be able to do that if I was extending out this test so far I also",
+    "start": "2157970",
+    "end": "2165560"
+  },
+  {
+    "text": "want to note something that I'm casually calling sleeping poodle and that's basically that there's poodle TLS",
+    "start": "2165560",
+    "end": "2171980"
+  },
+  {
+    "text": "problems that they really are slv-3",
+    "start": "2171980",
+    "end": "2178250"
+  },
+  {
+    "text": "padding mode being used within the application data but not in the handshake so to understand this you have",
+    "start": "2178250",
+    "end": "2185150"
+  },
+  {
+    "text": "to know that there's multiple protocols within the TLS protocol you can check out my blog for more details on that but",
+    "start": "2185150",
+    "end": "2191480"
+  },
+  {
+    "text": "basically you can have a separate implementation for handshake and application data and there are a number",
+    "start": "2191480",
+    "end": "2196700"
+  },
+  {
+    "text": "of hosts out there and they seem to so with these hosts you could scan with my pad check tool and you'll see that it",
+    "start": "2196700",
+    "end": "2202880"
+  },
+  {
+    "text": "says poodle but if you scanned with something like as cell labs or some other proper portal TLS test tool it's",
+    "start": "2202880",
+    "end": "2211400"
+  },
+  {
+    "text": "not going to recognize that as vulnerable so the disclosures that have",
+    "start": "2211400",
+    "end": "2216530"
+  },
+  {
+    "text": "been going on as I mentioned Citrix and f5 have both released advisories already",
+    "start": "2216530",
+    "end": "2222280"
+  },
+  {
+    "text": "each of these vendors had exposure for both zombie poodle and Goldendoodle but",
+    "start": "2222280",
+    "end": "2227810"
+  },
+  {
+    "text": "it was predominantly zombie poodle that I was seeing with the Citrix host and predominantly goldendoodle that I was",
+    "start": "2227810",
+    "end": "2234050"
+  },
+  {
+    "text": "seeing with the five hosts but it's important to note f5 was by far not the",
+    "start": "2234050",
+    "end": "2240290"
+  },
+  {
+    "text": "biggest offender of goldendoodle hosts there are several other vendors that I",
+    "start": "2240290",
+    "end": "2246410"
+  },
+  {
+    "text": "have ongoing communications with who are trying to figure out whether or not it's their product or an IPS in line so I'm",
+    "start": "2246410",
+    "end": "2253370"
+  },
+  {
+    "text": "kind of hoping that you guys will take the tool that I'm going to share with you at the end of today scan your environments and maybe open up tickets",
+    "start": "2253370",
+    "end": "2260660"
+  },
+  {
+    "text": "with vendors to help get some more patches out so there's also some things",
+    "start": "2260660",
+    "end": "2267230"
+  },
+  {
+    "text": "that I missed here because there are things that aren't going to be in the Alexa top sites for example if",
+    "start": "2267230",
+    "end": "2274859"
+  },
+  {
+    "text": "you're talking about home devices and VPN endpoints these probably aren't",
+    "start": "2274859",
+    "end": "2280499"
+  },
+  {
+    "text": "going to end up on an Internet top site list but they could have very important",
+    "start": "2280499",
+    "end": "2286109"
+  },
+  {
+    "text": "vulnerabilities especially these SSL VPN systems so that's something that I",
+    "start": "2286109",
+    "end": "2291150"
+  },
+  {
+    "text": "haven't really had access to scan a lot of different vendors and I would encourage other people to do that",
+    "start": "2291150",
+    "end": "2298940"
+  },
+  {
+    "text": "there's also as I said a lot more subtle checks that you can do like there are",
+    "start": "2298970",
+    "end": "2305009"
+  },
+  {
+    "text": "problems that could be exploitable simply if a server is failing to validate just one Mac byte because if",
+    "start": "2305009",
+    "end": "2310980"
+  },
+  {
+    "text": "they fail to validate just one Mac byte you might be able to use that as part of an Oracle I promise that",
+    "start": "2310980",
+    "end": "2319079"
+  },
+  {
+    "text": "TLS 1.3 is going to save us all so the reason for this is that there's only",
+    "start": "2319079",
+    "end": "2325710"
+  },
+  {
+    "text": "authenticated ciphers allowed until s 1.3 I'm absolutely encouraging that",
+    "start": "2325710",
+    "end": "2332430"
+  },
+  {
+    "text": "anybody in here who manages a site you need to stop using TLS CBC ciphers this",
+    "start": "2332430",
+    "end": "2338369"
+  },
+  {
+    "text": "Mac then pad then encrypt it's not a good process and really moving to TLS",
+    "start": "2338369",
+    "end": "2346650"
+  },
+  {
+    "text": "1.3 is a very good idea for a long time now the TLS specifications have been",
+    "start": "2346650",
+    "end": "2353009"
+  },
+  {
+    "text": "driven too far by vendors and practitioners rather than actual cryptographers and I feel that Telus 1.3",
+    "start": "2353009",
+    "end": "2361140"
+  },
+  {
+    "text": "is really a sea change at this point that it was driven by cryptic cryptography and security and privacy",
+    "start": "2361140",
+    "end": "2368190"
+  },
+  {
+    "text": "rather than business needs and what's going to sell I have some",
+    "start": "2368190",
+    "end": "2374700"
+  },
+  {
+    "text": "acknowledgments that I want to make so Hana book had inspired me to do this",
+    "start": "2374700",
+    "end": "2379920"
+  },
+  {
+    "text": "kind of work we had spoken after blackhat after the robot research and talked about the different things that",
+    "start": "2379920",
+    "end": "2386759"
+  },
+  {
+    "text": "might still be out there basically well-known crypto flaws that are still making the REA on the Internet",
+    "start": "2386759",
+    "end": "2393089"
+  },
+  {
+    "text": "I also want to give a special thanks to Robert Mayer get your ice or summer off ski and Nimrod Avram",
+    "start": "2393089",
+    "end": "2400259"
+  },
+  {
+    "text": "these guys did a really awesome project which is going to be in the USENIX proceedings this year and you can check",
+    "start": "2400259",
+    "end": "2408390"
+  },
+  {
+    "text": "out their repo it's the bottom link there and this top link is the repo for",
+    "start": "2408390",
+    "end": "2413670"
+  },
+  {
+    "text": "getting the pad check tool and I've been told that they will also be releasing",
+    "start": "2413670",
+    "end": "2419070"
+  },
+  {
+    "text": "their tool today I expect that it will end up on that bottom repo and if",
+    "start": "2419070",
+    "end": "2424440"
+  },
+  {
+    "text": "everybody's copied down those links I'm just going to give him one more second",
+    "start": "2424440",
+    "end": "2431150"
+  },
+  {
+    "text": "okay so now I have a few minutes for questions say anybody have any questions",
+    "start": "2438200",
+    "end": "2448599"
+  },
+  {
+    "text": "somebody must have a question I guess I did a very good job explaining everything then",
+    "start": "2455730",
+    "end": "2463190"
+  },
+  {
+    "text": "well thank you everybody for your time then [Applause]",
+    "start": "2469760",
+    "end": "2480019"
+  }
+]

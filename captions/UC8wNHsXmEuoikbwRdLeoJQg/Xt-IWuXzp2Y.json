@@ -1,0 +1,3507 @@
+[
+  {
+    "text": "So I thought we could talk today about a little bit more about mailbox storage.",
+    "start": "3533",
+    "end": "8199"
+  },
+  {
+    "text": "We've kind of been talking about it offline a little bit and also maybe talk about the",
+    "start": "8599",
+    "end": "14799"
+  },
+  {
+    "text": "mailbox implementation itself and potentially get to a point",
+    "start": "14866",
+    "end": "21900"
+  },
+  {
+    "text": "where we have something that can be incorporated either into the Entity Manager or the pod",
+    "start": "21900",
+    "end": "28000"
+  },
+  {
+    "text": "depending on which component we're talking about. And to that end, maybe",
+    "start": "28000",
+    "end": "33033"
+  },
+  {
+    "text": "like a good starting point. Share my screen. Yeah, maybe having a look at",
+    "start": "33033",
+    "end": "38800"
+  },
+  {
+    "text": "the current mailbox storage. Well, I started like working on a little draw.io diagram because",
+    "start": "38800",
+    "end": "46433"
+  },
+  {
+    "text": "I felt like I was getting myself confused and I thought this would be helpful to just start off looking at.",
+    "start": "46433",
+    "end": "52532"
+  },
+  {
+    "text": "Let me zoom in a little bit on this. So this is the structure of a pod that we",
+    "start": "53300",
+    "end": "61232"
+  },
+  {
+    "text": "discussed on stream the last time where we obviously have a pod.",
+    "start": "61233",
+    "end": "66666"
+  },
+  {
+    "text": "Pod can have many shards and then shards can contain entities and shards are really just",
+    "start": "67099",
+    "end": "73599"
+  },
+  {
+    "text": "we've talked about this before, but shards are just an optimization for",
+    "start": "73900",
+    "end": "79033"
+  },
+  {
+    "text": "addressing purposes. But in reality, like the shard structure itself like doesn't",
+    "start": "79033",
+    "end": "87133"
+  },
+  {
+    "text": "isn't really like a physical component of the cluster. It's more of like an addressing optimization.",
+    "start": "87133",
+    "end": "92099"
+  },
+  {
+    "text": "But the pod. It is because there's a shard manager. Well, yes, but the shard",
+    "start": "93066",
+    "end": "99033"
+  },
+  {
+    "text": "managers on the cluster level. It's not unlike the individual pod level.",
+    "start": "99033",
+    "end": "105433"
+  },
+  {
+    "text": "Yeah, but it is a component of the cluster who assigns shards to specific pods.",
+    "start": "107833",
+    "end": "113666"
+  },
+  {
+    "text": "Yeah, I'm just saying like I'm talking about like things where code can physically live, if that makes sense or things where code",
+    "start": "115166",
+    "end": "122066"
+  },
+  {
+    "text": "physically runs is what I was trying to like conceptualize in my head when I was doing this.",
+    "start": "122066",
+    "end": "129433"
+  },
+  {
+    "text": "So basically like on the cluster level and this isn't complete yet, but the idea was",
+    "start": "129866",
+    "end": "136599"
+  },
+  {
+    "text": "to try to outline like some of the components we have running in the cluster and like talk about like where they actually live like",
+    "start": "136599",
+    "end": "143966"
+  },
+  {
+    "text": "on the cluster level. And I think shardcake actually has a couple of nice diagrams related to this, but the",
+    "start": "143966",
+    "end": "151366"
+  },
+  {
+    "text": "shard manager lives on the cluster level. There's only one per cluster and it has",
+    "start": "151533",
+    "end": "158533"
+  },
+  {
+    "text": "the ability to assign and unassign shards from pods. But if the shard manager goes down, there",
+    "start": "158533",
+    "end": "166433"
+  },
+  {
+    "text": "is still the ability for like normal cluster activity to take place.",
+    "start": "166433",
+    "end": "171099"
+  },
+  {
+    "text": "Like at least in Shardcake, the shard manager is not a quote unquote like everything is",
+    "start": "171833",
+    "end": "178232"
+  },
+  {
+    "text": "a what's the word durable in the sense that like if the shard manager goes down, the cluster",
+    "start": "178266",
+    "end": "185800"
+  },
+  {
+    "text": "can still operate relatively normally. Yeah, everything keeps running.",
+    "start": "185800",
+    "end": "191099"
+  },
+  {
+    "text": "The only thing that cannot happen is when the shard manager goes down, if a pod goes",
+    "start": "191099",
+    "end": "196533"
+  },
+  {
+    "text": "down, those shards would not be reallocated. Right. Because the other thing that the shard",
+    "start": "196533",
+    "end": "202500"
+  },
+  {
+    "text": "manager is in charge of is monitoring pod health through",
+    "start": "202500",
+    "end": "208000"
+  },
+  {
+    "text": "like an optional pod health API. But so that's like the cluster level",
+    "start": "208266",
+    "end": "213666"
+  },
+  {
+    "text": "components that I've outlined like so far. There's other things at this level.",
+    "start": "213666",
+    "end": "218733"
+  },
+  {
+    "text": "But if we take a look at like what I've started sketching out on the pod level on the pod",
+    "start": "219233",
+    "end": "226232"
+  },
+  {
+    "text": "level, we have like the sharding component, which is what controls the",
+    "start": "226233",
+    "end": "232433"
+  },
+  {
+    "text": "actual communication between sharded entities. So sharding lives this, the sharding",
+    "start": "232433",
+    "end": "239766"
+  },
+  {
+    "text": "service, whatever you want to call it, lives on each pod and is responsible for",
+    "start": "239766",
+    "end": "245133"
+  },
+  {
+    "text": "actually like communicating between the different entities, whether they're local to the pod, like communicating between like entities",
+    "start": "245133",
+    "end": "252833"
+  },
+  {
+    "text": "between shards or even within the same shard or communicating to entities on other pods.",
+    "start": "252833",
+    "end": "259199"
+  },
+  {
+    "text": "And there's one, there's one sharding service per pod.",
+    "start": "260766",
+    "end": "266800"
+  },
+  {
+    "text": "And yeah, that's basically like what I mean, sharding does other things.",
+    "start": "268199",
+    "end": "273733"
+  },
+  {
+    "text": "But the main point of the service is to control communication.",
+    "start": "273733",
+    "end": "276833"
+  },
+  {
+    "text": "And then Oh, by the way, just one point about the",
+    "start": "278833",
+    "end": "284233"
+  },
+  {
+    "text": "communication between the pod and the shard manager.",
+    "start": "284233",
+    "end": "288233"
+  },
+  {
+    "text": "You said that the shard manager is responsible for checking the health of the pod.",
+    "start": "289433",
+    "end": "293832"
+  },
+  {
+    "text": "But on the other side, if the pod cannot communicate with the shard",
+    "start": "295166",
+    "end": "303566"
+  },
+  {
+    "text": "manager for I don't know how long there should be some kind of even",
+    "start": "303566",
+    "end": "312166"
+  },
+  {
+    "text": "myself API, because the issue is split brains.",
+    "start": "312166",
+    "end": "317466"
+  },
+  {
+    "text": "What if a pod and community is disconnected from the shard",
+    "start": "318666",
+    "end": "324666"
+  },
+  {
+    "text": "manager and still has shards assigned? The shard manager will detect the pod is",
+    "start": "324666",
+    "end": "331033"
+  },
+  {
+    "text": "unhealthy and allocate the shards in other pods.",
+    "start": "331033",
+    "end": "337766"
+  },
+  {
+    "text": "If a timeout occurs. Now, in that case, we have",
+    "start": "339866",
+    "end": "346066"
+  },
+  {
+    "text": "a duplication of entities. So it's very important that there is a",
+    "start": "346066",
+    "end": "352766"
+  },
+  {
+    "text": "key switch mechanism. If the pod can communicate to the shard manager for longer than",
+    "start": "352766",
+    "end": "360833"
+  },
+  {
+    "text": "the timeout, both the shard manager deallocate the shards, but also the pod stop the shards.",
+    "start": "360833",
+    "end": "368366"
+  },
+  {
+    "text": "Because otherwise we have split brains. Yeah, I mean, in in Shardcake, they",
+    "start": "369099",
+    "end": "376033"
+  },
+  {
+    "text": "actually talk about that. Let me pull up the little diagram because I was curious,",
+    "start": "376033",
+    "end": "382266"
+  },
+  {
+    "text": "basically, like, similar to your what you bring up here. I was curious like how shard cake handles this.",
+    "start": "382266",
+    "end": "388233"
+  },
+  {
+    "text": "So let me switch tabs that I'm streaming.",
+    "start": "392133",
+    "end": "395066"
+  },
+  {
+    "text": "So in the cluster here, the shard manager",
+    "start": "397733",
+    "end": "403833"
+  },
+  {
+    "text": "is a single node in charge of maintaining",
+    "start": "403833",
+    "end": "409566"
+  },
+  {
+    "text": "the pod to shard assignments. And only one shard manager should be alive at a given time.",
+    "start": "409566",
+    "end": "414099"
+  },
+  {
+    "text": "The shard manager does have the ability to assign and unassign shards from pods.",
+    "start": "414599",
+    "end": "420866"
+  },
+  {
+    "text": "And pods can register and unregister themselves or notify unhealthy pod to the shard manager.",
+    "start": "422000",
+    "end": "428500"
+  },
+  {
+    "text": "If the shard manager, in Shardcake, the shard manager is only involved when pods are added",
+    "start": "430866",
+    "end": "438033"
+  },
+  {
+    "text": "or removed from the cluster. That's the only time it's really involved. The rest of the time the shard manager",
+    "start": "438033",
+    "end": "443099"
+  },
+  {
+    "text": "actually doesn't do anything. Since pods get a cached version of shard assignments and they communicate between",
+    "start": "443099",
+    "end": "449465"
+  },
+  {
+    "text": "themselves directly. So like the pods read from the cluster",
+    "start": "449466",
+    "end": "456166"
+  },
+  {
+    "text": "storage directly to get assignments. And they have the ability to communicate with themselves directly to basically like take",
+    "start": "456166",
+    "end": "468466"
+  },
+  {
+    "text": "the shard manager out of the equation. So if a pod becomes unresponsive, for",
+    "start": "468466",
+    "end": "475466"
+  },
+  {
+    "text": "example, other pods would notify the shard manager who would check through the health API if",
+    "start": "475466",
+    "end": "482833"
+  },
+  {
+    "text": "the pod is still active. And it would unassign shards from the pod only if the pod is not alive. If the pod is alive, we can't reassign",
+    "start": "482833",
+    "end": "489432"
+  },
+  {
+    "text": "the shards because it might cause, like you said, the duplication.",
+    "start": "489433",
+    "end": "492433"
+  },
+  {
+    "text": "My point is if you have a network split-brain, there's no way for the shard manager to communicate to the pod.",
+    "start": "495433",
+    "end": "501066"
+  },
+  {
+    "text": "Right. So it appears as far as the pod is not alive. But the pod thinks it's alive.",
+    "start": "501666",
+    "end": "508333"
+  },
+  {
+    "text": "That's the definition of a split-brain on the network.",
+    "start": "508500",
+    "end": "511833"
+  },
+  {
+    "text": "Yeah. So I guess your point is not addressed by problem. So your point is if the pod itself can't",
+    "start": "514000",
+    "end": "523965"
+  },
+  {
+    "text": "communicate with the shard manager, that we should have some sort of time out",
+    "start": "523966",
+    "end": "529300"
+  },
+  {
+    "text": "where the pod kills itself. The pod thinks itself is.",
+    "start": "529300",
+    "end": "534433"
+  },
+  {
+    "text": "Yeah. Okay. But the rest of the cluster can't communicate to the pod",
+    "start": "534766",
+    "end": "539899"
+  },
+  {
+    "text": "because there's a network failure,",
+    "start": "539899",
+    "end": "545066"
+  },
+  {
+    "text": "a partial network failure is the definition of a split-brain. Right. In that case, the cluster will reassign",
+    "start": "545466",
+    "end": "553600"
+  },
+  {
+    "text": "shards to a different pod. But that pod thinks it's alive.",
+    "start": "553600",
+    "end": "557166"
+  },
+  {
+    "text": "So the shards are-- it's local cache. It's still fresh.",
+    "start": "558966",
+    "end": "563633"
+  },
+  {
+    "text": "maybe it can even communicate to the outside of the internet. Just can't communicate to the pods.",
+    "start": "565433",
+    "end": "572332"
+  },
+  {
+    "text": "It's fundamental that the health API is",
+    "start": "573300",
+    "end": "580032"
+  },
+  {
+    "text": "kind of a central place. Let it be, for example, a shared database that we have anyway.",
+    "start": "580033",
+    "end": "585600"
+  },
+  {
+    "text": "I don't know where each pod thinks every pod seconds.",
+    "start": "586433",
+    "end": "592066"
+  },
+  {
+    "text": "And if the pod can't communicate its health, regardless, maybe",
+    "start": "593166",
+    "end": "598233"
+  },
+  {
+    "text": "the shard manager can go down. That's fine.",
+    "start": "598233",
+    "end": "602165"
+  },
+  {
+    "text": "But the health detection mechanism, it's fundamental that it is not based on",
+    "start": "603566",
+    "end": "610733"
+  },
+  {
+    "text": "simply a ping to the pod. Because if it's simply a ping to the pod, it's vulnerable to network partitioning.",
+    "start": "610733",
+    "end": "618365"
+  },
+  {
+    "text": "And network partitioning does happen. It's not. It's not a not situation.",
+    "start": "618899",
+    "end": "624166"
+  },
+  {
+    "text": "On the other side, if the pod unhealthy detection is live, I can't",
+    "start": "624433",
+    "end": "630399"
+  },
+  {
+    "text": "communicate to the database for more than 60 seconds. And by default, I communicate every 15.",
+    "start": "630399",
+    "end": "638199"
+  },
+  {
+    "text": "Just increase a timer count in the database.",
+    "start": "638966",
+    "end": "645533"
+  },
+  {
+    "text": "Like pod number and last-- Yeah. The pod needs--",
+    "start": "646566",
+    "end": "652433"
+  },
+  {
+    "text": "The pod almost needs its own liveness probe for itself.",
+    "start": "652933",
+    "end": "659899"
+  },
+  {
+    "text": "To basically say-- Yes. And if the liveness probe fails, it needs to heal itself.",
+    "start": "660966",
+    "end": "668466"
+  },
+  {
+    "text": "Right. Right, right. The only part-- Is the ring fencing mechanism.",
+    "start": "669000",
+    "end": "675266"
+  },
+  {
+    "text": "Yeah. Well, I have to figure out-- because if that pod kills itself,",
+    "start": "677066",
+    "end": "682899"
+  },
+  {
+    "text": "and the shard manager would know that-- I mean, the pod would be down from the perspective of",
+    "start": "683766",
+    "end": "689166"
+  },
+  {
+    "text": "the rest of the cluster. So the cluster would already be rebalancing those shards.",
+    "start": "689166",
+    "end": "693066"
+  },
+  {
+    "text": "And yeah, so that would work. I was just thinking, how would the",
+    "start": "694533",
+    "end": "701899"
+  },
+  {
+    "text": "cluster storage update to basically reflect the fact that rebalancing is occurring?",
+    "start": "701899",
+    "end": "707233"
+  },
+  {
+    "text": "But that already happens because the rest of the cluster can't see that pod.",
+    "start": "707466",
+    "end": "713266"
+  },
+  {
+    "text": "The pod can't see the rest of the cluster. So the pod would take itself down after whatever configurable",
+    "start": "713266",
+    "end": "719100"
+  },
+  {
+    "text": "liveness probe it has for itself. And the rest of the cluster would already probably be in the process of rebalancing.",
+    "start": "719100",
+    "end": "725066"
+  },
+  {
+    "text": "Yeah, the only important point is that the pod has to heal itself faster than the cluster",
+    "start": "728333",
+    "end": "735466"
+  },
+  {
+    "text": "can detect its unavailability. Because if the pod can't communicate to",
+    "start": "735466",
+    "end": "740633"
+  },
+  {
+    "text": "the database for, I don't know, longer than 30 seconds, then it should stop all operations.",
+    "start": "740633",
+    "end": "746266"
+  },
+  {
+    "text": "Because it should assume some sort of network weakness is occurring. And of course, it could be",
+    "start": "747066",
+    "end": "753333"
+  },
+  {
+    "text": "that the database is down. So it could very well be that I need to",
+    "start": "753333",
+    "end": "759000"
+  },
+  {
+    "text": "stop everything and keep pinging the database. If the database comes back alive, I can",
+    "start": "759000",
+    "end": "764933"
+  },
+  {
+    "text": "restart operating normally. But the point is the entities should be deallocated if the pod is",
+    "start": "764933",
+    "end": "775166"
+  },
+  {
+    "text": "unhealthy or cannot communicate its health. Right.",
+    "start": "775166",
+    "end": "779966"
+  },
+  {
+    "text": "At that point, the health API can simply be checking that",
+    "start": "780266",
+    "end": "785533"
+  },
+  {
+    "text": "timer and can say, I think the pod is unavailable if it hasn't sent",
+    "start": "785533",
+    "end": "795300"
+  },
+  {
+    "text": "a heartbeat to the database for longer than 45 seconds instead of 30.",
+    "start": "795300",
+    "end": "801066"
+  },
+  {
+    "text": "So you have this difference of time that guarantees that the pod heals itself faster than the",
+    "start": "802333",
+    "end": "810133"
+  },
+  {
+    "text": "shard manager can reallocate the shards. Right. Because if the shard manager reallocates",
+    "start": "810133",
+    "end": "815399"
+  },
+  {
+    "text": "the shards faster than the pod kills itself, you have a ring fancing mechanism.",
+    "start": "815399",
+    "end": "820233"
+  },
+  {
+    "text": "It could probably be like a configuration as well. And we can fail fast when the cluster starts.",
+    "start": "820833",
+    "end": "826633"
+  },
+  {
+    "text": "Like basically, like when the cluster starts, we could fail fast if like the configured,",
+    "start": "827333",
+    "end": "831699"
+  },
+  {
+    "text": "I don't know, pod liveness probe is longer than the cluster's liveness probe.",
+    "start": "832433",
+    "end": "838266"
+  },
+  {
+    "text": "So consider that these cases only occur when there is either a",
+    "start": "838533",
+    "end": "844865"
+  },
+  {
+    "text": "network issue or a machine dies just out of the blue.",
+    "start": "844866",
+    "end": "850633"
+  },
+  {
+    "text": "Right. Because in the case of a graceful shutdown, the pod will communicate its unhealthiness",
+    "start": "851266",
+    "end": "857165"
+  },
+  {
+    "text": "directly, and the shard manager will automatically rebalance.",
+    "start": "857166",
+    "end": "862365"
+  },
+  {
+    "text": "Right. So in a clean exit, we have fast recovery.",
+    "start": "862833",
+    "end": "867766"
+  },
+  {
+    "text": "The issue is when there is no clean exit, you don't really know if the point is if you",
+    "start": "869399",
+    "end": "876166"
+  },
+  {
+    "text": "ping a machine, the only thing you can say is if the machine is up for sure, because",
+    "start": "876166",
+    "end": "882533"
+  },
+  {
+    "text": "it answers. Right. But if the machine doesn't answer, you don't know if it's the network or if it's the machine.",
+    "start": "882533",
+    "end": "888533"
+  },
+  {
+    "text": "The server could be up. Right. Your network could be fucked up. Right. And the provider could have, you know,",
+    "start": "889233",
+    "end": "895333"
+  },
+  {
+    "text": "there's many different hops between you and the machine to know that, okay, a ping is failing doesn't mean the machine is down.",
+    "start": "896166",
+    "end": "902365"
+  },
+  {
+    "text": "Right. Sometimes it's up. It's just not responsive on the network.",
+    "start": "903366",
+    "end": "907933"
+  },
+  {
+    "text": "So this key element is very important if you have to guarantee that",
+    "start": "909033",
+    "end": "915100"
+  },
+  {
+    "text": "every entity only executes once. Yeah, that makes sense.",
+    "start": "915100",
+    "end": "920032"
+  },
+  {
+    "text": "Effectively, the shard allocation is the",
+    "start": "920366",
+    "end": "925433"
+  },
+  {
+    "text": "reason why we guarantee that an entity only exists once in the cluster because it's assigned",
+    "start": "925433",
+    "end": "932165"
+  },
+  {
+    "text": "to a shard and a shard is uniquely assigned to a single pod. Right.",
+    "start": "932166",
+    "end": "936366"
+  },
+  {
+    "text": "But if the second part can be faulty, then we lose a critical guarantee.",
+    "start": "938066",
+    "end": "943566"
+  },
+  {
+    "text": "Okay. I mean, if we don't have it, we need locking. Yeah, I'm tracking there.",
+    "start": "945133",
+    "end": "951233"
+  },
+  {
+    "text": "I think that makes sense. Okay. What else?",
+    "start": "951233",
+    "end": "954032"
+  },
+  {
+    "text": "So we talked about sharding, talked about the shard manager. We have entity managers on the pod level.",
+    "start": "956333",
+    "end": "962199"
+  },
+  {
+    "text": "So within a pod, there are entity managers that control like",
+    "start": "962733",
+    "end": "968066"
+  },
+  {
+    "text": "the lifecycle of the individual entities. And there are, from what I understood,",
+    "start": "968066",
+    "end": "973433"
+  },
+  {
+    "text": "there are N entity managers per pod, which is equivalent to the number of distinct entities on that pod.",
+    "start": "973899",
+    "end": "979433"
+  },
+  {
+    "text": "So on this pod here where we have users and to-dos, there would be two entity managers,",
+    "start": "979833",
+    "end": "985500"
+  },
+  {
+    "text": "one for managing all of the users and one for managing the to-dos.",
+    "start": "985800",
+    "end": "990832"
+  },
+  {
+    "text": "What else? There's cluster storage. So you can basically create it when we register an entity.",
+    "start": "994100",
+    "end": "1000600"
+  },
+  {
+    "text": "Yeah, yeah, yeah. There's an entity manager that gets created behind the scenes when the entity is registered.",
+    "start": "1001333",
+    "end": "1006032"
+  },
+  {
+    "text": "The entity manager does a bunch of different things. But there's only one entity manager per",
+    "start": "1006800",
+    "end": "1014699"
+  },
+  {
+    "text": "entity type, even though there might be like 100 entities of a given type, there's one",
+    "start": "1014699",
+    "end": "1020766"
+  },
+  {
+    "text": "manager for the entity. Cluster storage, I put this on the pod level, although it's technically cluster level, but",
+    "start": "1020766",
+    "end": "1027266"
+  },
+  {
+    "text": "like the actual service that communicates with the storage is on the pod level.",
+    "start": "1027300",
+    "end": "1033398"
+  },
+  {
+    "text": "So we could probably just move this here just for like sanity purposes.",
+    "start": "1034600",
+    "end": "1040300"
+  },
+  {
+    "text": "On the pod level, there's also mailbox storage, which we discussed, I think we discussed it",
+    "start": "1048166",
+    "end": "1053699"
+  },
+  {
+    "text": "last time when we spoke. Basically, we sort of introduced the concept.",
+    "start": "1053699",
+    "end": "1059199"
+  },
+  {
+    "text": "Yeah, we've been discussing it offline a bunch as well. But basically, like the mailbox storage",
+    "start": "1059966",
+    "end": "1066065"
+  },
+  {
+    "text": "would be the on the pod level, the thing that actually writes mailbox state for each entity to",
+    "start": "1066066",
+    "end": "1072100"
+  },
+  {
+    "text": "some persistent storage, probably like within the cluster storage and reads mailbox state",
+    "start": "1072100",
+    "end": "1077266"
+  },
+  {
+    "text": "from the external store of the persistent storage when needed.",
+    "start": "1077266",
+    "end": "1082366"
+  },
+  {
+    "text": "And then the on the entity level itself,",
+    "start": "1085199",
+    "end": "1089733"
+  },
+  {
+    "text": "every one of these entities gets a mailbox, which allows the entity to read incoming messages.",
+    "start": "1090300",
+    "end": "1095433"
+  },
+  {
+    "text": "And then the thing I did not put here yet was the behavior, which",
+    "start": "1096433",
+    "end": "1101966"
+  },
+  {
+    "text": "allows an entity to respond.",
+    "start": "1101966",
+    "end": "1105165"
+  },
+  {
+    "text": "So this is not this diagram is obviously not complete, but I wanted to start sketching out like some of the ideas and things",
+    "start": "1120166",
+    "end": "1126033"
+  },
+  {
+    "text": "like assumptions I was making as I was working on clusters since I'm still familiarizing",
+    "start": "1126033",
+    "end": "1133733"
+  },
+  {
+    "text": "myself with a lot of the components within cluster as I work to like redesign some of these things and",
+    "start": "1133733",
+    "end": "1139733"
+  },
+  {
+    "text": "like kind of just refactor some of these things. But anyways, I thought today we could try",
+    "start": "1139733",
+    "end": "1147565"
+  },
+  {
+    "text": "to focus on the mailbox storage and the mailbox.",
+    "start": "1147566",
+    "end": "1151899"
+  },
+  {
+    "text": "So if we end up getting somewhere with the storage that we're happy with. So offline, we've discussed a lot of the",
+    "start": "1153500",
+    "end": "1161565"
+  },
+  {
+    "text": "aspects of mailbox storage and like what it should",
+    "start": "1161566",
+    "end": "1167566"
+  },
+  {
+    "text": "look like, how it should function. So maybe I can pull up the code for that.",
+    "start": "1167566",
+    "end": "1173366"
+  },
+  {
+    "text": "Let me. I'm going to try my text editor and then",
+    "start": "1174500",
+    "end": "1180399"
+  },
+  {
+    "text": "we'll switch to my IDE if necessary.",
+    "start": "1180399",
+    "end": "1182800"
+  },
+  {
+    "text": "OK, so I like how your how your precision is very careful with",
+    "start": "1186566",
+    "end": "1193366"
+  },
+  {
+    "text": "the way that I get very careful with the way that I talk about my editor with Mike.",
+    "start": "1193366",
+    "end": "1198000"
+  },
+  {
+    "text": "Let me zoom in. Mike, is this a good size?",
+    "start": "1199166",
+    "end": "1202833"
+  },
+  {
+    "text": "Yeah, I think so. OK, this is good. OK, so.",
+    "start": "1206000",
+    "end": "1211166"
+  },
+  {
+    "text": "We have been discussing, like I said, offline mailbox storage, what it should look like,",
+    "start": "1214166",
+    "end": "1219500"
+  },
+  {
+    "text": "et cetera. And one of the first things we started with was sort of sketching out what the actual table for",
+    "start": "1219500",
+    "end": "1225166"
+  },
+  {
+    "text": "mailbox storage look like. For now, we've sort of settled on",
+    "start": "1225166",
+    "end": "1230899"
+  },
+  {
+    "text": "something like this, but obviously this is not like final.",
+    "start": "1230899",
+    "end": "1236000"
+  },
+  {
+    "text": "So this can this is certainly something that can change.",
+    "start": "1236533",
+    "end": "1240899"
+  },
+  {
+    "text": "But basically, we have this table that would be persisted in the cluster storage.",
+    "start": "1241666",
+    "end": "1246866"
+  },
+  {
+    "text": "Right now, this is written in like mySQL Syntax, I guess.",
+    "start": "1248033",
+    "end": "1253000"
+  },
+  {
+    "text": "But we have this mailbox table and the",
+    "start": "1254566",
+    "end": "1260199"
+  },
+  {
+    "text": "mailbox table has a bunch of different fields. So we have a field for the shard ID. We have a field for",
+    "start": "1260199",
+    "end": "1266199"
+  },
+  {
+    "text": "the entity identifier. We also have a field for the entity type. So the reason why there's a field for ID",
+    "start": "1266199",
+    "end": "1272333"
+  },
+  {
+    "text": "versus type is because if you recall, we can have multiple different identities like user is the entity type.",
+    "start": "1272333",
+    "end": "1278600"
+  },
+  {
+    "text": "But then that user may be associated with like some, you know, identifier could be like anything.",
+    "start": "1279199",
+    "end": "1285800"
+  },
+  {
+    "text": "So that's why we've separated the concept of the ID from the type here, because there can be many different entities",
+    "start": "1287699",
+    "end": "1296033"
+  },
+  {
+    "text": "of the same type within the cluster. And then we have the message identifier.",
+    "start": "1296199",
+    "end": "1303199"
+  },
+  {
+    "text": "So messages as they come into the mailbox would have a unique identifier.",
+    "start": "1303233",
+    "end": "1308600"
+  },
+  {
+    "text": "And the primary key for this table is composed at the moment of the entity ID,",
+    "start": "1310899",
+    "end": "1320533"
+  },
+  {
+    "text": "the entity type and the message ID. I remember we had a discussion in Discord",
+    "start": "1320533",
+    "end": "1327466"
+  },
+  {
+    "text": "about why the shard ID should be removed from the primary key. But I don't remember what",
+    "start": "1327466",
+    "end": "1334666"
+  },
+  {
+    "text": "the rationale was there. So this is one thing I want to talk about is like how we should key the storage and",
+    "start": "1334666",
+    "end": "1342800"
+  },
+  {
+    "text": "whether or not, I mean, first, like whether or not the fields that we have here actually makes sense. And then we can talk about like how we're",
+    "start": "1342800",
+    "end": "1348933"
+  },
+  {
+    "text": "keying the table and things like that. But I'll go through the rest of the fields. The message body would be the actual like",
+    "start": "1348933",
+    "end": "1355766"
+  },
+  {
+    "text": "fields that the message is providing. So when you define like a tagged request",
+    "start": "1355766",
+    "end": "1361399"
+  },
+  {
+    "text": "that might have a bunch of different fields, eventually that message would be",
+    "start": "1361399",
+    "end": "1367065"
+  },
+  {
+    "text": "serialized and placed that the full message body would be serialized and",
+    "start": "1367066",
+    "end": "1372600"
+  },
+  {
+    "text": "placed into this table. We also have a field for whether or not",
+    "start": "1372600",
+    "end": "1378000"
+  },
+  {
+    "text": "the message was acknowledged. So at the moment, it's just a tiny integer or Boolean, whatever.",
+    "start": "1378000",
+    "end": "1385000"
+  },
+  {
+    "text": "And where zero means that the message was just received and one would indicate the message was actually acknowledged.",
+    "start": "1386066",
+    "end": "1392066"
+  },
+  {
+    "text": "We've got the sequence number of the message. So Mike had brought up last time the",
+    "start": "1393800",
+    "end": "1399466"
+  },
+  {
+    "text": "concept of using a message sequence number to sort of allow us to have a",
+    "start": "1399466",
+    "end": "1406833"
+  },
+  {
+    "text": "cursor into where entities are in processing messages.",
+    "start": "1406833",
+    "end": "1411100"
+  },
+  {
+    "text": "So by using something like this, we can easily resume processing messages.",
+    "start": "1412333",
+    "end": "1419199"
+  },
+  {
+    "text": "If, for example, an entity goes down or fails or whatever, we have like the",
+    "start": "1419199",
+    "end": "1424699"
+  },
+  {
+    "text": "ability to use a cursor to resume message processing. And this is very important that the cursor, the sequence number, be a",
+    "start": "1424699",
+    "end": "1432898"
+  },
+  {
+    "text": "monotonic sequence number that is scoped to the entity, type and ID. So",
+    "start": "1432899",
+    "end": "1442699"
+  },
+  {
+    "text": "like within a given entity, the message sequence number would increment for each",
+    "start": "1442699",
+    "end": "1448866"
+  },
+  {
+    "text": "message that entity receives. The result of the message,",
+    "start": "1448866",
+    "end": "1455233"
+  },
+  {
+    "text": "actually, this should be not. The result of the message can be present,",
+    "start": "1455500",
+    "end": "1462333"
+  },
+  {
+    "text": "but it doesn't have to be because obviously the message could have been received, but not processed yet. And this message result, similar to the",
+    "start": "1462333",
+    "end": "1468933"
+  },
+  {
+    "text": "body, would be the fully serialized result of that message, using the tagged",
+    "start": "1468933",
+    "end": "1476933"
+  },
+  {
+    "text": "request to serialize that result. And then we have the",
+    "start": "1476933",
+    "end": "1482133"
+  },
+  {
+    "text": "keys here in the table. So the first thing I wanted to talk about",
+    "start": "1482133",
+    "end": "1488733"
+  },
+  {
+    "text": "is like, is there any other information that we need to track for mailbox storage?",
+    "start": "1488733",
+    "end": "1493600"
+  },
+  {
+    "text": "And then we can talk about like how we're keying this information and some of the queries that I've written to get",
+    "start": "1494800",
+    "end": "1502199"
+  },
+  {
+    "text": "information out of the mailbox. So, so, yeah.",
+    "start": "1502199",
+    "end": "1508199"
+  },
+  {
+    "text": "I can't think of other other elements that we should that",
+    "start": "1509199",
+    "end": "1515633"
+  },
+  {
+    "text": "we should track there. I think at some point I raised a design",
+    "start": "1515633",
+    "end": "1523633"
+  },
+  {
+    "text": "trade off. Let's put it this way. And the design trade off is on the sequence number. Initially, I thought about a sequence",
+    "start": "1523633",
+    "end": "1531666"
+  },
+  {
+    "text": "number per entity. So it's monotonic increasing based on a single entity.",
+    "start": "1531666",
+    "end": "1540500"
+  },
+  {
+    "text": "And this would guarantee ordering of messages within a",
+    "start": "1541100",
+    "end": "1546333"
+  },
+  {
+    "text": "single, within a single entity. Later on, I thought that the sequence",
+    "start": "1546333",
+    "end": "1556100"
+  },
+  {
+    "text": "number could be sequence number per shard instead.",
+    "start": "1556100",
+    "end": "1560199"
+  },
+  {
+    "text": "The reasoning behind this is that",
+    "start": "1561199",
+    "end": "1566466"
+  },
+  {
+    "text": "whenever we spin up a new entity or we",
+    "start": "1566466",
+    "end": "1576000"
+  },
+  {
+    "text": "recover an existing entity from a new message.",
+    "start": "1576000",
+    "end": "1581199"
+  },
+  {
+    "text": "So let's say that we already processed all the messages for user two. Well, at",
+    "start": "1582199",
+    "end": "1588733"
+  },
+  {
+    "text": "some point we get a new message. So user two would not be allocated on a",
+    "start": "1588733",
+    "end": "1597100"
+  },
+  {
+    "text": "shard if there are no messages to be processed when the shard is allocated into a pod.",
+    "start": "1597100",
+    "end": "1603199"
+  },
+  {
+    "text": "And that means when we receive a new message, the first thing we have to do is",
+    "start": "1603600",
+    "end": "1609632"
+  },
+  {
+    "text": "query the database to know, okay, what was the last sequence for user two? Did it already exist? Did it not? And",
+    "start": "1609633",
+    "end": "1617266"
+  },
+  {
+    "text": "this is a read, basically a read on what's called a read on write.",
+    "start": "1617266",
+    "end": "1621666"
+  },
+  {
+    "text": "Before writing a new message to the mailbox, you have to read to understand what was the last.",
+    "start": "1622866",
+    "end": "1631199"
+  },
+  {
+    "text": "Now, this is not a huge problem because of course it's a single query.",
+    "start": "1633199",
+    "end": "1641899"
+  },
+  {
+    "text": "But if we think that messages are sporadic, then the entity would be",
+    "start": "1643533",
+    "end": "1650233"
+  },
+  {
+    "text": "passivated between T0 and T1 to different points in time.",
+    "start": "1650233",
+    "end": "1656199"
+  },
+  {
+    "text": "These read queries is persistent and we don't want to read all the entities upon",
+    "start": "1657199",
+    "end": "1665766"
+  },
+  {
+    "text": "restart of a pod because we might have billions of entities that are dead.",
+    "start": "1665766",
+    "end": "1671699"
+  },
+  {
+    "text": "An entity might leave for five seconds and then no longer has no longer any purpose.",
+    "start": "1672899",
+    "end": "1678833"
+  },
+  {
+    "text": "Think, for example, an entity that tracks sending an email. Once the email is sent,",
+    "start": "1679199",
+    "end": "1684500"
+  },
+  {
+    "text": "that entity is gone. There's no reason why to restore the state of that entity",
+    "start": "1685633",
+    "end": "1691833"
+  },
+  {
+    "text": "in the shard that that entity belongs to. So we don't want to query upon restart of",
+    "start": "1691833",
+    "end": "1699000"
+  },
+  {
+    "text": "a pod every entity. We only want to query entities that have",
+    "start": "1699000",
+    "end": "1704933"
+  },
+  {
+    "text": "messages to be processed. This is also to keep the initial query to a reasonable amount. You only have to",
+    "start": "1704933",
+    "end": "1713233"
+  },
+  {
+    "text": "fetch messages that have to be processed. You don't want to fetch the whole history.",
+    "start": "1713233",
+    "end": "1717833"
+  },
+  {
+    "text": "The trade-off might be that if instead we have a sequence number per shard, upon",
+    "start": "1719100",
+    "end": "1726533"
+  },
+  {
+    "text": "allocation of a shard, we query from the database the last sequence number of the shard.",
+    "start": "1726533",
+    "end": "1732100"
+  },
+  {
+    "text": "My argument there is because a shard is allocated to a single pod, generating the",
+    "start": "1733166",
+    "end": "1742433"
+  },
+  {
+    "text": "sequence number is a local operation and all the writes can even be batched in the",
+    "start": "1742433",
+    "end": "1749033"
+  },
+  {
+    "text": "same or maybe not batched for duplication",
+    "start": "1749033",
+    "end": "1757065"
+  },
+  {
+    "text": "purposes because it has to error if it's already present, maybe",
+    "start": "1757066",
+    "end": "1762766"
+  },
+  {
+    "text": "we can figure a way of batching the inserts potentially if we are slightly smarter with the query.",
+    "start": "1762766",
+    "end": "1771132"
+  },
+  {
+    "text": "Point being, the sequence numbers are generated locally, so it shouldn't be",
+    "start": "1771233",
+    "end": "1778533"
+  },
+  {
+    "text": "problematic to do this, but Mattia then",
+    "start": "1778533",
+    "end": "1785065"
+  },
+  {
+    "text": "raised a different point, which is what if we reshard the cluster.",
+    "start": "1785066",
+    "end": "1789199"
+  },
+  {
+    "text": "And resharding the cluster is an interesting point of discussion because",
+    "start": "1791066",
+    "end": "1797266"
+  },
+  {
+    "text": "and I guess it also",
+    "start": "1797266",
+    "end": "1800266"
+  },
+  {
+    "text": "kind of it has an impact in the discussion should the shard ID be part of of the primary key or not",
+    "start": "1806466",
+    "end": "1814600"
+  },
+  {
+    "text": "because if we end up resharding the cluster the entity will change the shard ID",
+    "start": "1814600",
+    "end": "1820500"
+  },
+  {
+    "text": "because the shard ID is allocated based on the",
+    "start": "1820500",
+    "end": "1826433"
+  },
+  {
+    "text": "entity ID, modulo the number of shards. So if we change the number of shards,",
+    "start": "1826433",
+    "end": "1832066"
+  },
+  {
+    "text": "each entity changes the entity ID. And this operation, in my design, with",
+    "start": "1832899",
+    "end": "1841433"
+  },
+  {
+    "text": "sequence numbers per entity, per shard,",
+    "start": "1841433",
+    "end": "1847199"
+  },
+  {
+    "text": "would mean that we have to re-index all the sequence numbers, which is an",
+    "start": "1847833",
+    "end": "1855100"
+  },
+  {
+    "text": "intensive operation. Whereas re-sharding, if we only store the",
+    "start": "1855100",
+    "end": "1861033"
+  },
+  {
+    "text": "shard ID, can be as simple as update all that has shard ID to X to Y.",
+    "start": "1861033",
+    "end": "1870399"
+  },
+  {
+    "text": "So it can be done in a single query.",
+    "start": "1872600",
+    "end": "1876833"
+  },
+  {
+    "text": "Right. Yeah, I mean, I think that makes sense. Also, so that kind of goes towards the",
+    "start": "1880000",
+    "end": "1887766"
+  },
+  {
+    "text": "argument of essentially having the sequence number per entity instead of per shard, right? Because if we re-shard or",
+    "start": "1887766",
+    "end": "1895800"
+  },
+  {
+    "text": "rebalance the cluster and we move entities between, like we move a shard,",
+    "start": "1895800",
+    "end": "1902100"
+  },
+  {
+    "text": "you know, around or we rebalance an entity from one shard to another.",
+    "start": "1902100",
+    "end": "1905199"
+  },
+  {
+    "text": "Yeah, it would be much easier to update the shard ID.",
+    "start": "1911666",
+    "end": "1914733"
+  },
+  {
+    "text": "So with this, yeah, so with this primary, in this discussion, I think it would be",
+    "start": "1917866",
+    "end": "1923100"
+  },
+  {
+    "text": "even easier if we store the max number of",
+    "start": "1923100",
+    "end": "1928533"
+  },
+  {
+    "text": "shards in that table too, even though it's going to be a repeated, a repetitive thing.",
+    "start": "1928533",
+    "end": "1935199"
+  },
+  {
+    "text": "But it would make the update query much easier and it would make it so that we",
+    "start": "1935233",
+    "end": "1941533"
+  },
+  {
+    "text": "can do that across multiple transactions.",
+    "start": "1941533",
+    "end": "1946299"
+  },
+  {
+    "text": "And what would be... Yeah, go on. Sorry. I know I was going to say, if you could",
+    "start": "1949066",
+    "end": "1954600"
+  },
+  {
+    "text": "explain a little bit more, I'm not sure I understand why storing the max number of shards in the table would make sense.",
+    "start": "1954600",
+    "end": "1959199"
+  },
+  {
+    "text": "Because if I think about how we go on about re-sharding, there has to be a",
+    "start": "1960199",
+    "end": "1968899"
+  },
+  {
+    "text": "database query which says, and that has to update every single message, okay?",
+    "start": "1968899",
+    "end": "1975199"
+  },
+  {
+    "text": "Which might be billions of rows if we consider history. And if we consider that",
+    "start": "1976033",
+    "end": "1981633"
+  },
+  {
+    "text": "you are re-sharding the cluster, which means you need probably more shards.",
+    "start": "1981633",
+    "end": "1986199"
+  },
+  {
+    "text": "There's no point in re-sharding a database to have less shards.",
+    "start": "1987199",
+    "end": "1992433"
+  },
+  {
+    "text": "It means you need more... You're probably increasing the size and you need more distribution.",
+    "start": "1994100",
+    "end": "2000199"
+  },
+  {
+    "text": "In that case, you need a query that sounds like update shard_id to",
+    "start": "2001199",
+    "end": "2013699"
+  },
+  {
+    "text": "one where shard_id was three.",
+    "start": "2013699",
+    "end": "2020433"
+  },
+  {
+    "text": "Right. Because you're changing that number. Now, if you do that and you commit that,",
+    "start": "2021566",
+    "end": "2029366"
+  },
+  {
+    "text": "then you can't do another subsequent query which says update shard_id three to",
+    "start": "2030866",
+    "end": "2038533"
+  },
+  {
+    "text": "what was two because you just changed the other one. You're changing those numbers and you",
+    "start": "2038533",
+    "end": "2048000"
+  },
+  {
+    "text": "don't have a selection. And instead, if you store the max numbers, you can say",
+    "start": "2048000",
+    "end": "2056366"
+  },
+  {
+    "text": "where shard_id equals three and max shards equal 512.",
+    "start": "2056366",
+    "end": "2065000"
+  },
+  {
+    "text": "that thing doesn't change because when I update, I would change the",
+    "start": "2065000",
+    "end": "2070500"
+  },
+  {
+    "text": "shard_id, but I would also change the max shards so the two queries don't conflict.",
+    "start": "2070500",
+    "end": "2078199"
+  },
+  {
+    "text": "To be clear, the cluster has to be down when this operation happens, but the",
+    "start": "2079199",
+    "end": "2084800"
+  },
+  {
+    "text": "difference is in the first one, I need to have everything in the same transaction",
+    "start": "2084800",
+    "end": "2091699"
+  },
+  {
+    "text": "and in the same statement, I can't afford...",
+    "start": "2091699",
+    "end": "2100199"
+  },
+  {
+    "text": "How do you keep selecting if you've changed the selector?",
+    "start": "2101199",
+    "end": "2108199"
+  },
+  {
+    "text": "You have a part of the query which identifies which rows has to be changed.",
+    "start": "2109800",
+    "end": "2115199"
+  },
+  {
+    "text": "And that part, if you then change the information in that part, you might...",
+    "start": "2116199",
+    "end": "2124300"
+  },
+  {
+    "text": "What before was shard_1 now has become shard_3.",
+    "start": "2125833",
+    "end": "2130466"
+  },
+  {
+    "text": "But when you get to update shard_3, the row that you updated before which was one, now it's three.",
+    "start": "2132133",
+    "end": "2138399"
+  },
+  {
+    "text": "So how do you know that this was recently updated? You have to keep track of the",
+    "start": "2138399",
+    "end": "2145233"
+  },
+  {
+    "text": "update number or some sort of thing. If instead you have the max shards, you",
+    "start": "2145233",
+    "end": "2153233"
+  },
+  {
+    "text": "can say, \"Yes, I am updating shard_3 with",
+    "start": "2153233",
+    "end": "2159899"
+  },
+  {
+    "text": "max shards count to 512. I'm updating that",
+    "start": "2159899",
+    "end": "2167366"
+  },
+  {
+    "text": "number to be 6 when end max shards to be 1048.\"",
+    "start": "2167366",
+    "end": "2174199"
+  },
+  {
+    "text": "So at the next query, I will select for shard_512 and my priorly updated row will",
+    "start": "2175199",
+    "end": "2183099"
+  },
+  {
+    "text": "not be part of the new update because it has the max number of shards changed.",
+    "start": "2183100",
+    "end": "2188833"
+  },
+  {
+    "text": "Change was the point that Mattia was trying to make. I guess... Can we make the assumption",
+    "start": "2189866",
+    "end": "2196866"
+  },
+  {
+    "text": "that rebalancing only happens when you're expanding the cluster? Because in the in the current design, which is also I think the",
+    "start": "2196866",
+    "end": "2205299"
+  },
+  {
+    "text": "design in Shardcake, I'll actually share the architecture again.",
+    "start": "2205300",
+    "end": "2209965"
+  },
+  {
+    "text": "The current design of clusters rebalancing, I think, is similar to shard_cakes where rebalancing happens",
+    "start": "2211199",
+    "end": "2219166"
+  },
+  {
+    "text": "when a first pod registers, when a pod unregisters, or on a regular interval.",
+    "start": "2219166",
+    "end": "2226233"
+  },
+  {
+    "text": "Rebalancing has nothing to do with re-sharding. Doesn't rebalancing involve",
+    "start": "2228566",
+    "end": "2235633"
+  },
+  {
+    "text": "re-sharding in some cases? No, absolutely not.",
+    "start": "2235633",
+    "end": "2239000"
+  },
+  {
+    "text": "Re-sharding means changing the numbers of shards. Re-balancing means changing the allocation of shards to pods.",
+    "start": "2240866",
+    "end": "2246566"
+  },
+  {
+    "text": "Got it. Okay. Then that was my mistake. They are completely unrelated.",
+    "start": "2247633",
+    "end": "2250366"
+  },
+  {
+    "text": "So, re-sharding would be like if you need to move an entity between",
+    "start": "2255500",
+    "end": "2261100"
+  },
+  {
+    "text": "shards or if you need to... Let's say you start with two shards.",
+    "start": "2261100",
+    "end": "2267199"
+  },
+  {
+    "text": "It would be dumb, but it's a free configuration.",
+    "start": "2267199",
+    "end": "2275033"
+  },
+  {
+    "text": "And you realize that if you have four pods and two shards, there's not much",
+    "start": "2276699",
+    "end": "2283500"
+  },
+  {
+    "text": "distribution that you can do. Or you realize that you have 128 shards,",
+    "start": "2283500",
+    "end": "2291133"
+  },
+  {
+    "text": "but you end up having too many users in the same shard.",
+    "start": "2291133",
+    "end": "2295666"
+  },
+  {
+    "text": "You then raise the number of shards to force entities to split. To split more.",
+    "start": "2298466",
+    "end": "2307133"
+  },
+  {
+    "text": "This is obviously something that cannot occur when the cluster is alive because",
+    "start": "2309333",
+    "end": "2315799"
+  },
+  {
+    "text": "it changes the inherent structure of the cluster. It changes the",
+    "start": "2315800",
+    "end": "2321433"
+  },
+  {
+    "text": "allocation of entity to shard. Instead of the allocation of shards to",
+    "start": "2321433",
+    "end": "2328199"
+  },
+  {
+    "text": "pod, an entity to shard is something that can't change.",
+    "start": "2328199",
+    "end": "2335799"
+  },
+  {
+    "text": "If that changes, everything breaks. So you need to bring the cluster down, do",
+    "start": "2336933",
+    "end": "2343899"
+  },
+  {
+    "text": "re-sharding, and bring the cluster back up again. It would be like, in a Kafka topic, you",
+    "start": "2343899",
+    "end": "2352533"
+  },
+  {
+    "text": "change the amount of partitions. Why would you change the amount of",
+    "start": "2352533",
+    "end": "2359299"
+  },
+  {
+    "text": "partitions? Well, if it's not performant enough.",
+    "start": "2359300",
+    "end": "2363733"
+  },
+  {
+    "text": "The counter-argument is why don't you start with 65,000 partitions?",
+    "start": "2364699",
+    "end": "2369199"
+  },
+  {
+    "text": "Well, because consumption takes more resources. It's a balance.",
+    "start": "2370199",
+    "end": "2379133"
+  },
+  {
+    "text": "Now, if a well-planned cluster never needs to re-shard, and there's not many arguments who have less than some",
+    "start": "2380500",
+    "end": "2388633"
+  },
+  {
+    "text": "thousands of shards, I would set the default to something like, I don't know, 16k.",
+    "start": "2388633",
+    "end": "2395199"
+  },
+  {
+    "text": "Something like that. So re-sharding is not a common operation.",
+    "start": "2396199",
+    "end": "2401666"
+  },
+  {
+    "text": "But it does put a bit of pressure onto the shard manager, having to allocate 16k shards versus 12.",
+    "start": "2402833",
+    "end": "2411266"
+  },
+  {
+    "text": "It's much easier to just manage 12. If you are smart and we do things",
+    "start": "2412433",
+    "end": "2419733"
+  },
+  {
+    "text": "properly, then it's not a huge deal to manage a large number of shards.",
+    "start": "2419733",
+    "end": "2424932"
+  },
+  {
+    "text": "And probably re-sharding is a situation that will never present as necessary.",
+    "start": "2426066",
+    "end": "2432500"
+  },
+  {
+    "text": "But in case it is necessary, then we have to change the messages,",
+    "start": "2434000",
+    "end": "2439533"
+  },
+  {
+    "text": "how the messages are stored. The alternative is we don't",
+    "start": "2440033",
+    "end": "2445632"
+  },
+  {
+    "text": "store the shard ID at all. But I'm afraid then...",
+    "start": "2445633",
+    "end": "2450765"
+  },
+  {
+    "text": "That was going to be my next question, is for the mailbox, do we need the shard ID?",
+    "start": "2452233",
+    "end": "2457300"
+  },
+  {
+    "text": "Because an entity is going to be... When a pod comes up,",
+    "start": "2458000",
+    "end": "2467966"
+  },
+  {
+    "text": "the pod has to query. The messages that has to process.",
+    "start": "2468766",
+    "end": "2475133"
+  },
+  {
+    "text": "How are those messages retrieved? Right, and knows what entity it should go",
+    "start": "2476633",
+    "end": "2481966"
+  },
+  {
+    "text": "to, but it doesn't know. It only wants the entities for... Yeah. The pod only knows",
+    "start": "2481966",
+    "end": "2489399"
+  },
+  {
+    "text": "which shards it has assigned to. So the pod knows, okay, I need the",
+    "start": "2489399",
+    "end": "2497600"
+  },
+  {
+    "text": "entities that are in shard 1 and 5. This query can either be efficient if you",
+    "start": "2497600",
+    "end": "2506099"
+  },
+  {
+    "text": "query with the shard ID indexed, then you",
+    "start": "2506100",
+    "end": "2512000"
+  },
+  {
+    "text": "get an efficient lookup. Otherwise, you have to query having the",
+    "start": "2512000",
+    "end": "2518599"
+  },
+  {
+    "text": "database compute the hash and compute the shard ID on the fly.",
+    "start": "2518600",
+    "end": "2522500"
+  },
+  {
+    "text": "Which is possible, but it's a full table scan. I don't think we can assume that a",
+    "start": "2523666",
+    "end": "2530399"
+  },
+  {
+    "text": "database has hash indexes. Some database have hash indexes.",
+    "start": "2530399",
+    "end": "2535833"
+  },
+  {
+    "text": "And you could probably build some custom",
+    "start": "2537199",
+    "end": "2542333"
+  },
+  {
+    "text": "plugin that allows you to do that efficiently on a Postgres.",
+    "start": "2542333",
+    "end": "2546766"
+  },
+  {
+    "text": "But it's very database specific. And it's absolutely not",
+    "start": "2549133",
+    "end": "2555133"
+  },
+  {
+    "text": "portable across other places.",
+    "start": "2555133",
+    "end": "2560100"
+  },
+  {
+    "text": "There are databases like, for example, Cockroach, that are very nice and very efficient.",
+    "start": "2561233",
+    "end": "2567233"
+  },
+  {
+    "text": "They have the same API as Postgres, the same protocol as Postgres, but they can",
+    "start": "2568066",
+    "end": "2573632"
+  },
+  {
+    "text": "be sharded themselves. And to shard themselves, they need some",
+    "start": "2573633",
+    "end": "2581765"
+  },
+  {
+    "text": "sort of shard identifier in the table that tells the database,",
+    "start": "2581766",
+    "end": "2587000"
+  },
+  {
+    "text": "\"Look, all my queries will be within this shard.\"",
+    "start": "2587000",
+    "end": "2591866"
+  },
+  {
+    "text": "And if they don't, then it's less efficient because then you have distributed transactions, for the ignitions",
+    "start": "2592500",
+    "end": "2598500"
+  },
+  {
+    "text": "multiple registries, multiple main",
+    "start": "2598500",
+    "end": "2604966"
+  },
+  {
+    "text": "servers, each responsible for each shard, and so on and so forth. So I think the shard ID has to be stored",
+    "start": "2604966",
+    "end": "2611699"
+  },
+  {
+    "text": "for the query to be efficient in retrieving non-processed",
+    "start": "2611699",
+    "end": "2617833"
+  },
+  {
+    "text": "messages upon starting the thing.",
+    "start": "2617833",
+    "end": "2623199"
+  },
+  {
+    "text": "Right. Okay. I think that hearing all of this, to me, it makes more sense to go",
+    "start": "2624199",
+    "end": "2635133"
+  },
+  {
+    "text": "down the route of message sequence number being local to entity and trying to figure out the problems,",
+    "start": "2635133",
+    "end": "2640533"
+  },
+  {
+    "text": "solving the problems there, because I feel like message sequence",
+    "start": "2641133",
+    "end": "2647599"
+  },
+  {
+    "text": "number on the shard level, even though resharding should be a",
+    "start": "2647600",
+    "end": "2653599"
+  },
+  {
+    "text": "reasonably rare operation that we perform, we should still support it with good performance, right?",
+    "start": "2653600",
+    "end": "2659600"
+  },
+  {
+    "text": "And if resharding is going to be problematic, not problematic, but if it's going to be an intensive operation,",
+    "start": "2659800",
+    "end": "2666100"
+  },
+  {
+    "text": "if we put the message sequence number on the shard level, then I feel like we should maybe try to figure out how to do",
+    "start": "2666100",
+    "end": "2671733"
+  },
+  {
+    "text": "this with the message sequence number local to the identity instead. Because the problem you were describing,",
+    "start": "2671733",
+    "end": "2679066"
+  },
+  {
+    "text": "so we focus on that and talk about the problem. The problem that you were describing is that if the message",
+    "start": "2679300",
+    "end": "2686199"
+  },
+  {
+    "text": "sequence number is local to the entity, then restoring the state of a pod and its",
+    "start": "2686199",
+    "end": "2694433"
+  },
+  {
+    "text": "shards becomes problematic, right? That was what you were talking about before,",
+    "start": "2694433",
+    "end": "2699899"
+  },
+  {
+    "text": "is like we may end up restoring the state of it. No, no, not specifically. What I said is",
+    "start": "2699899",
+    "end": "2708099"
+  },
+  {
+    "text": "it requires a read query before a write",
+    "start": "2708100",
+    "end": "2713966"
+  },
+  {
+    "text": "query to get the last message ID to",
+    "start": "2713966",
+    "end": "2721333"
+  },
+  {
+    "text": "generate the sequence number, but it doesn't even have to be necessarily true.",
+    "start": "2721333",
+    "end": "2727199"
+  },
+  {
+    "text": "I was going to say, because that would be... When a pod starts up, it's going to",
+    "start": "2727233",
+    "end": "2737333"
+  },
+  {
+    "text": "read the table, right? It's going to get all the information about the shards that belong to that pod.",
+    "start": "2737333",
+    "end": "2742899"
+  },
+  {
+    "text": "Why would we need to do a read before",
+    "start": "2743899",
+    "end": "2749233"
+  },
+  {
+    "text": "every write if we can just store the message sequence number in memory when",
+    "start": "2749233",
+    "end": "2754533"
+  },
+  {
+    "text": "we're writing messages to the table? We get the initial reference to the last message sequence number, and when we",
+    "start": "2754533",
+    "end": "2763100"
+  },
+  {
+    "text": "write the messages to the table, we just increment that message sequence number in memory.",
+    "start": "2763100",
+    "end": "2768899"
+  },
+  {
+    "text": "If the pod goes down... No, we don't. We don't.",
+    "start": "2768899",
+    "end": "2775033"
+  },
+  {
+    "text": "Go ahead. We don't. The reason is simple. When a",
+    "start": "2775233",
+    "end": "2780433"
+  },
+  {
+    "text": "pod starts, you only query the non-processed messages. You don't query",
+    "start": "2780433",
+    "end": "2786966"
+  },
+  {
+    "text": "the whole history of all entities. Yeah. Because you might have a billion of",
+    "start": "2786966",
+    "end": "2792566"
+  },
+  {
+    "text": "entities that are no longer alive. So you only query messages that have to",
+    "start": "2792566",
+    "end": "2799099"
+  },
+  {
+    "text": "be processed. Right. Which means you don't have the sequence numbers of all entities.",
+    "start": "2799100",
+    "end": "2804133"
+  },
+  {
+    "text": "You only have the sequence numbers of the entities that have messages... that have",
+    "start": "2805433",
+    "end": "2812466"
+  },
+  {
+    "text": "non-processed messages. My point was, if we instead make the",
+    "start": "2812466",
+    "end": "2818433"
+  },
+  {
+    "text": "sequence number per shard, then we can know it because we just need to query the",
+    "start": "2818433",
+    "end": "2826265"
+  },
+  {
+    "text": "shards instead of the entities. But this leads to other problems.",
+    "start": "2826266",
+    "end": "2832800"
+  },
+  {
+    "text": "The shard ID has to be stored in the message anyway, but the sequence number",
+    "start": "2833800",
+    "end": "2841099"
+  },
+  {
+    "text": "doesn't have to be related to the shard ID. My point was, do we relate the sequence",
+    "start": "2841100",
+    "end": "2846599"
+  },
+  {
+    "text": "number to the entity or to the shard? Both have pros and cons.",
+    "start": "2846600",
+    "end": "2851800"
+  },
+  {
+    "text": "But now that I think about it better, I see actually a potential issue in my",
+    "start": "2851800",
+    "end": "2861533"
+  },
+  {
+    "text": "design, which was a sequence number per shard.",
+    "start": "2861533",
+    "end": "2866800"
+  },
+  {
+    "text": "The potential issue I see is, what if a malicious actor starts to send duplicated",
+    "start": "2867800",
+    "end": "2878933"
+  },
+  {
+    "text": "messages in the same shard?",
+    "start": "2878933",
+    "end": "2882533"
+  },
+  {
+    "text": "Well, we received maybe a hundred messages of which one is duplicated.",
+    "start": "2885100",
+    "end": "2891533"
+  },
+  {
+    "text": "Which means the local sequence numbers will be fucked up. Because we then start",
+    "start": "2893133",
+    "end": "2898833"
+  },
+  {
+    "text": "to insert first, second, third, fourth... the fifth is duplicated. So the fifth, the insert of the fifth",
+    "start": "2898833",
+    "end": "2906366"
+  },
+  {
+    "text": "doesn't go through, but it means six now becomes five, seven becomes six.",
+    "start": "2906366",
+    "end": "2913533"
+  },
+  {
+    "text": "So the whole local generation of sequence numbers is not a great idea.",
+    "start": "2914633",
+    "end": "2919800"
+  },
+  {
+    "text": "I think the better alternative would be that each message is independent, and the",
+    "start": "2920800",
+    "end": "2928566"
+  },
+  {
+    "text": "query that writes the message also increments the sequence number.",
+    "start": "2928566",
+    "end": "2933833"
+  },
+  {
+    "text": "Which is like the query you initially were designing, where you do select marks",
+    "start": "2934500",
+    "end": "2940966"
+  },
+  {
+    "text": "from sequence number where entity ID equals current entity ID plus one.",
+    "start": "2940966",
+    "end": "2948800"
+  },
+  {
+    "text": "And that would be the same thing if you have a duplicate, then it just fades, but",
+    "start": "2949800",
+    "end": "2955433"
+  },
+  {
+    "text": "the other query will insert the message. And in that design, is the sequence",
+    "start": "2955433",
+    "end": "2960633"
+  },
+  {
+    "text": "numbers entity local, right? Yes. Yeah. So if we go",
+    "start": "2960633",
+    "end": "2966233"
+  },
+  {
+    "text": "actually to the code again... Which was the initial design, but I was",
+    "start": "2966233",
+    "end": "2973433"
+  },
+  {
+    "text": "kind of fooled into thinking we could save a read query.",
+    "start": "2973433",
+    "end": "2977399"
+  },
+  {
+    "text": "So if we ignore... And we don't need in the first place. We ignore all my... Because the right query can read.",
+    "start": "2978866",
+    "end": "2984466"
+  },
+  {
+    "text": "Right. All right. Here's my service.",
+    "start": "2985600",
+    "end": "2991100"
+  },
+  {
+    "text": "Okay. So let's ignore some of this.",
+    "start": "2991100",
+    "end": "2997366"
+  },
+  {
+    "text": "Let's go to the query where we actually insert a message.",
+    "start": "2998233",
+    "end": "3001000"
+  },
+  {
+    "text": "Here's the query. So here, we're doing an insert select.",
+    "start": "3003466",
+    "end": "3012066"
+  },
+  {
+    "text": "It doesn't have to be done this way because every database kind of has their own way of doing a...",
+    "start": "3014199",
+    "end": "3020066"
+  },
+  {
+    "text": "An insert statement where you don't want to do anything if you",
+    "start": "3020066",
+    "end": "3025199"
+  },
+  {
+    "text": "have duplicate messages. So it doesn't have to be done this way.",
+    "start": "3025199",
+    "end": "3031833"
+  },
+  {
+    "text": "This was like a portable way to kind of do the insert. The... I guess, \"upsert\" is not the right",
+    "start": "3032899",
+    "end": "3039199"
+  },
+  {
+    "text": "way to describe this query. It's more of like we're inserting,",
+    "start": "3039199",
+    "end": "3046066"
+  },
+  {
+    "text": " but on duplicate, don't do anything. So every database has its own kind of",
+    "start": "3046066",
+    "end": "3051965"
+  },
+  {
+    "text": "like method for handling this. I just want to... I wrote a portable query for now, but we can always use the",
+    "start": "3051966",
+    "end": "3059533"
+  },
+  {
+    "text": "SQL dot on dialect to write the parlance",
+    "start": "3059533",
+    "end": "3065932"
+  },
+  {
+    "text": "for every individual database later if we want to do that. But anyways, the idea here is that we're",
+    "start": "3065933",
+    "end": "3073866"
+  },
+  {
+    "text": "writing an insert select, and we're selecting where not exists like the actual message.",
+    "start": "3073866",
+    "end": "3079833"
+  },
+  {
+    "text": "So basically, we're saying like only insert these values to insert where we",
+    "start": "3079833",
+    "end": "3085500"
+  },
+  {
+    "text": "don't already have a value. But...",
+    "start": "3085500",
+    "end": "3088899"
+  },
+  {
+    "text": "The... The original... It also generate a progressive ID.",
+    "start": "3092066",
+    "end": "3096300"
+  },
+  {
+    "text": "Yeah, so now we have to add that piece in. So I think my original",
+    "start": "3097866",
+    "end": "3103033"
+  },
+  {
+    "text": "query was something like...",
+    "start": "3103033",
+    "end": "3107099"
+  },
+  {
+    "text": "Alright, let's just assume for a moment the message sequence number is not in the request, even though it is right now.",
+    "start": "3117366",
+    "end": "3122733"
+  },
+  {
+    "text": "Select... I think I wrote... I will.",
+    "start": "3125100",
+    "end": "3128333"
+  },
+  {
+    "text": "I can't remember what my query was before, but something like select...",
+    "start": "3136166",
+    "end": "3139733"
+  },
+  {
+    "text": "Select marx sequence number from...",
+    "start": "3141533",
+    "end": "3145399"
+  },
+  {
+    "text": "You got the from wrong in the query that you posted, so I wouldn't just copy the",
+    "start": "3148533",
+    "end": "3154233"
+  },
+  {
+    "text": "query that you posted. I'm not. I'm not. The problem was right.",
+    "start": "3154233",
+    "end": "3159633"
+  },
+  {
+    "text": "The where was not correct. We want the where... It's entity local,",
+    "start": "3159899",
+    "end": "3166500"
+  },
+  {
+    "text": "so we want it to be at least this.",
+    "start": "3166500",
+    "end": "3170233"
+  },
+  {
+    "text": "Where entity type, yes. That's the point.",
+    "start": "3172133",
+    "end": "3174333"
+  },
+  {
+    "text": "So we want it to be entity local.",
+    "start": "3183266",
+    "end": "3185100"
+  },
+  {
+    "text": "Select the max message... By the way, I think the shard ID is not necessary in this query.",
+    "start": "3188833",
+    "end": "3192633"
+  },
+  {
+    "text": "Yeah, it is not.",
+    "start": "3195100",
+    "end": "3195666"
+  },
+  {
+    "text": "So we get the max message sequence number. We had one from mailbox where entity ID.",
+    "start": "3204833",
+    "end": "3210099"
+  },
+  {
+    "text": "And by the way... I don't know how to",
+    "start": "3211100",
+    "end": "3217233"
+  },
+  {
+    "text": "do it, but it might be that this is the first message.",
+    "start": "3217233",
+    "end": "3221533"
+  },
+  {
+    "text": "Yeah. So you cannot rely on the previous to be there.",
+    "start": "3223399",
+    "end": "3226800"
+  },
+  {
+    "text": "I will have to... I'll look into it, but... And the idea is something like this.",
+    "start": "3234633",
+    "end": "3241733"
+  },
+  {
+    "text": "Assuming we have other messages, this is the idea.",
+    "start": "3242533",
+    "end": "3244500"
+  },
+  {
+    "text": "Yeah, which needs to be refined for handling the case where there are no other messages.",
+    "start": "3248100",
+    "end": "3253300"
+  },
+  {
+    "text": "That's fine. I can do that.",
+    "start": "3255133",
+    "end": "3256100"
+  },
+  {
+    "text": "Okay.",
+    "start": "3267100",
+    "end": "3267833"
+  },
+  {
+    "text": "And then obviously the request would... The insert message request would not have",
+    "start": "3274399",
+    "end": "3280600"
+  },
+  {
+    "text": "the sequence number. And we can actually just take the envelope in, which is great.",
+    "start": "3280600",
+    "end": "3286633"
+  },
+  {
+    "text": "And it is in the return type, though.",
+    "start": "3292333",
+    "end": "3295633"
+  },
+  {
+    "text": "It is in the return type, yes. Because if",
+    "start": "3305333",
+    "end": "3310899"
+  },
+  {
+    "text": "we go back to insert...",
+    "start": "3310899",
+    "end": "3312066"
+  },
+  {
+    "text": "This thing needs to return the message sequence. So rather it should be returned. Say that again, Mike?",
+    "start": "3316300",
+    "end": "3322100"
+  },
+  {
+    "text": "I mean, it should be in the return. So we need to return the newly added sequence,",
+    "start": "3324133",
+    "end": "3330633"
+  },
+  {
+    "text": "which we added the message. And instead, if the message was duplicated, we just have",
+    "start": "3330933",
+    "end": "3340166"
+  },
+  {
+    "text": "to basically do nothing.",
+    "start": "3340166",
+    "end": "3343333"
+  },
+  {
+    "text": "Yeah, that is the current behavior here. The result of this query...",
+    "start": "3346266",
+    "end": "3351899"
+  },
+  {
+    "text": "Could be nothing.",
+    "start": "3357100",
+    "end": "3359366"
+  },
+  {
+    "text": "I don't exactly know how to do this with effectSQL. But it would probably",
+    "start": "3366100",
+    "end": "3375600"
+  },
+  {
+    "text": "be something like...",
+    "start": "3375600",
+    "end": "3376899"
+  },
+  {
+    "text": "Or it could always be the sequence number and a boolean if the",
+    "start": "3385633",
+    "end": "3390733"
+  },
+  {
+    "text": "message was new or not. We can play with the thing a little bit.",
+    "start": "3390733",
+    "end": "3400800"
+  },
+  {
+    "text": "Because I think for the party who inserts",
+    "start": "3401100",
+    "end": "3406300"
+  },
+  {
+    "text": "the message, or rather for the party who tells the entity,",
+    "start": "3406300",
+    "end": "3411965"
+  },
+  {
+    "text": "the result already has a difference in telling. If you just tell, then",
+    "start": "3413100",
+    "end": "3419000"
+  },
+  {
+    "text": "there is nothing to be done. If you are asking, then I have to reply",
+    "start": "3419000",
+    "end": "3425300"
+  },
+  {
+    "text": "to you with the same reply that I gave you previously.",
+    "start": "3425300",
+    "end": "3430566"
+  },
+  {
+    "text": "So basically, I don't restart processing. I just then listen to the same result.",
+    "start": "3432866",
+    "end": "3440033"
+  },
+  {
+    "text": "Because the point of having the message ID is idempotency. Right. You don't know if you've sent the message",
+    "start": "3440500",
+    "end": "3446733"
+  },
+  {
+    "text": "or not, you just resend it. While idempotency also means you should get the same response back.",
+    "start": "3446733",
+    "end": "3451733"
+  },
+  {
+    "text": "Well, I guess we could... I'll have to adjust this query because",
+    "start": "3455533",
+    "end": "3461099"
+  },
+  {
+    "text": "when we actually insert the message, you're right. We probably want the result.",
+    "start": "3461100",
+    "end": "3465099"
+  },
+  {
+    "text": "Because, okay, the entity receives a message that now needs",
+    "start": "3468766",
+    "end": "3474199"
+  },
+  {
+    "text": "to persist into storage. The entity attempts to persist the message into storage.",
+    "start": "3474199",
+    "end": "3479366"
+  },
+  {
+    "text": "When it does that, it calls insert on the mailbox storage. If the message was already there,",
+    "start": "3479800",
+    "end": "3486233"
+  },
+  {
+    "text": "regardless of whether the message is there or not, we're going to respond back to insert",
+    "start": "3486800",
+    "end": "3492500"
+  },
+  {
+    "text": "with a particular structure. That structure needs to indicate to the",
+    "start": "3492500",
+    "end": "3500533"
+  },
+  {
+    "text": "thing that called insert whether or not the message was already processed. Right now on our table, the way we",
+    "start": "3500533",
+    "end": "3508399"
+  },
+  {
+    "text": "indicate if a message was actually processed is whether or not there was a result. Because our message acknowledged is just",
+    "start": "3508399",
+    "end": "3516100"
+  },
+  {
+    "text": "a Boolean for whether or not it was acknowledged. If the message was actually fully processed, then there should be a result.",
+    "start": "3516100",
+    "end": "3521033"
+  },
+  {
+    "text": "So essentially the query... Well, I mean, the result might be avoided.",
+    "start": "3522366",
+    "end": "3528899"
+  },
+  {
+    "text": "But the point is if it was reinserted, not even acknowledged or processed,",
+    "start": "3530000",
+    "end": "3534566"
+  },
+  {
+    "text": "there's nothing else to be done. You just have to wait for the response. Right.",
+    "start": "3535600",
+    "end": "3541099"
+  },
+  {
+    "text": "The insert wasn't asked. But we don't have to do anything else",
+    "start": "3542133",
+    "end": "3547199"
+  },
+  {
+    "text": "because the entity is already processing that message. Right. So really, it would be",
+    "start": "3547199",
+    "end": "3554199"
+  },
+  {
+    "text": "in queueing operation. We are not going to queue if it's already there.",
+    "start": "3554199",
+    "end": "3558066"
+  },
+  {
+    "text": "Right. So in that case, like basically the response would be a message state where we already we received the message already.",
+    "start": "3559600",
+    "end": "3565100"
+  },
+  {
+    "text": "Yeah, I think it has to answer back with some sort of message state.",
+    "start": "3568733",
+    "end": "3574033"
+  },
+  {
+    "text": "Is that inserted of knowledge or processed?",
+    "start": "3585100",
+    "end": "3588133"
+  },
+  {
+    "text": "Yeah, received, acknowledged or processed probably.",
+    "start": "3590333",
+    "end": "3592100"
+  },
+  {
+    "text": "Some kind of thing like that.",
+    "start": "3600199",
+    "end": "3602300"
+  },
+  {
+    "text": "I think we have like a... There's a little bit of a problem with",
+    "start": "3609166",
+    "end": "3614500"
+  },
+  {
+    "text": "terminology here because technically message state acknowledged is overloaded",
+    "start": "3614500",
+    "end": "3620100"
+  },
+  {
+    "text": "to both mean like received and acknowledged, but I",
+    "start": "3620100",
+    "end": "3625300"
+  },
+  {
+    "text": "don't think it should be. No, I don't think this is the same state.",
+    "start": "3625300",
+    "end": "3630399"
+  },
+  {
+    "text": "I think there should be another one here that's like received, which indicates the message was received",
+    "start": "3631399",
+    "end": "3637933"
+  },
+  {
+    "text": "but not acknowledged. Acknowledged is a separate thing. And then processed is",
+    "start": "3637933",
+    "end": "3643100"
+  },
+  {
+    "text": "also a separate thing. And processed means it has a result. Right. And the result is...",
+    "start": "3643100",
+    "end": "3648100"
+  },
+  {
+    "text": "Because by the way, a message could be acknowledged but never has a process.",
+    "start": "3648133",
+    "end": "3652533"
+  },
+  {
+    "text": "Right. Is there a processed message? Even at most once, you first acknowledge",
+    "start": "3653933",
+    "end": "3660933"
+  },
+  {
+    "text": "then you process. So you might get to process but you might fail to process.",
+    "start": "3660933",
+    "end": "3665033"
+  },
+  {
+    "text": "Right.",
+    "start": "3665966",
+    "end": "3666100"
+  },
+  {
+    "text": "Yeah, I think...",
+    "start": "3679100",
+    "end": "3682966"
+  },
+  {
+    "text": "I think I need to go back to my old... No, received would just be like whether",
+    "start": "3696100",
+    "end": "3705733"
+  },
+  {
+    "text": "or not there's a value here, something in the mailbox already. I'm just thinking about it from like how",
+    "start": "3705733",
+    "end": "3711533"
+  },
+  {
+    "text": "you represented from a database perspective. Received would be the messages in the mailbox storage here but not",
+    "start": "3711533",
+    "end": "3719366"
+  },
+  {
+    "text": "acknowledged, which is when there's a zero here. Acknowledged is a one and processed is if there's a result.",
+    "start": "3719366",
+    "end": "3724733"
+  },
+  {
+    "text": "Received, which indicates in the main box. Right. And the default for the",
+    "start": "3730800",
+    "end": "3737433"
+  },
+  {
+    "text": "acknowledged field here is here. But also this message state...",
+    "start": "3737433",
+    "end": "3744466"
+  },
+  {
+    "text": "I don't think it has anything to do with the query that we were talking about. Because received is",
+    "start": "3750133",
+    "end": "3758766"
+  },
+  {
+    "text": "always the initial state. And it gives you back the sequence number. But it doesn't tell you if the",
+    "start": "3758766",
+    "end": "3765433"
+  },
+  {
+    "text": "insert was a new one or not. If it's a new one, you have to dispatch it to the queue of the entity. If it's",
+    "start": "3765433",
+    "end": "3772432"
+  },
+  {
+    "text": "not a new one, you don't have to do anything. But this is an additional thing, which is on the mailbox storage. It's not the",
+    "start": "3772433",
+    "end": "3779633"
+  },
+  {
+    "text": "message state. It has nothing to do with the message state. It has to do with the insert query.",
+    "start": "3779633",
+    "end": "3785166"
+  },
+  {
+    "text": "Right. But, okay, so let's say the entity inserts...",
+    "start": "3786466",
+    "end": "3793666"
+  },
+  {
+    "text": "An entity receives a new message. Okay. First it goes to the storage. It saves",
+    "start": "3794899",
+    "end": "3801333"
+  },
+  {
+    "text": "the message. The message was new. It directly dispatches it to the internal",
+    "start": "3801333",
+    "end": "3807932"
+  },
+  {
+    "text": "queue that the behavior will pull from.",
+    "start": "3807933",
+    "end": "3811666"
+  },
+  {
+    "text": "This is new message. Entity receives a message which was already there. It goes to storage.",
+    "start": "3814600",
+    "end": "3820132"
+  },
+  {
+    "text": "Finds that the message already existed. Does not put it in the",
+    "start": "3820966",
+    "end": "3826366"
+  },
+  {
+    "text": "queue that the behavior takes. Otherwise you're just",
+    "start": "3826366",
+    "end": "3831500"
+  },
+  {
+    "text": "over-dispatching to the behavior. Right. Out of order messages.",
+    "start": "3831500",
+    "end": "3836500"
+  },
+  {
+    "text": "So if the message was already there, you have to take a different path.",
+    "start": "3839100",
+    "end": "3843633"
+  },
+  {
+    "text": "It is not dispatching to the internal behavior. It's just listening to the",
+    "start": "3847633",
+    "end": "3853699"
+  },
+  {
+    "text": "result if it was an ask and just do",
+    "start": "3853699",
+    "end": "3858899"
+  },
+  {
+    "text": "nothing if it was a tell.",
+    "start": "3858899",
+    "end": "3860066"
+  },
+  {
+    "text": "Yeah, I guess we'll have to figure that out from like the client side. But I'm just thinking about it in terms",
+    "start": "3865666",
+    "end": "3870866"
+  },
+  {
+    "text": "of like from the entity side for the moment. So I guess you're right. The",
+    "start": "3870866",
+    "end": "3876899"
+  },
+  {
+    "text": "message state doesn't actually need a...",
+    "start": "3887033",
+    "end": "3891765"
+  },
+  {
+    "text": "...received.",
+    "start": "3897366",
+    "end": "3897733"
+  },
+  {
+    "text": "I mean, the message state is kind of a different thing. Yeah.",
+    "start": "3906500",
+    "end": "3909399"
+  },
+  {
+    "text": "No, but this makes sense. That makes sense. So I think I'm tracking on like the",
+    "start": "3914866",
+    "end": "3922033"
+  },
+  {
+    "text": "insert message. Like when the entity inserts a message, if the message was",
+    "start": "3922033",
+    "end": "3927166"
+  },
+  {
+    "text": "there, then we take a different path. If it wasn't, we store the message and dispatch the message to the mailbox's",
+    "start": "3927166",
+    "end": "3933866"
+  },
+  {
+    "text": "queue to be processed.",
+    "start": "3933866",
+    "end": "3935533"
+  },
+  {
+    "text": "Do we... ...do we actually dispatch the message directly to the entity's queue or does",
+    "start": "3939433",
+    "end": "3945333"
+  },
+  {
+    "text": "the entity pull from mailbox storage? So this is kind of talking about something different, but like when an entity...",
+    "start": "3945333",
+    "end": "3952733"
+  },
+  {
+    "text": "We shouldn't dispatch it right away. Because the writer to the",
+    "start": "3952733",
+    "end": "3959366"
+  },
+  {
+    "text": "message storage is the pod. Right.",
+    "start": "3959366",
+    "end": "3964533"
+  },
+  {
+    "text": "So the pod can directly dispatch to the behavior. There's no point having the",
+    "start": "3964566",
+    "end": "3970765"
+  },
+  {
+    "text": "behavior pull every few seconds. It would only slow down the delivery.",
+    "start": "3970766",
+    "end": "3976333"
+  },
+  {
+    "text": "Right.",
+    "start": "3978633",
+    "end": "3978833"
+  },
+  {
+    "text": "Okay. I think that makes sense",
+    "start": "3985533",
+    "end": "3987199"
+  },
+  {
+    "text": "Then... It's like a push versus pull. Right.",
+    "start": "3993666",
+    "end": "3998699"
+  },
+  {
+    "text": "I mean, the single writer, we can do a push. Yeah, we just push directly into the",
+    "start": "3999166",
+    "end": "4004666"
+  },
+  {
+    "text": "mailbox queue that the behavior is reading from. We know you have a new message, so it's",
+    "start": "4004666",
+    "end": "4010765"
+  },
+  {
+    "text": "like, go on. There's no need to have you pulled into 100 milliseconds to figure",
+    "start": "4010766",
+    "end": "4016833"
+  },
+  {
+    "text": "for new messages. I'm the only one who writes new messages. I know if I have new messages.",
+    "start": "4016833",
+    "end": "4021699"
+  },
+  {
+    "text": "Yeah, that makes sense. That makes sense. Yeah, I like that more than querying the",
+    "start": "4024433",
+    "end": "4034265"
+  },
+  {
+    "text": "database repeatedly. Which would be like inefficient. Um...",
+    "start": "4034266",
+    "end": "4040465"
+  },
+  {
+    "text": "The... So actually, this actually brings up a",
+    "start": "4048166",
+    "end": "4055566"
+  },
+  {
+    "text": "point I wanted to ask you about as well, which sort of doesn't really have",
+    "start": "4055566",
+    "end": "4061233"
+  },
+  {
+    "text": "anything to do with mailbox storage, but does have to do with mailbox state. So if you would indulge me for a moment.",
+    "start": "4061233",
+    "end": "4067199"
+  },
+  {
+    "text": "Sure. sharding.ts",
+    "start": "4068566",
+    "end": "4072633"
+  },
+  {
+    "text": "So sharding is the thing that we discussed earlier, which is responsible",
+    "start": "4075533",
+    "end": "4081899"
+  },
+  {
+    "text": "for creating messengers and things like that that can actually be used to send",
+    "start": "4081899",
+    "end": "4088066"
+  },
+  {
+    "text": "messages to pods and entities and things",
+    "start": "4088066",
+    "end": "4093932"
+  },
+  {
+    "text": "like that, or to entities rather. So you would use sharding to create a",
+    "start": "4093933",
+    "end": "4099833"
+  },
+  {
+    "text": "messenger for an entity, which then can be used to send messages to an entity",
+    "start": "4099833",
+    "end": "4106733"
+  },
+  {
+    "text": "with a particular ID. And I think there's an example in... If we look at cluster node examples.",
+    "start": "4106733",
+    "end": "4116032"
+  },
+  {
+    "text": "I think there's an example... Here...",
+    "start": "4117500",
+    "end": "4122333"
+  },
+  {
+    "text": "Where you create a messenger for an",
+    "start": "4123533",
+    "end": "4128733"
+  },
+  {
+    "text": "entity. So in this case, we create a messenger for the counter entity. And then we use that messenger to basically",
+    "start": "4128733",
+    "end": "4136465"
+  },
+  {
+    "text": "send messages whether... I mean, the terminology can change, but whether we tell or ask, we can use...",
+    "start": "4136466",
+    "end": "4144933"
+  },
+  {
+    "text": "We can basically send messages to that entity with a messenger, but sharding is what actually creates the messenger in question.",
+    "start": "4144933",
+    "end": "4151666"
+  },
+  {
+    "text": "What I wanted to ask about is how basically we...",
+    "start": "4159466",
+    "end": "4169233"
+  },
+  {
+    "text": "And I think that Mattia and I were talking about this a little bit in Discord, but when we go to send a message",
+    "start": "4170933",
+    "end": "4178799"
+  },
+  {
+    "text": "via sharding to an entity, how encoding",
+    "start": "4178800",
+    "end": "4184965"
+  },
+  {
+    "text": "of that message should be performed. So at the moment, what happens is that we",
+    "start": "4184966",
+    "end": "4193299"
+  },
+  {
+    "text": "encode the message itself.",
+    "start": "4193300",
+    "end": "4196133"
+  },
+  {
+    "text": "And then we store that encoded message in a data type called a serialized message.",
+    "start": "4201199",
+    "end": "4208433"
+  },
+  {
+    "text": "And then we pack that into an envelope, which is called... I mean, it's a regular envelope that contains",
+    "start": "4209233",
+    "end": "4215266"
+  },
+  {
+    "text": "a serialized message. And then we call that like a serialized",
+    "start": "4215266",
+    "end": "4221066"
+  },
+  {
+    "text": "envelope. But I'm really not satisfied",
+    "start": "4221066",
+    "end": "4226233"
+  },
+  {
+    "text": "with this whole, like, all these serialized data types. The reason why we go through these hoops, Mattia sort of",
+    "start": "4226233",
+    "end": "4233666"
+  },
+  {
+    "text": "described in Discord, but the... When we send a message, we want the",
+    "start": "4233666",
+    "end": "4239833"
+  },
+  {
+    "text": "metadata of the envelope available. And if I remember correctly, I can look at",
+    "start": "4239833",
+    "end": "4245466"
+  },
+  {
+    "text": "our discussion, but...",
+    "start": "4245466",
+    "end": "4247166"
+  },
+  {
+    "text": "Where was it? But he said that... The receiver side of the message uses the",
+    "start": "4250533",
+    "end": "4263833"
+  },
+  {
+    "text": "serialized data types. But I feel like there's a better way that we can do this.",
+    "start": "4263833",
+    "end": "4268698"
+  },
+  {
+    "text": "Because if you look, for example, at like what serialized message actually is, it's",
+    "start": "4269166",
+    "end": "4275033"
+  },
+  {
+    "text": "basically the equivalent of... I mean, I've made a bunch of changes to this. But",
+    "start": "4275033",
+    "end": "4280266"
+  },
+  {
+    "text": "before I made changes, it was basically this.",
+    "start": "4280266",
+    "end": "4282933"
+  },
+  {
+    "text": "Where the success, the failure, and the payload are all just like strings. And the only reason this data type even",
+    "start": "4289166",
+    "end": "4294966"
+  },
+  {
+    "text": "exists is because an envelope can only store... can only have",
+    "start": "4294966",
+    "end": "4300032"
+  },
+  {
+    "text": "tagged requests as messages. And if you look... Let's go to serialized",
+    "start": "4300033",
+    "end": "4309899"
+  },
+  {
+    "text": "envelope. It's literally just an envelope that has a serialized message in it.",
+    "start": "4309899",
+    "end": "4318066"
+  },
+  {
+    "text": "I want to find a better way to do this because I feel like this... there's a lot",
+    "start": "4319566",
+    "end": "4324933"
+  },
+  {
+    "text": "of like indirection happening here that doesn't make a lot of sense.",
+    "start": "4324933",
+    "end": "4329933"
+  },
+  {
+    "text": "I mean, shouldn't an envelope be directly",
+    "start": "4329966",
+    "end": "4335566"
+  },
+  {
+    "text": "serialized always? Because the sender has",
+    "start": "4335566",
+    "end": "4341066"
+  },
+  {
+    "text": "to serialize the message and the behavior, the final piece",
+    "start": "4341066",
+    "end": "4346500"
+  },
+  {
+    "text": "is in charge of decoding it. So if the envelope is the thing you send,",
+    "start": "4346500",
+    "end": "4351133"
+  },
+  {
+    "text": "like the letter, to your home, then that thing is always serialized. When you open",
+    "start": "4351866",
+    "end": "4358000"
+  },
+  {
+    "text": "it up, you deserialize the inner. So you're saying that when the behavior",
+    "start": "4358000",
+    "end": "4364333"
+  },
+  {
+    "text": "pulls from the... I mean, it's not the responsibility of the user necessarily, but like when the... on the receiving",
+    "start": "4364333",
+    "end": "4373333"
+  },
+  {
+    "text": "end, right? We send the message, the message is serialized, it goes over the",
+    "start": "4373333",
+    "end": "4379166"
+  },
+  {
+    "text": "wire. The receiver gets it. Stored to a database?",
+    "start": "4379166",
+    "end": "4384000"
+  },
+  {
+    "text": "We have to store it to the database, the serialized thing. You can't store that to the database, non-serialized thing.",
+    "start": "4387066",
+    "end": "4392399"
+  },
+  {
+    "text": "Obviously, obviously. But the receiver gets it, right? And the mailbox for that",
+    "start": "4392600",
+    "end": "4398333"
+  },
+  {
+    "text": "entity eventually gets that message. And internally, before it actually calls the",
+    "start": "4398333",
+    "end": "4403966"
+  },
+  {
+    "text": "behavior, it uses the schema of that...",
+    "start": "4403966",
+    "end": "4406932"
+  },
+  {
+    "text": "of that entity to decode that message. Is what you're saying.",
+    "start": "4409866",
+    "end": "4416866"
+  },
+  {
+    "text": "Yeah, that sounds to me like the only logical... Yeah, because to me, I think that we",
+    "start": "4420866",
+    "end": "4427833"
+  },
+  {
+    "text": "should basically... I think that that makes sense. And my thing was like, okay, so let's say that we're going through",
+    "start": "4427833",
+    "end": "4435333"
+  },
+  {
+    "text": "this messaging protocol, right? So where is send message? So send message is... send message is",
+    "start": "4435333",
+    "end": "4444666"
+  },
+  {
+    "text": "what is responsible for actually coordinating the sending of the message to either the same pod or a different pod.",
+    "start": "4444666",
+    "end": "4451233"
+  },
+  {
+    "text": "And if we look at",
+    "start": "4451233",
+    "end": "4457266"
+  },
+  {
+    "text": "this... send message to pod.",
+    "start": "4457266",
+    "end": "4463933"
+  },
+  {
+    "text": "So basically, this message just sort of decides if it's going to send the message to the local entity manager or to the",
+    "start": "4471600",
+    "end": "4478233"
+  },
+  {
+    "text": "remote pod. But the... like, both of these are essentially still receiving an",
+    "start": "4478233",
+    "end": "4483432"
+  },
+  {
+    "text": "envelope. And like, the idea I was talking to Mattia about was... that essentially you can take the",
+    "start": "4483433",
+    "end": "4489899"
+  },
+  {
+    "text": "envelope, serialize it, send it directly over the wire, and then use the mailbox of the entity, not the mailbox storage,",
+    "start": "4489899",
+    "end": "4497866"
+  },
+  {
+    "text": "to deserialize the message right before it goes to the behavior.",
+    "start": "4498533",
+    "end": "4503133"
+  },
+  {
+    "text": "And I think Mattia and I were in agreement on that, but I wanted to make sure from your perspective, it made sense. It sounds like you're suggesting basically",
+    "start": "4503766",
+    "end": "4509698"
+  },
+  {
+    "text": "the same thing. It's like you serialize it, it goes over the wire, gets stored in the database, blah, blah, blah, blah.",
+    "start": "4509699",
+    "end": "4514933"
+  },
+  {
+    "text": "The point of having this duality of serialized, non-serialized was because in",
+    "start": "4516966",
+    "end": "4523265"
+  },
+  {
+    "text": "Shardcake, when messages are not persisted, in theory, you can skip",
+    "start": "4523266",
+    "end": "4529833"
+  },
+  {
+    "text": "serialization altogether if the sender and the receiver are on the same pod.",
+    "start": "4529833",
+    "end": "4534733"
+  },
+  {
+    "text": "Got it. Okay. Because then you can share memory. But first, this is a terrible idea",
+    "start": "4535466",
+    "end": "4542166"
+  },
+  {
+    "text": "because usually when you test locally,",
+    "start": "4542166",
+    "end": "4547933"
+  },
+  {
+    "text": "you have a single process and all your entities are there and everything works. Then you deploy and, \"Oh, fuck, I have a",
+    "start": "4547933",
+    "end": "4555333"
+  },
+  {
+    "text": "serialization boundary,\" and everything explodes. So, not a good idea to skip.",
+    "start": "4555333",
+    "end": "4560933"
+  },
+  {
+    "text": "That makes sense. What you were saying now is you were saying we treat the",
+    "start": "4560966",
+    "end": "4566233"
+  },
+  {
+    "text": "message the same regardless of if it's going over the wire or not. We still do the full encode, decode serial.",
+    "start": "4566233",
+    "end": "4572833"
+  },
+  {
+    "text": "We have to store the messages. So for us, there's no difference. We still have to encode the message to store it. Even if",
+    "start": "4572833",
+    "end": "4579699"
+  },
+  {
+    "text": "it's on the same pod. Even if the storage is an in memory storage",
+    "start": "4579699",
+    "end": "4587066"
+  },
+  {
+    "text": "for local testing purposes, fine. We still store the serialized thing. The",
+    "start": "4587066",
+    "end": "4595966"
+  },
+  {
+    "text": "interface should be the same. But there's no point cheating if it's",
+    "start": "4595966",
+    "end": "4601166"
+  },
+  {
+    "text": "only local or not because this only introduces problems. It was one of the",
+    "start": "4601166",
+    "end": "4606899"
+  },
+  {
+    "text": "things that I always hated about Akka. You tested everything locally and everything worked. Now, Akka doesn't even",
+    "start": "4606899",
+    "end": "4613866"
+  },
+  {
+    "text": "have explicit types. It uses reflection to serialize that this is",
+    "start": "4613866",
+    "end": "4620933"
+  },
+  {
+    "text": "Java-based serialization. So, you didn't know anything. Then you",
+    "start": "4620933",
+    "end": "4626000"
+  },
+  {
+    "text": "deployed and quite literally everything bamboozle because you were storing",
+    "start": "4626000",
+    "end": "4633466"
+  },
+  {
+    "text": "non-serialized information. And locally, I could send a database connection over a message, which I did",
+    "start": "4633466",
+    "end": "4640766"
+  },
+  {
+    "text": "sometimes. And of course, you can't do that. I can't send you an open database",
+    "start": "4640766",
+    "end": "4646600"
+  },
+  {
+    "text": "connection over the wire. It would be beautiful if I could. I would have solved a few problems in",
+    "start": "4646600",
+    "end": "4651733"
+  },
+  {
+    "text": "computer science, but unfortunately that doesn't work. So I do prefer to spend a",
+    "start": "4651733",
+    "end": "4658432"
+  },
+  {
+    "text": "few milliseconds more, but at least have safety that I'm actually not going to break.",
+    "start": "4658433",
+    "end": "4664933"
+  },
+  {
+    "text": "I think that makes sense. And I think it makes a lot of sense, especially since we have to store the message anyways, we don't really have a choice. So I think",
+    "start": "4665933",
+    "end": "4672166"
+  },
+  {
+    "text": "I'm tracking a lot more of the discussion",
+    "start": "4672166",
+    "end": "4677466"
+  },
+  {
+    "text": "that was being had than I was before.",
+    "start": "4677466",
+    "end": "4679666"
+  },
+  {
+    "text": "Another question I had... This context over context over context over context.",
+    "start": "4682600",
+    "end": "4688266"
+  },
+  {
+    "text": "Sometimes they have to discuss this a hundred times with Mattia. Sometimes it does get hard to try.",
+    "start": "4689666",
+    "end": "4695533"
+  },
+  {
+    "text": "It's still a two-year-old project.",
+    "start": "4695533",
+    "end": "4697233"
+  },
+  {
+    "text": "Just goes to show there's always improvements to be made, right?",
+    "start": "4700633",
+    "end": "4703032"
+  },
+  {
+    "text": "One last question that I had before, I think I've got enough to start trying to",
+    "start": "4706433",
+    "end": "4713365"
+  },
+  {
+    "text": "incorporate some of this, was the mailbox, the message state.",
+    "start": "4713366",
+    "end": "4719433"
+  },
+  {
+    "text": "So when you send a message with a messenger, depending on whether you tell",
+    "start": "4719433",
+    "end": "4724699"
+  },
+  {
+    "text": "or you ask, like if we just talk about ask for a minute, because asking I think is more relevant here, you get back a",
+    "start": "4724700",
+    "end": "4732933"
+  },
+  {
+    "text": "message state from sending the message. And we already looked at the message",
+    "start": "4732933",
+    "end": "4738166"
+  },
+  {
+    "text": "state before. The message state can be either the message was acknowledged or",
+    "start": "4738166",
+    "end": "4743365"
+  },
+  {
+    "text": "the message was processed. Like from the behavior. Now, I don't know",
+    "start": "4743366",
+    "end": "4754333"
+  },
+  {
+    "text": "whether or not this makes 100% sense because we will again look at like when",
+    "start": "4754333",
+    "end": "4763566"
+  },
+  {
+    "text": "the actual usage of this. I think this is where the thing pulls.",
+    "start": "4763566",
+    "end": "4774299"
+  },
+  {
+    "text": "So here, yeah, so ask would be assuming that this is where like if you don't get",
+    "start": "4775833",
+    "end": "4783599"
+  },
+  {
+    "text": "a processed message state, ask   would block until it gets a response, right?",
+    "start": "4783600",
+    "end": "4791833"
+  },
+  {
+    "text": "Like it would pull.  Yeah, I think we need to revise how this",
+    "start": "4792733",
+    "end": "4797766"
+  },
+  {
+    "text": "is designed. But I think we should discuss this at a different time because we need to figure better the protocol",
+    "start": "4797766",
+    "end": "4805433"
+  },
+  {
+    "text": "because at the moment it's pulling. It's not very efficient. ",
+    "start": "4805433",
+    "end": "4809466"
+  },
+  {
+    "text": "we should probably have an open connection like an open HTTP",
+    "start": "4810933",
+    "end": "4819200"
+  },
+  {
+    "text": "connection. We just wait for the for the message. And if it's acknowledged and you are",
+    "start": "4819200",
+    "end": "4825933"
+  },
+  {
+    "text": "asking, then you have a conundrum because it means that the behavior has acknowledged",
+    "start": "4825933",
+    "end": "4836066"
+  },
+  {
+    "text": "but doesn't have a response yet or will not have a response at all.",
+    "start": "4836066",
+    "end": "4840966"
+  },
+  {
+    "text": "So in this case, we have to fail. Right.",
+    "start": "4842200",
+    "end": "4845633"
+  },
+  {
+    "text": "Yes, I mean, I think what probably makes the most sense for the moment is to start",
+    "start": "4848733",
+    "end": "4854833"
+  },
+  {
+    "text": "working under the like basically work with the same protocol from the client side in terms of sending messages for the",
+    "start": "4854833",
+    "end": "4861533"
+  },
+  {
+    "text": "moment that can be revised as the next step. But I think like the next logical place",
+    "start": "4861533",
+    "end": "4868066"
+  },
+  {
+    "text": "for me to start working is inside sharding start to like adjust the",
+    "start": "4868066",
+    "end": "4875000"
+  },
+  {
+    "text": "implementation to actually utilize mailbox storage.",
+    "start": "4875000",
+    "end": "4879066"
+  },
+  {
+    "text": "To do things because I think we're going to have there's going to be additional questions that come up as we start to",
+    "start": "4880933",
+    "end": "4888233"
+  },
+  {
+    "text": "introduce mailbox storage into this like sharding service.",
+    "start": "4888233",
+    "end": "4890899"
+  },
+  {
+    "text": "Yeah, I think so. All right, cool. Well, this was very useful.",
+    "start": "4894500",
+    "end": "4899433"
+  },
+  {
+    "text": "I appreciate your time as always, Mike. Yeah. Thank you, everybody, for watching.",
+    "start": "4900766",
+    "end": "4906766"
+  },
+  {
+    "text": "Thank you.",
+    "start": "4909299",
+    "end": "4909633"
+  }
+]

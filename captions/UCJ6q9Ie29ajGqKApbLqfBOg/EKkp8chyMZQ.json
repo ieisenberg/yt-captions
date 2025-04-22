@@ -1,0 +1,1882 @@
+[
+  {
+    "text": "[Music] foreign",
+    "start": "1700",
+    "end": "6720"
+  },
+  {
+    "text": "thank you everybody for being here this is uh evpf elfs jumping through the",
+    "start": "7820",
+    "end": "13799"
+  },
+  {
+    "text": "windows and I am Richard Johnson a senior researcher at trellix products lab and",
+    "start": "13799",
+    "end": "22080"
+  },
+  {
+    "text": "uh before I get started I just quickly want to give a shout out to our teammates Casimir and Andrea uh",
+    "start": "22080",
+    "end": "29760"
+  },
+  {
+    "text": "Brilliance interns that I've had the pleasure to work with and contributed to this talk and implementing some of the",
+    "start": "29760",
+    "end": "36120"
+  },
+  {
+    "text": "fuzzing harnesses So today we're going to talk about uh what is ebpf in general what are the",
+    "start": "36120",
+    "end": "42300"
+  },
+  {
+    "text": "origins and applications of this technology stack and this talk in particular is going to be focusing on a",
+    "start": "42300",
+    "end": "50039"
+  },
+  {
+    "text": "new implementation of vbpf that's now coming to the windows platform and so",
+    "start": "50039",
+    "end": "55140"
+  },
+  {
+    "text": "we'll be doing a deep dive into the apis and attack surfaces that are available to Security review and then we'll talk",
+    "start": "55140",
+    "end": "63420"
+  },
+  {
+    "text": "about how we went through each layers of this technology stack to do fuzzing and",
+    "start": "63420",
+    "end": "68640"
+  },
+  {
+    "text": "a little bit of code auditing and talk about some bugs that we found and then I'll just leave with some concluding",
+    "start": "68640",
+    "end": "74520"
+  },
+  {
+    "text": "thoughts on where I think this technology is going and what it means for everybody in the room",
+    "start": "74520",
+    "end": "81240"
+  },
+  {
+    "text": "so what is ebpf it's the virtual CPU architecture so this is a non-existent",
+    "start": "81240",
+    "end": "87540"
+  },
+  {
+    "text": "CPU it's software CPU much like JavaScript engine or some other emulated",
+    "start": "87540",
+    "end": "93960"
+  },
+  {
+    "text": "CPU and it was originally designed to do Network packet filtering as part of the",
+    "start": "93960",
+    "end": "100320"
+  },
+  {
+    "text": "Berkeley packet filters in Linux and it's designed basically as a more",
+    "start": "100320",
+    "end": "105900"
+  },
+  {
+    "text": "general purpose extension execution environment for kernel modules so this",
+    "start": "105900",
+    "end": "111000"
+  },
+  {
+    "text": "is a way to run code in a kernel on a virtual CPU that's sandboxed",
+    "start": "111000",
+    "end": "117000"
+  },
+  {
+    "text": "the way that you uh create a program to do this is you write it in standard C",
+    "start": "117000",
+    "end": "122579"
+  },
+  {
+    "text": "language and you include some special headers and then you can use llvm to",
+    "start": "122579",
+    "end": "127860"
+  },
+  {
+    "text": "compile that to this custom architecture from there you can use traditionally",
+    "start": "127860",
+    "end": "133319"
+  },
+  {
+    "text": "system calls on the Linux side to load these programs into the kernel context and Implement hooks into the network",
+    "start": "133319",
+    "end": "140520"
+  },
+  {
+    "text": "layers or into code instrumentation callbacks",
+    "start": "140520",
+    "end": "147840"
+  },
+  {
+    "text": "in general the system is designed for high-speed inspection and modification of network packets and also the ability",
+    "start": "147840",
+    "end": "154500"
+  },
+  {
+    "text": "to hook both userland and kernel functions so this all started back in 1992 when",
+    "start": "154500",
+    "end": "161340"
+  },
+  {
+    "text": "BPF was added to the Linux kernel and this is a precursor technology in these days and it was specifically designed to",
+    "start": "161340",
+    "end": "168599"
+  },
+  {
+    "text": "filter Network packets so if you've ever used a TCP dump or Wireshark and you've",
+    "start": "168599",
+    "end": "175080"
+  },
+  {
+    "text": "used a string to specify a network filter on a certain IP in a port you are",
+    "start": "175080",
+    "end": "181500"
+  },
+  {
+    "text": "in fact interfacing with the BPF implementation inside your kernel those",
+    "start": "181500",
+    "end": "186720"
+  },
+  {
+    "text": "strings those filter strings behind the scenes get compiled into a BPF program on the Fly and that code is",
+    "start": "186720",
+    "end": "195300"
+  },
+  {
+    "text": "then jitted into the kernel and these hooks are implemented in a high performance manner in that way",
+    "start": "195300",
+    "end": "202319"
+  },
+  {
+    "text": "so we call this old BPF implementation that was specifically for Doing Network filtering the classic BPF",
+    "start": "202319",
+    "end": "211099"
+  },
+  {
+    "text": "now as of about eight years ago Linux kernel 318 released a new version of",
+    "start": "211200",
+    "end": "217980"
+  },
+  {
+    "text": "this that has extended the concept of the BPF packet filter to a general purpose execution environment they went",
+    "start": "217980",
+    "end": "225480"
+  },
+  {
+    "text": "from having 32-bit instructions to 64-bit instructions they added the ability to use persistent data",
+    "start": "225480",
+    "end": "232080"
+  },
+  {
+    "text": "structures so your BPF programs could store arrays or linked lists or hash",
+    "start": "232080",
+    "end": "238080"
+  },
+  {
+    "text": "tables of information as your hooks are monitoring Network traffic or functions",
+    "start": "238080",
+    "end": "245519"
+  },
+  {
+    "text": "getting executed then your this extension allows you to store",
+    "start": "245519",
+    "end": "251280"
+  },
+  {
+    "text": "that data across different invocations of your ebpf programs on the right hand side some of these",
+    "start": "251280",
+    "end": "257699"
+  },
+  {
+    "text": "screenshots in here I know are not the largest it's okay we have a ton of slides so this is going to be a pretty quick talk uh or paste talk and there's",
+    "start": "257699",
+    "end": "265440"
+  },
+  {
+    "text": "a lot of extra info in there for you to study on your own but in the Linux side it is all implemented through a single",
+    "start": "265440",
+    "end": "271259"
+  },
+  {
+    "text": "system call interface and inside that system call there are a",
+    "start": "271259",
+    "end": "278220"
+  },
+  {
+    "text": "bunch of sub operations and sub features it's kind of designed in a way that a",
+    "start": "278220",
+    "end": "283320"
+  },
+  {
+    "text": "device ioctal might work where you have a number of commands hidden behind a",
+    "start": "283320",
+    "end": "288479"
+  },
+  {
+    "text": "single kernel interface one thing about ebpf that's unique is",
+    "start": "288479",
+    "end": "294540"
+  },
+  {
+    "text": "that it implements a static verifier for these programs so because you're able to load code into the kernel they wanted to",
+    "start": "294540",
+    "end": "301500"
+  },
+  {
+    "text": "add some security guarantees so there is not only the virtual CPU execution environment but also a on the Linux side",
+    "start": "301500",
+    "end": "308759"
+  },
+  {
+    "text": "a fairly simple static analysis pass that tries to ensure that memory safety",
+    "start": "308759",
+    "end": "314580"
+  },
+  {
+    "text": "and the programs will terminate within a short amount of time in general applications at ebpf are for",
+    "start": "314580",
+    "end": "322380"
+  },
+  {
+    "text": "Network instrumentation load balancing monitoring",
+    "start": "322380",
+    "end": "327800"
+  },
+  {
+    "text": "Telemetry things along those lines and at this point the system The",
+    "start": "327800",
+    "end": "333960"
+  },
+  {
+    "text": "environment's Fairly mature on the Linux side there are go and rust and Python",
+    "start": "333960",
+    "end": "339840"
+  },
+  {
+    "text": "and C back ends at all interface with this and at the end of the day they still all call into that system call",
+    "start": "339840",
+    "end": "345979"
+  },
+  {
+    "text": "and um the layout is basically everything happens in the kernel as far as Linux",
+    "start": "345979",
+    "end": "352620"
+  },
+  {
+    "text": "goes if you use any of these products on Linux then you're already using the ebpf",
+    "start": "352620",
+    "end": "357840"
+  },
+  {
+    "text": "infrastructure things like uh you know Microsoft Defender for endpoints or psyllium for kubernetes things like that",
+    "start": "357840",
+    "end": "367139"
+  },
+  {
+    "text": "so the last few years at blackcat we've also seen a few talks about the Linux ebpf implementation focusing on red team",
+    "start": "367139",
+    "end": "373919"
+  },
+  {
+    "text": "applications and I myself just gave a talk a couple weeks ago at tour camp and",
+    "start": "373919",
+    "end": "379380"
+  },
+  {
+    "text": "last fall at tourcon that talked about basically writing root attack and defense but kind of a tripwire style",
+    "start": "379380",
+    "end": "387680"
+  },
+  {
+    "text": "whitelisting for binary execution as well as the ability to inject code into",
+    "start": "387680",
+    "end": "393560"
+  },
+  {
+    "text": "executables as they launch so switching Focus to the windows timeline basically",
+    "start": "393560",
+    "end": "400139"
+  },
+  {
+    "text": "um you know we saw it was sorry 2014 is when it was added to the Linux kernel as",
+    "start": "400139",
+    "end": "406080"
+  },
+  {
+    "text": "of last year in May Microsoft announced their intent to bring this platform to",
+    "start": "406080",
+    "end": "411300"
+  },
+  {
+    "text": "the windows side of the house now of course we all know that linux's GPL kernel and windows of course cannot",
+    "start": "411300",
+    "end": "418500"
+  },
+  {
+    "text": "adopt that code directly into their kernel so they had to come up with a way",
+    "start": "418500",
+    "end": "424259"
+  },
+  {
+    "text": "to re-implement the entire technology stack and so that's kind of why this is interesting it's a net new set of code",
+    "start": "424259",
+    "end": "431160"
+  },
+  {
+    "text": "that implements something that we've seen be seen grow and become adopted",
+    "start": "431160",
+    "end": "436259"
+  },
+  {
+    "text": "heavily on the Linux side and is really all indications point to this being the general platform for the future for",
+    "start": "436259",
+    "end": "442800"
+  },
+  {
+    "text": "doing telemetry so in 2021 Microsoft announced that they",
+    "start": "442800",
+    "end": "448139"
+  },
+  {
+    "text": "had implemented two Network hooks that uh can be interfaced with through ebpf",
+    "start": "448139",
+    "end": "454080"
+  },
+  {
+    "text": "programs you use the exact same compiler stack you use llvm you output the exact same byte code for this virtual CPU",
+    "start": "454080",
+    "end": "461180"
+  },
+  {
+    "text": "internally it's all similar the differences of course are how Microsoft",
+    "start": "461180",
+    "end": "466860"
+  },
+  {
+    "text": "re-implemented these interfaces and plugged them into the kernel so in August they announced that they",
+    "start": "466860",
+    "end": "475319"
+  },
+  {
+    "text": "had matured some of that code and added I guess it was closer to November but they had added about 68 apis that are",
+    "start": "475319",
+    "end": "483240"
+  },
+  {
+    "text": "part of the standard Linux API set for doing ebpf instrumentation and as of",
+    "start": "483240",
+    "end": "489660"
+  },
+  {
+    "text": "this February they released kind of their first functioning implementation",
+    "start": "489660",
+    "end": "494759"
+  },
+  {
+    "text": "of a program that runs on top of the windows ebps stack and that was the psyllium layer 4 load balancer so as of",
+    "start": "494759",
+    "end": "502379"
+  },
+  {
+    "text": "this February from last May until this February they've more or less implemented a bare minimum you know",
+    "start": "502379",
+    "end": "509160"
+  },
+  {
+    "text": "minimum viable products for doing ebpf and that was about the time of course that the black cats cfp was around and",
+    "start": "509160",
+    "end": "516779"
+  },
+  {
+    "text": "I'd already done some research into this so I figured we would continue down that path and see what kind of security like",
+    "start": "516779",
+    "end": "523919"
+  },
+  {
+    "text": "architecture is there and what exposure is there for attackers",
+    "start": "523919",
+    "end": "529160"
+  },
+  {
+    "text": "um so on Linux as I said it's all in the kernel on Windows we see this diagram on the right it comes from the windows ebpf",
+    "start": "529860",
+    "end": "537300"
+  },
+  {
+    "text": "project and it shows that basically we have several different components both in user land and kernel uh orchestrating",
+    "start": "537300",
+    "end": "545160"
+  },
+  {
+    "text": "together to create this overall system and in particular Microsoft adopted two",
+    "start": "545160",
+    "end": "551760"
+  },
+  {
+    "text": "open source projects the rbsd licensed the i o visor ubpf implementation which",
+    "start": "551760",
+    "end": "557880"
+  },
+  {
+    "text": "that's the virtual CPU and the Prevail static verifier which was an academic work that tried to enhance the security",
+    "start": "557880",
+    "end": "564120"
+  },
+  {
+    "text": "guarantees around the static analysis engine and I'm going to dive into each of these",
+    "start": "564120",
+    "end": "569399"
+  },
+  {
+    "text": "components you'll see them blown up and so um here we go the",
+    "start": "569399",
+    "end": "576240"
+  },
+  {
+    "text": "current implementation so on Linux you can hook as I mentioned functions in user land and kernel as well as do",
+    "start": "576240",
+    "end": "582300"
+  },
+  {
+    "text": "Network instrumentation on windows so far they've only focused on the network stack so right now they're interested in",
+    "start": "582300",
+    "end": "589380"
+  },
+  {
+    "text": "using ebpf in places like the cloud space to do virtual networking to do load balancing to rewrite packets on the",
+    "start": "589380",
+    "end": "597360"
+  },
+  {
+    "text": "Fly and distribute them to other systems things like that um it is shipped as a standalone",
+    "start": "597360",
+    "end": "602940"
+  },
+  {
+    "text": "component and in conversation with Microsoft they've indicated that this shipping model is designed so that when",
+    "start": "602940",
+    "end": "610320"
+  },
+  {
+    "text": "you write these programs which effectively are kernel modules um you don't need to go through the standard driver",
+    "start": "610320",
+    "end": "616940"
+  },
+  {
+    "text": "signing and Driver verification process that you do with Windows and so",
+    "start": "616940",
+    "end": "622140"
+  },
+  {
+    "text": "you have a much faster serviceability model which is one advantage to this",
+    "start": "622140",
+    "end": "627240"
+  },
+  {
+    "text": "and because everything here is MIT licensed it can also be consumed by third-party products and shipped as a",
+    "start": "627240",
+    "end": "634620"
+  },
+  {
+    "text": "component of an overall system such as an xdr or EDR platform",
+    "start": "634620",
+    "end": "639720"
+  },
+  {
+    "text": "on Windows it works as I said just the same way you use clang llbm back ends",
+    "start": "639720",
+    "end": "644880"
+  },
+  {
+    "text": "you write a simple Hello World style program there's some special apis that",
+    "start": "644880",
+    "end": "651839"
+  },
+  {
+    "text": "allow you to do things like print to the screen or the logs and you'll see there's this annotation here that shows",
+    "start": "651839",
+    "end": "657959"
+  },
+  {
+    "text": "SEC bind what's really happening is that's indicating that we're going to add a special section to the elf file",
+    "start": "657959",
+    "end": "663959"
+  },
+  {
+    "text": "that is going to contain this particular function now ppf programs themselves are",
+    "start": "663959",
+    "end": "669540"
+  },
+  {
+    "text": "one function long but they do have the ability to call into each other",
+    "start": "669540",
+    "end": "674700"
+  },
+  {
+    "text": "so if you compile that hello world you'll see that an elf file is generated and in the text segments there's",
+    "start": "674700",
+    "end": "681600"
+  },
+  {
+    "text": "actually no bytes size zero but there is a new segment called bind and that is",
+    "start": "681600",
+    "end": "687360"
+  },
+  {
+    "text": "hex 68 bytes and so that was where our compiled program was put and you can also use llbm Ops dump to inspect that",
+    "start": "687360",
+    "end": "695519"
+  },
+  {
+    "text": "section and you'll see this virtual CPU representation of instructions down",
+    "start": "695519",
+    "end": "701820"
+  },
+  {
+    "text": "there on the bottom right for a later reference if you look at these slides here's a couple screenshots",
+    "start": "701820",
+    "end": "707519"
+  },
+  {
+    "text": "of a full program and it shows that there's multiple sections in here some of them holding these data structure",
+    "start": "707519",
+    "end": "713279"
+  },
+  {
+    "text": "maps and other ones doing things like Network packet inspection",
+    "start": "713279",
+    "end": "718620"
+  },
+  {
+    "text": "so the different types of programs ebpf programs that you can Implement correspond to the types of hooks that",
+    "start": "718620",
+    "end": "724920"
+  },
+  {
+    "text": "you want to leverage and so at the lowest layer of network stack there's something called XDP and this is a layer",
+    "start": "724920",
+    "end": "733079"
+  },
+  {
+    "text": "that actually is coming directly out of your network driver and before it really reaches the rest of the windows kernel",
+    "start": "733079",
+    "end": "740100"
+  },
+  {
+    "text": "and so if you implement an ebpf program at the XDP layer you're actually able to rewrite packets and resend them out of",
+    "start": "740100",
+    "end": "747540"
+  },
+  {
+    "text": "the box before their ever technically received by the OS itself very fascinating stuff",
+    "start": "747540",
+    "end": "753740"
+  },
+  {
+    "text": "binds uh is a type of program that allows you to respond to Port binding",
+    "start": "753740",
+    "end": "760500"
+  },
+  {
+    "text": "and accept and general listen and those types of apis and then there's a handful",
+    "start": "760500",
+    "end": "767760"
+  },
+  {
+    "text": "of C group related and sock operations related hooks that you can Implement as well",
+    "start": "767760",
+    "end": "772980"
+  },
+  {
+    "text": "again this is just for a visual to show you that there's a set of apis we don't",
+    "start": "772980",
+    "end": "778860"
+  },
+  {
+    "text": "need to talk about them specifically but these apis allow you to do things like interact with the maps create the maps",
+    "start": "778860",
+    "end": "785339"
+  },
+  {
+    "text": "pull data store data call other programs things like that",
+    "start": "785339",
+    "end": "790800"
+  },
+  {
+    "text": "figure out what CPU you're running on or what thread you're on and you will use this to also interact with other kernel",
+    "start": "790800",
+    "end": "799200"
+  },
+  {
+    "text": "apis perhaps so ultimately what's the security model",
+    "start": "799200",
+    "end": "804420"
+  },
+  {
+    "text": "around ebpf for Windows well it's allowing us to run unsigned code on the Kernel right so any break in the",
+    "start": "804420",
+    "end": "811440"
+  },
+  {
+    "text": "security model or implementation here is going to be a driver signing enforcement bypass because we're already getting our",
+    "start": "811440",
+    "end": "818100"
+  },
+  {
+    "text": "code into the kernel and if the security guarantees are not valid and we're able",
+    "start": "818100",
+    "end": "823620"
+  },
+  {
+    "text": "to break them then of course that means that we're getting native code execution in the kernel now the implementation of Windows ebpf",
+    "start": "823620",
+    "end": "831420"
+  },
+  {
+    "text": "we're very early on the curve here as I mentioned there's no function pointer Hooks and there's no there's just basic",
+    "start": "831420",
+    "end": "837839"
+  },
+  {
+    "text": "networking but and because of that the tackles that are on access to the kernel",
+    "start": "837839",
+    "end": "845100"
+  },
+  {
+    "text": "object or to the apis themselves through RPC are restricted to administrator",
+    "start": "845100",
+    "end": "850200"
+  },
+  {
+    "text": "so ultimately we'll talk about kind of what the attack objectives would be but we have to keep in mind that you have to",
+    "start": "850200",
+    "end": "856980"
+  },
+  {
+    "text": "be administrator to interface with this subsystem currently and and therefore",
+    "start": "856980",
+    "end": "862019"
+  },
+  {
+    "text": "the attack model is going to be something that more or less is you know Colonel as an administrator we",
+    "start": "862019",
+    "end": "868680"
+  },
+  {
+    "text": "can already read memory from the kernel so really what we're looking for is ability to write out of bounds or to get",
+    "start": "868680",
+    "end": "874440"
+  },
+  {
+    "text": "full code execution um and so of course the byte code is",
+    "start": "874440",
+    "end": "880740"
+  },
+  {
+    "text": "that is generated by llbm is then loaded by the static verifier and uh we'll make",
+    "start": "880740",
+    "end": "887279"
+  },
+  {
+    "text": "sure that it's not violating those security guarantees I should mention on the Linux side there",
+    "start": "887279",
+    "end": "894360"
+  },
+  {
+    "text": "is a part of this attack surface that is available to unprivileged users and so you don't always need to be route to",
+    "start": "894360",
+    "end": "899880"
+  },
+  {
+    "text": "call the BPF system call and in the source code of the windows implementation they do have comments in",
+    "start": "899880",
+    "end": "905820"
+  },
+  {
+    "text": "there that indicates that in the future some of these apis will be opened up to standard users",
+    "start": "905820",
+    "end": "912560"
+  },
+  {
+    "text": "um so Prevail is the name of that static verifier as I said and it's using",
+    "start": "912660",
+    "end": "918779"
+  },
+  {
+    "text": "abstract interpretation so that it can do things like pointer analysis and check that you have",
+    "start": "918779",
+    "end": "926519"
+  },
+  {
+    "text": "um if you have a pointer return from an API you have to check it for null before",
+    "start": "926519",
+    "end": "931860"
+  },
+  {
+    "text": "you can actually dereference it it has all these built-in analyzes which are",
+    "start": "931860",
+    "end": "936899"
+  },
+  {
+    "text": "much more sound than what is in the Linux kernel in theory also in ebpf as opposed to the classic",
+    "start": "936899",
+    "end": "944100"
+  },
+  {
+    "text": "implementation we can do things like actually Implement loops and tail calls into other evpr programs",
+    "start": "944100",
+    "end": "952399"
+  },
+  {
+    "text": "and as I mentioned uh this is all net new code using i o visors ubpf stack interesting",
+    "start": "952399",
+    "end": "961019"
+  },
+  {
+    "text": "thing about ubpf is that it can run both in userland and kernel contexts the U stands for user mode or user space and",
+    "start": "961019",
+    "end": "969060"
+  },
+  {
+    "text": "what this also means is that we can leverage this virtual CPU in other contexts than just the ebpf stack so in",
+    "start": "969060",
+    "end": "977399"
+  },
+  {
+    "text": "this case we're plugging into the kernel to do Network introspection in other cases it may become a replacement for",
+    "start": "977399",
+    "end": "983399"
+  },
+  {
+    "text": "Lua or V8s or JavaScript engines in general in other places so it's in",
+    "start": "983399",
+    "end": "989339"
+  },
+  {
+    "text": "general a really interesting platform to consider all right so what are these security guarantees that's uh the solid ties",
+    "start": "989339",
+    "end": "997139"
+  },
+  {
+    "text": "together well number one because these are meant to be high performance filter hooks uh they have a limit of 4096",
+    "start": "997139",
+    "end": "1004639"
+  },
+  {
+    "text": "instructions that can be in a single function and so the static analysis is",
+    "start": "1004639",
+    "end": "1010459"
+  },
+  {
+    "text": "able to in fact unroll loops and ensure that you will terminate the old halting",
+    "start": "1010459",
+    "end": "1016160"
+  },
+  {
+    "text": "problem but since they have restrictions on the execution they're able to prove that it will in fact terminate and as I",
+    "start": "1016160",
+    "end": "1023600"
+  },
+  {
+    "text": "mentioned it tries to ensure that your pointers when you reference them are",
+    "start": "1023600",
+    "end": "1028938"
+  },
+  {
+    "text": "pointing within bounds of buffers that you control and have permissions to access",
+    "start": "1028939",
+    "end": "1034160"
+  },
+  {
+    "text": "and that you're doing basic checks on return values also that your stack pointer is within",
+    "start": "1034160",
+    "end": "1040100"
+  },
+  {
+    "text": "bounds there's a dedicated chunk of memory for your VM to be executing in all these sorts of things",
+    "start": "1040100",
+    "end": "1046579"
+  },
+  {
+    "text": "and in fact as we'll see in a moments the service itself can be run in a hypervisor code Integrity mode in the",
+    "start": "1046579",
+    "end": "1054440"
+  },
+  {
+    "text": "future it's kind of in progress so the attacks that we're looking for since we are administrator is that we",
+    "start": "1054440",
+    "end": "1060860"
+  },
+  {
+    "text": "would like to get code execution as admin and the first way that you could do that is if you load a security module",
+    "start": "1060860",
+    "end": "1069020"
+  },
+  {
+    "text": "or ebpf module that comes from a third-party project because you want to collect Telemetry on your system and so",
+    "start": "1069020",
+    "end": "1075799"
+  },
+  {
+    "text": "you go off to GitHub and you download and compile evpf program and that's one attack where you would get user mode",
+    "start": "1075799",
+    "end": "1082400"
+  },
+  {
+    "text": "administrator privileges then there is the trusted service which exposes an RPC endpoint and this is uh a",
+    "start": "1082400",
+    "end": "1092179"
+  },
+  {
+    "text": "PPL process so it's highly privileged it's considered part of your trusted Computing base so any vulnerability",
+    "start": "1092179",
+    "end": "1097580"
+  },
+  {
+    "text": "there is the equivalent of having direct right access to the kernel then of course there is the static",
+    "start": "1097580",
+    "end": "1103880"
+  },
+  {
+    "text": "verifier or the jit engine itself if either of those as they process the code",
+    "start": "1103880",
+    "end": "1109760"
+  },
+  {
+    "text": "read out of bounds or write out of bounds that would be a vulnerability as well as there's an interpreter mode",
+    "start": "1109760",
+    "end": "1116000"
+  },
+  {
+    "text": "so same idea there and then there's a whole ioctal layer which of course comes",
+    "start": "1116000",
+    "end": "1121520"
+  },
+  {
+    "text": "with its own implementations of handling the each eye octal request before it interfaces with the ebpf subsystem",
+    "start": "1121520",
+    "end": "1128720"
+  },
+  {
+    "text": "itself and then finally these hooks that exist that hook into the network packet",
+    "start": "1128720",
+    "end": "1134720"
+  },
+  {
+    "text": "layer themselves these are you know grabbing packets and preparing them into data structures that the ebpf platform",
+    "start": "1134720",
+    "end": "1141620"
+  },
+  {
+    "text": "can access and so there's some memory management happening there where those hooks themselves could be exposed to",
+    "start": "1141620",
+    "end": "1147380"
+  },
+  {
+    "text": "potential remote over the wire Network packet attacks so uh and I am going to try to go as",
+    "start": "1147380",
+    "end": "1155720"
+  },
+  {
+    "text": "quick as possible here but the first component that we're interested in is the userland API set and that is",
+    "start": "1155720",
+    "end": "1161840"
+  },
+  {
+    "text": "contained in the ebpf api.dll and basically this is where uh the",
+    "start": "1161840",
+    "end": "1167840"
+  },
+  {
+    "text": "loading where the the user land user administrator will be able to load BPF",
+    "start": "1167840",
+    "end": "1173059"
+  },
+  {
+    "text": "programs unload uh get a list of what's loaded add Maps kind of interrogate the",
+    "start": "1173059",
+    "end": "1178340"
+  },
+  {
+    "text": "system in general it's the equivalent of executing the system calls directly and uh it",
+    "start": "1178340",
+    "end": "1185000"
+  },
+  {
+    "text": "does come with two tools that you would interface with one is a standalone tool",
+    "start": "1185000",
+    "end": "1190820"
+  },
+  {
+    "text": "called BPF tool and another is a plug-in to the net shell",
+    "start": "1190820",
+    "end": "1196280"
+  },
+  {
+    "text": "um Windows kind of wmi backend",
+    "start": "1196280",
+    "end": "1201520"
+  },
+  {
+    "text": "so what we want to do is fuzz each of these layers directly and in order to fuzz the API layer we know that this the",
+    "start": "1202280",
+    "end": "1210440"
+  },
+  {
+    "text": "entry point to interacting with that is basically to give it an elf file that clang emitted or to give it a raw stream",
+    "start": "1210440",
+    "end": "1218240"
+  },
+  {
+    "text": "of byte codes and then that will pass it to the verifier so",
+    "start": "1218240",
+    "end": "1224299"
+  },
+  {
+    "text": "um we ended up fuzzing this two different ways I actually fuzzed this the um Prevail and ubpf independently uh",
+    "start": "1224299",
+    "end": "1231980"
+  },
+  {
+    "text": "quite a while ago and found some crashes so we did some cross-fuzzing there where",
+    "start": "1231980",
+    "end": "1237380"
+  },
+  {
+    "text": "we just took the output of fuzzing these components independently on Linux and then ran them through these loader tools",
+    "start": "1237380",
+    "end": "1243080"
+  },
+  {
+    "text": "on Windows and um so we'll talk a little bit more about the bugs that we found in the individual",
+    "start": "1243080",
+    "end": "1249020"
+  },
+  {
+    "text": "components but the first big bone that I found was as a result of this approach",
+    "start": "1249020",
+    "end": "1254240"
+  },
+  {
+    "text": "and it hits that very first attack goal which is we found a vulnerability that",
+    "start": "1254240",
+    "end": "1260179"
+  },
+  {
+    "text": "gives you remote code execution or arbitrary code execution through the loading of an L file that contains this",
+    "start": "1260179",
+    "end": "1267200"
+  },
+  {
+    "text": "ebpf bytecode so this particular vulnerability results in heat corruption which calls free on a",
+    "start": "1267200",
+    "end": "1274280"
+  },
+  {
+    "text": "user-controlled pointer and if a administrator were to load your filter then you get remote code execution on",
+    "start": "1274280",
+    "end": "1282020"
+  },
+  {
+    "text": "that box as admin the outputs shown below here is showing the",
+    "start": "1282020",
+    "end": "1287660"
+  },
+  {
+    "text": "um Windows debug verifier showing that there was a corrupted suffix pattern on",
+    "start": "1287660",
+    "end": "1294380"
+  },
+  {
+    "text": "a heat block and if we look at the location that it says the corruption address is at we see that there's four",
+    "start": "1294380",
+    "end": "1301820"
+  },
+  {
+    "text": "A's that I've conveniently placed there to show you that you know it's hacked so this attack",
+    "start": "1301820",
+    "end": "1308120"
+  },
+  {
+    "text": "would ultimately allow you to control a free pointer which isn't typically a",
+    "start": "1308120",
+    "end": "1314440"
+  },
+  {
+    "text": "exploitable scenario if you have enough control of memory and",
+    "start": "1314440",
+    "end": "1320059"
+  },
+  {
+    "text": "here's a little call stack that shows how we got there the way that this was doing the free it was in the destructor",
+    "start": "1320059",
+    "end": "1327320"
+  },
+  {
+    "text": "for an ebpf program and it was dealing with an array of ebpf instructions so",
+    "start": "1327320",
+    "end": "1334640"
+  },
+  {
+    "text": "it's just trying to free all the objects that represent the instructions and the way that that allocation occurred that was missized was due to",
+    "start": "1334640",
+    "end": "1342620"
+  },
+  {
+    "text": "the processing of relocation entries in the L file itself so you generate ebpf",
+    "start": "1342620",
+    "end": "1349039"
+  },
+  {
+    "text": "program l-file there's a relocation section and as that gets parsed it's being done in a",
+    "start": "1349039",
+    "end": "1356480"
+  },
+  {
+    "text": "loop and because this is an L file you have the ability to require segments and",
+    "start": "1356480",
+    "end": "1362419"
+  },
+  {
+    "text": "sections to be loaded at kind of arbitrary places of memory you have a high degree of control of memory and you",
+    "start": "1362419",
+    "end": "1368360"
+  },
+  {
+    "text": "also have a looping constructs as it's parsing through these different sections you can of course have multiple sections",
+    "start": "1368360",
+    "end": "1374720"
+  },
+  {
+    "text": "as many sections as you need and so the combination of having a good degree of memory control and a looping based",
+    "start": "1374720",
+    "end": "1382120"
+  },
+  {
+    "text": "parser means that I didn't have time to fully exploit this myself in the time",
+    "start": "1382120",
+    "end": "1387320"
+  },
+  {
+    "text": "that we had allowed but it's definitely would be an exploitable class bug",
+    "start": "1387320",
+    "end": "1393799"
+  },
+  {
+    "text": "so moving past the user mode API the next layer is that service the PPL",
+    "start": "1393799",
+    "end": "1398960"
+  },
+  {
+    "text": "process and this is as you see in the blown up diagram here primarily all this",
+    "start": "1398960",
+    "end": "1404480"
+  },
+  {
+    "text": "actually is is it implements one RPC endpoint one API that you can call and",
+    "start": "1404480",
+    "end": "1409880"
+  },
+  {
+    "text": "uh it that API simply says look verify and load program and you pass it the",
+    "start": "1409880",
+    "end": "1417280"
+  },
+  {
+    "text": "data structure that has been generated by that first dll that has pulled the",
+    "start": "1417280",
+    "end": "1423260"
+  },
+  {
+    "text": "byte codes out of the L file and now has prepared a array a data structure that holds the instructions and passes that",
+    "start": "1423260",
+    "end": "1430220"
+  },
+  {
+    "text": "over and um and the attack surface that should be",
+    "start": "1430220",
+    "end": "1436700"
+  },
+  {
+    "text": "available here is the Prevail verifier and then ultimately the jit compilation that happens after verification succeeds",
+    "start": "1436700",
+    "end": "1444559"
+  },
+  {
+    "text": "and if you get in there the the API is you know quite",
+    "start": "1444559",
+    "end": "1449600"
+  },
+  {
+    "text": "um layered and so you know there's several API calls that kind of get you to the",
+    "start": "1449600",
+    "end": "1455780"
+  },
+  {
+    "text": "same point whether you're using the dll or the RPC API they all kind of get to",
+    "start": "1455780",
+    "end": "1462260"
+  },
+  {
+    "text": "the the same API call and so when we were fuzzing the dll we were also actually already fuzzing",
+    "start": "1462260",
+    "end": "1469039"
+  },
+  {
+    "text": "through the RPC endpoint we did try to oh sorry before I get there um so we did",
+    "start": "1469039",
+    "end": "1476419"
+  },
+  {
+    "text": "fuzz these components individually of course so Prevail verifier and ubpf so",
+    "start": "1476419",
+    "end": "1482240"
+  },
+  {
+    "text": "the Prevail verifier you can go look up the paper it's a polynomial runtime ebpf verifier using abstract interpretation",
+    "start": "1482240",
+    "end": "1488659"
+  },
+  {
+    "text": "layer all that really means is they're using a lot of math to try to um you know do this pointer analysis",
+    "start": "1488659",
+    "end": "1495380"
+  },
+  {
+    "text": "and it can be used anywhere that ubpf can conveniently",
+    "start": "1495380",
+    "end": "1501380"
+  },
+  {
+    "text": "it comes with a standalone verifier tool and so this of course was the tool that we harnessed and this is very simple and",
+    "start": "1501380",
+    "end": "1509059"
+  },
+  {
+    "text": "straightforward it takes a file input so we can use our trusty AFL plus plus to",
+    "start": "1509059",
+    "end": "1514400"
+  },
+  {
+    "text": "do that fuzzing so I did this buzzing actually last fall prior to my tourcon talk independently when I was looking at",
+    "start": "1514400",
+    "end": "1521000"
+  },
+  {
+    "text": "the Linux side of ebpf and so here on the screenshot you can see that it found",
+    "start": "1521000",
+    "end": "1526520"
+  },
+  {
+    "text": "some crashes when we run those crashes through a cool a tool called AFL collect again I realize it's kind of small you",
+    "start": "1526520",
+    "end": "1533480"
+  },
+  {
+    "text": "can look later but this first screenshot shows that we have found 303 crash samples and and what I noticed",
+    "start": "1533480",
+    "end": "1542779"
+  },
+  {
+    "text": "in here is that some of these are handled aborts you know they're doing asserts that lead to a board so I",
+    "start": "1542779",
+    "end": "1548059"
+  },
+  {
+    "text": "filtered those out and then we're down to 56 unique crash samples and we do see the the red lines that we see here are",
+    "start": "1548059",
+    "end": "1555200"
+  },
+  {
+    "text": "basically bang exploitable saying that this is likely an exploitable crash and here's a couple pages of crashes so",
+    "start": "1555200",
+    "end": "1561320"
+  },
+  {
+    "text": "right so so I knew going into this project that the verifier itself had some vulnerabilities in there",
+    "start": "1561320",
+    "end": "1568700"
+  },
+  {
+    "text": "um a blown up screenshots of what one of those bugs was it was indicated as probably exploitable",
+    "start": "1568700",
+    "end": "1575120"
+  },
+  {
+    "text": "in fact in this particular case it was not really exploitable it thought that it was a right a memory right but it's",
+    "start": "1575120",
+    "end": "1581480"
+  },
+  {
+    "text": "actually on the test instruction so it's dereferencing a value turns out to be read AV not too crazy well so we had",
+    "start": "1581480",
+    "end": "1589460"
+  },
+  {
+    "text": "this pilot crashes though and we knew that we wanted to run them through the windows side is kind of the idea same thing on the ubpf side ubpf can run",
+    "start": "1589460",
+    "end": "1597620"
+  },
+  {
+    "text": "in an interpreted mode or in a jit mode so ultimately this",
+    "start": "1597620",
+    "end": "1603260"
+  },
+  {
+    "text": "ubpf does not Implement any of the maps or any of the helper functions it's just",
+    "start": "1603260",
+    "end": "1609559"
+  },
+  {
+    "text": "a pure virtual CPU so really we're just trying to execute out of bounds or read",
+    "start": "1609559",
+    "end": "1614900"
+  },
+  {
+    "text": "or write out of bounds of the virtual CPU environment and so if we fuzz the interpreted mode",
+    "start": "1614900",
+    "end": "1620419"
+  },
+  {
+    "text": "found some crashes again AFL collects shows us these red lines that say",
+    "start": "1620419",
+    "end": "1626000"
+  },
+  {
+    "text": "there's exploitable bugs there and in the jet mode it got even crazier",
+    "start": "1626000",
+    "end": "1632480"
+  },
+  {
+    "text": "um all kinds of exploitable crashes but as it turns out the heuristics around this weren't that great and so at the",
+    "start": "1632480",
+    "end": "1637880"
+  },
+  {
+    "text": "time that we found all these bugs um you know I didn't submit them all to these open source projects because a I",
+    "start": "1637880",
+    "end": "1642980"
+  },
+  {
+    "text": "didn't know that these were going to eventually make their way into Windows yet but B because a lot of these were low-grade",
+    "start": "1642980",
+    "end": "1649220"
+  },
+  {
+    "text": "um you know issues that ultimately I was waiting for a more significant project to use the CPU in a meaningful context",
+    "start": "1649220",
+    "end": "1657559"
+  },
+  {
+    "text": "and so we had all these bugs um and just kind of knew that we would",
+    "start": "1657559",
+    "end": "1663380"
+  },
+  {
+    "text": "want to follow up now here this this is one that we did find uh and replicate in the kernel side",
+    "start": "1663380",
+    "end": "1669740"
+  },
+  {
+    "text": "um this one is showing a vulnerability in the ubpf destroy where it is freeing",
+    "start": "1669740",
+    "end": "1674900"
+  },
+  {
+    "text": "the virtual machine as it's trying to terminate the program and",
+    "start": "1674900",
+    "end": "1680000"
+  },
+  {
+    "text": "um in this case the pointer was corrupted",
+    "start": "1680000",
+    "end": "1684879"
+  },
+  {
+    "text": "so these components are sitting inside this ebpf service dll and we",
+    "start": "1685179",
+    "end": "1692360"
+  },
+  {
+    "text": "fuzz dots both with WTF but actually when we once we got to this component",
+    "start": "1692360",
+    "end": "1697419"
+  },
+  {
+    "text": "Microsoft started doing their own fuzzing sometime in June late May June",
+    "start": "1697419",
+    "end": "1702500"
+  },
+  {
+    "text": "and um ultimately the bugs weren't reachable or they were already patched",
+    "start": "1702500",
+    "end": "1707659"
+  },
+  {
+    "text": "and so the ebpf service itself the PPL service turned out fairly clean uh as",
+    "start": "1707659",
+    "end": "1713539"
+  },
+  {
+    "text": "far as exploitable bugs go so then the last area that we wanted to switch to is of course discovering what",
+    "start": "1713539",
+    "end": "1719720"
+  },
+  {
+    "text": "this kernel driver exposes because that's really where the where everything's going to end up eventually",
+    "start": "1719720",
+    "end": "1725440"
+  },
+  {
+    "text": "and of course it exposes a nice eye-octal interface and as I mentioned before the dackle on this device object",
+    "start": "1725440",
+    "end": "1732320"
+  },
+  {
+    "text": "does require administrative privileges so we are looking for unsigned code execution ideally",
+    "start": "1732320",
+    "end": "1738559"
+  },
+  {
+    "text": "the interfaces that are exposed through ioctal allow you to you know resolve functions and maps and load programs get",
+    "start": "1738559",
+    "end": "1747380"
+  },
+  {
+    "text": "the next program ID interact with ring buffers and data structures and all these sorts of things plenty of",
+    "start": "1747380",
+    "end": "1754299"
+  },
+  {
+    "text": "interesting memory uh modification going on there",
+    "start": "1754299",
+    "end": "1759740"
+  },
+  {
+    "text": "and so this is kind of where the majority of the attack surface that became interesting uh existed",
+    "start": "1759740",
+    "end": "1768440"
+  },
+  {
+    "text": "and because it's in the kernel context we can't use Simple AFL style approach or cross-fuzzing really we needed to",
+    "start": "1768440",
+    "end": "1775460"
+  },
+  {
+    "text": "come up with another approach and so in this case we leveraged the tool called WTF fuzzer from Axel touche that was",
+    "start": "1775460",
+    "end": "1783380"
+  },
+  {
+    "text": "released last year also known as overclock and the way that this fuzzer works is we",
+    "start": "1783380",
+    "end": "1789980"
+  },
+  {
+    "text": "take a snapshot of the complete operating system memory from the kernel debugger and we write that to disk and",
+    "start": "1789980",
+    "end": "1797299"
+  },
+  {
+    "text": "then there's a component using the Box CPU emulator x86 emulator 64-bit and we",
+    "start": "1797299",
+    "end": "1804260"
+  },
+  {
+    "text": "it's an emulation based snapshots uh fuzzer",
+    "start": "1804260",
+    "end": "1809419"
+  },
+  {
+    "text": "and ultimately this allows us to set a breakpoints at the entry point to any function we want whether it's userland",
+    "start": "1809419",
+    "end": "1815659"
+  },
+  {
+    "text": "or kernel and replace the contents of buffers being passed to those apis to do our fuzzing",
+    "start": "1815659",
+    "end": "1821840"
+  },
+  {
+    "text": "other advantage of this is that it is distributed so you run one server and it",
+    "start": "1821840",
+    "end": "1827000"
+  },
+  {
+    "text": "uses TCP sockets and communicates over the wire from clients",
+    "start": "1827000",
+    "end": "1832220"
+  },
+  {
+    "text": "to implement a harness you more or less just need to write three functions and",
+    "start": "1832220",
+    "end": "1837320"
+  },
+  {
+    "text": "one that inserts the test case and moves the newly fuzzed data into the buffer",
+    "start": "1837320",
+    "end": "1843500"
+  },
+  {
+    "text": "that is in the memory snapshot and then some initialization for catching calls",
+    "start": "1843500",
+    "end": "1849500"
+  },
+  {
+    "text": "to swap contexts or other functions that you would either want to modify or you",
+    "start": "1849500",
+    "end": "1854779"
+  },
+  {
+    "text": "just want to force terminate your fuzzing session um due to time constraints this is just",
+    "start": "1854779",
+    "end": "1861980"
+  },
+  {
+    "text": "kind of an introduction to WTF as being a powerful tool for doing kernel fuzzing uh you'll have to go look a little bit",
+    "start": "1861980",
+    "end": "1867679"
+  },
+  {
+    "text": "further on your own but uh ultimately it comes with a demonstration fuzzer that is able to do",
+    "start": "1867679",
+    "end": "1874520"
+  },
+  {
+    "text": "type length value network fuzzing using multiple packets so we Fork that modified it so that instead of hooking",
+    "start": "1874520",
+    "end": "1881539"
+  },
+  {
+    "text": "the network sockets we hooked below the device i o control file API and you'll",
+    "start": "1881539",
+    "end": "1888919"
+  },
+  {
+    "text": "see in the call stack here that ultimately from the user lands where you would normally call device i o control",
+    "start": "1888919",
+    "end": "1894260"
+  },
+  {
+    "text": "it passes through several layers until you get to the kernel side Handler for all that and we replace the contents of",
+    "start": "1894260",
+    "end": "1900559"
+  },
+  {
+    "text": "those buffers each iteration and then we had to use a json-based",
+    "start": "1900559",
+    "end": "1906080"
+  },
+  {
+    "text": "serialization format that could hold multiple ioctal requests so our whole goal here is to be able to send you know",
+    "start": "1906080",
+    "end": "1911659"
+  },
+  {
+    "text": "a dozen eye octals at once that kind of manipulate the same Maps or programs looking for various vulnerability",
+    "start": "1911659",
+    "end": "1918500"
+  },
+  {
+    "text": "classes and so ultimately we serialized the contents of what the ioctal data buffer",
+    "start": "1918500",
+    "end": "1925399"
+  },
+  {
+    "text": "would be and add a little bit of metadata around that in order to re-execute those or to inject that data",
+    "start": "1925399",
+    "end": "1932059"
+  },
+  {
+    "text": "properly from our WTF hooks so when you run WTF clients it looks",
+    "start": "1932059",
+    "end": "1937820"
+  },
+  {
+    "text": "something like this and if we have time I will do a live demo but um basically this is showing a client",
+    "start": "1937820",
+    "end": "1944120"
+  },
+  {
+    "text": "booting up and outputting occasional updates on the left hand side is the",
+    "start": "1944120",
+    "end": "1950240"
+  },
+  {
+    "text": "iteration number and how many blocks it's covered and how many executions is getting a second now the execution is a",
+    "start": "1950240",
+    "end": "1956659"
+  },
+  {
+    "text": "second here per client is quite low it's only in you know 15 to 20 kind of executions a second but that's because",
+    "start": "1956659",
+    "end": "1962840"
+  },
+  {
+    "text": "we're sending up to 10 ioctal requests at once so we're activating a lot of",
+    "start": "1962840",
+    "end": "1968000"
+  },
+  {
+    "text": "behavior inside the kernel if you only do one it can be up to 10 times faster basically and of course we can scale",
+    "start": "1968000",
+    "end": "1974360"
+  },
+  {
+    "text": "this across many CPUs so we were ultimately using like 40 cores and",
+    "start": "1974360",
+    "end": "1979880"
+  },
+  {
+    "text": "getting 300 executions a second or something on the server side when you initialize",
+    "start": "1979880",
+    "end": "1985159"
+  },
+  {
+    "text": "it it boots up and shows you that it's starting to receive information from the",
+    "start": "1985159",
+    "end": "1990200"
+  },
+  {
+    "text": "clients and ultimately we're looking for outputs that are being saved as crashes that we can then go replay and test so",
+    "start": "1990200",
+    "end": "1997940"
+  },
+  {
+    "text": "the results of our kernel driver fuzzing did come up with a handful of crashes unfortunately most of these are",
+    "start": "1997940",
+    "end": "2003519"
+  },
+  {
+    "text": "robustness kind of layer crashes because you're already administrator so we did get out of bounds read access violation",
+    "start": "2003519",
+    "end": "2009880"
+  },
+  {
+    "text": "which of course tears down the system and causes kernel to panic but at the end of the day you know",
+    "start": "2009880",
+    "end": "2016240"
+  },
+  {
+    "text": "you're already administrator so technically you could probably shut down the system if you want to",
+    "start": "2016240",
+    "end": "2021340"
+  },
+  {
+    "text": "um but you know here's the call stack for that as I mentioned the uh uh ebpf core invoke protocol Handler",
+    "start": "2021340",
+    "end": "2029679"
+  },
+  {
+    "text": "I believe that's where we were squirting in our data um there was another one this is the ubpf destroy API it's the same bug that",
+    "start": "2029679",
+    "end": "2037179"
+  },
+  {
+    "text": "I mentioned I found in the user land side but here it exists in the kernel because the kernel has the jit engine",
+    "start": "2037179",
+    "end": "2042580"
+  },
+  {
+    "text": "inside of it um and or has The Interpreter inside of it rather and so that same code is both",
+    "start": "2042580",
+    "end": "2049658"
+  },
+  {
+    "text": "present and user land and kernel and so depending on how you interface with apis you can trigger those bugs either in",
+    "start": "2049659",
+    "end": "2056740"
+  },
+  {
+    "text": "userland or in the kernel and then yet another uh crash and",
+    "start": "2056740",
+    "end": "2062260"
+  },
+  {
+    "text": "trampoline table uh and so on and so forth so overall you know our goal here was a if we could find exploitable bugs",
+    "start": "2062260",
+    "end": "2068800"
+  },
+  {
+    "text": "then great and we did and you know that first vulnerability to give you administrator access and then we wanted",
+    "start": "2068800",
+    "end": "2075638"
+  },
+  {
+    "text": "to just continue to do robustness testing in an overall Deep dive into the security design here to get a sniff test",
+    "start": "2075639",
+    "end": "2081940"
+  },
+  {
+    "text": "of you know how how well has this code been fuzzed or checked done Security",
+    "start": "2081940",
+    "end": "2089560"
+  },
+  {
+    "text": "reviews and it is a moving code base it is a young code base we did expect that there would be various problems like",
+    "start": "2089560",
+    "end": "2095618"
+  },
+  {
+    "text": "this it's not unexpected and as I said Microsoft has begun fuzzing sometime in late May and in June and they're very",
+    "start": "2095619",
+    "end": "2102400"
+  },
+  {
+    "text": "rapidly fixing a lot of these bugs um so some of these we didn't bother submitting you know just because they're",
+    "start": "2102400",
+    "end": "2109480"
+  },
+  {
+    "text": "read AVS and all the references if you're wondering what the outputs of the fuzzer looks like where it has",
+    "start": "2109480",
+    "end": "2115660"
+  },
+  {
+    "text": "multiple packets here's a little screenshot that shows what that Json format looks like when it actually",
+    "start": "2115660",
+    "end": "2120760"
+  },
+  {
+    "text": "contains a number of requests and then also to continue our fuzzing uh",
+    "start": "2120760",
+    "end": "2127119"
+  },
+  {
+    "text": "we wanted to experiment with AFL Knicks which is American fuzzy Lop plug-in that",
+    "start": "2127119",
+    "end": "2133540"
+  },
+  {
+    "text": "interfaces with a hypervisor based snapshot fuzzer called NYX or kafl that",
+    "start": "2133540",
+    "end": "2139420"
+  },
+  {
+    "text": "was used previously called and because we spent about a month or at least three",
+    "start": "2139420",
+    "end": "2145240"
+  },
+  {
+    "text": "weeks fuzzing before we really started switching to Nyx we didn't find any new bugs but of course we did still find",
+    "start": "2145240",
+    "end": "2152380"
+  },
+  {
+    "text": "similar bugs to the ones that we had found before and we weren't reusing the",
+    "start": "2152380",
+    "end": "2157420"
+  },
+  {
+    "text": "you know harnesses or crashes or anything it was going from the same template so one thing to notice about",
+    "start": "2157420",
+    "end": "2162579"
+  },
+  {
+    "text": "this is that a single core was getting 65 executions a second instead of just 15 or 20 and so we do see that nyx's uh",
+    "start": "2162579",
+    "end": "2171339"
+  },
+  {
+    "text": "substantially faster it's just a little bit more difficult to set up and scale",
+    "start": "2171339",
+    "end": "2177579"
+  },
+  {
+    "text": "so that leaves the last bit of attack surface which are these kernel extension modules and the network hooks are",
+    "start": "2177579",
+    "end": "2184660"
+  },
+  {
+    "text": "implemented in a kernel extension module and in the future there should be something that implements detours or",
+    "start": "2184660",
+    "end": "2191140"
+  },
+  {
+    "text": "code hooks in a different extension module the network one is called net ebpf",
+    "start": "2191140",
+    "end": "2197440"
+  },
+  {
+    "text": "extension and this one was small but a bit complicated to fuzz because as I",
+    "start": "2197440",
+    "end": "2203920"
+  },
+  {
+    "text": "mentioned this is going to be what reads the packets off of the wire and implements the hooks that will pass the",
+    "start": "2203920",
+    "end": "2209380"
+  },
+  {
+    "text": "data to your evpf program and so we're interested in just that little chunk of code that does that translation and so",
+    "start": "2209380",
+    "end": "2217599"
+  },
+  {
+    "text": "in this case we actually did a code audit both myself and Andrea just read the code there wasn't a lot of memory",
+    "start": "2217599",
+    "end": "2223240"
+  },
+  {
+    "text": "management happening it does a lot of zero copy just pointing at things and so",
+    "start": "2223240",
+    "end": "2228579"
+  },
+  {
+    "text": "we didn't come up with any new bugs there lastly as I said the code hooks will be",
+    "start": "2228579",
+    "end": "2233800"
+  },
+  {
+    "text": "implemented in their own extension modules so that will be a thing for the future",
+    "start": "2233800",
+    "end": "2239619"
+  },
+  {
+    "text": "and uh really quick because I we do have two minutes and that should be just enough time to do the live demo uh",
+    "start": "2239619",
+    "end": "2246579"
+  },
+  {
+    "text": "if I switch here okay so",
+    "start": "2246579",
+    "end": "2254800"
+  },
+  {
+    "text": "this is going to just be a demo showing us running um the WTF buzzer and finding bugs in",
+    "start": "2254800",
+    "end": "2261940"
+  },
+  {
+    "text": "real time um in this directory this is the WTF",
+    "start": "2261940",
+    "end": "2268119"
+  },
+  {
+    "text": "directory I have a bunch of metadata there so we're going to delete all the crashes and the",
+    "start": "2268119",
+    "end": "2274660"
+  },
+  {
+    "text": "inputs and the outputs from the previous run I'm going to dump the list of Json packet harnesses that we've created and",
+    "start": "2274660",
+    "end": "2281680"
+  },
+  {
+    "text": "then we're just going to copy one over just the create program Json",
+    "start": "2281680",
+    "end": "2286500"
+  },
+  {
+    "text": "so what we're seeing here though is that these were all um",
+    "start": "2287859",
+    "end": "2293040"
+  },
+  {
+    "text": "ioctals that we created a plane structure to feed into the fuzzer so",
+    "start": "2293040",
+    "end": "2299980"
+  },
+  {
+    "text": "that it would do these individual requests and then those get mutated over time and expanded and modified to find the crashes and so lastly I'll just kind",
+    "start": "2299980",
+    "end": "2308260"
+  },
+  {
+    "text": "of tell it to quickly launch a screen session which will have eight clients connecting to back to the server fuzzing",
+    "start": "2308260",
+    "end": "2313900"
+  },
+  {
+    "text": "RI octals we will not copy the previous inputs this is showing at booting up an h-top",
+    "start": "2313900",
+    "end": "2320800"
+  },
+  {
+    "text": "so I'll exit out of that we will [Music]",
+    "start": "2320800",
+    "end": "2328060"
+  },
+  {
+    "text": "okay and so what we're seeing here is that in fact I actually I started",
+    "start": "2331960",
+    "end": "2337960"
+  },
+  {
+    "text": "this run in the speaker room so this is the wrong screen but what we see here is that it has been running for a little",
+    "start": "2337960",
+    "end": "2344859"
+  },
+  {
+    "text": "while and we've got eight nodes connected we're getting 100 executions I'm sorry 16 nodes now 100 executions a",
+    "start": "2344859",
+    "end": "2351640"
+  },
+  {
+    "text": "second and it has found uh 20 000 crashes since a couple hours ago so",
+    "start": "2351640",
+    "end": "2357280"
+  },
+  {
+    "text": "concluding thoughts um I'm sorry we're uh on the last minute",
+    "start": "2357280",
+    "end": "2364420"
+  },
+  {
+    "text": "here but uh in general ebpf is an exciting technology it's going it's going to be the underpinning of",
+    "start": "2364420",
+    "end": "2370180"
+  },
+  {
+    "text": "telemetry now and in the future it's coming to Windows uh windows will be",
+    "start": "2370180",
+    "end": "2375760"
+  },
+  {
+    "text": "able to run the exact same abpf programs they're portable and um Microsoft has uh joins the ebpf",
+    "start": "2375760",
+    "end": "2384220"
+  },
+  {
+    "text": "foundation which is part of the Linux foundation and so there's a lot of weight behind it so did Netflix and a",
+    "start": "2384220",
+    "end": "2389980"
+  },
+  {
+    "text": "few other Cloud players and we found one serious vulnerability found a handful of",
+    "start": "2389980",
+    "end": "2395500"
+  },
+  {
+    "text": "robustness vulnerabilities applied fuzzing at various different layers and",
+    "start": "2395500",
+    "end": "2400720"
+  },
+  {
+    "text": "ultimately we're here as trellix to do proactive research on security for the",
+    "start": "2400720",
+    "end": "2406720"
+  },
+  {
+    "text": "public and for the future so thank you very much for attending my talk and yeah",
+    "start": "2406720",
+    "end": "2414119"
+  },
+  {
+    "text": "[Music]",
+    "start": "2414610",
+    "end": "2417719"
+  },
+  {
+    "text": "[Music]",
+    "start": "2421560",
+    "end": "2424650"
+  }
+]

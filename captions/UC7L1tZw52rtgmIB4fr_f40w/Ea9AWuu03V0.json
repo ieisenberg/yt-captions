@@ -1,0 +1,1652 @@
+[
+  {
+    "text": "cool all right we have a much Fuller house there than we thought so thanks so much for coming by I'm will I'm a",
+    "start": "5240",
+    "end": "11099"
+  },
+  {
+    "text": "software engineer here at snorkel and today we're going to talk about how we redesigned snorkel's interactive ml",
+    "start": "11099",
+    "end": "16320"
+  },
+  {
+    "text": "systems to power our core Enterprise products and hint we use Rey so just some signposting we're first",
+    "start": "16320",
+    "end": "23039"
+  },
+  {
+    "text": "going to give a bit of background about snorkel and then talk about the specific challenges we faced and why we had to",
+    "start": "23039",
+    "end": "28560"
+  },
+  {
+    "text": "redesign our ml systems then we'll go over the different architecture designs we evaluated and why we chose Ray to",
+    "start": "28560",
+    "end": "34920"
+  },
+  {
+    "text": "implement our redesign and then lastly we're going to drill down into how our system works",
+    "start": "34920",
+    "end": "40200"
+  },
+  {
+    "text": "so first of all I just wanted to thank all the wonderful folks who helped make this happen anytime a data scientist in",
+    "start": "40200",
+    "end": "45420"
+  },
+  {
+    "text": "one of the world's largest organizations wants to start an ml project they turn to snorkel and directly hit the systems",
+    "start": "45420",
+    "end": "51300"
+  },
+  {
+    "text": "that we built together as a team all right so I'm going to start off with a bit of background about snorkel one of",
+    "start": "51300",
+    "end": "57840"
+  },
+  {
+    "text": "the world's largest companies want to develop and deploy ml apps they turn a snorkel our Flagship products snorkel flow",
+    "start": "57840",
+    "end": "64440"
+  },
+  {
+    "text": "allows data scientists to programmatically label massive data sets without needing to use human labelers",
+    "start": "64440",
+    "end": "70979"
+  },
+  {
+    "text": "and then train models on those data sets so using programmatic labeling actually",
+    "start": "70979",
+    "end": "76560"
+  },
+  {
+    "text": "leads to 10 to 100 times faster AI development for the world's largest companies",
+    "start": "76560",
+    "end": "81900"
+  },
+  {
+    "text": "so what is this programmatic labeling magic it's a technique that was developed out of Chris Ray's Lab at",
+    "start": "81900",
+    "end": "87659"
+  },
+  {
+    "text": "Stanford and we rely on people so data scientists writing heuristics in the",
+    "start": "87659",
+    "end": "92759"
+  },
+  {
+    "text": "form of code so these can be FL statements or calling out to models which can be anything from logistic",
+    "start": "92759",
+    "end": "99240"
+  },
+  {
+    "text": "regression to large language model inference calls to spit out these weak labels for data points and it turns out",
+    "start": "99240",
+    "end": "105420"
+  },
+  {
+    "text": "that if you stack enough of these heuristics together you get some really damn good labels and to get good labels",
+    "start": "105420",
+    "end": "111240"
+  },
+  {
+    "text": "you need to iteratively tweak your heuristics you can't just generate magic out of thin air it takes a lot of work",
+    "start": "111240",
+    "end": "117439"
+  },
+  {
+    "text": "and so as you can imagine you need to you know tweak your heuristics get your",
+    "start": "117439",
+    "end": "122460"
+  },
+  {
+    "text": "labels out then train your models on those labels and you have to rinse and repeat this process",
+    "start": "122460",
+    "end": "127619"
+  },
+  {
+    "text": "and So within snorkel users iterate on their data in a part of the product called label studio and users actually",
+    "start": "127619",
+    "end": "133800"
+  },
+  {
+    "text": "spend around 75 percent of their time in this part of the product so as a result this process needs to be really",
+    "start": "133800",
+    "end": "139560"
+  },
+  {
+    "text": "interactive and I'm going to show you what this roughly looks like so here's the quick demo this video will play",
+    "start": "139560",
+    "end": "146819"
+  },
+  {
+    "text": "all right so here I'm trying to label my data set and I'm trying to find all image images",
+    "start": "146819",
+    "end": "152580"
+  },
+  {
+    "text": "of apples and so as you can see I've kind of run this actually what's happening in the",
+    "start": "152580",
+    "end": "158280"
+  },
+  {
+    "text": "background is there's an image model inference going on and I'm running that inference over a lot of uh images in my",
+    "start": "158280",
+    "end": "164280"
+  },
+  {
+    "text": "data set so the core idea I'm trying to drive home here is that our users need to run these arbitrary and really",
+    "start": "164280",
+    "end": "169620"
+  },
+  {
+    "text": "complex workloads over large data sets that can span gigabytes over and over and over again and these workloads can",
+    "start": "169620",
+    "end": "175140"
+  },
+  {
+    "text": "be anything from FL statements to llm inference and in the past label Studio would actually run these workloads over",
+    "start": "175140",
+    "end": "181500"
+  },
+  {
+    "text": "data using desk which is a framework for parallel processing of data frames",
+    "start": "181500",
+    "end": "187140"
+  },
+  {
+    "text": "and so now I'm going to talk about the problem that we faced and kind of you know what we saw as a company so around",
+    "start": "187140",
+    "end": "192780"
+  },
+  {
+    "text": "mid last year we had some really exciting opportunities here at snorkel our customer base is growing they're",
+    "start": "192780",
+    "end": "197819"
+  },
+  {
+    "text": "dramatically expanding the size of data they want to work with in label Studio into the tens of gigabytes to millions",
+    "start": "197819",
+    "end": "203400"
+  },
+  {
+    "text": "of row range and they also needed Foundation model and llm capabilities in label Studio like running models like",
+    "start": "203400",
+    "end": "209220"
+  },
+  {
+    "text": "clip Birch or GPT so while these are some great problems to have we ran up against some serious",
+    "start": "209220",
+    "end": "214680"
+  },
+  {
+    "text": "roadblocks our previous infrastructure ran on desk which prevented us from meeting that customer demand that I just",
+    "start": "214680",
+    "end": "220140"
+  },
+  {
+    "text": "talked about and snorkel is often deployed on resource constrained self-hosted Enterprise customer",
+    "start": "220140",
+    "end": "226200"
+  },
+  {
+    "text": "environments so we can't just arbitrarily scale up and out like a cloud-hosted solution can so building",
+    "start": "226200",
+    "end": "232019"
+  },
+  {
+    "text": "these platforms is actually really tough and to also double click into why we Face these scaling blockers early on at",
+    "start": "232019",
+    "end": "238920"
+  },
+  {
+    "text": "snorkel and before my time there label Studio was built on top of desk so all of those you know iterative interactive",
+    "start": "238920",
+    "end": "245280"
+  },
+  {
+    "text": "data operations and ml workloads were running over and over again that's all being run on desk and it was a fantastic",
+    "start": "245280",
+    "end": "251159"
+  },
+  {
+    "text": "technology we used early on at the company and it got us to our series C and well beyond but we outgrew it we",
+    "start": "251159",
+    "end": "257160"
+  },
+  {
+    "text": "needed something more reliable that could work at scale to drill down an additional level of detail at a much",
+    "start": "257160",
+    "end": "263160"
+  },
+  {
+    "text": "larger data set sizes with many data sets pinned in memory we saw Das make these crazy scheduling decisions and",
+    "start": "263160",
+    "end": "269220"
+  },
+  {
+    "text": "shuffles that would lead to really high latent sees for a lot of our workloads we also couldn't easily do memory or",
+    "start": "269220",
+    "end": "274800"
+  },
+  {
+    "text": "scheduling of workloads on our cluster and we also needed fine-grained control over worker life cycles and our you know",
+    "start": "274800",
+    "end": "282720"
+  },
+  {
+    "text": "Das components would also leak memory through time which would lead to nodes uming and we really felt this impact as",
+    "start": "282720",
+    "end": "288600"
+  },
+  {
+    "text": "the company it affected our customers they would face outages in our system booms would cause ooms caused by memory",
+    "start": "288600",
+    "end": "295320"
+  },
+  {
+    "text": "leaks and our performance would suffer too and my workloads would take a hell of a long time sometimes we would also",
+    "start": "295320",
+    "end": "300720"
+  },
+  {
+    "text": "hit a scaling wall and it was also tough for us to build new products and a build towards the future using llms or you",
+    "start": "300720",
+    "end": "307320"
+  },
+  {
+    "text": "know computer vision models so how did we solve this problem how do we move past this first I'll give a bit",
+    "start": "307320",
+    "end": "313259"
+  },
+  {
+    "text": "of background about our requirements and then I'll talk through some of the approaches we considered and how we ended up settling on a design",
+    "start": "313259",
+    "end": "320400"
+  },
+  {
+    "text": "so surprise surprise we had to re-turf completely rebuild our interactive ml systems",
+    "start": "320400",
+    "end": "325620"
+  },
+  {
+    "text": "and so just to run through some of the functional requirements at the end of the day we had to run these embarrassingly embarrassingly parallel",
+    "start": "325620",
+    "end": "332220"
+  },
+  {
+    "text": "User submitted workloads over customer data and this customer data would be pretty big and it also had to be",
+    "start": "332220",
+    "end": "337979"
+  },
+  {
+    "text": "interactive had to work quickly it would need to support multiple users without the system tipping over",
+    "start": "337979",
+    "end": "344580"
+  },
+  {
+    "text": "now I want to take some time to do a quick aside on one of the biggest constraints as well that we had to work",
+    "start": "344580",
+    "end": "350220"
+  },
+  {
+    "text": "with for many of our customers snorkel is deployed in these server racks or in a self-hosted fashion so resources are",
+    "start": "350220",
+    "end": "357240"
+  },
+  {
+    "text": "actually really scarce we can't vertically scale up or out like a cloud-hosted solution can especially",
+    "start": "357240",
+    "end": "362580"
+  },
+  {
+    "text": "when data sets are larger than memory so in order for us to even be usable or Deployable Not Dead on Arrival we have",
+    "start": "362580",
+    "end": "368820"
+  },
+  {
+    "text": "to use out of core algorithms because there's often not enough RAM to keep the full data set resident",
+    "start": "368820",
+    "end": "375360"
+  },
+  {
+    "text": "so we have these requirements where we have to deal with this crazy supportability requirement and we have",
+    "start": "375360",
+    "end": "380940"
+  },
+  {
+    "text": "to deliver on a reasonably performing experience but if a user has more resources to spare we want to deliver a",
+    "start": "380940",
+    "end": "387180"
+  },
+  {
+    "text": "very performant experience so how do we satisfy all of these pretty Divergent requirements",
+    "start": "387180",
+    "end": "393000"
+  },
+  {
+    "text": "skipping to the end here we achieved this using a hybrid approach a hybrid architecture as it turns out using an",
+    "start": "393000",
+    "end": "399120"
+  },
+  {
+    "text": "out-of-core approach helps us deploy anywhere because we can process any size data set using a finite pool of",
+    "start": "399120",
+    "end": "404759"
+  },
+  {
+    "text": "resources but at the same time using in-core approaches allows us to deliver a low latency experience for",
+    "start": "404759",
+    "end": "411960"
+  },
+  {
+    "text": "well-resourced customer environments but first we should talk about our design process because we're Engineers here the",
+    "start": "411960",
+    "end": "418199"
+  },
+  {
+    "text": "first approach we considered was to build a full out-of-core processing solution so workers would apply operations over chunks of a data set",
+    "start": "418199",
+    "end": "424919"
+  },
+  {
+    "text": "loaded from disk these chunks would be gc'd garbage collected to return memory to the resource pool and all of our",
+    "start": "424919",
+    "end": "431100"
+  },
+  {
+    "text": "users running workloads on any data set would share the same pool of resources the natural architecture to implement",
+    "start": "431100",
+    "end": "437340"
+  },
+  {
+    "text": "this would be a worker pool this is excellent for resource constrained environments because we can",
+    "start": "437340",
+    "end": "443639"
+  },
+  {
+    "text": "process any size data set even with limited memory and we can deploy this on any compute constrained customer",
+    "start": "443639",
+    "end": "448860"
+  },
+  {
+    "text": "environment and it would still work the issue is that if you're a customer that has way more compute to spare and",
+    "start": "448860",
+    "end": "455400"
+  },
+  {
+    "text": "you can afford a cash a lot more data in memory we're still doing all this expensive disk to Ram IO fetching with",
+    "start": "455400",
+    "end": "461220"
+  },
+  {
+    "text": "this worker pool architecture and this isn't this isn't great this is a severe latency bottleneck for us",
+    "start": "461220",
+    "end": "466620"
+  },
+  {
+    "text": "so since the worker pool architecture alone can give us the performance we needed it was time to also consider in-core approaches that leaned into",
+    "start": "466620",
+    "end": "473400"
+  },
+  {
+    "text": "caching and so rather than constantly load chunks of a data set and then garbage collect those chunks why not",
+    "start": "473400",
+    "end": "478680"
+  },
+  {
+    "text": "just pin that data set in memory user workloads would get routed to run on those data sets and minimize i o cost so",
+    "start": "478680",
+    "end": "485099"
+  },
+  {
+    "text": "what we're doing here is we're caching data at the data set level and it removes a lot of i o latency but it",
+    "start": "485099",
+    "end": "491220"
+  },
+  {
+    "text": "assumes a lot about what's useful to Cache for the user for example when a user interacts with the data set that",
+    "start": "491220",
+    "end": "497220"
+  },
+  {
+    "text": "user might generate a lot of intermediate results or metadata and we have to store that somewhere as well this architecture doesn't leave enough",
+    "start": "497220",
+    "end": "503220"
+  },
+  {
+    "text": "room for that but also each user might have their own version of some fine-tuned model that that they need to",
+    "start": "503220",
+    "end": "508500"
+  },
+  {
+    "text": "store in in Ram or in vram somewhere so what if for every user working on a",
+    "start": "508500",
+    "end": "514320"
+  },
+  {
+    "text": "data set we just spun up dedicated resources just for that user data interaction we'd have dedicated space to",
+    "start": "514320",
+    "end": "520080"
+  },
+  {
+    "text": "Cache each user's you know private stuff with that data set and while maintaining memory safety so we're essentially",
+    "start": "520080",
+    "end": "526680"
+  },
+  {
+    "text": "caching the highest level of granularity here we acknowledge that we're duplicating the data set a lot however what we get",
+    "start": "526680",
+    "end": "533399"
+  },
+  {
+    "text": "in return is infrastructural flexibility because you know this is fine grain caching and this is a trade-off we're",
+    "start": "533399",
+    "end": "539339"
+  },
+  {
+    "text": "willing to make we can optimize for memory later so on the one hand while out of core approaches allow us to support any",
+    "start": "539339",
+    "end": "546060"
+  },
+  {
+    "text": "customer no matter how resource constrained they are on the other hand in-core approaches allow us to deliver",
+    "start": "546060",
+    "end": "551100"
+  },
+  {
+    "text": "the low latency experiences customers want when they have more resources to spare by caching and avoiding i o",
+    "start": "551100",
+    "end": "558660"
+  },
+  {
+    "text": "so why don't why don't we just combine these approaches into a hybrid architecture this is the solution we",
+    "start": "558660",
+    "end": "563940"
+  },
+  {
+    "text": "ended up going with and by caching data sets metadata and models in memory on the right hand side we can deliver",
+    "start": "563940",
+    "end": "570360"
+  },
+  {
+    "text": "really low latency experiences for our customers on massive data sets but if we ever run out of resources we can always",
+    "start": "570360",
+    "end": "575519"
+  },
+  {
+    "text": "fall back on this you know worker pool on the left hand side and everything will still work no matter what and",
+    "start": "575519",
+    "end": "581040"
+  },
+  {
+    "text": "compute bound workloads are also great on the worker pool as well and here's just a bit more detail on what this",
+    "start": "581040",
+    "end": "586860"
+  },
+  {
+    "text": "looks like see some people taking photos I'll give you a few seconds for that cool as you can see we can leverage the",
+    "start": "586860",
+    "end": "593640"
+  },
+  {
+    "text": "strengths of both approaches to basically get the best of both worlds so this is really cool",
+    "start": "593640",
+    "end": "598860"
+  },
+  {
+    "text": "now why why Ray we chose Ray to help build this architecture because it gives us the abstractions that we were looking",
+    "start": "598860",
+    "end": "605339"
+  },
+  {
+    "text": "for for example it naturally served our architecture needs by you know giving us amazing interfaces for worker pools and",
+    "start": "605339",
+    "end": "612480"
+  },
+  {
+    "text": "for actors so it's honestly fit like a glove here as well as helping us ensure",
+    "start": "612480",
+    "end": "617519"
+  },
+  {
+    "text": "memory safety so that we don't tip nodes over you know it helps us bin pack really well it's also a breezed to",
+    "start": "617519",
+    "end": "623160"
+  },
+  {
+    "text": "horizontally scale all right so why does any of this matter for snorkel we spend a lot of time a lot",
+    "start": "623160",
+    "end": "629640"
+  },
+  {
+    "text": "of effort building this the impact of all of this is that it's actually helped scale our product by orders of magnitude",
+    "start": "629640",
+    "end": "635399"
+  },
+  {
+    "text": "it's helped us unblock new product initiatives around foundation models and llms all while maintaining platform",
+    "start": "635399",
+    "end": "641339"
+  },
+  {
+    "text": "stability by avoiding booms and yes that is a that is a two order of magnitude increasing the amount of data",
+    "start": "641339",
+    "end": "647459"
+  },
+  {
+    "text": "we can process and we can now build these products that involve text and image Foundation models and deploy them",
+    "start": "647459",
+    "end": "652800"
+  },
+  {
+    "text": "on customer environments which is super cool all right so now we're going to drill down into how all this actually even",
+    "start": "652800",
+    "end": "659399"
+  },
+  {
+    "text": "works so again I want to drill home this core idea we are running these really complex operations over a lot of data",
+    "start": "659399",
+    "end": "665160"
+  },
+  {
+    "text": "over and over again and this needs to happen quickly so first we're going to talk about how the out-of-core part of",
+    "start": "665160",
+    "end": "670920"
+  },
+  {
+    "text": "the architecture does this at a high performance before my partner in crime John joins me on stage and talks about",
+    "start": "670920",
+    "end": "676500"
+  },
+  {
+    "text": "the in-core component so we implemented the out-of-core component as a worker pool with each",
+    "start": "676500",
+    "end": "682380"
+  },
+  {
+    "text": "worker pulling chunks of data from disk into RAM and the first core idea is to use data chunking and parallelism for",
+    "start": "682380",
+    "end": "689279"
+  },
+  {
+    "text": "memory safety and for Speed so let's go over how this happens let's say we have a bunch of operations",
+    "start": "689279",
+    "end": "695160"
+  },
+  {
+    "text": "we want to run over data set too let's say data set 2 is ginormous so then we load chunks of data set 2 in parallel",
+    "start": "695160",
+    "end": "702060"
+  },
+  {
+    "text": "apply those operations over each tongue in parallel and then just and then just join the results afterwards so here I",
+    "start": "702060",
+    "end": "708000"
+  },
+  {
+    "text": "don't know maybe we'd prepare three tasks Each of which will load a chunk of data set two from disk into RAM so these",
+    "start": "708000",
+    "end": "715079"
+  },
+  {
+    "text": "tasks will then get fanned out to a pool of Ray workers each worker reads a partition of data set 2 from disk into",
+    "start": "715079",
+    "end": "721740"
+  },
+  {
+    "text": "RAM and then just runs all the operations over each Chunk in parallel and then joins the results after and so we can",
+    "start": "721740",
+    "end": "728399"
+  },
+  {
+    "text": "pack these tasks onto our cluster without ooms because Ray does a great job at memoryware scheduling so and if",
+    "start": "728399",
+    "end": "734700"
+  },
+  {
+    "text": "we're in a resource scare scenario we can then run these tasks serially instead of fan them out you know",
+    "start": "734700",
+    "end": "740279"
+  },
+  {
+    "text": "massively parallely so that the full data set is never resonant in memory all at once",
+    "start": "740279",
+    "end": "746040"
+  },
+  {
+    "text": "now we can introduce an additional layer of parallelism on this for you know even better memory safety and better",
+    "start": "746040",
+    "end": "751500"
+  },
+  {
+    "text": "performance and this is operator parallelism this is especially critical of all those operations can't fit in memory all at",
+    "start": "751500",
+    "end": "758040"
+  },
+  {
+    "text": "once maybe each operation is actually a an llm like literally so let's say we have all these operations but we we",
+    "start": "758040",
+    "end": "764279"
+  },
+  {
+    "text": "can't fit them all in memory all at once so what we do is we can group The Ops so that no group is larger than a certain",
+    "start": "764279",
+    "end": "770100"
+  },
+  {
+    "text": "Ram limit so we can set this Ram limit based on some you know environment variable or based on the size of the",
+    "start": "770100",
+    "end": "775260"
+  },
+  {
+    "text": "cluster and then after we divvy all of them up into their own groups of operations it's almost like we now have",
+    "start": "775260",
+    "end": "781440"
+  },
+  {
+    "text": "three separate workloads to run and for each sub workload we can then apply additional data parallelism on top of",
+    "start": "781440",
+    "end": "787620"
+  },
+  {
+    "text": "that to get all of this amazing chunking here so as you can see we've actually split",
+    "start": "787620",
+    "end": "793440"
+  },
+  {
+    "text": "up the operations so that you know we can control when those operations are loaded in memory at any given time so we",
+    "start": "793440",
+    "end": "799500"
+  },
+  {
+    "text": "can then fan out those tasks to the worker pool once again and this is awesome because we can use chunking",
+    "start": "799500",
+    "end": "805380"
+  },
+  {
+    "text": "across tasks to achieve memory safety or we can do parallelism to achieve performance",
+    "start": "805380",
+    "end": "811560"
+  },
+  {
+    "text": "all right this is this is wonderful but we we ran into some roadblocks when trying to build this uh the the main",
+    "start": "811560",
+    "end": "817019"
+  },
+  {
+    "text": "roadblock in particular is job isolation when trying to implement the worker pool the issue is that these workloads are",
+    "start": "817019",
+    "end": "822839"
+  },
+  {
+    "text": "actually submitted from different API client processes from Ray's perspective these are all different drivers so they",
+    "start": "822839",
+    "end": "828600"
+  },
+  {
+    "text": "don't share resources that you spin up so if process one spins up a bunch of workers in the cluster process two can't",
+    "start": "828600",
+    "end": "835200"
+  },
+  {
+    "text": "use them because it's a different driver so if process one has actually crowded the cluster with workers process 2 has",
+    "start": "835200",
+    "end": "840420"
+  },
+  {
+    "text": "to wait for all that stuff to exit and die before spinning up its own workers from a cold State and this is fine but",
+    "start": "840420",
+    "end": "846839"
+  },
+  {
+    "text": "with one big caveat spinning up cold workers takes a long time because of expensive Imports and sometimes you just",
+    "start": "846839",
+    "end": "853800"
+  },
+  {
+    "text": "gotta load you know torch and Transformers and whatnot into memory through python Imports so we actually",
+    "start": "853800",
+    "end": "859260"
+  },
+  {
+    "text": "need these workers to stay super warm but if those workers stay warm then again you know we run back into that",
+    "start": "859260",
+    "end": "865620"
+  },
+  {
+    "text": "problem different API processes can't share them so we needed a way for all these processes on the left hand side to",
+    "start": "865620",
+    "end": "871139"
+  },
+  {
+    "text": "have access so the full worker pool on the right hand side so how do we get around this problem the solution is to",
+    "start": "871139",
+    "end": "876779"
+  },
+  {
+    "text": "have all the drivers connect to a broker actor that would fan out tasks across a pool of already warmed up workers so",
+    "start": "876779",
+    "end": "882959"
+  },
+  {
+    "text": "through this broker drivers can submit their tax tasks tasks would get immediately scheduled onto the worker",
+    "start": "882959",
+    "end": "889260"
+  },
+  {
+    "text": "pool and so that way all of our drivers can access the shared worker pool so this broker actor lives in the same",
+    "start": "889260",
+    "end": "895260"
+  },
+  {
+    "text": "Ray worker pods that the ray uh you know workers the task executors live in and it submits these heartbeat tasks to",
+    "start": "895260",
+    "end": "902040"
+  },
+  {
+    "text": "ensure that Ray workers are warm with the necessary expensive Imports and datas and models and whatnot cached in",
+    "start": "902040",
+    "end": "907260"
+  },
+  {
+    "text": "memory before we schedule work on them and so this really minimizes our execution latency",
+    "start": "907260",
+    "end": "912300"
+  },
+  {
+    "text": "sure just to zoom out we use data and task parallelism built on top of Ray workers and raise memoryware scheduling",
+    "start": "912300",
+    "end": "917760"
+  },
+  {
+    "text": "to achieve both memory safety and performance but due to some limitations we need to maintain this broker actor to",
+    "start": "917760",
+    "end": "924240"
+  },
+  {
+    "text": "allow many drivers to share a warmed worker pool which minimizes our execution latency",
+    "start": "924240",
+    "end": "929820"
+  },
+  {
+    "text": "all right so John and I are going to switch off John is now going to talk about the in-memory component of the",
+    "start": "929820",
+    "end": "934860"
+  },
+  {
+    "text": "architecture and then we're going to finish off with some of the limitations with Ray that we had to work around take it away man",
+    "start": "934860",
+    "end": "940980"
+  },
+  {
+    "text": "hello hello cool everyone I'm John I'm a software engineer and like will said I",
+    "start": "940980",
+    "end": "946260"
+  },
+  {
+    "text": "worked on the uh The Encore in-memory component of this architecture of this hybrid architecture so let's talk about",
+    "start": "946260",
+    "end": "952139"
+  },
+  {
+    "text": "the motivations behind this a bit right so if you have i o bound operations obviously you want to have the data",
+    "start": "952139",
+    "end": "957779"
+  },
+  {
+    "text": "cached in memory before the operations are actually performed so you're not paying that I O cost when the request comes in from the user so you know a",
+    "start": "957779",
+    "end": "964920"
+  },
+  {
+    "text": "good example of this that maybe is relevant to to this conference is if you're working with large models if you're working with a Burt model or a",
+    "start": "964920",
+    "end": "970560"
+  },
+  {
+    "text": "clip model or a model from the Llama series you definitely don't want to be loading the weights from disk into CPU memory into GPU memory when a request",
+    "start": "970560",
+    "end": "976500"
+  },
+  {
+    "text": "comes in from the user you want to pay that cost one time up front and then amortize the cost over the future requests that come in from users so you",
+    "start": "976500",
+    "end": "983279"
+  },
+  {
+    "text": "can just go ahead and pay the cost of the forward pass that haven't actually load the weights in um and so what we came up here with here",
+    "start": "983279",
+    "end": "989940"
+  },
+  {
+    "text": "is that if the resources if there's enough resources available within this user system we can go ahead and allocate",
+    "start": "989940",
+    "end": "998040"
+  },
+  {
+    "text": "a dedicated pool of resources and we'll allocate individual actors to individual",
+    "start": "998040",
+    "end": "1003740"
+  },
+  {
+    "text": "users when those actors almost actually load the data on boot on",
+    "start": "1003740",
+    "end": "1009079"
+  },
+  {
+    "text": "initialization and then essentially we can just talk directly to those actors and we don't have to pay those i o costs as requests come into you from from",
+    "start": "1009079",
+    "end": "1014839"
+  },
+  {
+    "text": "Individual users so this will become obvious as we Trace through some requests that go through the interactive",
+    "start": "1014839",
+    "end": "1020959"
+  },
+  {
+    "text": "part of the system or this in-memory part of the system so let's say that a request comes in from user one and they want to perform",
+    "start": "1020959",
+    "end": "1026600"
+  },
+  {
+    "text": "some operations on data set too so the request comes in from the user it hits our API layer it's going to talk to the scheduler the scheduler is going to look",
+    "start": "1026600",
+    "end": "1033438"
+  },
+  {
+    "text": "at this dedicated resource pool and since Ray does memory aware scheduling it's going to see are there enough resources available within this pool to",
+    "start": "1033439",
+    "end": "1040040"
+  },
+  {
+    "text": "support the operations that this user wants to perform on the data set that the user wants to perform the operations on top of in this case there are",
+    "start": "1040040",
+    "end": "1046699"
+  },
+  {
+    "text": "resources available so the scheduler is going to go ahead and allocate an actor for this user the actor while it's",
+    "start": "1046699",
+    "end": "1051799"
+  },
+  {
+    "text": "initializing will go ahead and load data from disk into memory it'll perform any relevant pre-processing steps on that",
+    "start": "1051799",
+    "end": "1057620"
+  },
+  {
+    "text": "data set and it can do other things like load weights for large models into memory get them onto the GPU",
+    "start": "1057620",
+    "end": "1063080"
+  },
+  {
+    "text": "once the actor has been fully allocated it's warmed up now the scheduler can go",
+    "start": "1063080",
+    "end": "1068299"
+  },
+  {
+    "text": "ahead and just forward requests for this user directly to the actor so we no longer have to go and put them in these",
+    "start": "1068299",
+    "end": "1073340"
+  },
+  {
+    "text": "tasks in a queue we don't have to wait for a pool of shared workers for workers to become available the scheduler can",
+    "start": "1073340",
+    "end": "1078559"
+  },
+  {
+    "text": "just forward these requests directly to this actor the weights are in memory the data set is in memory the latency is low",
+    "start": "1078559",
+    "end": "1083600"
+  },
+  {
+    "text": "in this in this scenario so let's Trace through one more request so let's say a request comes in from",
+    "start": "1083600",
+    "end": "1089059"
+  },
+  {
+    "text": "user two this time to perform operations on data set one the scheduler wants away again because it's a resource aware",
+    "start": "1089059",
+    "end": "1095240"
+  },
+  {
+    "text": "scheduler can go ahead and allocate an actor for user two on data set one once again it'll load the data set perform",
+    "start": "1095240",
+    "end": "1101419"
+  },
+  {
+    "text": "some pre-processing let's say this time it's loading the weights for like a llama2 family model into memory and now",
+    "start": "1101419",
+    "end": "1107120"
+  },
+  {
+    "text": "when requests come in from user two the scheduler doesn't have to try to allocate something on the shared worker pool it can just send these requests",
+    "start": "1107120",
+    "end": "1112580"
+  },
+  {
+    "text": "directly to the dedicated actor so we'll do this one more time let's say that user 2 now wants to operate on data",
+    "start": "1112580",
+    "end": "1118160"
+  },
+  {
+    "text": "set too so the scheduler will look at the pool and it will say we actually don't have enough room for this actor it",
+    "start": "1118160",
+    "end": "1123799"
+  },
+  {
+    "text": "knows the size of data set 2 it knows the operation that user 2 might want to perform it knows it doesn't have the resources so it won't schedule an actor",
+    "start": "1123799",
+    "end": "1130580"
+  },
+  {
+    "text": "this time which is fine because we have the shared out of core worker pool right so as these requests come in we",
+    "start": "1130580",
+    "end": "1136280"
+  },
+  {
+    "text": "optimistically tried to send them to the in-memory pool because that's where the latency is the lowest but if there",
+    "start": "1136280",
+    "end": "1141500"
+  },
+  {
+    "text": "aren't resources available we can always fall back to the shared worker pool",
+    "start": "1141500",
+    "end": "1146440"
+  },
+  {
+    "text": "after some period of time let's say that user one logs out of the system they haven't interacted with this original",
+    "start": "1146860",
+    "end": "1152360"
+  },
+  {
+    "text": "actor in some time the actor will actually just be evicted because it hasn't been interacted with in a certain",
+    "start": "1152360",
+    "end": "1158240"
+  },
+  {
+    "text": "period of time so there's resources from that first actor will actually be returned back to the dedicated resource pool which is great because if user 2",
+    "start": "1158240",
+    "end": "1165080"
+  },
+  {
+    "text": "comes along and they try to allocate an actor again we'll have enough resources and we'll go ahead and allocate it",
+    "start": "1165080",
+    "end": "1171740"
+  },
+  {
+    "text": "so we ran through a few example requests kind of like a few toy requests we'll talk now about the actor lifecycle so",
+    "start": "1171740",
+    "end": "1177200"
+  },
+  {
+    "text": "it's actually not that complex let's say that a user request comes in and we want to allocate an actor and the scheduler",
+    "start": "1177200",
+    "end": "1183020"
+  },
+  {
+    "text": "sees that there are no resources available fine we'll go ahead and just throw it on the shared worker pool that always works the shared worker pool has",
+    "start": "1183020",
+    "end": "1188960"
+  },
+  {
+    "text": "a queue so requests will always complete regardless of if you have a dedicated pool of resources at all but if there",
+    "start": "1188960",
+    "end": "1195679"
+  },
+  {
+    "text": "are resources available then the scheduler will go ahead and allocate an actor right it's literally like array.actor.remode call the war the",
+    "start": "1195679",
+    "end": "1202460"
+  },
+  {
+    "text": "actor will warm itself up so it knows it needs to load some data set into memory it needs to perform some pre-processing steps it needs to essentially load",
+    "start": "1202460",
+    "end": "1208520"
+  },
+  {
+    "text": "weights onto a GPU if there's a model available and then once that actor is alive it'll continue essentially",
+    "start": "1208520",
+    "end": "1214640"
+  },
+  {
+    "text": "heartbeating so that we know the actor is alive and it'll stay alive until one of three conditions fail or one of three",
+    "start": "1214640",
+    "end": "1220640"
+  },
+  {
+    "text": "conditions happen either the actor fails a heartbeat so it had some sort of internal error then we'll go ahead and just evict the actor and return the",
+    "start": "1220640",
+    "end": "1226880"
+  },
+  {
+    "text": "resources to the pool if the user doesn't interact with it in a certain TTL then we'll go ahead and we'll evict the doctor or if the user performs an",
+    "start": "1226880",
+    "end": "1233900"
+  },
+  {
+    "text": "operation like they log out of the system we'll go ahead and just Purge the actor from the resource pool because we know it's no longer needed when the",
+    "start": "1233900",
+    "end": "1239480"
+  },
+  {
+    "text": "actor has been evicted it'll tear itself down and we'll just return the resources to the pool and then those resources can go to serve another future request",
+    "start": "1239480",
+    "end": "1246620"
+  },
+  {
+    "text": "so this is the the life cycle of actors within the the dedicated resource pool so we'll talk now a little bit about",
+    "start": "1246620",
+    "end": "1252880"
+  },
+  {
+    "text": "synchronization so obviously Rey is a component of a larger system the system",
+    "start": "1252880",
+    "end": "1258020"
+  },
+  {
+    "text": "that we call snorkel flow and so when we're actually interacting with actors this is done from our API layer right so",
+    "start": "1258020",
+    "end": "1263179"
+  },
+  {
+    "text": "we have um an API layer the API layer is horizontally scaled so we have multiple processes actually scaled across",
+    "start": "1263179",
+    "end": "1268880"
+  },
+  {
+    "text": "multiple pods and this is the ideal view of the system right is that for each API process they all have handles to each",
+    "start": "1268880",
+    "end": "1275600"
+  },
+  {
+    "text": "and every actor that they might need to interact with this is the ideal view but since this is a real life system it",
+    "start": "1275600",
+    "end": "1282320"
+  },
+  {
+    "text": "often looks a little bit more like this right so some API processes know about some actors that exist but no process",
+    "start": "1282320",
+    "end": "1288980"
+  },
+  {
+    "text": "the local state of these processes is not synchronized at the global State as it's stored in the GCS so we'll talk",
+    "start": "1288980",
+    "end": "1294380"
+  },
+  {
+    "text": "about kind of the issue of synchronization and how we can get into this state and then what we're going to do and what we actually layered on top to deal with this",
+    "start": "1294380",
+    "end": "1301220"
+  },
+  {
+    "text": "so let's say that a request comes in and it says use actor one this request comes in it gets randomly routed to one of our",
+    "start": "1301220",
+    "end": "1306740"
+  },
+  {
+    "text": "API workers it goes to API process one API process one sees that this actor one doesn't exist so it talks to the GCS GCS",
+    "start": "1306740",
+    "end": "1314059"
+  },
+  {
+    "text": "allocates actor one it Returns the handle to actor one to that to the uh the memory of the first process worker",
+    "start": "1314059",
+    "end": "1321799"
+  },
+  {
+    "text": "and that API process can actually use that actor handle to talk directly to the actor right so the user wants to essentially perform a forward pass on an",
+    "start": "1321799",
+    "end": "1328039"
+  },
+  {
+    "text": "llm it can now fan that or um or create that request out to the remote actor and",
+    "start": "1328039",
+    "end": "1333080"
+  },
+  {
+    "text": "get the results back from the forward pass and return that to the user so the request has been completed but let's say that the user makes another request",
+    "start": "1333080",
+    "end": "1339140"
+  },
+  {
+    "text": "right after it but this time it gets randomly routed to API process 2. so this time API process 2 doesn't have the",
+    "start": "1339140",
+    "end": "1344600"
+  },
+  {
+    "text": "actor handle in memory it actually doesn't know if this actor exists so the act or the API process has to go and talk to GCS and say What actors exist",
+    "start": "1344600",
+    "end": "1351620"
+  },
+  {
+    "text": "and if this actor exists it has to get the handle back for that actor this surprisingly can take a long time it's",
+    "start": "1351620",
+    "end": "1356840"
+  },
+  {
+    "text": "not so much the network delay but it's the serialization of the actor class and then the instantiation of the actor on",
+    "start": "1356840",
+    "end": "1362840"
+  },
+  {
+    "text": "the client I can actually take a relatively long amount of time on the order of a second and so you it's not ideal to introduce like a second latency",
+    "start": "1362840",
+    "end": "1369260"
+  },
+  {
+    "text": "when a request comes in from a user especially since we already paid the price of allocating the actor previously",
+    "start": "1369260",
+    "end": "1374419"
+  },
+  {
+    "text": "so we have something pretty simple which oh yeah so after that comes in now we have the actor handle in process two we can actually just go ahead and make the",
+    "start": "1374419",
+    "end": "1379940"
+  },
+  {
+    "text": "request directly to the actor so the system is correct right a request comes in the actor exists it gets routed to a",
+    "start": "1379940",
+    "end": "1385640"
+  },
+  {
+    "text": "cold process the process will essentially fetch the handle and talk to the actor directly it's correct but it's not ideal we're paying a latency",
+    "start": "1385640",
+    "end": "1391220"
+  },
+  {
+    "text": "overhead so to address this we essentially have what are called like synchronization threads running in the background of",
+    "start": "1391220",
+    "end": "1396559"
+  },
+  {
+    "text": "these API processes and these synchronization threads periodically talk to GCS to go ahead and",
+    "start": "1396559",
+    "end": "1401659"
+  },
+  {
+    "text": "fetch the global state of What actors exist and synchronize their local state to the global state so the idea here is",
+    "start": "1401659",
+    "end": "1407419"
+  },
+  {
+    "text": "that hopefully we're getting all of the handles we're getting the handles for all of the actors that exist in the",
+    "start": "1407419",
+    "end": "1412580"
+  },
+  {
+    "text": "local process memory before requests come in for those for those actors so in this case a request came in we had",
+    "start": "1412580",
+    "end": "1418880"
+  },
+  {
+    "text": "already synchronized the handle then the request came in and we could actually just make the request directly to the remote actor and this works the same",
+    "start": "1418880",
+    "end": "1425059"
+  },
+  {
+    "text": "going the other direction too right so actor one might be killed here by API process one API process 2 would still",
+    "start": "1425059",
+    "end": "1430820"
+  },
+  {
+    "text": "have the stale handle in memory so it would try to essentially make a request to an actor that no longer exists the",
+    "start": "1430820",
+    "end": "1435860"
+  },
+  {
+    "text": "request would fail you're still paying a latency overhead so the synchronization actually goes in both directions we would Purge handles from memory that are",
+    "start": "1435860",
+    "end": "1441559"
+  },
+  {
+    "text": "no longer valid as well so yeah so just to summarize um getting actor handles can take a",
+    "start": "1441559",
+    "end": "1447200"
+  },
+  {
+    "text": "surprisingly long time like on the order of a second depending on the complexity of the actor having them cached beforehand reduces latency obviously",
+    "start": "1447200",
+    "end": "1453640"
+  },
+  {
+    "text": "consistency versus latency so basically we are always correct like we have like a strongly consistent system but you can",
+    "start": "1453640",
+    "end": "1459740"
+  },
+  {
+    "text": "reduce the latency by kind of like layering on these synchronization Primitives over on top the the API layer",
+    "start": "1459740",
+    "end": "1465440"
+  },
+  {
+    "text": "and for future work ideally we wouldn't have to talk to GCS to in order to converge the local state of the processes with the global state of the",
+    "start": "1465440",
+    "end": "1471559"
+  },
+  {
+    "text": "system we could have like a gossip protocol between the API workers there's a whole bunch of other really cool things that you could do here in the",
+    "start": "1471559",
+    "end": "1477440"
+  },
+  {
+    "text": "future work so zooming out on the in-memory part of",
+    "start": "1477440",
+    "end": "1482539"
+  },
+  {
+    "text": "this architecture if you want to run i o bound operations over data sets that can fit in memory then you want to work on",
+    "start": "1482539",
+    "end": "1488539"
+  },
+  {
+    "text": "this part of our hybrid architecture we pay the i o cost up front when we're allocating these actors and then we amortize that cost over the lifespan of",
+    "start": "1488539",
+    "end": "1495500"
+  },
+  {
+    "text": "the actor actors are interacted with directly from the API layer so you have to have the actor Handles in memory at",
+    "start": "1495500",
+    "end": "1501200"
+  },
+  {
+    "text": "the API layer we have some simple systems to kind of like improve latency by converging the local state of those API processes to the global state of the",
+    "start": "1501200",
+    "end": "1507980"
+  },
+  {
+    "text": "GCS and if the resources aren't available that's fine we always fall back to the shared part of the system",
+    "start": "1507980",
+    "end": "1514539"
+  },
+  {
+    "text": "so we'll now just talk about Ray and kind of like some of the speed bumps that we ran into while we were building",
+    "start": "1514940",
+    "end": "1521120"
+  },
+  {
+    "text": "the system what we found is that while Ray was a great fit for this system it was kind of designed to be used in a way",
+    "start": "1521120",
+    "end": "1526640"
+  },
+  {
+    "text": "that wasn't quite aligned with kind of like the real-time aspect of the system so we'll go over a few of these speed",
+    "start": "1526640",
+    "end": "1532820"
+  },
+  {
+    "text": "bumps I'll hand it back to Will this is one of the first limitations we",
+    "start": "1532820",
+    "end": "1539840"
+  },
+  {
+    "text": "ran into we've already talked about this so we can just fly through this we can't really configure job isolation in Array",
+    "start": "1539840",
+    "end": "1544880"
+  },
+  {
+    "text": "so different drivers can't share resources which kind of sucks what we really want is this we want for all",
+    "start": "1544880",
+    "end": "1550400"
+  },
+  {
+    "text": "processes to share the same pool of you know warmed up resources whether they be array workers or Ray actors or whatnot",
+    "start": "1550400",
+    "end": "1556760"
+  },
+  {
+    "text": "so the solution was to introduce a broker actor in the middle that would fan out tasks across a already warmed up",
+    "start": "1556760",
+    "end": "1563840"
+  },
+  {
+    "text": "pool of workers and Ray makes this really easy to implement you just spin up a detached actor and if you want to",
+    "start": "1563840",
+    "end": "1569900"
+  },
+  {
+    "text": "say run Fu on left hand side you would submit it to the actor so the broker actor via broker.exec or something on",
+    "start": "1569900",
+    "end": "1576740"
+  },
+  {
+    "text": "the right hand side and so this actor will then submit those actual Ray tasks to the cluster to be run on the worker",
+    "start": "1576740",
+    "end": "1582559"
+  },
+  {
+    "text": "pool and we're working on making this more fault tolerant we also noticed this thing where tasks would take a really",
+    "start": "1582559",
+    "end": "1588799"
+  },
+  {
+    "text": "long time to execute and the reason for this is that when functions get serialized and then sent to the cluster",
+    "start": "1588799",
+    "end": "1593960"
+  },
+  {
+    "text": "pickle will include the referenced Imports as well in the function closure so while the serialized function is on",
+    "start": "1593960",
+    "end": "1600200"
+  },
+  {
+    "text": "its way to the ray cluster on the way it might get unpickled from time to time which leads to dramatic slowdowns",
+    "start": "1600200",
+    "end": "1605539"
+  },
+  {
+    "text": "because unpickling causes arbitrary code execution so if those Imports are actually in the top level that code will",
+    "start": "1605539",
+    "end": "1611360"
+  },
+  {
+    "text": "get executed during an unpickle if the import is expensive then we're going to see it every single time",
+    "start": "1611360",
+    "end": "1616700"
+  },
+  {
+    "text": "to alleviate this we can move all the expensive Imports into the function body itself to avoid arbitrary execution from",
+    "start": "1616700",
+    "end": "1623720"
+  },
+  {
+    "text": "unpickles switching back to John yeah",
+    "start": "1623720",
+    "end": "1629080"
+  },
+  {
+    "text": "one other limitation that we ran into is just basically cold workers so we have the worker pool that was shown for the",
+    "start": "1629179",
+    "end": "1635779"
+  },
+  {
+    "text": "the out-of-core part of the architecture and if you don't interact with these workers um periodically they actually go cold so",
+    "start": "1635779",
+    "end": "1641240"
+  },
+  {
+    "text": "they get reallocated by Ray and we pay a relatively significant startup cost just because of all the modules that we have",
+    "start": "1641240",
+    "end": "1646760"
+  },
+  {
+    "text": "to import and other initialization steps that we have in these workers and so a pretty simple solution here actually was just to heartbeat these from time to",
+    "start": "1646760",
+    "end": "1652940"
+  },
+  {
+    "text": "time and so the broker actor was a great abstraction to use to actually manage these heartbeats because it actually do",
+    "start": "1652940",
+    "end": "1658880"
+  },
+  {
+    "text": "the the scope of all the the workers that existed so the broker actor basically just had a background Loop",
+    "start": "1658880",
+    "end": "1664100"
+  },
+  {
+    "text": "that would go along and periodically ping the workers and just keep them alive so we paid that warm-up cost one time when the workers were originally",
+    "start": "1664100",
+    "end": "1669679"
+  },
+  {
+    "text": "allocated and then essentially again you just amortize that cost over the the lifespan of the workers",
+    "start": "1669679",
+    "end": "1675320"
+  },
+  {
+    "text": "which is shown here just Fanning out heartbeat tasks to the to the individual workers uh so real limitation four so maybe you",
+    "start": "1675320",
+    "end": "1683539"
+  },
+  {
+    "text": "all have seen this but when you allocate an actor and if you wanted to take up one GPU and there's no gpus available",
+    "start": "1683539",
+    "end": "1689419"
+  },
+  {
+    "text": "the actor will just hang until the GPU becomes available right like let's say there are gpus allocated they exist",
+    "start": "1689419",
+    "end": "1694940"
+  },
+  {
+    "text": "within the cluster but they're currently used by other actors the default functionality of race to actually just like hang until those gpus become",
+    "start": "1694940",
+    "end": "1701600"
+  },
+  {
+    "text": "available so this is fine if you're just a data scientist who's trying to Fan out some jobs that run overnight maybe those gpus will become available you're fine",
+    "start": "1701600",
+    "end": "1708260"
+  },
+  {
+    "text": "if if your actor takes a while to boot up but this actually doesn't work great in our system where we have requests coming in that are supposed to be low",
+    "start": "1708260",
+    "end": "1714140"
+  },
+  {
+    "text": "latency and there's a bunch of users using the system that all expect relatively low latency on the request we can't just try to allocate an actor and",
+    "start": "1714140",
+    "end": "1720440"
+  },
+  {
+    "text": "then just wait forever in order for it to be allocated and Ray doesn't give you a way to essentially fail the actor dot",
+    "start": "1720440",
+    "end": "1726799"
+  },
+  {
+    "text": "remote request immediately if there aren't resources available so what we had to do is essentially figure out how",
+    "start": "1726799",
+    "end": "1732140"
+  },
+  {
+    "text": "long it takes for these actors to be allocated and then if at a timeout if the request to allocate doesn't complete",
+    "start": "1732140",
+    "end": "1737840"
+  },
+  {
+    "text": "in that time go ahead and end the request just assume that the actor cannot be allocated and then de-balance",
+    "start": "1737840",
+    "end": "1743360"
+  },
+  {
+    "text": "requests that come in similar requests for a certain amount of time so you don't just like spend a bunch of time trying to allocate actors when there",
+    "start": "1743360",
+    "end": "1749179"
+  },
+  {
+    "text": "aren't resources available for them so this was uh when I kind of the incongruities that we ran into when we were trying to use Rey in order to build",
+    "start": "1749179",
+    "end": "1755720"
+  },
+  {
+    "text": "a real-time system like this and I believe that concludes our talk thank you very much",
+    "start": "1755720",
+    "end": "1763059"
+  },
+  {
+    "text": "[Applause] well uh questions",
+    "start": "1764200",
+    "end": "1772659"
+  },
+  {
+    "text": "a very short question uh what kind of work I mean maybe you know from your experience what type of work is the one",
+    "start": "1774500",
+    "end": "1780140"
+  },
+  {
+    "text": "that happens when you get an actor handle that can take up to a second because that number is quite large",
+    "start": "1780140",
+    "end": "1786440"
+  },
+  {
+    "text": "yeah depending on the complexity of the actor essentially there's a certain amount of like serialization that happens in order for you to get the",
+    "start": "1786440",
+    "end": "1791779"
+  },
+  {
+    "text": "actor handle back the ray assumes that you actually don't have the actor class defined locally and so it like it pickles it back from the store of actor",
+    "start": "1791779",
+    "end": "1798860"
+  },
+  {
+    "text": "handles on remote and that process depending on the complexity of the actor you can end up paying the same pickling cost that was discussed in the other",
+    "start": "1798860",
+    "end": "1805220"
+  },
+  {
+    "text": "limitation so it's not like the network traffic of getting this uh this blob over the network but it's actually the instantiation of the actor locally and",
+    "start": "1805220",
+    "end": "1812240"
+  },
+  {
+    "text": "and the serialization of it from the remote yeah so for example if say you reference things in the function closure or if you",
+    "start": "1812240",
+    "end": "1818899"
+  },
+  {
+    "text": "even have references to certain types in your type definition of a function of an",
+    "start": "1818899",
+    "end": "1824059"
+  },
+  {
+    "text": "actor method sometimes that stuff can get you know included with the function serialization or the class serialize the",
+    "start": "1824059",
+    "end": "1830000"
+  },
+  {
+    "text": "class definition when you serialize so",
+    "start": "1830000",
+    "end": "1834520"
+  },
+  {
+    "text": "I guess like when you were debugging these issues like what was your like debugging",
+    "start": "1839539",
+    "end": "1845720"
+  },
+  {
+    "text": "workflow because I think like yeah I mean just parsing through rate logs like",
+    "start": "1845720",
+    "end": "1850760"
+  },
+  {
+    "text": "can be extremely painful in TDS like I'm just curious like if you guys had any better ways of doing it well let me let",
+    "start": "1850760",
+    "end": "1856460"
+  },
+  {
+    "text": "me let me tell you man like I think I think one time I put a debugger in the ray lib and then deployed it to the",
+    "start": "1856460",
+    "end": "1862100"
+  },
+  {
+    "text": "remote cluster and then exact in and attached the debugger so I could inspect the unpickling process to try and figure",
+    "start": "1862100",
+    "end": "1868760"
+  },
+  {
+    "text": "out what was actually happening so that could have been a little bit better and yeah I think we've all run into the issue of trying to look for a log and",
+    "start": "1868760",
+    "end": "1875000"
+  },
+  {
+    "text": "then you just end up in a directory with 50 000 files in it that's a bunch of uuids for different like worker tasks and the lifespan is pretty short so not",
+    "start": "1875000",
+    "end": "1882200"
+  },
+  {
+    "text": "great yeah yeah I can tell you something I did as well sometimes I would print out tracebacks like in the you know top",
+    "start": "1882200",
+    "end": "1889520"
+  },
+  {
+    "text": "level I guess scope of Python program so that I could see where that unpickling",
+    "start": "1889520",
+    "end": "1894860"
+  },
+  {
+    "text": "was happening so if an unpickle accidentally arbitrarily executed code I could actually see them blogs so we can",
+    "start": "1894860",
+    "end": "1902419"
+  },
+  {
+    "text": "we can talk about this more offline as well we had so many tricks",
+    "start": "1902419",
+    "end": "1906580"
+  },
+  {
+    "text": "yeah we should put down the talk actually yeah yeah next time",
+    "start": "1908840",
+    "end": "1914299"
+  },
+  {
+    "text": "so for the issue of uh synchronization so what did you do for the what do you",
+    "start": "1914299",
+    "end": "1919399"
+  },
+  {
+    "text": "do like when the API process receives a request but like hasn't synchronous or hasn't synced with the GCS yet so like",
+    "start": "1919399",
+    "end": "1925820"
+  },
+  {
+    "text": "if um because you only run at intervals right so like if you haven't like seemed",
+    "start": "1925820",
+    "end": "1930919"
+  },
+  {
+    "text": "it correctly then like um yeah I guess I will duplicate actors get created or like what happens when it's deleted yeah if we don't have the",
+    "start": "1930919",
+    "end": "1938240"
+  },
+  {
+    "text": "actors handled in memory we have to assume that the actor exists and we just don't have the handle so then we have to pay that cost for the GCS we have to go",
+    "start": "1938240",
+    "end": "1944779"
+  },
+  {
+    "text": "round trip to the GCS at that time um likewise kind of like the symmetric case is if a request comes in for a",
+    "start": "1944779",
+    "end": "1950419"
+  },
+  {
+    "text": "handle we assume the handle is valid we try to use it you might hit a grpc error because it's trying to talk to a port that's been closed because the actor no",
+    "start": "1950419",
+    "end": "1956840"
+  },
+  {
+    "text": "longer exists and then we essentially Purge the handle for memory and then put it on either the shared pool or we try to allocate the the referenced actor so",
+    "start": "1956840",
+    "end": "1963919"
+  },
+  {
+    "text": "basically we always are correct but we might end up trying to talk to an actor that doesn't exist or we might have to",
+    "start": "1963919",
+    "end": "1969860"
+  },
+  {
+    "text": "go and talk to GCS to grab a handle that was referenced yep because we're using detach named actors so it is how we're",
+    "start": "1969860",
+    "end": "1976159"
+  },
+  {
+    "text": "referencing them so the user data set combination gives you like a unique name for the actor these are detached actors and so we can actually just like look",
+    "start": "1976159",
+    "end": "1981919"
+  },
+  {
+    "text": "them up from from the GCS",
+    "start": "1981919",
+    "end": "1985720"
+  },
+  {
+    "text": "I think we're running out of time so we can do the rest offline thank you so",
+    "start": "1987440",
+    "end": "1992899"
+  },
+  {
+    "text": "much yep cool",
+    "start": "1992899",
+    "end": "1995919"
+  }
+]

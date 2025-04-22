@@ -1,0 +1,1967 @@
+[
+  {
+    "text": "[Music]",
+    "start": "4520",
+    "end": "14340"
+  },
+  {
+    "text": "hello uh welcome uh so today i'm going to be talking about uh pointer authentication",
+    "start": "17440",
+    "end": "22960"
+  },
+  {
+    "text": "in the ios kernel and in particular how pointer authentication is used to build kernel",
+    "start": "22960",
+    "end": "28000"
+  },
+  {
+    "text": "control flow integrity uh now unfortunately this time slot is not long enough for me to talk about",
+    "start": "28000",
+    "end": "34160"
+  },
+  {
+    "text": "all the things i would like to share so if you're interested i highly recommend checking out either my previous talk on",
+    "start": "34160",
+    "end": "40239"
+  },
+  {
+    "text": "pac or the project zero blog so about a year and a half ago at the",
+    "start": "40239",
+    "end": "45520"
+  },
+  {
+    "text": "beginning of 2019 i'd written a kernel exploit for ios 12",
+    "start": "45520",
+    "end": "50879"
+  },
+  {
+    "text": "on the iphone 10s and i'd achieved a kernel read write primitive and at this point i had wanted to find a",
+    "start": "50879",
+    "end": "57760"
+  },
+  {
+    "text": "way to use kernel read write to execute arbitrary kernel code that is calling",
+    "start": "57760",
+    "end": "63600"
+  },
+  {
+    "text": "arbitrary kernel functions in the ios kernel so the idea",
+    "start": "63600",
+    "end": "68640"
+  },
+  {
+    "text": "was apple had added this new pack security feature and i wanted to find a way to",
+    "start": "68640",
+    "end": "75200"
+  },
+  {
+    "text": "bypass the control flow integrity uh that it provided so i put pointer authentication under",
+    "start": "75200",
+    "end": "81280"
+  },
+  {
+    "text": "the microscope and eventually ended up finding five different ways to bypass",
+    "start": "81280",
+    "end": "86640"
+  },
+  {
+    "text": "pointer authentication in ios 12 which i then presented in study in pac",
+    "start": "86640",
+    "end": "93600"
+  },
+  {
+    "text": "so at the time once i had found this fifth uh bypass in my original work in 2019",
+    "start": "93600",
+    "end": "100320"
+  },
+  {
+    "text": "i eventually decided that this fifth bypass was uh indicative of kind of systematic",
+    "start": "100320",
+    "end": "105840"
+  },
+  {
+    "text": "problems with the design with the original design of pointer authentication and so",
+    "start": "105840",
+    "end": "111200"
+  },
+  {
+    "text": "i wanted to give uh you know apple some time to fix it to improve the the design a little bit and maybe i",
+    "start": "111200",
+    "end": "117920"
+  },
+  {
+    "text": "would revisit it at a later point you know give ios 13 a chance to fix some of the problems that",
+    "start": "117920",
+    "end": "123920"
+  },
+  {
+    "text": "i uncovered so uh now one year later this talk is my revisiting of pointer",
+    "start": "123920",
+    "end": "131200"
+  },
+  {
+    "text": "authentication in ios 13. so what is pointer",
+    "start": "131200",
+    "end": "137120"
+  },
+  {
+    "text": "authentication it's a security feature from arm the 8.3",
+    "start": "137120",
+    "end": "142160"
+  },
+  {
+    "text": "and the basic idea is that here you have a kernel pointer and if you look you'll notice that the",
+    "start": "142160",
+    "end": "147520"
+  },
+  {
+    "text": "upper bits of this pointer are basically all one they're all kind of unused storing redundant information",
+    "start": "147520",
+    "end": "155120"
+  },
+  {
+    "text": "so the idea with pack is to replace those unused bits of the pointer with a cryptographic signature over the",
+    "start": "155120",
+    "end": "162239"
+  },
+  {
+    "text": "lower bits of the pointer and that what that allows us to do is basically ensure that these pointers",
+    "start": "162239",
+    "end": "168879"
+  },
+  {
+    "text": "can't be tampered with during the operation of the kernel even",
+    "start": "168879",
+    "end": "174239"
+  },
+  {
+    "text": "if you have a kernel read write primitive if an attacker tries to modify these pointers that should result in this using of this",
+    "start": "174239",
+    "end": "182159"
+  },
+  {
+    "text": "pointer causing a kernel panic so there are a number of different instructions which",
+    "start": "182159",
+    "end": "187200"
+  },
+  {
+    "text": "are provided by the arm architecture i'm not going to go into these in details but these are the instructions",
+    "start": "187200",
+    "end": "192319"
+  },
+  {
+    "text": "that you use to manipulate pointer authentication codes so how has apple used this uh",
+    "start": "192319",
+    "end": "200080"
+  },
+  {
+    "text": "security feature in order to implement control flow integrity in the ios kernel",
+    "start": "200080",
+    "end": "205519"
+  },
+  {
+    "text": "well there are a number of different uses of these pointer authentication keys i'm not going to go into all of them in detail here",
+    "start": "205519",
+    "end": "211519"
+  },
+  {
+    "text": "the basic idea is that they segment out uh different uh use cases into different",
+    "start": "211519",
+    "end": "217360"
+  },
+  {
+    "text": "architectural keys so that pointers used with one key can't be substituted for",
+    "start": "217360",
+    "end": "222799"
+  },
+  {
+    "text": "other uses for other pointers using different keys the only one we're going to be focusing on",
+    "start": "222799",
+    "end": "227840"
+  },
+  {
+    "text": "for this talk is a thread saved state so basically imagine that there you have",
+    "start": "227840",
+    "end": "233920"
+  },
+  {
+    "text": "a kernel thread and all of a sudden a timer interrupt fires",
+    "start": "233920",
+    "end": "239200"
+  },
+  {
+    "text": "when that happens you're going to jump execution from the kernel thread over to",
+    "start": "239200",
+    "end": "244239"
+  },
+  {
+    "text": "the exception handler the the the exception vector and in the exception vector you're going",
+    "start": "244239",
+    "end": "249840"
+  },
+  {
+    "text": "to spill all of the kernel threads registers out to memory and then run the interrupt",
+    "start": "249840",
+    "end": "256160"
+  },
+  {
+    "text": "handler in place and then when the interrupt handler is finished running it's going to pop all of those registers back and then",
+    "start": "256160",
+    "end": "262560"
+  },
+  {
+    "text": "resume executing the kernel thread but while those registers are spilled to memory it's possible that they might be",
+    "start": "262560",
+    "end": "269600"
+  },
+  {
+    "text": "modified by an attacker with kernel read write to try to subvert control flow integrity",
+    "start": "269600",
+    "end": "275600"
+  },
+  {
+    "text": "so it's very important that any registers which could be used to influence uh kernel control flow those registers need",
+    "start": "275600",
+    "end": "282720"
+  },
+  {
+    "text": "to be protected to ensure that they aren't modified by an attacker and that's what this function right here",
+    "start": "282720",
+    "end": "288479"
+  },
+  {
+    "text": "is used for this sign thread state function is going to take the address of the saved state blob",
+    "start": "288479",
+    "end": "295840"
+  },
+  {
+    "text": "where all the registers are being stored it's going to take the pc register cpsr and lr so pc is your program counter",
+    "start": "295840",
+    "end": "303280"
+  },
+  {
+    "text": "which is the address you were executing from cpsr is your current program status register which saved the exception level",
+    "start": "303280",
+    "end": "309360"
+  },
+  {
+    "text": "that you were previously running at i.e were you running in the kernel or you were you in user mode and lr is your return address register",
+    "start": "309360",
+    "end": "316240"
+  },
+  {
+    "text": "and assign thread state is going to entangle all of these registers into a signature",
+    "start": "316240",
+    "end": "321759"
+  },
+  {
+    "text": "a pac protected signature which then gets stored into your saved state blob",
+    "start": "321759",
+    "end": "326880"
+  },
+  {
+    "text": "and correspondingly there's also a function that verifies these signatures verify thread state for when you want to",
+    "start": "326880",
+    "end": "333120"
+  },
+  {
+    "text": "actually pop these registers back out and so this function is basically going to regenerate the signature and uh check",
+    "start": "333120",
+    "end": "340720"
+  },
+  {
+    "text": "that it hasn't been none of the registers have been tampered with uh and if it's true that there has been",
+    "start": "340720",
+    "end": "346400"
+  },
+  {
+    "text": "some sort of tampering uh then this function will panic uh now a very important place",
+    "start": "346400",
+    "end": "352400"
+  },
+  {
+    "text": "for uh this to be used is uh during exception return uh so uh as i mentioned before if you",
+    "start": "352400",
+    "end": "359039"
+  },
+  {
+    "text": "for example are running a kernel thread and a timer interrupt fires you're gonna jump to the exception vector",
+    "start": "359039",
+    "end": "364960"
+  },
+  {
+    "text": "and eventually after running your interrupt handler to completion you're going to want to resume executing",
+    "start": "364960",
+    "end": "370880"
+  },
+  {
+    "text": "the original kernel thread and that's what uh this exception return function does it's going to",
+    "start": "370880",
+    "end": "376479"
+  },
+  {
+    "text": "return from that exception that was just handled so the ending of this function basically",
+    "start": "376479",
+    "end": "382960"
+  },
+  {
+    "text": "pops all of those registers that have been stored during the exception vector it pops them",
+    "start": "382960",
+    "end": "389360"
+  },
+  {
+    "text": "back into the architectural registers which means that this is pretty much the best rop gadget that you could ever",
+    "start": "389360",
+    "end": "395039"
+  },
+  {
+    "text": "possibly hope for it gives you control over every single register so it's very important",
+    "start": "395039",
+    "end": "400319"
+  },
+  {
+    "text": "that this thing is protected so that you cannot just get it called with",
+    "start": "400319",
+    "end": "406319"
+  },
+  {
+    "text": "arbitrary arguments you want to ensure that when you do an exception return pc cpsr and lr",
+    "start": "406319",
+    "end": "412319"
+  },
+  {
+    "text": "are indeed protected they haven't not been modified during the execution of the interrupt handler",
+    "start": "412319",
+    "end": "418080"
+  },
+  {
+    "text": "and so apple has inserted this call to verify the thread state before executing the exception return",
+    "start": "418080",
+    "end": "424720"
+  },
+  {
+    "text": "instruction all right so that's an overview of what pointer authentication",
+    "start": "424720",
+    "end": "430479"
+  },
+  {
+    "text": "control flow integrity looked like in ios 12. now i'm going to briefly summarize just",
+    "start": "430479",
+    "end": "435840"
+  },
+  {
+    "text": "two of the bypasses that i reported back in 2019 so jumping all the way to",
+    "start": "435840",
+    "end": "442720"
+  },
+  {
+    "text": "bypass number four this was a very interesting pac bypass from my perspective because it was an",
+    "start": "442720",
+    "end": "449120"
+  },
+  {
+    "text": "example of something which only showed up it didn't show up if you looked at the c code it only",
+    "start": "449120",
+    "end": "454240"
+  },
+  {
+    "text": "showed up when you started looking at the assembly so here's this kernel function ipc k message clean body and it has a switch",
+    "start": "454240",
+    "end": "462400"
+  },
+  {
+    "text": "statement in it and what you'll notice is that it's loading the jump table for this switch statement in register x25",
+    "start": "462400",
+    "end": "469520"
+  },
+  {
+    "text": "and then if you trace the flow of this register eventually it loads the jump target into",
+    "start": "469520",
+    "end": "475520"
+  },
+  {
+    "text": "register x9 and then executes this unprotected branch instruction through register x9",
+    "start": "475520",
+    "end": "482400"
+  },
+  {
+    "text": "so in my mind i thought that this was problematic because uh if you remember from before",
+    "start": "482400",
+    "end": "489440"
+  },
+  {
+    "text": "when you have an interrupt delivered only the pc cpsr and lr registers are",
+    "start": "489440",
+    "end": "495840"
+  },
+  {
+    "text": "protected when your thread state gets spilled to memory in particular neither register",
+    "start": "495840",
+    "end": "501039"
+  },
+  {
+    "text": "x25 nor register x9 is protected so they're vulnerable to be modified",
+    "start": "501039",
+    "end": "506639"
+  },
+  {
+    "text": "uh by some concurrent kernel right primitive um by an attacker in this particular",
+    "start": "506639",
+    "end": "513200"
+  },
+  {
+    "text": "case uh even though kind of the idea was to find things that were vulnerable to interrupts i actually found",
+    "start": "513200",
+    "end": "520159"
+  },
+  {
+    "text": "that there's a function call which actually directly spills register x25",
+    "start": "520159",
+    "end": "525200"
+  },
+  {
+    "text": "uh to the stack so there is in fact no need uh in the proof of concepts that i submitted to leverage preemption",
+    "start": "525200",
+    "end": "532320"
+  },
+  {
+    "text": "in order to take advantage of this uh uh switch statement in order to get uh arbitrary kernel code",
+    "start": "532320",
+    "end": "538480"
+  },
+  {
+    "text": "execution uh the next bypass that i want to uh talk about was uh something more of a",
+    "start": "538480",
+    "end": "544959"
+  },
+  {
+    "text": "fundamental issue that i realized existed with signing thread states so here we",
+    "start": "544959",
+    "end": "550480"
+  },
+  {
+    "text": "have a kernel function which is creating a new uh thread and what you can see",
+    "start": "550480",
+    "end": "555760"
+  },
+  {
+    "text": "is that it has a call to the sign thread state function from before now a thing that i noticed is that",
+    "start": "555760",
+    "end": "562480"
+  },
+  {
+    "text": "interrupts are enabled during the whole execution of this function and this is problematic",
+    "start": "562480",
+    "end": "567839"
+  },
+  {
+    "text": "because uh as you recall from before sign thread state only protects your pc cpsr and lr registers and yet",
+    "start": "567839",
+    "end": "575120"
+  },
+  {
+    "text": "the four arguments to assign thread state are passed in registers x0 through x3",
+    "start": "575120",
+    "end": "580240"
+  },
+  {
+    "text": "which are not protected registers and therefore could be modified if an interrupt is delivered directly",
+    "start": "580240",
+    "end": "585279"
+  },
+  {
+    "text": "before the signed thread state operation uh but once again kind of in the end i found that uh",
+    "start": "585279",
+    "end": "591600"
+  },
+  {
+    "text": "it wasn't actually necessary to um have uh interrupts be used in order to",
+    "start": "591600",
+    "end": "598080"
+  },
+  {
+    "text": "trigger this issue because it turns out that this function would actually just read the parameters to sign directly",
+    "start": "598080",
+    "end": "604959"
+  },
+  {
+    "text": "from memory if you were to use your kernel right primitive to swap out this user state",
+    "start": "604959",
+    "end": "610320"
+  },
+  {
+    "text": "pointer to some address you control you could just directly get a signature on the state without having to mess with",
+    "start": "610320",
+    "end": "617760"
+  },
+  {
+    "text": "interrupts at all so those were two of the bypasses that i found in ios 12.",
+    "start": "617760",
+    "end": "624399"
+  },
+  {
+    "text": "and after this point i realized you know this this signing thread states is kind of fundamentally insecure i'll give apple",
+    "start": "624399",
+    "end": "631200"
+  },
+  {
+    "text": "some amount of time to uh to fix these issues and i'll revisit pack at a later point in time",
+    "start": "631200",
+    "end": "637279"
+  },
+  {
+    "text": "so let's look at what has happened in the intervening year with ios 13.",
+    "start": "637279",
+    "end": "642880"
+  },
+  {
+    "text": "so fundamentally the kind of uses of pointer authentication through the ios kernel fundamentally it's the same stuff",
+    "start": "642880",
+    "end": "650880"
+  },
+  {
+    "text": "there's no for example data pack using pac to protect additional data pointers i was hoping to",
+    "start": "650880",
+    "end": "656480"
+  },
+  {
+    "text": "see that but it didn't end up making it into ios 13. but regardless there is one change which",
+    "start": "656480",
+    "end": "662560"
+  },
+  {
+    "text": "is worth pointing out which is that there are two new protected registers",
+    "start": "662560",
+    "end": "667839"
+  },
+  {
+    "text": "so if we look at the disassembly of this sign thread state function what you'll observe is that rather than",
+    "start": "667839",
+    "end": "674560"
+  },
+  {
+    "text": "having four parameters as an ios 12 it now has six parameters and the two additional parameters",
+    "start": "674560",
+    "end": "680560"
+  },
+  {
+    "text": "are used to sign the values of architectural registers x16 and x17",
+    "start": "680560",
+    "end": "685839"
+  },
+  {
+    "text": "now what that means is that x16 and x17 are now kind of considered interrupt safe in the sense that they",
+    "start": "685839",
+    "end": "692640"
+  },
+  {
+    "text": "can't be modified during preemption during an interrupt because any attempts",
+    "start": "692640",
+    "end": "697839"
+  },
+  {
+    "text": "to modify them will invalidate the pac signature and what this has allowed apple to do is",
+    "start": "697839",
+    "end": "704320"
+  },
+  {
+    "text": "basically harden their implementation of switch statements so here you can see the original switch statement that i",
+    "start": "704320",
+    "end": "710399"
+  },
+  {
+    "text": "reported in pack bypass number four and on the right you have the hardened",
+    "start": "710399",
+    "end": "715600"
+  },
+  {
+    "text": "version in ios 13 where you can see that the switch statement is only using uh registers x16 and x17 to conduct this",
+    "start": "715600",
+    "end": "724160"
+  },
+  {
+    "text": "indirect branch so uh theoretically this should be safe from a concurrent modification",
+    "start": "724160",
+    "end": "729440"
+  },
+  {
+    "text": "during interrupts all right so that's a high level overview of the changes to",
+    "start": "729440",
+    "end": "735600"
+  },
+  {
+    "text": "pointer authentication in ios 13. uh now let's get to the bulk of the",
+    "start": "735600",
+    "end": "741200"
+  },
+  {
+    "text": "research uh for uh this year which was looking at uh are there still ways to bypass",
+    "start": "741200",
+    "end": "747200"
+  },
+  {
+    "text": "this hardened uh pointer authentication based control flow integrity in ios 13. and the place that i wanted",
+    "start": "747200",
+    "end": "754480"
+  },
+  {
+    "text": "to start out was revisiting this this fifth bypass that i had found uh the first time around uh so if you",
+    "start": "754480",
+    "end": "761760"
+  },
+  {
+    "text": "recall the fifth bypass was this issue with a cyan thread state kind of being fundamentally",
+    "start": "761760",
+    "end": "767360"
+  },
+  {
+    "text": "insecure due to the use of interrupts uh so i was very curious how apple actually addressed this uh in",
+    "start": "767360",
+    "end": "774320"
+  },
+  {
+    "text": "ios 13. and it seems like the solution was to uh basically replace the reading",
+    "start": "774320",
+    "end": "782240"
+  },
+  {
+    "text": "of parameters from memory with just hard coding all the parameters to zero",
+    "start": "782240",
+    "end": "787519"
+  },
+  {
+    "text": "so this is certainly an improvement because it uh completely nullifies the technique that i used in my poc",
+    "start": "787519",
+    "end": "793040"
+  },
+  {
+    "text": "but the fundamental issue is still there which is that interrupts are still enabled for the duration of this",
+    "start": "793040",
+    "end": "798880"
+  },
+  {
+    "text": "function call meaning that we are still vulnerable to preemption this is a lot easier to see if you look at the assembly",
+    "start": "798880",
+    "end": "805200"
+  },
+  {
+    "text": "so imagine that we're executing the instruction sequentially and then right before we get to this sign thread",
+    "start": "805200",
+    "end": "812000"
+  },
+  {
+    "text": "state call we have a timer interrupt that fires and we immediately jump from here directly to",
+    "start": "812000",
+    "end": "819120"
+  },
+  {
+    "text": "the timer interrupt exception vector so now during this exception vector",
+    "start": "819120",
+    "end": "824160"
+  },
+  {
+    "text": "as you can see it's going to spill all of the architectural registers to memory so you can see x0 x1",
+    "start": "824160",
+    "end": "830000"
+  },
+  {
+    "text": "x2 x3 x4 x5 all of them get spilled to memory uh and because none of those are",
+    "start": "830000",
+    "end": "835519"
+  },
+  {
+    "text": "protected by the pac signature they can all be modified by an attacker",
+    "start": "835519",
+    "end": "842240"
+  },
+  {
+    "text": "coming in racing during this interrupt to overwrite them while the interrupt handler is running",
+    "start": "842240",
+    "end": "849040"
+  },
+  {
+    "text": "and then once those registers get popped back out an attacker has control over all of the parameters",
+    "start": "849040",
+    "end": "854959"
+  },
+  {
+    "text": "to the sign thread state function so once again this is a full thread state forgery pack bypass",
+    "start": "854959",
+    "end": "863360"
+  },
+  {
+    "text": "now for a couple of uh complicated reasons it wasn't actually easy to trigger this issue",
+    "start": "863360",
+    "end": "869120"
+  },
+  {
+    "text": "right here so i started searching for other places that sign thread state was called where it might be easier",
+    "start": "869120",
+    "end": "875120"
+  },
+  {
+    "text": "and i eventually ran across this function thread state 64 to save state",
+    "start": "875120",
+    "end": "880320"
+  },
+  {
+    "text": "so this function is the implementation of the user system call thread set state which is",
+    "start": "880320",
+    "end": "887040"
+  },
+  {
+    "text": "responsible for setting the registers in a user space thread so imagine that a user space",
+    "start": "887040",
+    "end": "893040"
+  },
+  {
+    "text": "process has created a new thread and it wants to set the values of all of the registers in that thread",
+    "start": "893040",
+    "end": "899040"
+  },
+  {
+    "text": "so this is the actual implementation of thread set state in the kernel",
+    "start": "899040",
+    "end": "904079"
+  },
+  {
+    "text": "and what you can see if you look at the assembly is that it does something kind of interesting here so first off",
+    "start": "904079",
+    "end": "909440"
+  },
+  {
+    "text": "it's returning from this function with an unprotected ret instruction and second",
+    "start": "909440",
+    "end": "914720"
+  },
+  {
+    "text": "the uh return address is actually being stored to register x8 for the duration",
+    "start": "914720",
+    "end": "921279"
+  },
+  {
+    "text": "of this kind of verify thread state then sign thread state uh sequence of operations and this is",
+    "start": "921279",
+    "end": "926959"
+  },
+  {
+    "text": "problematic because x8 is not a protected register it is vulnerable to being modified if an interrupt gets",
+    "start": "926959",
+    "end": "934320"
+  },
+  {
+    "text": "delivered somewhere during the operation of this sequence so how would you actually use this uh to",
+    "start": "934320",
+    "end": "940720"
+  },
+  {
+    "text": "bypass pointer authentication uh let's walk through an example uh so for this example we're gonna have two",
+    "start": "940720",
+    "end": "946320"
+  },
+  {
+    "text": "threads uh thread a is going to be running on cpu4 so actually having it run on cpu four is",
+    "start": "946320",
+    "end": "952880"
+  },
+  {
+    "text": "important because for whatever architectural reason cpu4 seems to get a lot more interrupts than",
+    "start": "952880",
+    "end": "958480"
+  },
+  {
+    "text": "other threads uh so thread a is going to be just calling thread set state in a loop and thread b is going to be checking to",
+    "start": "958480",
+    "end": "965360"
+  },
+  {
+    "text": "see when cpu4 gets interrupted so each time thread set state gets called that's going to jump into the",
+    "start": "965360",
+    "end": "971600"
+  },
+  {
+    "text": "kernel and it's going to call machine thread set state and then that is going to call the vulnerable",
+    "start": "971600",
+    "end": "977600"
+  },
+  {
+    "text": "function and as we're kind of iterating through the instructions this function eventually at some point we're",
+    "start": "977600",
+    "end": "983360"
+  },
+  {
+    "text": "going to have an interrupt arrive and it's going to cause us to jump to the exception vector",
+    "start": "983360",
+    "end": "988720"
+  },
+  {
+    "text": "spilling all of our registers to memory including register x8 which currently holds the return address",
+    "start": "988720",
+    "end": "996079"
+  },
+  {
+    "text": "so once all these registers have been spilled to memory uh execution is going to run in the",
+    "start": "996079",
+    "end": "1002560"
+  },
+  {
+    "text": "interrupt handler and while this is happening we're now going to come in on thread b",
+    "start": "1002560",
+    "end": "1007839"
+  },
+  {
+    "text": "and see oh look indeed cpu4 is interrupted so it's going to go ahead",
+    "start": "1007839",
+    "end": "1013600"
+  },
+  {
+    "text": "and overwrite the value of register x8 which used to hold the return address",
+    "start": "1013600",
+    "end": "1019120"
+  },
+  {
+    "text": "now it's going to be an attacker controlled value instead so at this point we now have control",
+    "start": "1019120",
+    "end": "1026000"
+  },
+  {
+    "text": "over the return address and when the interrupt handler finishes running and it's about to do an",
+    "start": "1026000",
+    "end": "1031438"
+  },
+  {
+    "text": "exception return all of those registers are now going to be popped back out of the saved state blob and back",
+    "start": "1031439",
+    "end": "1038319"
+  },
+  {
+    "text": "into the registers giving us control over register x8 when normal execution resumes uh this means",
+    "start": "1038319",
+    "end": "1045199"
+  },
+  {
+    "text": "that uh this move instruction will give us control over the return address register and then this uh rhett instruction is",
+    "start": "1045199",
+    "end": "1051440"
+  },
+  {
+    "text": "going to give us pc control so let's see a demo all right so uh here we have an iphone",
+    "start": "1051440",
+    "end": "1059120"
+  },
+  {
+    "text": "running uh it's an iphone 11 pro running ios 13.3 and uh it is i'm going to run",
+    "start": "1059120",
+    "end": "1066160"
+  },
+  {
+    "text": "a kernel exploit on it uh which is going to give it a kernel read write primitive and then i'm going to use that to call",
+    "start": "1066160",
+    "end": "1073200"
+  },
+  {
+    "text": "this kernel function uh io malloc which is going to allocate uh some memory",
+    "start": "1073200",
+    "end": "1078320"
+  },
+  {
+    "text": "from the kernel so this is basically demonstrating the ability to call arbitrary kernel functions uh from user space in spite of uh the",
+    "start": "1078320",
+    "end": "1086320"
+  },
+  {
+    "text": "presence of pointer authentication so if i just run this what i should see",
+    "start": "1086320",
+    "end": "1091919"
+  },
+  {
+    "text": "is it'll bypass pack and then uh immediately i get uh the ability to",
+    "start": "1091919",
+    "end": "1097679"
+  },
+  {
+    "text": "call i o malek and it returns this uh pointer which does which does indeed look like a",
+    "start": "1097679",
+    "end": "1102880"
+  },
+  {
+    "text": "kernel heap pointer so uh this demonstrates a the ability to bypass the control flow integrity mechanism",
+    "start": "1102880",
+    "end": "1109440"
+  },
+  {
+    "text": "using preemption with thread set state so we've demonstrated being able to",
+    "start": "1109440",
+    "end": "1115039"
+  },
+  {
+    "text": "bypass uh control flow integrity using this uh interrupt-based technique um but as i kind of thought about uh the",
+    "start": "1115039",
+    "end": "1122799"
+  },
+  {
+    "text": "issue here a little bit more uh it really boils down to uh basically anytime",
+    "start": "1122799",
+    "end": "1128160"
+  },
+  {
+    "text": "interrupts are enabled during this thread state signing operation uh that's just fundamentally an unsafe",
+    "start": "1128160",
+    "end": "1134320"
+  },
+  {
+    "text": "thing to have happen but the more i thought about it the more i realized that this doesn't just apply",
+    "start": "1134320",
+    "end": "1139840"
+  },
+  {
+    "text": "to this sign thread state function basically any time you have a pac signature being",
+    "start": "1139840",
+    "end": "1145440"
+  },
+  {
+    "text": "generated it needs to be the case that it's either has interrupts disabled",
+    "start": "1145440",
+    "end": "1150559"
+  },
+  {
+    "text": "or it's only using interrupt safe registers and so this let me search for other",
+    "start": "1150559",
+    "end": "1157280"
+  },
+  {
+    "text": "patterns of a variant of the same bypass so here you can see an example in this",
+    "start": "1157280",
+    "end": "1162400"
+  },
+  {
+    "text": "function b copy in where we have a unsafe pack ia operating on registers x3 and x11 i'm",
+    "start": "1162400",
+    "end": "1169760"
+  },
+  {
+    "text": "not going to go into this one in detail but it's fundamentally the same bypass as before just with a raw pack ia instruction",
+    "start": "1169760",
+    "end": "1176799"
+  },
+  {
+    "text": "rather than this thread set state all right uh so uh after looking",
+    "start": "1176799",
+    "end": "1183520"
+  },
+  {
+    "text": "while i was uh in the process of looking at the uh the the bypass involving thread set",
+    "start": "1183520",
+    "end": "1190480"
+  },
+  {
+    "text": "state and interrupts being delivered one of the things that i had to look at was how exactly are the",
+    "start": "1190480",
+    "end": "1197760"
+  },
+  {
+    "text": "registers spilled to memory during execution of the exception vector and i saw",
+    "start": "1197760",
+    "end": "1203919"
+  },
+  {
+    "text": "something kind of interesting i wasn't expecting to see this but it ended up being another pack",
+    "start": "1203919",
+    "end": "1209440"
+  },
+  {
+    "text": "bypass in the exception vector itself so if you look closely what you'll see is that actually the",
+    "start": "1209440",
+    "end": "1215919"
+  },
+  {
+    "text": "return address register x30 is being spilled to memory and then just a few instructions later it's being",
+    "start": "1215919",
+    "end": "1222559"
+  },
+  {
+    "text": "re-read back from memory right before this call to sign thread state",
+    "start": "1222559",
+    "end": "1227919"
+  },
+  {
+    "text": "and this is problematic because this basically gives the attacker a window and time to modify",
+    "start": "1227919",
+    "end": "1233280"
+  },
+  {
+    "text": "the return address while it's built to memory before it has been protected by generating this",
+    "start": "1233280",
+    "end": "1240080"
+  },
+  {
+    "text": "pac signature on the saved state so this is additionally just another pac",
+    "start": "1240080",
+    "end": "1245600"
+  },
+  {
+    "text": "bypass right in the exception vector itself uh the way you might actually exploit this",
+    "start": "1245600",
+    "end": "1250640"
+  },
+  {
+    "text": "is you'd need to find some sort of gadget which for example is going to spin while some memory location is zero and then it's",
+    "start": "1250640",
+    "end": "1257600"
+  },
+  {
+    "text": "going to return with this again an unprotected ret instruction so now eventually while this gadget is",
+    "start": "1257600",
+    "end": "1263679"
+  },
+  {
+    "text": "executing uh you'll eventually hit a preemption or an interrupt will fire and you're going to jump to the uh",
+    "start": "1263679",
+    "end": "1271280"
+  },
+  {
+    "text": "exception vector and so now right at the beginning of this exception vector you're going to need to race in another thread so",
+    "start": "1271280",
+    "end": "1277840"
+  },
+  {
+    "text": "uh this thread is going to us at the very beginning store the return address register to the",
+    "start": "1277840",
+    "end": "1283760"
+  },
+  {
+    "text": "saved state blob and then we need to come in on another cpu core and immediately",
+    "start": "1283760",
+    "end": "1288960"
+  },
+  {
+    "text": "overwrite it to change it to some attacker-controlled value instead",
+    "start": "1288960",
+    "end": "1294400"
+  },
+  {
+    "text": "then just a few instructions later the exception vector is going to read the now attacker-controlled return",
+    "start": "1294400",
+    "end": "1301200"
+  },
+  {
+    "text": "address value back in and then it's going to call sign thread state uh meaning that we have now uh controlled",
+    "start": "1301200",
+    "end": "1308880"
+  },
+  {
+    "text": "the return address that has been incorporated into this pac signature giving us control",
+    "start": "1308880",
+    "end": "1313919"
+  },
+  {
+    "text": "of where this spin while zero gadget will return to at a later point",
+    "start": "1313919",
+    "end": "1320480"
+  },
+  {
+    "text": "uh so this was actually another kind of interesting pack bypass i hadn't expected to find something just",
+    "start": "1320640",
+    "end": "1326559"
+  },
+  {
+    "text": "sitting right there in the exception vector but it also kind of got me thinking like what is the generalization",
+    "start": "1326559",
+    "end": "1332240"
+  },
+  {
+    "text": "of this issue here and what i really eventually settled on was that the problem was that you're reading",
+    "start": "1332240",
+    "end": "1338320"
+  },
+  {
+    "text": "parameters from memory before calling sign thread state doing this is kind of fundamentally an",
+    "start": "1338320",
+    "end": "1344559"
+  },
+  {
+    "text": "insecure thing to do since it'll always give an attacker a window in time to modify",
+    "start": "1344559",
+    "end": "1350720"
+  },
+  {
+    "text": "the parameters to the sign thread state function so i started looking for other places",
+    "start": "1350720",
+    "end": "1356240"
+  },
+  {
+    "text": "where sign thread state is called where it's going to be reading parameters from memory",
+    "start": "1356240",
+    "end": "1361360"
+  },
+  {
+    "text": "and to my surprise i actually found another function which does this exact same thing so there's this function switch context",
+    "start": "1361360",
+    "end": "1368000"
+  },
+  {
+    "text": "which is used during voluntary kernel context switches so imagine like a kernel thread is blocking on a mutex",
+    "start": "1368000",
+    "end": "1374559"
+  },
+  {
+    "text": "and yielding execution to another thread when this happens all of the callee",
+    "start": "1374559",
+    "end": "1379919"
+  },
+  {
+    "text": "saved registers are going to be spilled to your saved state and in particular",
+    "start": "1379919",
+    "end": "1385120"
+  },
+  {
+    "text": "that include the return address which means you have to protect it which means a call to sign thread state",
+    "start": "1385120",
+    "end": "1391280"
+  },
+  {
+    "text": "now when you are when switch context is calling sign thread state",
+    "start": "1391280",
+    "end": "1396799"
+  },
+  {
+    "text": "it actually reads in the value of pc and cpsr originally in this saved state blob from",
+    "start": "1396799",
+    "end": "1404159"
+  },
+  {
+    "text": "memory before the signing operation so once again this is basically a way to directly get control of the",
+    "start": "1404159",
+    "end": "1411919"
+  },
+  {
+    "text": "pc and cpsr registers in the saved state blob before the signature gets generated so kind of once again",
+    "start": "1411919",
+    "end": "1419919"
+  },
+  {
+    "text": "the switch context is uh responsible for managing thread states for voluntary kernel",
+    "start": "1419919",
+    "end": "1425360"
+  },
+  {
+    "text": "context switches and so because this is really doing like you know voluntary context switches",
+    "start": "1425360",
+    "end": "1431200"
+  },
+  {
+    "text": "between kernel threads that's the reason why these pc and cpsr registers aren't needed",
+    "start": "1431200",
+    "end": "1437039"
+  },
+  {
+    "text": "and kind of why this thing isn't fundamentally broken but what it enables is this really",
+    "start": "1437039",
+    "end": "1443360"
+  },
+  {
+    "text": "straightforward pack bypass basically you wait for some kernel thread to be active while it's",
+    "start": "1443360",
+    "end": "1449360"
+  },
+  {
+    "text": "running and using all of its registers and while that's the case you overwrite",
+    "start": "1449360",
+    "end": "1454559"
+  },
+  {
+    "text": "the pc and cpsr registers in its saved state blob and then eventually this kernel thread",
+    "start": "1454559",
+    "end": "1460320"
+  },
+  {
+    "text": "is going to block it's going to call switch context and switch context is going to read pc",
+    "start": "1460320",
+    "end": "1466159"
+  },
+  {
+    "text": "and cpsr which are again the attacker controlled overwritten values it's going to read those into memory",
+    "start": "1466159",
+    "end": "1472080"
+  },
+  {
+    "text": "into registers as parameters to the called assigned thread state and therefore those are going to get",
+    "start": "1472080",
+    "end": "1477600"
+  },
+  {
+    "text": "signed into the pac signature and then because you have a valid uh",
+    "start": "1477600",
+    "end": "1483039"
+  },
+  {
+    "text": "signature on an attacker controlled saved state blob you can reuse that save",
+    "start": "1483039",
+    "end": "1489120"
+  },
+  {
+    "text": "state for an exception return operation with arbitrary pc and cpsr so basically you'd",
+    "start": "1489120",
+    "end": "1494960"
+  },
+  {
+    "text": "set cpsr to be exception level one or kernel mode and pc you'd set to some attacker",
+    "start": "1494960",
+    "end": "1501520"
+  },
+  {
+    "text": "hijacking gadget so this is an interesting pack bypass as well i wasn't expecting to find this issue in",
+    "start": "1501520",
+    "end": "1509279"
+  },
+  {
+    "text": "like the context switching code which is called all the time but kind of once again i wanted to take",
+    "start": "1509279",
+    "end": "1514480"
+  },
+  {
+    "text": "a step back and think of what is kind of the fundamental issue here uh and pretty soon it dawned on me",
+    "start": "1514480",
+    "end": "1520159"
+  },
+  {
+    "text": "that there is really something much bigger going on here and that is that there is a design",
+    "start": "1520159",
+    "end": "1526000"
+  },
+  {
+    "text": "issue with how these thread states are managed fundamentally there are two different ways in which signed thread",
+    "start": "1526000",
+    "end": "1532000"
+  },
+  {
+    "text": "states are being used in the kernel so first off you have the the method that we are already very familiar with",
+    "start": "1532000",
+    "end": "1538000"
+  },
+  {
+    "text": "which is during an exception return so an interrupt gets delivered you run your interrupt handler and then you're calling this exception return",
+    "start": "1538000",
+    "end": "1544799"
+  },
+  {
+    "text": "function to resume execution of the interrupted thread so we've already seen that but then",
+    "start": "1544799",
+    "end": "1551039"
+  },
+  {
+    "text": "there's this other way in which signed thread states are used which is via switch context during",
+    "start": "1551039",
+    "end": "1556400"
+  },
+  {
+    "text": "voluntary kernel context switches and as it turns out these two uses of",
+    "start": "1556400",
+    "end": "1562400"
+  },
+  {
+    "text": "signed thread states have very different security requirements so for exception returns when you're doing",
+    "start": "1562400",
+    "end": "1569679"
+  },
+  {
+    "text": "an exception return back into kernel mode you really do care about all three of the registers pc cpsr and lr",
+    "start": "1569679",
+    "end": "1576799"
+  },
+  {
+    "text": "since they all have an effect on what kernel code gets executed so they all need to be protected",
+    "start": "1576799",
+    "end": "1581919"
+  },
+  {
+    "text": "in order to ensure control flow integrity uh for exception returns to user mode so",
+    "start": "1581919",
+    "end": "1588480"
+  },
+  {
+    "text": "exam imagine like a system call and you're returning from the end of a system call um you really only care about the cpsr",
+    "start": "1588480",
+    "end": "1596400"
+  },
+  {
+    "text": "register and the reason for that is all you really care about is that when you return from the system call you",
+    "start": "1596400",
+    "end": "1603200"
+  },
+  {
+    "text": "are indeed jumping back into user space someone hasn't tampered with cpsr to make you return into kernel mode instead",
+    "start": "1603200",
+    "end": "1611200"
+  },
+  {
+    "text": "so in this case when you're returning to user mode you really only care about cpsr and",
+    "start": "1611200",
+    "end": "1616880"
+  },
+  {
+    "text": "finally during a switch context for switch context we only care about the return",
+    "start": "1616880",
+    "end": "1622400"
+  },
+  {
+    "text": "address register pc and cpsr just don't have meaning in this context so fundamentally it turns out that since",
+    "start": "1622400",
+    "end": "1629919"
+  },
+  {
+    "text": "thread states can be used in these two really different ways in order to ensure integrity we really",
+    "start": "1629919",
+    "end": "1636720"
+  },
+  {
+    "text": "want to be sure that thread states signed for use by switch context shouldn't be usable by exception return",
+    "start": "1636720",
+    "end": "1644240"
+  },
+  {
+    "text": "and also vice versa we don't want thread states signed for exception return to be usable by switch context instead",
+    "start": "1644240",
+    "end": "1652320"
+  },
+  {
+    "text": "unfortunately as it turns out there's only one function cyan thread state which means that",
+    "start": "1652320",
+    "end": "1658159"
+  },
+  {
+    "text": "unless additional care is taken in the implementation thread states signed for one purpose can",
+    "start": "1658159",
+    "end": "1664240"
+  },
+  {
+    "text": "always be swapped out and used for the other purpose instead uh so this gives us kind of",
+    "start": "1664240",
+    "end": "1670399"
+  },
+  {
+    "text": "a more fundamental lens on what is happening in this bypass which is that a thread",
+    "start": "1670399",
+    "end": "1676399"
+  },
+  {
+    "text": "states signed by switch context for context switching and remember context switching does not care",
+    "start": "1676399",
+    "end": "1682080"
+  },
+  {
+    "text": "about pc and cpsr these thread states can instead be used for",
+    "start": "1682080",
+    "end": "1688000"
+  },
+  {
+    "text": "exception returns which do care about cpc and cpsr",
+    "start": "1688000",
+    "end": "1693440"
+  },
+  {
+    "text": "so this is cool but it also begs kind of the obvious question which is what about the inverse can",
+    "start": "1693440",
+    "end": "1700000"
+  },
+  {
+    "text": "thread states signed for use by exception return instead be used for switch context",
+    "start": "1700000",
+    "end": "1707919"
+  },
+  {
+    "text": "and this actually brought me to what i think is the coolest uh pack by pass of all because it was the one that was staring me in the face the",
+    "start": "1707919",
+    "end": "1714320"
+  },
+  {
+    "text": "whole time uh which is uh how when you swap user and kernel thread states",
+    "start": "1714320",
+    "end": "1720080"
+  },
+  {
+    "text": "so uh if you remember from before there is this function a system called thread set state which",
+    "start": "1720080",
+    "end": "1726159"
+  },
+  {
+    "text": "basically allows a process to set the registers in a user space thread",
+    "start": "1726159",
+    "end": "1732640"
+  },
+  {
+    "text": "and it's implemented in the kernel by this function which we also saw before in the very first pack bypass",
+    "start": "1732640",
+    "end": "1738159"
+  },
+  {
+    "text": "thread state 64 to saved state which is responsible for verifying the old user space registers",
+    "start": "1738159",
+    "end": "1745039"
+  },
+  {
+    "text": "and then re-setting the new registers and then re-signing the thread state such that it has the",
+    "start": "1745039",
+    "end": "1750640"
+  },
+  {
+    "text": "new registers instead with the signature intact uh so now for this operation of a thread set state uh we",
+    "start": "1750640",
+    "end": "1758559"
+  },
+  {
+    "text": "only really care about cpsr being restricted we want to make sure that cpsr is set so that we return",
+    "start": "1758559",
+    "end": "1764799"
+  },
+  {
+    "text": "to uh user mode but we really don't care about the return address",
+    "start": "1764799",
+    "end": "1769840"
+  },
+  {
+    "text": "register because it like if you set a kernel pointer in your return address register as long",
+    "start": "1769840",
+    "end": "1775120"
+  },
+  {
+    "text": "as you're executing in user mode that'll just cause a seg fault when you try to return there it's not going to",
+    "start": "1775120",
+    "end": "1780320"
+  },
+  {
+    "text": "violate kernel control flow integrity so thread set state",
+    "start": "1780320",
+    "end": "1785520"
+  },
+  {
+    "text": "is fully secure against exception return you can't use thread set state to sign",
+    "start": "1785520",
+    "end": "1791919"
+  },
+  {
+    "text": "thread states that are then usable by exception return to violate kernel control flow integrity",
+    "start": "1791919",
+    "end": "1798320"
+  },
+  {
+    "text": "unfortunately this is not at all the case if you were to reuse thread states",
+    "start": "1798320",
+    "end": "1803679"
+  },
+  {
+    "text": "signed via thread set state with switch context because switch context really",
+    "start": "1803679",
+    "end": "1809039"
+  },
+  {
+    "text": "cares about the return address but completely ignores cpsr so this gives us a really lovely kind of",
+    "start": "1809039",
+    "end": "1816480"
+  },
+  {
+    "text": "logical pac bypass which is a very reliable 100 deterministic",
+    "start": "1816480",
+    "end": "1822960"
+  },
+  {
+    "text": "uh so once again we're going to create uh two threads uh thread and thread b uh and uh we're going to take a close",
+    "start": "1822960",
+    "end": "1829279"
+  },
+  {
+    "text": "look at thread a which has two signed thread states one for uh user mode",
+    "start": "1829279",
+    "end": "1834799"
+  },
+  {
+    "text": "execution and one for kernel execution so what's going to happen is that thread a is going to call some system call",
+    "start": "1834799",
+    "end": "1840960"
+  },
+  {
+    "text": "which is going to block and eventually that's going to reach switch context so when switch context is called it's",
+    "start": "1840960",
+    "end": "1847520"
+  },
+  {
+    "text": "going to save all of the registers including the return address register x30 and it's going to",
+    "start": "1847520",
+    "end": "1853679"
+  },
+  {
+    "text": "sign that state and then it's going to cause the thread to block and while thread a is blocked we're now",
+    "start": "1853679",
+    "end": "1860960"
+  },
+  {
+    "text": "going to come in on thread b and we're going to swap out the pointer to the user state",
+    "start": "1860960",
+    "end": "1866720"
+  },
+  {
+    "text": "so that it now points to the kernel state instead so this is going to leave us in this situation where the uh",
+    "start": "1866720",
+    "end": "1874320"
+  },
+  {
+    "text": "pointer to the thread a's user state blob now points to its kernel state blob",
+    "start": "1874320",
+    "end": "1880320"
+  },
+  {
+    "text": "uh and at this point we can now call thread set state uh on thread a to set the registers in",
+    "start": "1880320",
+    "end": "1887200"
+  },
+  {
+    "text": "its kernel state now of course thread set state as i mentioned is going to restrict",
+    "start": "1887200",
+    "end": "1892960"
+  },
+  {
+    "text": "the value of cpsr but it does not at all restrict the value of the return address which means that",
+    "start": "1892960",
+    "end": "1899360"
+  },
+  {
+    "text": "if we now unblock thread a some other kernel thread is going to context switch to it",
+    "start": "1899360",
+    "end": "1904960"
+  },
+  {
+    "text": "and when it does so it's going to load this completely arbitrary return address into its registers it's going to verify",
+    "start": "1904960",
+    "end": "1912159"
+  },
+  {
+    "text": "the signature that's correct and then finally it's going to move that into the return address register",
+    "start": "1912159",
+    "end": "1918320"
+  },
+  {
+    "text": "and return once again giving us uh pc control so let's see a pack a",
+    "start": "1918320",
+    "end": "1924159"
+  },
+  {
+    "text": "demonstration of this pack bypass all right so here again we have uh the same iphone",
+    "start": "1924159",
+    "end": "1929679"
+  },
+  {
+    "text": "and we are going to uh run this pack bypass to demonstrate uh how to",
+    "start": "1929679",
+    "end": "1936240"
+  },
+  {
+    "text": "hijack control flow integrity using the just discussed uh thread set state bypass technique",
+    "start": "1936240",
+    "end": "1942240"
+  },
+  {
+    "text": "so uh this is actually as i said because it's a logical bypass it's really elegant and short",
+    "start": "1942240",
+    "end": "1948159"
+  },
+  {
+    "text": "so you can see that the implementation starts on line 19 and ends on line 92 so that's the",
+    "start": "1948159",
+    "end": "1954000"
+  },
+  {
+    "text": "entirety of the code for this bypass it's very short completely 100 deterministic and uh",
+    "start": "1954000",
+    "end": "1959760"
+  },
+  {
+    "text": "what all this is going to do is it's going to set the value of the return address register",
+    "start": "1959760",
+    "end": "1965600"
+  },
+  {
+    "text": "to some controlled value uh causing the phone to panic so we will run that now",
+    "start": "1965600",
+    "end": "1971679"
+  },
+  {
+    "text": "and you can see immediately uh the device panics and uh if we check the panic log it will",
+    "start": "1971679",
+    "end": "1977279"
+  },
+  {
+    "text": "indeed be uh have this uh return address uh register set to uh 4242-42 uh demonstrating",
+    "start": "1977279",
+    "end": "1985360"
+  },
+  {
+    "text": "that we have uh broken the control flow integrity",
+    "start": "1985360",
+    "end": "1991039"
+  },
+  {
+    "text": "so uh what are the things that i want to you to take away from this talk i know it's been kind of a whirlwind",
+    "start": "1991039",
+    "end": "1997440"
+  },
+  {
+    "text": "whirlwind of pack bypasses so uh like what is the thing that i want you to walk away",
+    "start": "1997440",
+    "end": "2004159"
+  },
+  {
+    "text": "understanding about all of this when i originally gave the presentation",
+    "start": "2004159",
+    "end": "2009840"
+  },
+  {
+    "text": "demonstrating the first five pack bypasses in 2019 one of my conclusions was that more",
+    "start": "2009840",
+    "end": "2017120"
+  },
+  {
+    "text": "thorough analysis could have helped in the design of pointer authentication and while my views now are a little bit",
+    "start": "2017120",
+    "end": "2024320"
+  },
+  {
+    "text": "more nuanced i still stand by this original conclusion uh even in ios 13 uh pac still",
+    "start": "2024320",
+    "end": "2032320"
+  },
+  {
+    "text": "feels quite ad hoc i really don't get a sense of what the formal underlying security",
+    "start": "2032320",
+    "end": "2038480"
+  },
+  {
+    "text": "model for pac is that governs all of these design decisions and as a result",
+    "start": "2038480",
+    "end": "2043760"
+  },
+  {
+    "text": "i even though i'm not aware of any i wouldn't be surprised if at a later point it was revealed that",
+    "start": "2043760",
+    "end": "2050638"
+  },
+  {
+    "text": "there are in fact other kind of fundamental design issues like the one we just discussed earlier",
+    "start": "2050639",
+    "end": "2057520"
+  },
+  {
+    "text": "now another thing which i think is worth pointing out is that when i initially reported uh the",
+    "start": "2057520",
+    "end": "2063520"
+  },
+  {
+    "text": "proof of concepts for i the ios 12 bypasses um apple was",
+    "start": "2063520",
+    "end": "2068560"
+  },
+  {
+    "text": "able to fix the uh specific pox that i reported but they did not address the underlying",
+    "start": "2068560",
+    "end": "2074960"
+  },
+  {
+    "text": "issue for that fifth bypass which is that interrupts were enabled and i find this a little bit uh",
+    "start": "2074960",
+    "end": "2082320"
+  },
+  {
+    "text": "disconcerting because i explicitly called out the fact that interrupts were dangerous during thread",
+    "start": "2082320",
+    "end": "2088000"
+  },
+  {
+    "text": "state signing operations in my initial report and even you know one year later uh",
+    "start": "2088000",
+    "end": "2094398"
+  },
+  {
+    "text": "despite this being something that i talked about publicly it still was uh right there as a",
+    "start": "2094399",
+    "end": "2099440"
+  },
+  {
+    "text": "technique that worked so that was a little bit uh disconcerting to see that it's taken so",
+    "start": "2099440",
+    "end": "2104800"
+  },
+  {
+    "text": "long and yet it still wasn't addressed off the bat um one other thing which i think is definitely",
+    "start": "2104800",
+    "end": "2110720"
+  },
+  {
+    "text": "worth pointing out is that it's very very important to look at the output of your compiler a lot of",
+    "start": "2110720",
+    "end": "2116800"
+  },
+  {
+    "text": "these issues with pointer authentication are not visible if you're just looking at the c code so it is crucially crucially",
+    "start": "2116800",
+    "end": "2123520"
+  },
+  {
+    "text": "important that you pop the kernel into a disassembler take it apart look at the register allocation",
+    "start": "2123520",
+    "end": "2129599"
+  },
+  {
+    "text": "to get a good understanding of what are the low-level characteristics of your code [Music]",
+    "start": "2129599",
+    "end": "2136480"
+  },
+  {
+    "text": "uh all that uh being said i do still think that uh pac is a good mitigation i kind",
+    "start": "2136480",
+    "end": "2142720"
+  },
+  {
+    "text": "of see it as a pack having two different faces so there's pac as an exploit mitigation",
+    "start": "2142720",
+    "end": "2148480"
+  },
+  {
+    "text": "preventing you from getting a kernel read write to begin with and then there's also pac as control",
+    "start": "2148480",
+    "end": "2154720"
+  },
+  {
+    "text": "flow integrity uh making sure that you can't call arbitrary kernel functions",
+    "start": "2154720",
+    "end": "2160480"
+  },
+  {
+    "text": "once you have gotten this read write primitive uh and so everything that i've talked about right now",
+    "start": "2160480",
+    "end": "2165839"
+  },
+  {
+    "text": "is addressing pac as cfi and does not in any way diminish pac as an exploit",
+    "start": "2165839",
+    "end": "2171440"
+  },
+  {
+    "text": "mitigation and i think that pac has been quite successful at eliminating the",
+    "start": "2171440",
+    "end": "2176800"
+  },
+  {
+    "text": "exploitability of certain bug classes i think that any time you can force attackers to use better bugs",
+    "start": "2176800",
+    "end": "2183680"
+  },
+  {
+    "text": "that's always going to be a win for the long-term security of the platform um i also think that pac is promising",
+    "start": "2183680",
+    "end": "2191680"
+  },
+  {
+    "text": "that there's a lot of untapped potential in it improving over time in particular with",
+    "start": "2191680",
+    "end": "2197040"
+  },
+  {
+    "text": "regards to protecting data pointers with pac and i'm looking forward to seeing some promising improvements in this specific",
+    "start": "2197040",
+    "end": "2203520"
+  },
+  {
+    "text": "regard in ios 14. uh now the last thing that i want you to",
+    "start": "2203520",
+    "end": "2208960"
+  },
+  {
+    "text": "take away from all of this is that as much fun as all this research was to conduct",
+    "start": "2208960",
+    "end": "2215040"
+  },
+  {
+    "text": "pack bypass just aren't all that important in the grand scheme of things like if i'm writing a kernel exploit",
+    "start": "2215040",
+    "end": "2222480"
+  },
+  {
+    "text": "and i've obtained colonel read write i really don't see pac as like the last step that needs to be",
+    "start": "2222480",
+    "end": "2228240"
+  },
+  {
+    "text": "achieved it's more like the cherry on top of really nice exploit um i could see you know perhaps uh pack",
+    "start": "2228240",
+    "end": "2235520"
+  },
+  {
+    "text": "bypasses might make an expensive up charge when you're selling an exploit",
+    "start": "2235520",
+    "end": "2240640"
+  },
+  {
+    "text": "for example there may be some threat actors out there who have uh legacy implants that rely on kernel",
+    "start": "2240640",
+    "end": "2248000"
+  },
+  {
+    "text": "function calling uh to accomplish their goals and so for these actors it may be",
+    "start": "2248000",
+    "end": "2253839"
+  },
+  {
+    "text": "they would prefer to buy a pack bypass rather than like re-implement this implant but",
+    "start": "2253839",
+    "end": "2261839"
+  },
+  {
+    "text": "kernel cfi just fundamentally is not the last line of defense keeping your",
+    "start": "2261839",
+    "end": "2266960"
+  },
+  {
+    "text": "device safe hardening the kernel is always going to be more important",
+    "start": "2266960",
+    "end": "2272560"
+  },
+  {
+    "text": "for end user security because it's going to prevent the attacker from getting read write uh",
+    "start": "2272560",
+    "end": "2278480"
+  },
+  {
+    "text": "to begin with and once you have read write i mean it's pretty much game over at that point so i'm excited to see kernel cfi i think",
+    "start": "2278480",
+    "end": "2285680"
+  },
+  {
+    "text": "it's a really cool mitigation um but just fundamentally i think it is much more important that this",
+    "start": "2285680",
+    "end": "2292800"
+  },
+  {
+    "text": "kernel hardening work uh is happening so i don't see these pack bypasses as all that important in the grand scheme",
+    "start": "2292800",
+    "end": "2299280"
+  },
+  {
+    "text": "of things so that's all i have for you today i hope you enjoyed watching and",
+    "start": "2299280",
+    "end": "2304640"
+  },
+  {
+    "text": "uh thank you very much",
+    "start": "2304640",
+    "end": "2307760"
+  },
+  {
+    "text": "all right i hope you enjoyed my presentation uh i'll try to address uh some of the questions that were uh",
+    "start": "2310560",
+    "end": "2316640"
+  },
+  {
+    "text": "raised in the chat right now uh so uh first off uh there was a question are these",
+    "start": "2316640",
+    "end": "2322320"
+  },
+  {
+    "text": "types of flaws in programming likely to continue or become reintroduced in the future um so in my",
+    "start": "2322320",
+    "end": "2329200"
+  },
+  {
+    "text": "opinion just based on how i've uh understood pac to have changed over time",
+    "start": "2329200",
+    "end": "2336720"
+  },
+  {
+    "text": "uh it doesn't seem like there is a comprehensive strategy for pac it feels",
+    "start": "2336720",
+    "end": "2343200"
+  },
+  {
+    "text": "somewhat more ad hoc so i wouldn't be surprised if uh",
+    "start": "2343200",
+    "end": "2348560"
+  },
+  {
+    "text": "these types of pack bypasses do persist into the future um that being said that isn't",
+    "start": "2348560",
+    "end": "2355760"
+  },
+  {
+    "text": "a uh this isn't a certainty uh i could certainly see uh pac being hardened enough to uh",
+    "start": "2355760",
+    "end": "2362560"
+  },
+  {
+    "text": "make these things become very very rare um but there isn't anything that i've seen yet which demonstrates to me",
+    "start": "2362560",
+    "end": "2368640"
+  },
+  {
+    "text": "comprehensively uh that pac is uh robustly uh mitigated for cfi um",
+    "start": "2368640",
+    "end": "2376560"
+  },
+  {
+    "text": "and then finally kind of the last thing that i want to leave you with just to re-drive the last point that i made in",
+    "start": "2376560",
+    "end": "2382800"
+  },
+  {
+    "text": "the talk home is that pack bypasses just aren't comparable to",
+    "start": "2382800",
+    "end": "2390800"
+  },
+  {
+    "text": "local privilege escalation to begin with if you have a bug which gets kernel read",
+    "start": "2390800",
+    "end": "2396720"
+  },
+  {
+    "text": "write on the system uh your your device is pretty much toast anyway so i don't see these pack",
+    "start": "2396720",
+    "end": "2402160"
+  },
+  {
+    "text": "bypasses as all that important uh in the scheme of things i also see one new question that came up",
+    "start": "2402160",
+    "end": "2408960"
+  },
+  {
+    "text": "could apple disable interrupts on the sign thread state to alleviate some of these issues um yeah so that was one of the things",
+    "start": "2408960",
+    "end": "2416240"
+  },
+  {
+    "text": "that is definitely going to be required in order to have a secure implementation",
+    "start": "2416240",
+    "end": "2421599"
+  },
+  {
+    "text": "it's not sufficient to just disable it during uh the function itself it has to also",
+    "start": "2421599",
+    "end": "2426800"
+  },
+  {
+    "text": "include the point at which the arguments to the function are loaded into registers um",
+    "start": "2426800",
+    "end": "2432000"
+  },
+  {
+    "text": "but yeah that's definitely something which needs to uh occur in order for the implementation of signed thread state to",
+    "start": "2432000",
+    "end": "2437200"
+  },
+  {
+    "text": "be safe so i believe that's all the time that i have thank",
+    "start": "2437200",
+    "end": "2442640"
+  },
+  {
+    "text": "you so much everyone for listening enjoy the rest of black hat",
+    "start": "2442640",
+    "end": "2448960"
+  }
+]

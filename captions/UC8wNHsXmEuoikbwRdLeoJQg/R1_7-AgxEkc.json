@@ -1,0 +1,2862 @@
+[
+  {
+    "text": "So I thought it would be fun to stream for a little bit today to talk about",
+    "start": "4458",
+    "end": "16125"
+  },
+  {
+    "text": "re-implementing the Entity Manager a little bit in cluster, because I'm not really happy with the current state of",
+    "start": "16166",
+    "end": "23250"
+  },
+  {
+    "text": "the Entity Manager that we kind of have right now.",
+    "start": "23250",
+    "end": "27750"
+  },
+  {
+    "text": "And I thought since we were in the phase of rapid development, this would be a good time to think about re-implementing it.",
+    "start": "28416",
+    "end": "34541"
+  },
+  {
+    "text": "Some of the things that I thought would be good to consider would be to use a scope to control the",
+    "start": "36791",
+    "end": "42333"
+  },
+  {
+    "text": "Entity and the Entity Manager's lifecycle. So the idea being that like the Entity Manager itself has",
+    "start": "42333",
+    "end": "49291"
+  },
+  {
+    "text": "a scope that controls the lifecycle of the Entity Manager. So when that",
+    "start": "49291",
+    "end": "57208"
+  },
+  {
+    "text": "scope is closed, for example, all the entities managed by that Entity Manager would be terminated. And then similarly,",
+    "start": "57500",
+    "end": "66333"
+  },
+  {
+    "text": "the actual entities managed by that Entity Manager could have a child scope",
+    "start": "67625",
+    "end": "72666"
+  },
+  {
+    "text": "forked off of the manager scope that would allow us to attach resources.",
+    "start": "72666",
+    "end": "78250"
+  },
+  {
+    "text": "Because at the moment, we're currently doing a lot of manual bookkeeping. And",
+    "start": "78958",
+    "end": "84083"
+  },
+  {
+    "text": "yesterday, Tim and I started playing with using a scope to do some of this stuff, and it seemed like it might be a little",
+    "start": "84083",
+    "end": "90083"
+  },
+  {
+    "text": "bit cleaner. And then the other thing I want to do for the moment,",
+    "start": "90083",
+    "end": "94208"
+  },
+  {
+    "text": "Shardcake has this concept of like termination messages. But I think we can",
+    "start": "95458",
+    "end": "103125"
+  },
+  {
+    "text": "ignore termination messages for the moment. Basically, they're like messages",
+    "start": "103125",
+    "end": "111958"
+  },
+  {
+    "text": "that get, that allow you, it's a way to fire off a message to the Entity when the",
+    "start": "112041",
+    "end": "118750"
+  },
+  {
+    "text": "Entity Manager signals that the Entity is terminating. It might be useful in the",
+    "start": "118750",
+    "end": "123916"
+  },
+  {
+    "text": "future, but like to simplify things and allow us to implement this the way that",
+    "start": "123916",
+    "end": "130166"
+  },
+  {
+    "text": "I think is more like, I don't know, correct. We're gonna ignore termination",
+    "start": "130166",
+    "end": "135583"
+  },
+  {
+    "text": "messages for the moment. Yeah, so let's maybe get started.",
+    "start": "135750",
+    "end": "139083"
+  },
+  {
+    "text": "So I think we'll model the Manager the",
+    "start": "147458",
+    "end": "152500"
+  },
+  {
+    "text": "way they currently manage the, or model the Entity Manager is with a couple of",
+    "start": "152500",
+    "end": "159833"
+  },
+  {
+    "text": "methods on an object. Again, I want to kind of trim this down. I think probably",
+    "start": "159833",
+    "end": "166250"
+  },
+  {
+    "text": "like the only thing that we need is to be able to send to the Entity Manager",
+    "start": "166250",
+    "end": "171750"
+  },
+  {
+    "text": "because all of the termination related stuff could be like scope related. I mean",
+    "start": "171750",
+    "end": "180000"
+  },
+  {
+    "text": "maybe we want to like have the ability to terminate entities on specific shards, but for now",
+    "start": "180000",
+    "end": "186958"
+  },
+  {
+    "text": "I'm not gonna, I think I'm gonna focus on send. Termination can",
+    "start": "186958",
+    "end": "192375"
+  },
+  {
+    "text": "come later. So make still needs to",
+    "start": "192375",
+    "end": "197500"
+  },
+  {
+    "text": "accept some arguments. We need the Entity",
+    "start": "197541",
+    "end": "203791"
+  },
+  {
+    "text": "that's going to be managed. And we still need the message type.",
+    "start": "203791",
+    "end": "211208"
+  },
+  {
+    "text": "We can just do.",
+    "start": "228500",
+    "end": "230250"
+  },
+  {
+    "text": "We still need the behavior of the entity.",
+    "start": "240208",
+    "end": "246458"
+  },
+  {
+    "text": "And",
+    "start": "250125",
+    "end": "251000"
+  },
+  {
+    "text": "this is going to be. So I was talking to",
+    "start": "258833",
+    "end": "264833"
+  },
+  {
+    "text": "Tim yesterday about this. We could model the behavior as an effect of void, but I think we'll keep it at the moment as an",
+    "start": "264833",
+    "end": "272083"
+  },
+  {
+    "text": "effect, like a never-ending effect.",
+    "start": "272083",
+    "end": "273958"
+  },
+  {
+    "text": "I think this still makes sense for the moment. The behavior is gonna get a few",
+    "start": "279750",
+    "end": "285166"
+  },
+  {
+    "text": "things. The first argument is gonna be the mailbox. And we could use effects new",
+    "start": "285208",
+    "end": "293125"
+  },
+  {
+    "text": "mailbox module for this, but I am not.",
+    "start": "293125",
+    "end": "296875"
+  },
+  {
+    "text": "Why don't we actually do that? Let's use the new mailbox for this, and then we can always revert back to a queue if we",
+    "start": "301041",
+    "end": "306791"
+  },
+  {
+    "text": "need to, if we want to for some reason, but mailbox is pretty flexible.",
+    "start": "306791",
+    "end": "312041"
+  },
+  {
+    "text": "And the behavior is only gonna get the read-only side of the mailbox.",
+    "start": "312958",
+    "end": "318000"
+  },
+  {
+    "text": "And we'll ignore the registration options for the moment. So I still think",
+    "start": "323791",
+    "end": "332207"
+  },
+  {
+    "text": "managing all the entities as",
+    "start": "333125",
+    "end": "336416"
+  },
+  {
+    "text": "with a synchronized ref is a good idea because we want, there are certain cases",
+    "start": "340583",
+    "end": "346207"
+  },
+  {
+    "text": "in here where we're doing asynchronous work and we want to be able to lock the entities for writing while we do that.",
+    "start": "346208",
+    "end": "353416"
+  },
+  {
+    "text": "For example, when we get or create the entity state, we modify this map",
+    "start": "354625",
+    "end": "361833"
+  },
+  {
+    "text": "effectively. So I think we still want a synchronized ref here so that when we're",
+    "start": "361833",
+    "end": "369291"
+  },
+  {
+    "text": "doing that asynchronous work, we can make sure we're locking this for writing. Because inside, for those of you",
+    "start": "369291",
+    "end": "376000"
+  },
+  {
+    "text": "don't know, the effect has like a normal ref which models a mutable reference",
+    "start": "376000",
+    "end": "382166"
+  },
+  {
+    "text": "to an immutable value. But we also have synchronized ref.",
+    "start": "382166",
+    "end": "388666"
+  },
+  {
+    "text": "Synchronized, if I could spell synchronized, synchronized. And synchronized ref is",
+    "start": "390083",
+    "end": "397208"
+  },
+  {
+    "text": "basically a ref that also includes a semaphore with a",
+    "start": "397208",
+    "end": "403208"
+  },
+  {
+    "text": "single permit so that you can lock the ref for modification while",
+    "start": "403208",
+    "end": "411791"
+  },
+  {
+    "text": "you're doing asynchronous work. So while a ref only exposes kind of like an atomic",
+    "start": "411791",
+    "end": "417291"
+  },
+  {
+    "text": "API, synchronized ref also allows you to do effectful stuff to modify the ref. But",
+    "start": "417291",
+    "end": "424416"
+  },
+  {
+    "text": "synchronized ref is not really that useful if you're only doing synchronous",
+    "start": "424416",
+    "end": "432208"
+  },
+  {
+    "text": "operations on the reference. But since we're not, we can use this and",
+    "start": "432208",
+    "end": "439375"
+  },
+  {
+    "text": "make a synchronized ref. And we still need a hash map. And this is going to be a",
+    "start": "439375",
+    "end": "454875"
+  },
+  {
+    "text": "hash map of entity addresses to some entity state that we have yet to define. Where",
+    "start": "454875",
+    "end": "470541"
+  },
+  {
+    "text": "did my hash map go? So",
+    "start": "470541",
+    "end": "476457"
+  },
+  {
+    "text": "maybe we can do this now. Interface entity state message extends.",
+    "start": "476458",
+    "end": "486333"
+  },
+  {
+    "text": "So before we were modeling entity state as a discriminated union, like a tagged union",
+    "start": "489208",
+    "end": "496041"
+  },
+  {
+    "text": "of an entity being active and an entity being terminating in a terminating state. But I",
+    "start": "496041",
+    "end": "501666"
+  },
+  {
+    "text": "want to try doing this where we just have a single, like the entity is either alive or it's",
+    "start": "501666",
+    "end": "507666"
+  },
+  {
+    "text": "not. We'll see how it goes. The entity state is going to",
+    "start": "507666",
+    "end": "514958"
+  },
+  {
+    "text": "need the mailbox. And in this case, we want the read write interface for",
+    "start": "514958",
+    "end": "521416"
+  },
+  {
+    "text": "mailbox. And it's going to be a mailbox of messages. Again, we",
+    "start": "521416",
+    "end": "527000"
+  },
+  {
+    "text": "could use queue for this, but I want to try out mailbox just to see if it's useful for this use case.",
+    "start": "527000",
+    "end": "533125"
+  },
+  {
+    "text": "And then the state of an entity is also going to have a scope which we can use to attach",
+    "start": "533375",
+    "end": "541708"
+  },
+  {
+    "text": "resources and then clean them up later. And it's going to be a",
+    "start": "541708",
+    "end": "546250"
+  },
+  {
+    "text": "closeable scope because we want the ability to manually close",
+    "start": "547375",
+    "end": "553000"
+  },
+  {
+    "text": "an entity's scope. So yeah,",
+    "start": "553000",
+    "end": "561958"
+  },
+  {
+    "text": "I think this makes sense. So the manager",
+    "start": "561958",
+    "end": "573541"
+  },
+  {
+    "text": "is also going to, we're going to grab the scope from the manager. So creating an entity manager is",
+    "start": "573541",
+    "end": "585333"
+  },
+  {
+    "text": "a scoped operation. So this allows us to grab the scope that will be eventually provided to",
+    "start": "585333",
+    "end": "591000"
+  },
+  {
+    "text": "the entity manager. And then I want to look at",
+    "start": "591000",
+    "end": "599458"
+  },
+  {
+    "text": "recreating this like get or create state for an entity because yeah,",
+    "start": "600333",
+    "end": "610291"
+  },
+  {
+    "text": "I think this is like where kind of some of the interesting stuff happens. So, and this is what's used to forward messages",
+    "start": "610291",
+    "end": "617458"
+  },
+  {
+    "text": "to an entity. So to kind of like recap, like what an entity manager is, I",
+    "start": "617458",
+    "end": "623041"
+  },
+  {
+    "text": "probably should have done that at the beginning. The entity manager is essentially what it",
+    "start": "623041",
+    "end": "630750"
+  },
+  {
+    "text": "sounds like it manages entities, but there are on a given pod in the",
+    "start": "630750",
+    "end": "638958"
+  },
+  {
+    "text": "cluster, you have a sharding instance per pod. So there's a",
+    "start": "638958",
+    "end": "644375"
+  },
+  {
+    "text": "sharding service on that pod. And that sharding service has N entity managers, which correspond",
+    "start": "644375",
+    "end": "650416"
+  },
+  {
+    "text": "one to one to the number of entity types on that particular pod. So",
+    "start": "650708",
+    "end": "656708"
+  },
+  {
+    "text": "what do I mean by that? Let's say like you have, I don't know, like user entities and to do entities and I don't",
+    "start": "656708",
+    "end": "665041"
+  },
+  {
+    "text": "know, some other type of entity. These are entity types, but you",
+    "start": "665041",
+    "end": "672416"
+  },
+  {
+    "text": "could have multiple user entities registered to a given pod,",
+    "start": "672416",
+    "end": "677500"
+  },
+  {
+    "text": "right? You could have user one, user two, all the way out to user N.",
+    "start": "677583",
+    "end": "682500"
+  },
+  {
+    "text": "Similarly, you can have, you know, to do one, to do two, and to do N",
+    "start": "683375",
+    "end": "688916"
+  },
+  {
+    "text": "all on a given pod. And",
+    "start": "688916",
+    "end": "694291"
+  },
+  {
+    "text": "these could be in like separate shards on the pod, right? That's not really what's important here. The point",
+    "start": "694291",
+    "end": "700375"
+  },
+  {
+    "text": "is that on a pod, you could have different entity types and you could have multiple",
+    "start": "700375",
+    "end": "705958"
+  },
+  {
+    "text": "entities of the same type on a pod. The entity manager corresponds one to",
+    "start": "705958",
+    "end": "712750"
+  },
+  {
+    "text": "one, two entity types. So we could have an entity manager that's managing the users. We could have",
+    "start": "712750",
+    "end": "720500"
+  },
+  {
+    "text": "an entity manager that's managing the to do entities. So for all of these user entities, we'd",
+    "start": "720500",
+    "end": "728166"
+  },
+  {
+    "text": "have one entity manager that's managing them. Similarly for the to do's, et cetera. So the idea is on a pod,",
+    "start": "728166",
+    "end": "735333"
+  },
+  {
+    "text": "you have many shards, entities are registered inside the shards. And that's again, like an",
+    "start": "735708",
+    "end": "740958"
+  },
+  {
+    "text": "addressing optimization. But the sharding service that's on the",
+    "start": "740958",
+    "end": "746333"
+  },
+  {
+    "text": "pod is managing or has a bunch of entity managers that are used to kind of manage the life cycle",
+    "start": "746333",
+    "end": "751875"
+  },
+  {
+    "text": "of the entities within each shard. So again,",
+    "start": "751875",
+    "end": "756833"
+  },
+  {
+    "text": "we could probably even make this more. Let's do this.",
+    "start": "757125",
+    "end": "763750"
+  },
+  {
+    "text": "A little more clear. Sharding, which is on the pod level.",
+    "start": "767791",
+    "end": "779958"
+  },
+  {
+    "text": "So hopefully this makes sense. The sharding service has many entity",
+    "start": "782958",
+    "end": "789000"
+  },
+  {
+    "text": "managers, one per entity type, and the entity manager manages all the entities on that pod",
+    "start": "789000",
+    "end": "796375"
+  },
+  {
+    "text": "for a particular entity type. So and that makes sense because, you",
+    "start": "796375",
+    "end": "804833"
+  },
+  {
+    "text": "know, when you register a behavior for an entity, that behavior can only handle messages",
+    "start": "804833",
+    "end": "810083"
+  },
+  {
+    "text": "for that particular entity. So yeah.",
+    "start": "810083",
+    "end": "815041"
+  },
+  {
+    "text": "Let's keep going. So when we call get or create state, it's really only called by this send",
+    "start": "818416",
+    "end": "827041"
+  },
+  {
+    "text": "method. So send is what's used to take the envelope, which is basically like the encoded",
+    "start": "827041",
+    "end": "833166"
+  },
+  {
+    "text": "object that has the entity address information,",
+    "start": "833166",
+    "end": "837625"
+  },
+  {
+    "text": "as well as the message that needs to be sent to an entity in",
+    "start": "838500",
+    "end": "844083"
+  },
+  {
+    "text": "it. And when we call send, we decode the envelope using the schema of the entity. And then we persist",
+    "start": "844083",
+    "end": "852125"
+  },
+  {
+    "text": "that message to cluster storage, and then we send that message to the entity itself.",
+    "start": "852541",
+    "end": "858250"
+  },
+  {
+    "text": "And this send message to entity method calls get or create state. Basically, if that entity",
+    "start": "859875",
+    "end": "866500"
+  },
+  {
+    "text": "hasn't been provisioned yet by the entity manager, it will provision that entity and then create the",
+    "start": "866541",
+    "end": "872125"
+  },
+  {
+    "text": "state for that entity. Otherwise, it just returns the state directly. So I want to focus on get or",
+    "start": "872125",
+    "end": "877833"
+  },
+  {
+    "text": "create state for a moment. Get or create state. And we're going",
+    "start": "877875",
+    "end": "885500"
+  },
+  {
+    "text": "to take in an address, which is used to grab the entity out of",
+    "start": "885500",
+    "end": "893208"
+  },
+  {
+    "text": "the map if it exists. We'll do that. So synchronize draft dot",
+    "start": "893208",
+    "end": "899041"
+  },
+  {
+    "text": "modify effect entities. We have our map of entities here. You can",
+    "start": "899041",
+    "end": "911666"
+  },
+  {
+    "text": "do an option dot match. We need to import options.",
+    "start": "911666",
+    "end": "915000"
+  },
+  {
+    "text": "So a lot of this is the same at the moment. But",
+    "start": "924458",
+    "end": "930250"
+  },
+  {
+    "text": "map address.",
+    "start": "930500",
+    "end": "931916"
+  },
+  {
+    "text": "So if we don't find the entity, if we",
+    "start": "950541",
+    "end": "961500"
+  },
+  {
+    "text": "don't find an already registered entity in the map,",
+    "start": "961500",
+    "end": "967958"
+  },
+  {
+    "text": "then we need to do all the logic to set",
+    "start": "968000",
+    "end": "973083"
+  },
+  {
+    "text": "up the behavior for that entity and basically provision the entity state. But if we do find the",
+    "start": "973083",
+    "end": "979791"
+  },
+  {
+    "text": "states, maybe we can do that case first. That's easy. Some state. So modify all of the ref",
+    "start": "979791",
+    "end": "990583"
+  },
+  {
+    "text": "modification APIs return a tuple where the",
+    "start": "990583",
+    "end": "996291"
+  },
+  {
+    "text": "and where we're doing effect dot succeed, where the first element of the tuple is the thing you",
+    "start": "997041",
+    "end": "1002916"
+  },
+  {
+    "text": "actually want to return. So if you like, in this case, we want to return the entity state.",
+    "start": "1002916",
+    "end": "1008625"
+  },
+  {
+    "text": "And then the second element of the tuple is the value to put back",
+    "start": "1009125",
+    "end": "1017291"
+  },
+  {
+    "text": "into the ref. So in this case, we're just going to put the map back because we don't need to modify it. In this case, the state",
+    "start": "1017291",
+    "end": "1022916"
+  },
+  {
+    "text": "was already there. So we return the state directly and we return the map unchanged or put the map",
+    "start": "1022916",
+    "end": "1027958"
+  },
+  {
+    "text": "back, put the map back into the ref unchanged. But in the case that we don't find the state for",
+    "start": "1027958",
+    "end": "1037791"
+  },
+  {
+    "text": "given entity, we need to provision everything related to that entity. So",
+    "start": "1037791",
+    "end": "1046833"
+  },
+  {
+    "text": "you can probably copy some of the logic we already have, entity not managed by this pod, address.",
+    "start": "1050416",
+    "end": "1057833"
+  },
+  {
+    "text": "So, dot when effect. If the sharding",
+    "start": "1057875",
+    "end": "1068750"
+  },
+  {
+    "text": "service is shutting down, is shut down, is shut down,",
+    "start": "1068750",
+    "end": "1073791"
+  },
+  {
+    "text": "we need to grab sharding from the environment.",
+    "start": "1076166",
+    "end": "1078166"
+  },
+  {
+    "text": "I think I have to import it.",
+    "start": "1106000",
+    "end": "1107916"
+  },
+  {
+    "text": "So if the sharding service is shutting down, then we basically return",
+    "start": "1134541",
+    "end": "1141250"
+  },
+  {
+    "text": "an entity not managed by this pod exception, because if sharding is shutting down, then there are no entities managed by the",
+    "start": "1141250",
+    "end": "1147166"
+  },
+  {
+    "text": "that pod. So we need to indicate to the cluster to essentially retry that message",
+    "start": "1147666",
+    "end": "1155541"
+  },
+  {
+    "text": "or decline, I guess.",
+    "start": "1155541",
+    "end": "1158416"
+  },
+  {
+    "text": "Where is it? Here we go. So some of this logic again, we can reuse. So",
+    "start": "1161791",
+    "end": "1166416"
+  },
+  {
+    "text": "but if the sharding service is not shutting down, then we can start to provision everything we need.",
+    "start": "1167750",
+    "end": "1174458"
+  },
+  {
+    "text": "For the entity. So let's rename this to manager scope. Like we did on the right.",
+    "start": "1177708",
+    "end": "1186541"
+  },
+  {
+    "text": "So I don't know. I'll point out some weird stuff that newer",
+    "start": "1189500",
+    "end": "1195958"
+  },
+  {
+    "text": "folks might not be familiar with if I can remember to do that. Otherwise, if there are questions,",
+    "start": "1195958",
+    "end": "1201416"
+  },
+  {
+    "text": "just ping me in the chat. But Zip Right is like essentially doing a",
+    "start": "1201416",
+    "end": "1209041"
+  },
+  {
+    "text": "flat map and ignoring.",
+    "start": "1209041",
+    "end": "1212458"
+  },
+  {
+    "text": "It's essentially like a flat map, and then you just ignore the argument that comes in here and return whatever effect you want. So it's",
+    "start": "1214791",
+    "end": "1223041"
+  },
+  {
+    "text": "just kind of like a terser. You could also do end then and the effect that goes in there, but I like to use it right.",
+    "start": "1223041",
+    "end": "1230541"
+  },
+  {
+    "text": "And we want to now so we want to create the scope that's going to be used by the entity",
+    "start": "1232125",
+    "end": "1239166"
+  },
+  {
+    "text": "to attach like its resources that we can then close later. So in",
+    "start": "1239166",
+    "end": "1244791"
+  },
+  {
+    "text": "order to create a closeable scope and effect, we can fork a new scope",
+    "start": "1244791",
+    "end": "1250708"
+  },
+  {
+    "text": "off of the manager scope. And this also has the benefit that if the manager is shut down, so if",
+    "start": "1250708",
+    "end": "1259416"
+  },
+  {
+    "text": "the scope of the manager is closed, all of the entities will also have their scope shut down,",
+    "start": "1259416",
+    "end": "1267916"
+  },
+  {
+    "text": "which means that all of the stuff associated with the",
+    "start": "1267916",
+    "end": "1274041"
+  },
+  {
+    "text": "entities that we need to manage the lifecycle of kind of gets managed automatically. And we need",
+    "start": "1274041",
+    "end": "1282458"
+  },
+  {
+    "text": "the finalizer. We want it to be sequential, I believe.",
+    "start": "1282458",
+    "end": "1286791"
+  },
+  {
+    "text": "So we'll just leave it as sequential.",
+    "start": "1287791",
+    "end": "1289291"
+  },
+  {
+    "text": "Execution strategy. Execution strategy.",
+    "start": "1294083",
+    "end": "1298458"
+  },
+  {
+    "text": "This. So we can use effects like bind",
+    "start": "1306416",
+    "end": "1312500"
+  },
+  {
+    "text": "APIs to help us here. So we can bind this scope to a variable named scope. This just creates like an",
+    "start": "1312500",
+    "end": "1318541"
+  },
+  {
+    "text": "object inside our little pipeline here with like scope bound to scope that close will scope. And",
+    "start": "1318541",
+    "end": "1328125"
+  },
+  {
+    "text": "see what I mean when we actually use it. And we can probably follow a lot of the",
+    "start": "1328125",
+    "end": "1336541"
+  },
+  {
+    "text": "logic that I had here from yesterday.",
+    "start": "1336541",
+    "end": "1339500"
+  },
+  {
+    "text": "Bind the mailbox.",
+    "start": "1342041",
+    "end": "1344666"
+  },
+  {
+    "text": "It's not tapped.",
+    "start": "1350000",
+    "end": "1355083"
+  },
+  {
+    "text": "And again, this mailbox",
+    "start": "1356041",
+    "end": "1364041"
+  },
+  {
+    "text": "is going to take messages.",
+    "start": "1364041",
+    "end": "1365333"
+  },
+  {
+    "text": "And I'm using like the add finalizer stuff here.",
+    "start": "1374458",
+    "end": "1381708"
+  },
+  {
+    "text": "Basically just to manually attach finalizers to this scope.",
+    "start": "1383791",
+    "end": "1387125"
+  },
+  {
+    "text": "It's like one way that you can manually attach finalizers. And so essentially,",
+    "start": "1388875",
+    "end": "1394291"
+  },
+  {
+    "text": "again, every resource that we want to attach to the entity scope, so this scope that we're forking",
+    "start": "1396333",
+    "end": "1402333"
+  },
+  {
+    "text": "off the manager scope here, this scope we're calling like the entity scope, all the resources",
+    "start": "1402416",
+    "end": "1407958"
+  },
+  {
+    "text": "that need to be shut down when the entity is shut down, we can just attach finalizers to this scope. So mailbox.shutdown. And now,",
+    "start": "1407958",
+    "end": "1419291"
+  },
+  {
+    "text": "again, if we close this entity scope here, the mailbox will",
+    "start": "1419291",
+    "end": "1425708"
+  },
+  {
+    "text": "be shut down. And if we shut down the entity manager, similarly,",
+    "start": "1425708",
+    "end": "1430750"
+  },
+  {
+    "text": "the mailbox will be shut down because we're forking the entity scope",
+    "start": "1430958",
+    "end": "1436541"
+  },
+  {
+    "text": "off of the manager scope. All right, so let's continue. We need to",
+    "start": "1436541",
+    "end": "1443333"
+  },
+  {
+    "text": "start the behavior. And since we don't need to bind",
+    "start": "1443333",
+    "end": "1448958"
+  },
+  {
+    "text": "that to a variable, we can just tap, grab the mailbox in the scope.",
+    "start": "1448958",
+    "end": "1453583"
+  },
+  {
+    "text": "Behavior mailbox.",
+    "start": "1458333",
+    "end": "1462333"
+  },
+  {
+    "text": "Just seeing if there's like, if I have to call read only, or if it's just an interface, things just an interface. And then there",
+    "start": "1468208",
+    "end": "1477250"
+  },
+  {
+    "text": "will eventually be a second argument here, which will be, I don't really know what",
+    "start": "1477250",
+    "end": "1482750"
+  },
+  {
+    "text": "to name it yet. I think something like entity or entity info or something. But that second",
+    "start": "1482750",
+    "end": "1488125"
+  },
+  {
+    "text": "argument that I want the behavior to get will have methods on it to allow the user, because the user is",
+    "start": "1488125",
+    "end": "1495083"
+  },
+  {
+    "text": "the one who provides the behavior to the cluster for like an entity. This second argument would be",
+    "start": "1495083",
+    "end": "1501250"
+  },
+  {
+    "text": "used by the user to do things like acknowledging or marking messages as processed in their",
+    "start": "1501250",
+    "end": "1508666"
+  },
+  {
+    "text": "behavior. And we can also attach information about the",
+    "start": "1508666",
+    "end": "1514041"
+  },
+  {
+    "text": "entity to this argument. So things like, I don't know, the address",
+    "start": "1514041",
+    "end": "1519708"
+  },
+  {
+    "text": "of the entity, the ID of the entity, the entity type. So we could",
+    "start": "1519708",
+    "end": "1525333"
+  },
+  {
+    "text": "attach like various metadata to this. I don't really know what to call it yet, though. So we're just gonna leave that as a",
+    "start": "1525333",
+    "end": "1531750"
+  },
+  {
+    "text": "to do for the moment.",
+    "start": "1531750",
+    "end": "1533666"
+  },
+  {
+    "text": "Implement.",
+    "start": "1536958",
+    "end": "1537625"
+  },
+  {
+    "text": "And then we can use effect dot ensuring. Basically, if the behavior exits for some reason, so if the",
+    "start": "1553208",
+    "end": "1561083"
+  },
+  {
+    "text": "user interrupts the behavior with like an effect dot interrupt or",
+    "start": "1561291",
+    "end": "1566583"
+  },
+  {
+    "text": "whatever, if the behavior exits, we want to close the,",
+    "start": "1566583",
+    "end": "1575666"
+  },
+  {
+    "text": "we want to close the scope.",
+    "start": "1576041",
+    "end": "1579958"
+  },
+  {
+    "text": "And then we can just give it exit dot void is the value that we're closing it with.",
+    "start": "1584916",
+    "end": "1589458"
+  },
+  {
+    "text": "And then we can fork this behavior into the scope as well. So we have, again,",
+    "start": "1590958",
+    "end": "1598416"
+  },
+  {
+    "text": "this is a little bit of scope section. But the idea here is behavior is a user defined",
+    "start": "1598416",
+    "end": "1606375"
+  },
+  {
+    "text": "construct, right? So like, when you're defining an entity, you're",
+    "start": "1606375",
+    "end": "1612458"
+  },
+  {
+    "text": "going to give that entity some behavior. So when you do like in pseudo code, we",
+    "start": "1612458",
+    "end": "1620541"
+  },
+  {
+    "text": "just imitate this for a second.",
+    "start": "1620541",
+    "end": "1624250"
+  },
+  {
+    "text": "Somewhere in like an effect dot gen when you're appropriate, when you're defining what happens with your cluster doesn't have to be an",
+    "start": "1627583",
+    "end": "1635875"
+  },
+  {
+    "text": "effect dot gen. But I guess it's a little easier to read imperatively, you would do something like",
+    "start": "1635875",
+    "end": "1641833"
+  },
+  {
+    "text": "charting dot register entity, you know, my cool entity.",
+    "start": "1641833",
+    "end": "1648208"
+  },
+  {
+    "text": "And then you'd probably provide the behavior here. Right. And behavior would just be some",
+    "start": "1649250",
+    "end": "1656416"
+  },
+  {
+    "text": "function that has the same signature that we've defined up here, where it gets a mailbox and it's",
+    "start": "1656416",
+    "end": "1664083"
+  },
+  {
+    "text": "also going to get that second parameter. And so you can do things. The behavior",
+    "start": "1664083",
+    "end": "1671333"
+  },
+  {
+    "text": "has full control over like what happens in here. So you would do like, you know, mailbox dot",
+    "start": "1671333",
+    "end": "1678083"
+  },
+  {
+    "text": "take that pipe, you know, effect dot flat map message.",
+    "start": "1678083",
+    "end": "1685291"
+  },
+  {
+    "text": "And then you would do some stuff like actually process the message,",
+    "start": "1685416",
+    "end": "1690750"
+  },
+  {
+    "text": "you know, maybe like switching over the message dot tag or something.",
+    "start": "1691750",
+    "end": "1695833"
+  },
+  {
+    "text": "And then you can, again, you have full control over how fast you",
+    "start": "1697041",
+    "end": "1702625"
+  },
+  {
+    "text": "pull messages out of the mailbox. So you could do this effect forever. You could do it on a particular schedule or whatever.",
+    "start": "1702625",
+    "end": "1711916"
+  },
+  {
+    "text": "But you have full control in the behavior of how fast you're pulling messages. And then",
+    "start": "1711916",
+    "end": "1717291"
+  },
+  {
+    "text": "similarly, the second parameter here, the entity, once you've processed a message, like say we have",
+    "start": "1717291",
+    "end": "1724041"
+  },
+  {
+    "text": "a message type that's like, I don't know, maybe we have a maybe my cool entity is a counter",
+    "start": "1724041",
+    "end": "1729833"
+  },
+  {
+    "text": "and we have like an increment. We would do something like entity dot",
+    "start": "1729833",
+    "end": "1736166"
+  },
+  {
+    "text": "acknowledge. We could acknowledge messages with this",
+    "start": "1738833",
+    "end": "1744791"
+  },
+  {
+    "text": "entity dot acknowledge thingy. We could also do entity that process or mark processed.",
+    "start": "1744791",
+    "end": "1750291"
+  },
+  {
+    "text": "Whatever makes the most sense. And then",
+    "start": "1753333",
+    "end": "1756166"
+  },
+  {
+    "text": "you know, the point being here is like the idea is to give the",
+    "start": "1758666",
+    "end": "1765500"
+  },
+  {
+    "text": "user as much control as we can inside the behavior. So inside of behavior, you would be, again, full",
+    "start": "1765500",
+    "end": "1771333"
+  },
+  {
+    "text": "control over how fast you take messages.  And you have the ability to acknowledge and process messages.",
+    "start": "1771333",
+    "end": "1778916"
+  },
+  {
+    "text": "And eventually these, you know, entity dot acknowledge entity dot mark process.",
+    "start": "1778916",
+    "end": "1784541"
+  },
+  {
+    "text": "Eventually, these like acknowledge and",
+    "start": "1784541",
+    "end": "1790833"
+  },
+  {
+    "text": "process APIs that the user gets access to in the behaviors would be connected to back to like the",
+    "start": "1790833",
+    "end": "1796000"
+  },
+  {
+    "text": "client actually calling the cluster with that message. So if you imagine that you have a client",
+    "start": "1796000",
+    "end": "1802250"
+  },
+  {
+    "text": "where somewhere else you're doing like sharding dot",
+    "start": "1802250",
+    "end": "1807750"
+  },
+  {
+    "text": "messenger, right, to get a messenger. And",
+    "start": "1808333",
+    "end": "1815000"
+  },
+  {
+    "text": "then you do messenger dot tell some message.",
+    "start": "1815000",
+    "end": "1820041"
+  },
+  {
+    "text": "Right. When you actually tell the cluster",
+    "start": "1820708",
+    "end": "1828083"
+  },
+  {
+    "text": "message, you don't need to wait for the cluster to actually process that message or like fully process that",
+    "start": "1828083",
+    "end": "1834041"
+  },
+  {
+    "text": "message. You only want to know if the cluster is going to acknowledge that message. So when the entity actually if that's the case,",
+    "start": "1834041",
+    "end": "1841500"
+  },
+  {
+    "text": "and the entity like actually acknowledges a message, that would be when the client would",
+    "start": "1841750",
+    "end": "1848625"
+  },
+  {
+    "text": "actually get the response, hey, we received your message.",
+    "start": "1848625",
+    "end": "1851000"
+  },
+  {
+    "text": "And that would be the like kind of the idea. The other way we could go about doing this is instead of allowing the entity to",
+    "start": "1855916",
+    "end": "1861875"
+  },
+  {
+    "text": "acknowledge the message. And that be the response that the client gets. We could say that as soon as",
+    "start": "1861875",
+    "end": "1869791"
+  },
+  {
+    "text": "the message is persisted into cluster storage, that's considered having acknowledged",
+    "start": "1869791",
+    "end": "1876208"
+  },
+  {
+    "text": "that the cluster received the message. That probably makes more sense semantically. So I guess like in this case, the ask",
+    "start": "1876208",
+    "end": "1883833"
+  },
+  {
+    "text": "API, when you ask in cluster parlance, that means you actually want to",
+    "start": "1883833",
+    "end": "1889500"
+  },
+  {
+    "text": "wait, you're asking the cluster for a response to this message. And in that case, when you mark",
+    "start": "1889500",
+    "end": "1897000"
+  },
+  {
+    "text": "a messages process with some result, that result is what the client would then get back. So a little",
+    "start": "1897000",
+    "end": "1904416"
+  },
+  {
+    "text": "bit of a long-winded explanation of what's going on here. But that is the idea with the behavior is",
+    "start": "1904416",
+    "end": "1910958"
+  },
+  {
+    "text": "that the behavior gets access to the mailbox, as well as some object that we have yet",
+    "start": "1910958",
+    "end": "1916750"
+  },
+  {
+    "text": "to name that probably for the moment will just allow acknowledging messages and then maybe",
+    "start": "1916750",
+    "end": "1923291"
+  },
+  {
+    "text": "provide some entity metadata like the address and whatever. And then we spork that behavior into a",
+    "start": "1923291",
+    "end": "1932833"
+  },
+  {
+    "text": "fiber that's attached to the entity scope. And then this effect on ensuring basically allows",
+    "start": "1932833",
+    "end": "1939583"
+  },
+  {
+    "text": "us to close the entity scope if the behavior exits for some reason. So whether the behavior",
+    "start": "1939583",
+    "end": "1945083"
+  },
+  {
+    "text": "exits with a success or a failure or is interrupted or whatever, we can be sure that the scope is going to",
+    "start": "1945083",
+    "end": "1950500"
+  },
+  {
+    "text": "be closed by having this ensuring block in here.",
+    "start": "1950500",
+    "end": "1955041"
+  },
+  {
+    "text": "Hopefully that makes sense. Um, why am I getting so many type of,",
+    "start": "1964750",
+    "end": "1969916"
+  },
+  {
+    "text": "oh, it's because I don't, yeah. Okay, so that handles the behavior.",
+    "start": "1969916",
+    "end": "1975833"
+  },
+  {
+    "text": "But we still have a few other things that we want to do here eventually. So to do is",
+    "start": "1977875",
+    "end": "1982625"
+  },
+  {
+    "text": "one is we want to have the ability for the cluster to provide you with metrics by default.",
+    "start": "1986583",
+    "end": "1993000"
+  },
+  {
+    "text": "Um, so we can, over here you can see I'm actually handling like a,",
+    "start": "1993666",
+    "end": "1999208"
+  },
+  {
+    "text": "a gauge that's created to basically increment and decrement. Um, so when the entity is",
+    "start": "1999208",
+    "end": "2005875"
+  },
+  {
+    "text": "actually provisioned, we increment the gauge to basically like show you how",
+    "start": "2005875",
+    "end": "2011791"
+  },
+  {
+    "text": "many entities of a particular type are actually registered. And then the finalizer is basically decrementing that",
+    "start": "2011791",
+    "end": "2017416"
+  },
+  {
+    "text": "gauge. Um, I have to create a PR in effect to add the decrement APIs,",
+    "start": "2017416",
+    "end": "2023333"
+  },
+  {
+    "text": "but for now we just increment by the negative value. Um,",
+    "start": "2023541",
+    "end": "2028125"
+  },
+  {
+    "text": "but yeah, so, um, update, uh, or add",
+    "start": "2030250",
+    "end": "2035916"
+  },
+  {
+    "text": "metric bookkeeping bookkeeping here. Um, and we probably",
+    "start": "2035916",
+    "end": "2043625"
+  },
+  {
+    "text": "want to do it in this order too. So, uh, the other thing that we have here is, um, we want to add something that's",
+    "start": "2043625",
+    "end": "2055625"
+  },
+  {
+    "text": "tracking like the last time an entity received a",
+    "start": "2055625",
+    "end": "2061916"
+  },
+  {
+    "text": "particular message. So, um, sorry, I'm particular message. So, um, sorry, I'm",
+    "start": "2061916",
+    "end": "2069625"
+  },
+  {
+    "text": "reading something Mattia said. How do you plan the behavior to reach for additional data added by the persistence or cluster? Uh, not sure",
+    "start": "2069625",
+    "end": "2078500"
+  },
+  {
+    "text": "yet Mattia. I don't know yet. Um, probably the mailbox instead of being a mailbox of messages",
+    "start": "2078500",
+    "end": "2084916"
+  },
+  {
+    "text": "will be a mailbox of like some sort of like entry or something like that. Um,",
+    "start": "2084916",
+    "end": "2090875"
+  },
+  {
+    "text": "you can actually see in my previous implementation of the entity manager, uh,",
+    "start": "2091250",
+    "end": "2097583"
+  },
+  {
+    "text": "somewhere  I may have removed it. No,",
+    "start": "2097583",
+    "end": "2104291"
+  },
+  {
+    "text": "here, uh, the old version of mailbox that I had coded had this concept of like entries where all of",
+    "start": "2104291",
+    "end": "2112125"
+  },
+  {
+    "text": "like the metadata, um, that comes back from cluster storage. So like this sequence number of",
+    "start": "2112125",
+    "end": "2118625"
+  },
+  {
+    "text": "the message and whatever, um, are basically added to the mailbox as message entries. So you",
+    "start": "2118625",
+    "end": "2125708"
+  },
+  {
+    "text": "get the message and then all the metadata as well. Um, but I'm sort of ignoring that for now. Um,",
+    "start": "2125708",
+    "end": "2132583"
+  },
+  {
+    "text": "so anyways, getting back to the point I was making the other thing",
+    "start": "2135375",
+    "end": "2141750"
+  },
+  {
+    "text": "that we want to be able to do here is to track the last time an entity, um, was active. And we've",
+    "start": "2141750",
+    "end": "2149416"
+  },
+  {
+    "text": "discussed this at length. Shardcake, um, the concept of like active",
+    "start": "2149416",
+    "end": "2155541"
+  },
+  {
+    "text": "and shardcake is based on the last time an entity, um, received a message. But I think we",
+    "start": "2155541",
+    "end": "2164916"
+  },
+  {
+    "text": "decided for our implementation, the last time an entity was active, um,",
+    "start": "2164916",
+    "end": "2173291"
+  },
+  {
+    "text": "should be based on the last time a message was actually processed, not the last time a message was, uh, received. So I'm",
+    "start": "2173291",
+    "end": "2181791"
+  },
+  {
+    "text": "just going to add this to do in here for myself as well. So we need",
+    "start": "2181791",
+    "end": "2187541"
+  },
+  {
+    "text": "to update the last active, um, time based on the last message",
+    "start": "2187541",
+    "end": "2193041"
+  },
+  {
+    "text": "processed, not the last message received, because in the",
+    "start": "2193291",
+    "end": "2199625"
+  },
+  {
+    "text": "previous implementation, I was adding, I was basically doing the same implementation of shardcake where",
+    "start": "2199625",
+    "end": "2206083"
+  },
+  {
+    "text": "the last time, if we receive a message, we update the last active time. Um,",
+    "start": "2206791",
+    "end": "2212416"
+  },
+  {
+    "text": "but we don't want to do that. So I think probably what'll end up happening here is the management of like this last active time will be",
+    "start": "2215250",
+    "end": "2222875"
+  },
+  {
+    "text": "done in the method, like the Mark processed method, of whatever this object is going to",
+    "start": "2222875",
+    "end": "2229000"
+  },
+  {
+    "text": "eventually be called. It'll make more sense when I actually get to implementing it.",
+    "start": "2229000",
+    "end": "2234291"
+  },
+  {
+    "text": "Um, then what was the last thing I did here?",
+    "start": "2236333",
+    "end": "2238291"
+  },
+  {
+    "text": "Oh yeah, we're moving from the scope. So because we're running the finalizers of",
+    "start": "2242958",
+    "end": "2249916"
+  },
+  {
+    "text": "like, maybe it's not super clear from the little pipeline that we're setting up here.",
+    "start": "2250875",
+    "end": "2255583"
+  },
+  {
+    "text": "But the finalizers that we're registering to this scope. So",
+    "start": "2257083",
+    "end": "2262333"
+  },
+  {
+    "text": "whenever we do like a scope.ad finalizer, these finalizers will be run in the reverse order that",
+    "start": "2262333",
+    "end": "2268708"
+  },
+  {
+    "text": "they were attached. So, or in the order, the last finalizer attached",
+    "start": "2268708",
+    "end": "2274500"
+  },
+  {
+    "text": "will be the first finalizer, run. So,",
+    "start": "2274500",
+    "end": "2280541"
+  },
+  {
+    "text": "the first like finalizer that we probably want to run when the, when the, if the,",
+    "start": "2280541",
+    "end": "2289333"
+  },
+  {
+    "text": "if the entity's scope is closed, the first finalizer that we want to run is probably the one that removes the entity from the,",
+    "start": "2289750",
+    "end": "2298500"
+  },
+  {
+    "text": "the entity map. So we can do that here with effect dot tap scope.",
+    "start": "2299791",
+    "end": "2310458"
+  },
+  {
+    "text": "synchronized draft dot update.",
+    "start": "2314500",
+    "end": "2316500"
+  },
+  {
+    "text": "Hash map dot remove. So basically again,  finalizer.",
+    "start": "2321208",
+    "end": "2330208"
+  },
+  {
+    "text": "If this scope is closed, we need to make sure that this entity is like removed from the entity,",
+    "start": "2339333",
+    "end": "2345958"
+  },
+  {
+    "text": "from the entity map. So that like, if for some reason we end up in a situation,",
+    "start": "2347000",
+    "end": "2352875"
+  },
+  {
+    "text": "we shouldn't end up with this situation, but like if we end up in a situation where,",
+    "start": "2353125",
+    "end": "2358791"
+  },
+  {
+    "text": "we attempt to access that",
+    "start": "2358916",
+    "end": "2364791"
+  },
+  {
+    "text": "address, like we just, we know that we've, the first thing we've done when we attempt to close, when we close that",
+    "start": "2364791",
+    "end": "2370541"
+  },
+  {
+    "text": "scope is remove it, from the map. Okay. And then we need",
+    "start": "2370541",
+    "end": "2377625"
+  },
+  {
+    "text": "to actually return the state that we've built up here. So effect dot map.",
+    "start": "2377625",
+    "end": "2385250"
+  },
+  {
+    "text": "The mailbox scope.",
+    "start": "2387791",
+    "end": "2389708"
+  },
+  {
+    "text": "Um, I'm going to do this and then eventually",
+    "start": "2394208",
+    "end": "2400958"
+  },
+  {
+    "text": "then might remove the,",
+    "start": "2400958",
+    "end": "2402333"
+  },
+  {
+    "text": "So, you can move these two here.",
+    "start": "2432000",
+    "end": "2435208"
+  },
+  {
+    "text": "So again, the last, the final step here is like, since we're at",
+    "start": "2437833",
+    "end": "2443333"
+  },
+  {
+    "text": "the very beginning, we're",
+    "start": "2443333",
+    "end": "2444583"
+  },
+  {
+    "text": "since at the very beginning still running this as like a modification",
+    "start": "2449666",
+    "end": "2454875"
+  },
+  {
+    "text": "of the entities map, the final thing that we need to do is actually return what needs to happen as a",
+    "start": "2454875",
+    "end": "2460583"
+  },
+  {
+    "text": "part of that modification. So the value that we want to return is the state that we've created. And here, the state is just the closeable",
+    "start": "2460583",
+    "end": "2467833"
+  },
+  {
+    "text": "scope and the mailbox. And again, the scope is closeable because it was forked off of",
+    "start": "2467833",
+    "end": "2474000"
+  },
+  {
+    "text": "the entity manager scope. Just accessing a scope for those who are",
+    "start": "2474000",
+    "end": "2481541"
+  },
+  {
+    "text": "interested, you get a read-only version of the scope. You can like add final,",
+    "start": "2481541",
+    "end": "2486666"
+  },
+  {
+    "text": "it's not really read-only. It's a non-closeable scope. You don't have the ability to call scope.close.",
+    "start": "2486666",
+    "end": "2491958"
+  },
+  {
+    "text": "But if you want to be able to manually close a scope, if you fork a scope or create one,",
+    "start": "2493916",
+    "end": "2500000"
+  },
+  {
+    "text": "I think you'll end up with a closeable version of the scope. And in this case, since we already, we",
+    "start": "2500458",
+    "end": "2506916"
+  },
+  {
+    "text": "want to have the scope forked off the manager scope and we end up with a closeable scope anyways, so we're in good shape there.",
+    "start": "2506916",
+    "end": "2514125"
+  },
+  {
+    "text": "Exit is also imported as type Y.",
+    "start": "2515958",
+    "end": "2520708"
+  },
+  {
+    "text": "Or is not imported at all. Great.",
+    "start": "2521416",
+    "end": "2523000"
+  },
+  {
+    "text": "Cool. So we make sure that the entity gets removed when the scope is closed.",
+    "start": "2532416",
+    "end": "2536916"
+  },
+  {
+    "text": "And then we return the state.",
+    "start": "2537625",
+    "end": "2541833"
+  },
+  {
+    "text": "And we also update our hash map to include the mapping of",
+    "start": "2542916",
+    "end": "2549000"
+  },
+  {
+    "text": "the address that we received to the state. So all of this basically is to be able to",
+    "start": "2549000",
+    "end": "2559458"
+  },
+  {
+    "text": "give us an entity state that we can then use to communicate with an entity.",
+    "start": "2559458",
+    "end": "2564750"
+  },
+  {
+    "text": "So if the entity already exists, we return the state right away. Otherwise we do all the stuff that we need to do to actually",
+    "start": "2564750",
+    "end": "2571375"
+  },
+  {
+    "text": "provision and manage that entity. Cool.",
+    "start": "2571375",
+    "end": "2577291"
+  },
+  {
+    "text": "Let's now think about send",
+    "start": "2581000",
+    "end": "2584000"
+  },
+  {
+    "text": "we're still need to be able to decode an envelope",
+    "start": "2591500",
+    "end": "2594500"
+  },
+  {
+    "text": "And we're going to use decode unknown because we don't, I mean, we sort of know the shape of what's coming in, but we, the message",
+    "start": "2613416",
+    "end": "2620333"
+  },
+  {
+    "text": "that's inside is an unknown. So I'll show you folks the encoded, actually I can just do it now, what envelope.encoded",
+    "start": "2620333",
+    "end": "2627708"
+  },
+  {
+    "text": "looks like. So the encoded envelope basically has the",
+    "start": "2627708",
+    "end": "2633541"
+  },
+  {
+    "text": "encoded version of the address, which is just the shard ID, the entity type and the",
+    "start": "2633541",
+    "end": "2641750"
+  },
+  {
+    "text": "entity ID as their raw values. And then the message is an unknown type",
+    "start": "2641750",
+    "end": "2647416"
+  },
+  {
+    "text": "in this case when we first get it. And in a previous episode, I think, I",
+    "start": "2647416",
+    "end": "2656458"
+  },
+  {
+    "text": "think I did this like off stream, so maybe I'll just note this, but in a previous episode, we encoded",
+    "start": "2656458",
+    "end": "2661791"
+  },
+  {
+    "text": "envelope as a serializable thing.",
+    "start": "2661791",
+    "end": "2664708"
+  },
+  {
+    "text": "But thinking further about this, like we basically implemented the serializable interface for envelope, but in thinking further",
+    "start": "2666916",
+    "end": "2674208"
+  },
+  {
+    "text": "about it, envelope's not really serializable because once, I mean, it is, but once you",
+    "start": "2674208",
+    "end": "2680416"
+  },
+  {
+    "text": "serialize an envelope, when you set transmitted over the wire and it's received by whatever",
+    "start": "2680416",
+    "end": "2686583"
+  },
+  {
+    "text": "sharding entity manager, whatever, you can't deserialize the envelope with itself because the",
+    "start": "2686583",
+    "end": "2692458"
+  },
+  {
+    "text": "message is unknown at that point. You can't like reconstruct the schema for",
+    "start": "2692458",
+    "end": "2700333"
+  },
+  {
+    "text": "that message because the schema is not going over the wire. We need to find the correct entity first",
+    "start": "2700333",
+    "end": "2705833"
+  },
+  {
+    "text": "and then use the entity's schema to decode that message. So envelope, it didn't really make sense",
+    "start": "2705833",
+    "end": "2712416"
+  },
+  {
+    "text": "to implement envelope as a serializable thing. So instead, I have basically just added a",
+    "start": "2712416",
+    "end": "2722000"
+  },
+  {
+    "text": "serialize method here, which just encodes",
+    "start": "2722000",
+    "end": "2726916"
+  },
+  {
+    "text": "an envelope into its encoded version, creates a little struct internally, and then encodes",
+    "start": "2728458",
+    "end": "2734375"
+  },
+  {
+    "text": "the envelope. And then to deserialize the envelope, we",
+    "start": "2734375",
+    "end": "2740125"
+  },
+  {
+    "text": "need to have access to the entity, which we do in the entity manager. So entity manager.",
+    "start": "2740125",
+    "end": "2748458"
+  },
+  {
+    "text": "So here we can say schema.struct.",
+    "start": "2751500",
+    "end": "2755166"
+  },
+  {
+    "text": "It's basically the inverse of what's happening in the serialize method I showed you folks",
+    "start": "2756916",
+    "end": "2761958"
+  },
+  {
+    "text": "in the envelope module. But again, because like this has gone over the wire and envelope was fully encoded, I",
+    "start": "2761958",
+    "end": "2768125"
+  },
+  {
+    "text": "mean, the message was fully encoded. We don't really have the ability to reconstruct the message without knowing",
+    "start": "2768125",
+    "end": "2774708"
+  },
+  {
+    "text": "the entities schema. But now since we're in",
+    "start": "2774708",
+    "end": "2779875"
+  },
+  {
+    "text": "the manager, we can do that. So address, entity address,",
+    "start": "2779875",
+    "end": "2783416"
+  },
+  {
+    "text": "and message entity.schema. This entity is the one that the entity",
+    "start": "2785458",
+    "end": "2791833"
+  },
+  {
+    "text": "manager gets to manage. So entities being like user to do whatever.",
+    "start": "2791833",
+    "end": "2798458"
+  },
+  {
+    "text": "They all have their own schema. And then we can use that to decode the message of an envelope.",
+    "start": "2798458",
+    "end": "2805958"
+  },
+  {
+    "text": "So when we actually try to send an envelope, envelope.encoded, to an entity manager, we",
+    "start": "2807708",
+    "end": "2819833"
+  },
+  {
+    "text": "can return-- the first thing we do is we try to decode the envelope.",
+    "start": "2819875",
+    "end": "2823708"
+  },
+  {
+    "text": "We can again use these kind of like bind APIs if you're useful.",
+    "start": "2828375",
+    "end": "2831083"
+  },
+  {
+    "text": "Envelope. Bind entry.",
+    "start": "2833416",
+    "end": "2838000"
+  },
+  {
+    "text": "So again, the API of the storage still",
+    "start": "2839625",
+    "end": "2844833"
+  },
+  {
+    "text": "needs a little bit of refinement. But storage.save message.",
+    "start": "2844833",
+    "end": "2851208"
+  },
+  {
+    "text": "And we need access to mail lock storage.",
+    "start": "2853625",
+    "end": "2855958"
+  },
+  {
+    "text": "Entering all mail box storage.",
+    "start": "2862833",
+    "end": "2865041"
+  },
+  {
+    "text": "And this internal prefix that I use is just, I don't know, a convention that I came up",
+    "start": "2876375",
+    "end": "2882041"
+  },
+  {
+    "text": "with for knowing when I'm in a module like this, if I'm importing something from one of our internal interfaces-- I mean,",
+    "start": "2882083",
+    "end": "2889458"
+  },
+  {
+    "text": "internal files or from an external interface-- or external",
+    "start": "2889458",
+    "end": "2894750"
+  },
+  {
+    "text": "module, like something that's exposed to the user.",
+    "start": "2894833",
+    "end": "2897666"
+  },
+  {
+    "text": "Storage.save message. And this gets the envelope.address.",
+    "start": "2901083",
+    "end": "2907250"
+  },
+  {
+    "text": "And envelope.message.",
+    "start": "2908583",
+    "end": "2915166"
+  },
+  {
+    "text": "And this entry is like the old mailbox. So we had a mailbox implemented inside",
+    "start": "2929625",
+    "end": "2936083"
+  },
+  {
+    "text": "cluster that will be deleted shortly. But first, we need to figure out what the",
+    "start": "2936083",
+    "end": "2942416"
+  },
+  {
+    "text": "interface of an entry is going to look like. Probably to start with an entry coming back from storage.",
+    "start": "2942416",
+    "end": "2948416"
+  },
+  {
+    "text": "We'll just have the message and the sequence number.",
+    "start": "2950750",
+    "end": "2954833"
+  },
+  {
+    "text": "And then we can add additional metadata over time based on what makes sense.",
+    "start": "2957166",
+    "end": "2962875"
+  },
+  {
+    "text": "But the entry, probably for now, will just be like the-- like I said, the message sequence number and the message itself",
+    "start": "2963458",
+    "end": "2968500"
+  },
+  {
+    "text": "after it's saved to storage. Envelope.",
+    "start": "2968500",
+    "end": "2975208"
+  },
+  {
+    "text": "Send message to an entity. We'll basically do the same thing we did over here.",
+    "start": "2977750",
+    "end": "2985125"
+  },
+  {
+    "text": "Where envelope.address entry.",
+    "start": "2986958",
+    "end": "2994708"
+  },
+  {
+    "text": "Catch tags. So we want to remap some errors to our cluster domain.",
+    "start": "3001958",
+    "end": "3007666"
+  },
+  {
+    "text": "We want no such element exception, which happens, I think, from saving a message.",
+    "start": "3011666",
+    "end": "3018916"
+  },
+  {
+    "text": "Yeah. If we can't-- if the-- I think I forget",
+    "start": "3021291",
+    "end": "3027833"
+  },
+  {
+    "text": "exactly what causes this no such element exception. I can take a look in a second.",
+    "start": "3027833",
+    "end": "3033083"
+  },
+  {
+    "text": "It's when-- I think we get this when",
+    "start": "3038666",
+    "end": "3044250"
+  },
+  {
+    "text": "an entity is all-- or a message has already been saved. I think that's what causes this because",
+    "start": "3044250",
+    "end": "3051875"
+  },
+  {
+    "text": "we don't get anything back. So if save message returns a no such element exception, that means that it's",
+    "start": "3051875",
+    "end": "3058083"
+  },
+  {
+    "text": "already-- that message has already been persisted. And then a parse error.",
+    "start": "3058083",
+    "end": "3063875"
+  },
+  {
+    "text": "I'm not getting IntelliSense because we haven't functioned.",
+    "start": "3072958",
+    "end": "3076833"
+  },
+  {
+    "text": "And in this case, we have this malformed message type in our sharding exception.",
+    "start": "3093791",
+    "end": "3099625"
+  },
+  {
+    "text": "We can just give it the cause for now.",
+    "start": "3100750",
+    "end": "3103916"
+  },
+  {
+    "text": "And I think we still need-- Oh, yeah.",
+    "start": "3106958",
+    "end": "3114625"
+  },
+  {
+    "text": "We have to provide the context from the EntityManager because that is how we",
+    "start": "3115583",
+    "end": "3121208"
+  },
+  {
+    "text": "propagate context for a message. So let's actually do that. Let's do-- let's put the return type on",
+    "start": "3121208",
+    "end": "3129625"
+  },
+  {
+    "text": "this thing, or at least the beginnings of it. So EntityManager, we can--",
+    "start": "3129625",
+    "end": "3135666"
+  },
+  {
+    "text": "Read only, read only, send.",
+    "start": "3141916",
+    "end": "3144000"
+  },
+  {
+    "text": "Something.",
+    "start": "3152958",
+    "end": "3153291"
+  },
+  {
+    "text": "Let's do this for now. EntityManager, never-- and then this is",
+    "start": "3163083",
+    "end": "3172916"
+  },
+  {
+    "text": "going to need a scope. It's going to need the serializable.serializable.context.",
+    "start": "3172916",
+    "end": "3180375"
+  },
+  {
+    "text": "So I'm doing this basically to make sure that we propagate the context for a message into the EntityManager.",
+    "start": "3194833",
+    "end": "3203375"
+  },
+  {
+    "text": "It's essentially a way to make sure that we provide the context where we need it.",
+    "start": "3203666",
+    "end": "3210041"
+  },
+  {
+    "text": "Storage. Forget what else we need.",
+    "start": "3210750",
+    "end": "3215375"
+  },
+  {
+    "text": "Sharding.",
+    "start": "3218458",
+    "end": "3220583"
+  },
+  {
+    "text": "Okay. We'll flesh out this interface shortly.",
+    "start": "3232958",
+    "end": "3237458"
+  },
+  {
+    "text": "So what we need, const context equals--",
+    "start": "3246291",
+    "end": "3252125"
+  },
+  {
+    "text": "Let me just copy that and paste that here. We may need serializable with result",
+    "start": "3259125",
+    "end": "3267416"
+  },
+  {
+    "text": "context, but I don't know if it makes-- No, we don't. We need the context to",
+    "start": "3267416",
+    "end": "3273291"
+  },
+  {
+    "text": "serialize and deserialize a message. We do not need the context to create the result for a message.",
+    "start": "3273291",
+    "end": "3278666"
+  },
+  {
+    "text": "That context, if it makes sense even to provide-- to have that context anywhere,",
+    "start": "3279375",
+    "end": "3285125"
+  },
+  {
+    "text": "it would be on the behavior, not on the EntityManager. But the EntityManager base, it needs the cont--",
+    "start": "3286083",
+    "end": "3292291"
+  },
+  {
+    "text": "So because schemas can have an environment, we need to provide that environment somehow.",
+    "start": "3292291",
+    "end": "3299958"
+  },
+  {
+    "text": "And at this point, this decode envelope requires the context for",
+    "start": "3300958",
+    "end": "3309625"
+  },
+  {
+    "text": "deserializing our envelope. So in this way, we can propagate it to",
+    "start": "3309625",
+    "end": "3314833"
+  },
+  {
+    "text": "the point at which we create the EntityManager. Effect.provide context.",
+    "start": "3314833",
+    "end": "3320916"
+  },
+  {
+    "text": "And it probably makes more sense, instead of doing this, to--",
+    "start": "3322083",
+    "end": "3327166"
+  },
+  {
+    "text": "Let's do that instead. It probably makes more sense to extract a runtime,",
+    "start": "3327958",
+    "end": "3331583"
+  },
+  {
+    "text": "because then we'll get all of the runtime",
+    "start": "3333750",
+    "end": "3339458"
+  },
+  {
+    "text": "flags and fiber refs properly set. So let's do that instead, const runtime equals--",
+    "start": "3339458",
+    "end": "3346458"
+  },
+  {
+    "text": "serializable.serializable.context message.",
+    "start": "3352333",
+    "end": "3357416"
+  },
+  {
+    "text": "Let's get rid of that.",
+    "start": "3360000",
+    "end": "3360916"
+  },
+  {
+    "text": "I'm going to do this.",
+    "start": "3374958",
+    "end": "3376291"
+  },
+  {
+    "text": "I mean, we could do the runtime.",
+    "start": "3392708",
+    "end": "3396541"
+  },
+  {
+    "text": "We don't want to run this. We want to set this as the runtime. I just can't remember how to do it. So give me a second.",
+    "start": "3397958",
+    "end": "3403791"
+  },
+  {
+    "text": "See, even I have to look up the effect API docs.",
+    "start": "3406958",
+    "end": "3410500"
+  },
+  {
+    "text": "provide. I forget that provide also takes a runtime.",
+    "start": "3424250",
+    "end": "3430916"
+  },
+  {
+    "text": "All right, why does it shout at me? Cause has any type.",
+    "start": "3431833",
+    "end": "3436291"
+  },
+  {
+    "text": "Well, that's because there is no type for sendMessageToEntity, I think.",
+    "start": "3437750",
+    "end": "3443208"
+  },
+  {
+    "text": "Let's implement sendMessageToEntity. So this is where things will probably",
+    "start": "3450541",
+    "end": "3456500"
+  },
+  {
+    "text": "deviate slightly, because we don't need some of this stuff.",
+    "start": "3456500",
+    "end": "3461666"
+  },
+  {
+    "text": "So we can return get or create state for this address.",
+    "start": "3465458",
+    "end": "3470958"
+  },
+  {
+    "text": "The only thing we're going to have to think about here is what the consequences of removing this terminating state are.",
+    "start": "3513541",
+    "end": "3521541"
+  },
+  {
+    "text": "Not entirely sure, I think, what's going to end up happening with get or create state.",
+    "start": "3526833",
+    "end": "3530916"
+  },
+  {
+    "text": "The state is always going to be active because the second we close the scope for",
+    "start": "3540416",
+    "end": "3546083"
+  },
+  {
+    "text": "an entity, it's going to remove that entity from the active entity map.",
+    "start": "3546083",
+    "end": "3557625"
+  },
+  {
+    "text": "So I think we can just presume the happy path for a moment. And then we'll have to, I mean, when we",
+    "start": "3558958",
+    "end": "3564833"
+  },
+  {
+    "text": "get to the point of writing tests, we're going to need to test sending a message to an entity that we've terminated.",
+    "start": "3564833",
+    "end": "3569916"
+  },
+  {
+    "text": "But let's presume the happy path for the moment.",
+    "start": "3571375",
+    "end": "3575791"
+  },
+  {
+    "text": "So.",
+    "start": "3578750",
+    "end": "3579666"
+  },
+  {
+    "text": "We don't need to do this because, again,",
+    "start": "3585958",
+    "end": "3590875"
+  },
+  {
+    "text": "for us, the concept of last active is going to be based on acknowledgement of a message, not receipt of a message.",
+    "start": "3591291",
+    "end": "3597916"
+  },
+  {
+    "text": "So in this case, I think we can just literally forward state mailbox that offer the entry.",
+    "start": "3597958",
+    "end": "3606916"
+  },
+  {
+    "text": "This is going to be a type error at the moment, or it's not going to be a type error, but we need to add it to do to fix",
+    "start": "3608041",
+    "end": "3613833"
+  },
+  {
+    "text": "this because entry is typed as any right now. Implement.",
+    "start": "3613833",
+    "end": "3618500"
+  },
+  {
+    "text": "Entry.",
+    "start": "3621875",
+    "end": "3622416"
+  },
+  {
+    "text": "And then we probably still want to do an effect on catch.",
+    "start": "3629291",
+    "end": "3631541"
+  },
+  {
+    "text": "Send message to entity. So if there's if it fails, then we just repeat it after a delay.",
+    "start": "3638083",
+    "end": "3643166"
+  },
+  {
+    "text": "100 millis.",
+    "start": "3657958",
+    "end": "3659541"
+  },
+  {
+    "text": "Cool. And we can probably just move this up here.",
+    "start": "3687166",
+    "end": "3693500"
+  },
+  {
+    "text": "So now we actually have a type for this.",
+    "start": "3706666",
+    "end": "3713291"
+  },
+  {
+    "text": "Now we can add send envelope. Envelope dot included.",
+    "start": "3726000",
+    "end": "3731583"
+  },
+  {
+    "text": "Yeah. Right.",
+    "start": "3742625",
+    "end": "3745833"
+  },
+  {
+    "text": "Void or not managed by pod.",
+    "start": "3750750",
+    "end": "3757041"
+  },
+  {
+    "text": "Or malformed message.",
+    "start": "3758583",
+    "end": "3759416"
+  },
+  {
+    "text": "Yeah, I think this makes sense.",
+    "start": "3766083",
+    "end": "3767958"
+  },
+  {
+    "text": "So.",
+    "start": "3780125",
+    "end": "3780333"
+  },
+  {
+    "text": "Yeah, I think the next thing we can do is implement some of these stub types that we've left, like the entry type, which we",
+    "start": "3789583",
+    "end": "3798416"
+  },
+  {
+    "text": "probably should put into like the mailbox storage and delete the mailbox module",
+    "start": "3798416",
+    "end": "3803708"
+  },
+  {
+    "text": "since we don't need it anymore.",
+    "start": "3803708",
+    "end": "3805416"
+  },
+  {
+    "text": "And then also maybe like the maybe the behavior should get like three arguments. Maybe it should be like",
+    "start": "3821708",
+    "end": "3827416"
+  },
+  {
+    "text": "mailbox like message handlers.",
+    "start": "3827416",
+    "end": "3832958"
+  },
+  {
+    "text": "And handlers can basically have the same. Interface that we had for our.",
+    "start": "3835625",
+    "end": "3842500"
+  },
+  {
+    "text": "Okay. Same interface that we had for mailbox originally, which.",
+    "start": "3844916",
+    "end": "3851208"
+  },
+  {
+    "text": "Allowed for like. Both acknowledging a message and then it had some helper methods for like",
+    "start": "3854375",
+    "end": "3860875"
+  },
+  {
+    "text": "completing or acknowledging message messages.",
+    "start": "3860875",
+    "end": "3864125"
+  },
+  {
+    "text": "We can think about this a little more, but.",
+    "start": "3867791",
+    "end": "3869791"
+  },
+  {
+    "text": "The idea here was like. To have a similar interface as like the request type.",
+    "start": "3872916",
+    "end": "3880208"
+  },
+  {
+    "text": "In effect where there's just some helper methods that allow you to complete a request. Either with like an exit or with an",
+    "start": "3881375",
+    "end": "3888500"
+  },
+  {
+    "text": "effect or with the failure directly or with a success value directly.",
+    "start": "3888500",
+    "end": "3893500"
+  },
+  {
+    "text": "So maybe this like handlers thing would be that an object with those methods on it. And then we can have",
+    "start": "3895208",
+    "end": "3900750"
+  },
+  {
+    "text": "like a meta argument. Which maybe would have information about",
+    "start": "3900750",
+    "end": "3906833"
+  },
+  {
+    "text": "like the entity or info. Right. Which would be like entity information.",
+    "start": "3906833",
+    "end": "3911666"
+  },
+  {
+    "text": "But again we can think about that a little more for now I'd like to go to mailbox storage.",
+    "start": "3915458",
+    "end": "3920875"
+  },
+  {
+    "text": "And.",
+    "start": "3923000",
+    "end": "3923791"
+  },
+  {
+    "text": "So.",
+    "start": "3929833",
+    "end": "3929916"
+  },
+  {
+    "text": "Let's go take a look at the mailbox entry type I had implemented previously.",
+    "start": "3941333",
+    "end": "3944625"
+  },
+  {
+    "text": "So the mailbox entry. The shard ID and entity ID the entity",
+    "start": "3947833",
+    "end": "3953750"
+  },
+  {
+    "text": "type the message in the sequence sequence number all of which come back from the mailbox storage.",
+    "start": "3953750",
+    "end": "3960000"
+  },
+  {
+    "text": "I think this makes sense it's nice to have all this information coming back. So that when you pull.",
+    "start": "3960791",
+    "end": "3966375"
+  },
+  {
+    "text": "Like when a behavior pulls. A message out of mailbox storage.",
+    "start": "3967458",
+    "end": "3972916"
+  },
+  {
+    "text": "You get access to all of this information then we actually don't need. That whole like meta argument thing I was",
+    "start": "3972958",
+    "end": "3979041"
+  },
+  {
+    "text": "talking about or that info argument I was talking about you already have it on each entry that you pull out of the mailbox.",
+    "start": "3979041",
+    "end": "3984416"
+  },
+  {
+    "text": "Kind of nice.",
+    "start": "3986208",
+    "end": "3986625"
+  },
+  {
+    "text": "So.",
+    "start": "3996625",
+    "end": "3996958"
+  },
+  {
+    "text": "Yeah I think this is good for now. And probably improve naming and stuff later.",
+    "start": "4047500",
+    "end": "4053416"
+  },
+  {
+    "text": "Let's fix the internal mailbox storage.",
+    "start": "4054916",
+    "end": "4057708"
+  },
+  {
+    "text": "Entry.",
+    "start": "4060250",
+    "end": "4060666"
+  },
+  {
+    "text": "So save message is still a problem.",
+    "start": "4122333",
+    "end": "4124583"
+  },
+  {
+    "text": "Oh the context serializable. And.",
+    "start": "4189250",
+    "end": "4193791"
+  },
+  {
+    "text": "I don't think.",
+    "start": "4198958",
+    "end": "4199916"
+  },
+  {
+    "text": "I don't think we need the with result context or do we. Save message.",
+    "start": "4205708",
+    "end": "4211291"
+  },
+  {
+    "text": "No.",
+    "start": "4214958",
+    "end": "4215750"
+  },
+  {
+    "text": "No we do not. Because we're just.",
+    "start": "4220125",
+    "end": "4224416"
+  },
+  {
+    "text": "We're serializing the message. Do you serializing the message.",
+    "start": "4234083",
+    "end": "4238958"
+  },
+  {
+    "text": "Yeah we need to revisit close the mailbox storage at some point but I'm pretty sure this can just be serializable.",
+    "start": "4250208",
+    "end": "4256125"
+  },
+  {
+    "text": "Context.",
+    "start": "4258291",
+    "end": "4258583"
+  },
+  {
+    "text": "Oh.",
+    "start": "4277958",
+    "end": "4278291"
+  },
+  {
+    "text": "I know what this is.",
+    "start": "4287958",
+    "end": "4289541"
+  },
+  {
+    "text": "We need to decide what to do in this case.",
+    "start": "4297458",
+    "end": "4299416"
+  },
+  {
+    "text": "The other thing is I need to go through mailbox storage and figure out if we are properly mapping errors to like malformed",
+    "start": "4312458",
+    "end": "4319250"
+  },
+  {
+    "text": "or persistence errors in the correct places. But I haven't really spent a ton more",
+    "start": "4319250",
+    "end": "4324833"
+  },
+  {
+    "text": "time on mailbox storage. So right now we're focusing on the entity manager.",
+    "start": "4324833",
+    "end": "4329666"
+  },
+  {
+    "text": "So. OK. So mailbox. Storage entry.",
+    "start": "4330250",
+    "end": "4337875"
+  },
+  {
+    "text": "Message. And then.",
+    "start": "4340750",
+    "end": "4346541"
+  },
+  {
+    "text": "The mailbox.",
+    "start": "4348333",
+    "end": "4350000"
+  },
+  {
+    "text": "Maybe actually we can just make this a little bit easier  for ourselves and do this.",
+    "start": "4370041",
+    "end": "4373666"
+  },
+  {
+    "text": "And obviously like behavior also needs its types fixed because technically this",
+    "start": "4410375",
+    "end": "4416875"
+  },
+  {
+    "text": "is where we would need the serializable dot serializable with results context.",
+    "start": "4416875",
+    "end": "4422291"
+  },
+  {
+    "text": "For the message.",
+    "start": "4423958",
+    "end": "4424875"
+  },
+  {
+    "text": "But I'm not entirely sure if never is correct here either.",
+    "start": "4435750",
+    "end": "4438333"
+  },
+  {
+    "text": "So we'll see.",
+    "start": "4441666",
+    "end": "4442041"
+  },
+  {
+    "text": "For now let's go back to just ignoring the context.",
+    "start": "4452083",
+    "end": "4455333"
+  },
+  {
+    "text": "So at least we've now got mailbox storage entries coming into our behaviors.",
+    "start": "4471125",
+    "end": "4477875"
+  },
+  {
+    "text": "The next thing that might make sense for us to do is implement these like handler things that we were talking about.",
+    "start": "4483458",
+    "end": "4489375"
+  },
+  {
+    "text": "These message handlers.",
+    "start": "4489375",
+    "end": "4490333"
+  },
+  {
+    "text": "But I'm not entirely sure. What that will look like and.",
+    "start": "4498875",
+    "end": "4503041"
+  },
+  {
+    "text": "Probably just going to be like a. Object of methods.",
+    "start": "4506666",
+    "end": "4511541"
+  },
+  {
+    "text": "That the user can call similar to what I showed before. To either like process a message either",
+    "start": "4513083",
+    "end": "4520541"
+  },
+  {
+    "text": "directly with a value or with an error or.",
+    "start": "4520541",
+    "end": "4523750"
+  },
+  {
+    "text": "Yeah.",
+    "start": "4525875",
+    "end": "4525958"
+  },
+  {
+    "text": "And we also need to look into this last act of time thing but can't really do this last act of time",
+    "start": "4549416",
+    "end": "4554916"
+  },
+  {
+    "text": "thing until we implement. This because the bookkeeping of last act",
+    "start": "4554916",
+    "end": "4560958"
+  },
+  {
+    "text": "of time has to happen. Inside this like object.",
+    "start": "4560958",
+    "end": "4564833"
+  },
+  {
+    "text": "So maybe we can do like message.",
+    "start": "4567541",
+    "end": "4569791"
+  },
+  {
+    "text": "Create.",
+    "start": "4573000",
+    "end": "4573708"
+  },
+  {
+    "text": "Let's define what message handlers is going to look like first. We'll do it here but we need to move it to the.",
+    "start": "4587833",
+    "end": "4593583"
+  },
+  {
+    "text": "We're going to need to move this to the. External interface.",
+    "start": "4598916",
+    "end": "4604458"
+  },
+  {
+    "text": "At some point. Let's go back to.",
+    "start": "4605583",
+    "end": "4608916"
+  },
+  {
+    "text": "And actually we can look at the internal implementation because there's probably more stuff there.",
+    "start": "4614750",
+    "end": "4620333"
+  },
+  {
+    "text": "Yeah. So this is like. Where we would grab take mailbox storage",
+    "start": "4622416",
+    "end": "4628125"
+  },
+  {
+    "text": "update the message like do all of that stuff. All of the bookkeeping inside store in storage and with last act of time.",
+    "start": "4628125",
+    "end": "4635166"
+  },
+  {
+    "text": "And the reason why by the way we need this like last concept of last act of time is because the final piece of the",
+    "start": "4642166",
+    "end": "4647916"
+  },
+  {
+    "text": "puzzle related to entity termination is.",
+    "start": "4647916",
+    "end": "4650958"
+  },
+  {
+    "text": "That we're eventually going to. Have a fiber that we spin up that tracks",
+    "start": "4654208",
+    "end": "4661416"
+  },
+  {
+    "text": "whether or not the entity should be terminated based on its like time to live. So when you actually create an entity you",
+    "start": "4661416",
+    "end": "4667958"
+  },
+  {
+    "text": "can say how long it should be idle for before it terminates itself.",
+    "start": "4667958",
+    "end": "4672125"
+  },
+  {
+    "text": "So you can say OK if this entity is idle for 10 minutes doesn't process any message in 10 minutes.",
+    "start": "4673583",
+    "end": "4679541"
+  },
+  {
+    "text": "Go ahead and terminate it. And that happens when you actually register an entity so you do like.",
+    "start": "4679541",
+    "end": "4685250"
+  },
+  {
+    "text": "Sharding that register entity do the entity the behavior and then there's options and then those options you have the ability to define",
+    "start": "4686083",
+    "end": "4691625"
+  },
+  {
+    "text": "the idle time to live. Which is just a duration and so inside the entity manager we need to spin up a",
+    "start": "4691625",
+    "end": "4698416"
+  },
+  {
+    "text": "fiber for every entity. That tracks.",
+    "start": "4698416",
+    "end": "4702208"
+  },
+  {
+    "text": "On a particular like schedule how like when the last time the entity was active and whether or not the",
+    "start": "4704375",
+    "end": "4710583"
+  },
+  {
+    "text": "entity should be terminated. So.",
+    "start": "4710583",
+    "end": "4715291"
+  },
+  {
+    "text": "So for now why don't we just have a.",
+    "start": "4737666",
+    "end": "4740000"
+  },
+  {
+    "text": "This.",
+    "start": "4814833",
+    "end": "4815500"
+  },
+  {
+    "text": "It would essentially implement the same thing that complete is doing here.",
+    "start": "4829041",
+    "end": "4832666"
+  },
+  {
+    "text": "Where we. Create a processed message state and then",
+    "start": "4834208",
+    "end": "4842041"
+  },
+  {
+    "text": "update storage with it. We also need to update the like we need to create a map of last active times and",
+    "start": "4842041",
+    "end": "4848458"
+  },
+  {
+    "text": "update that as well.",
+    "start": "4848458",
+    "end": "4849375"
+  },
+  {
+    "text": "I think I have it actually defined somewhere",
+    "start": "4860708",
+    "end": "4863333"
+  },
+  {
+    "text": "What needed to happen?",
+    "start": "4866458",
+    "end": "4868083"
+  },
+  {
+    "text": "Update the database. We need to. This is also a place where we could communicate the result back to the client.",
+    "start": "4873958",
+    "end": "4878583"
+  },
+  {
+    "text": "And then also mark the last message processed time.",
+    "start": "4879291",
+    "end": "4882875"
+  },
+  {
+    "text": "I think I need to think more about this. Before working on it and I also need to grab lunch.",
+    "start": "4885291",
+    "end": "4890916"
+  },
+  {
+    "text": "So anyways I hope you guys enjoyed the stream today I'm going to try to stream on a more regular schedule if I can do",
+    "start": "4892208",
+    "end": "4898958"
+  },
+  {
+    "text": "twice a week maybe like Tuesdays and Thursdays around this time. But once I can establish a schedule I'll",
+    "start": "4898958",
+    "end": "4906750"
+  },
+  {
+    "text": "definitely like update my my twitch with it anyways I hope you guys",
+    "start": "4906750",
+    "end": "4912083"
+  },
+  {
+    "text": "enjoyed the stream today. Yeah if you have any suggestions for future streams or things that we can do",
+    "start": "4912083",
+    "end": "4917583"
+  },
+  {
+    "text": "to improve let us know and otherwise until next time. Cheers guys.",
+    "start": "4917583",
+    "end": "4922416"
+  }
+]

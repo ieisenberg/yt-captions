@@ -1,0 +1,1655 @@
+[
+  {
+    "start": "0",
+    "end": "36000"
+  },
+  {
+    "text": "[Music]",
+    "start": "3930",
+    "end": "14369"
+  },
+  {
+    "text": "thanks for coming out to my talk let's start with who am i well i'm 18",
+    "start": "15040",
+    "end": "20480"
+  },
+  {
+    "text": "years old i'm a sophomore at the rochester institute of technology i love windows internals i'm mostly",
+    "start": "20480",
+    "end": "27439"
+  },
+  {
+    "text": "self-taught with a strong mentor group helping me along the way and i have a strong game hacking background which is why i'm involved",
+    "start": "27439",
+    "end": "33680"
+  },
+  {
+    "text": "with windows internals so let's begin with what is this talk about well in this talk we're going to",
+    "start": "33680",
+    "end": "39840"
+  },
+  {
+    "start": "36000",
+    "end": "36000"
+  },
+  {
+    "text": "be going over loading a rootkit communicating with the rootkit abusing legitimate network",
+    "start": "39840",
+    "end": "45600"
+  },
+  {
+    "text": "communications an example rookit i wrote called the spectre rookit and the design choices behind it",
+    "start": "45600",
+    "end": "52160"
+  },
+  {
+    "text": "executing commands from kernel and tricks to cover up the file system trace of your kit",
+    "start": "52160",
+    "end": "58800"
+  },
+  {
+    "text": "so let's begin with windows root kit overview well when i say root can in this presentation i'm going to be referring to kernel",
+    "start": "58800",
+    "end": "64559"
+  },
+  {
+    "start": "60000",
+    "end": "60000"
+  },
+  {
+    "text": "level rootkits on windows so why would you want to use a rootkit well kernel drivers have significant",
+    "start": "64559",
+    "end": "71600"
+  },
+  {
+    "text": "access to the machine unlike in user mode you pretty much have access to anything and everything",
+    "start": "71600",
+    "end": "77600"
+  },
+  {
+    "text": "kernel drivers run at the same privilege level as a typical kernel anti-virus",
+    "start": "77600",
+    "end": "82640"
+  },
+  {
+    "text": "so this means that generally speaking you have the same access to the same resources",
+    "start": "82640",
+    "end": "88000"
+  },
+  {
+    "text": "there are less mitigations and security solutions targeting kernel malware if you can load kernel code chances are",
+    "start": "88000",
+    "end": "94560"
+  },
+  {
+    "text": "you can do a lot to cover up your tracks antivirus often have less visibility",
+    "start": "94560",
+    "end": "99680"
+  },
+  {
+    "text": "into the operations performed by kernel drivers this is because antivirus often depend",
+    "start": "99680",
+    "end": "104799"
+  },
+  {
+    "text": "on using user mode hooks to gain invisibility into certain suspicious operations but in the kernel you can't directly",
+    "start": "104799",
+    "end": "111280"
+  },
+  {
+    "text": "hook and toss kernel because of patch card finally kernel drivers are often ignored",
+    "start": "111280",
+    "end": "117439"
+  },
+  {
+    "text": "by antivirus let's take a look at an example of that so whether you're running a consumer antivirus or a corporate edr",
+    "start": "117439",
+    "end": "125520"
+  },
+  {
+    "start": "121000",
+    "end": "121000"
+  },
+  {
+    "text": "chances are that is that the application you use will treat kernel drivers with a significant amount",
+    "start": "125520",
+    "end": "131120"
+  },
+  {
+    "text": "of trust for example here we have the pre-processed thread callbacks from both malwarebytes and carbon black",
+    "start": "131120",
+    "end": "137599"
+  },
+  {
+    "text": "so these functions are called whenever a handle is created or duplicated to a process or a thread starting with",
+    "start": "137599",
+    "end": "144000"
+  },
+  {
+    "text": "malwarebytes what they do in their callback is check to see if the process id is less than a",
+    "start": "144000",
+    "end": "149840"
+  },
+  {
+    "text": "and if the kernel handle is if the handle is for a kernel handle then it will just go ahead and",
+    "start": "149840",
+    "end": "155519"
+  },
+  {
+    "text": "return zero and stop processing there for carbon block they take a little bit of a different perspective",
+    "start": "155519",
+    "end": "161519"
+  },
+  {
+    "text": "if you if the handle is for a kernel handle or if the previous mode is going is",
+    "start": "161519",
+    "end": "168000"
+  },
+  {
+    "text": "not user mode then it will not process that handle creation so let's talk a",
+    "start": "168000",
+    "end": "174800"
+  },
+  {
+    "text": "little bit about loading your rootkit well there are a lot of vulnerable drivers with some reversing",
+    "start": "174800",
+    "end": "180239"
+  },
+  {
+    "start": "176000",
+    "end": "176000"
+  },
+  {
+    "text": "knowledge finding a zero day in a driver can also be trivial some examples include capcom's",
+    "start": "180239",
+    "end": "185280"
+  },
+  {
+    "text": "anti-cheat driver intel's now driver and even microsoft themselves now the reason i put",
+    "start": "185280",
+    "end": "190400"
+  },
+  {
+    "text": "vulnerable in zero day in quotes is because oftentimes drivers require administrative privileges to communicate",
+    "start": "190400",
+    "end": "196400"
+  },
+  {
+    "text": "with them following microsoft standards ring 3 with administrator to ring 0 is not a",
+    "start": "196400",
+    "end": "201840"
+  },
+  {
+    "text": "valid security boundary so technically it isn't even a vulnerability",
+    "start": "201840",
+    "end": "207599"
+  },
+  {
+    "text": "but this doesn't mean we can't abuse it either so using legitimate drivers has quite a few benefits too because you only need a few",
+    "start": "207599",
+    "end": "213840"
+  },
+  {
+    "text": "primitives to ask late privileges and finding a vulnerable driver is relatively trivial",
+    "start": "213840",
+    "end": "219519"
+  },
+  {
+    "text": "a great place to start is oem drivers and it's very difficult to detect some operations due to compatibility",
+    "start": "219519",
+    "end": "225680"
+  },
+  {
+    "text": "reasons for example let's say that a driver exposes some suspicious operations over its eye",
+    "start": "225680",
+    "end": "231120"
+  },
+  {
+    "text": "optical interface especially if the legitimate application uses that suspicious functionality",
+    "start": "231120",
+    "end": "237519"
+  },
+  {
+    "text": "it can be very difficult for an antivirus to discern whether or not an operation is from a legitimate",
+    "start": "237519",
+    "end": "243120"
+  },
+  {
+    "text": "application and this is just intended use or if a militia's application is abusing that",
+    "start": "243120",
+    "end": "248159"
+  },
+  {
+    "text": "driver functionality now abusing legitimate drivers does have some strong drawbacks as well",
+    "start": "248159",
+    "end": "254799"
+  },
+  {
+    "text": "one of the only reasons i don't really like this method is because let's say you use a legitimate driver to",
+    "start": "254799",
+    "end": "260560"
+  },
+  {
+    "text": "load your own driver the problem with this is that you can often run into compatibil compatibility issues especially across",
+    "start": "260560",
+    "end": "266080"
+  },
+  {
+    "text": "operating system versions but even if you you know we're trying to get rid of all the bugs",
+    "start": "266080",
+    "end": "272160"
+  },
+  {
+    "text": "you're going to probably run into some edge cases that can cause blue screens and the last thing i want to do is blue screen a victim",
+    "start": "272160",
+    "end": "278960"
+  },
+  {
+    "text": "for some red teamers an option is just buy your own certificate for your company now this is great for targeted attacks",
+    "start": "278960",
+    "end": "285280"
+  },
+  {
+    "start": "279000",
+    "end": "279000"
+  },
+  {
+    "text": "you're not gonna have stability concerns but it potentially reveals your identity and it can be blacklisted",
+    "start": "285280",
+    "end": "290880"
+  },
+  {
+    "text": "now this black listing doesn't really happen so much these days it's something that's being worked on by av vendors but it's very possible that",
+    "start": "290880",
+    "end": "298479"
+  },
+  {
+    "text": "a red team company might have their certificate blacklisted because it's strictly associated with colonel",
+    "start": "298479",
+    "end": "304000"
+  },
+  {
+    "text": "malware another option is just use someone else's certificate and there's actually",
+    "start": "304000",
+    "end": "309759"
+  },
+  {
+    "start": "306000",
+    "end": "306000"
+  },
+  {
+    "text": "quite a few publicly leaked certificates available to download if you're looking for one a good place to start is cheating forms which have",
+    "start": "309759",
+    "end": "316000"
+  },
+  {
+    "text": "quite a few posted there's almost all the benefits of using your own certificate",
+    "start": "316000",
+    "end": "321600"
+  },
+  {
+    "text": "except without de-anonymizing yourself but at least certificate you use can be detected in the future especially",
+    "start": "321600",
+    "end": "328080"
+  },
+  {
+    "text": "if it's a very public one if the leak certificate was issued after july 29 2015",
+    "start": "328080",
+    "end": "334320"
+  },
+  {
+    "text": "it won't work for kernel drivers on windows machines over version 1607 that have secured",
+    "start": "334320",
+    "end": "340880"
+  },
+  {
+    "text": "enabled so in most cases windows doesn't actually care if your driver has been",
+    "start": "340880",
+    "end": "346800"
+  },
+  {
+    "text": "expired or revoked so what you see in digital signatures is not what the kernel code signing policy",
+    "start": "346800",
+    "end": "353280"
+  },
+  {
+    "text": "is so even if you see you know this certificate has been revoked or the certificate has been expired i'd still give it a try because chances",
+    "start": "353280",
+    "end": "360000"
+  },
+  {
+    "text": "are it's going to work for kernel drivers so several leaked certificates are",
+    "start": "360000",
+    "end": "365199"
+  },
+  {
+    "text": "already publicly posted but it's not impossible to find your own either for example this website called greyhound warfare allows me to search",
+    "start": "365199",
+    "end": "372000"
+  },
+  {
+    "text": "open s3 buckets for files when i search for pfx and p12 files",
+    "start": "372000",
+    "end": "377039"
+  },
+  {
+    "text": "common extensions for private keys i found over 6 000 results",
+    "start": "377039",
+    "end": "382639"
+  },
+  {
+    "text": "and the best part about this method is that at this time the bulk of antivirus don't even come",
+    "start": "382639",
+    "end": "387840"
+  },
+  {
+    "text": "near detecting this method this is because i guess they haven't been working on blacklisting as much but",
+    "start": "387840",
+    "end": "393360"
+  },
+  {
+    "text": "i have not seen any antivirus yet detect most leaked certificates i've come across",
+    "start": "393360",
+    "end": "399919"
+  },
+  {
+    "text": "so let's talk about communicating with a rookie well a try and true method is just a beacon out to a c2",
+    "start": "399919",
+    "end": "406000"
+  },
+  {
+    "start": "401000",
+    "end": "401000"
+  },
+  {
+    "text": "now firewalls can block or flag outgoing requests that are to suspicious ip's reports",
+    "start": "406000",
+    "end": "411120"
+  },
+  {
+    "text": "and even for the more advanced techniques uh there's new features such as advanced network inspection that try to combat them another option",
+    "start": "411120",
+    "end": "418400"
+  },
+  {
+    "start": "418000",
+    "end": "418000"
+  },
+  {
+    "text": "is just to open a port onto your victim machine and have the c2 connect to the victim",
+    "start": "418400",
+    "end": "425680"
+  },
+  {
+    "text": "now the problem with this is that even though it's relatively simple to set up it can be blocked by a firewall and it",
+    "start": "425680",
+    "end": "431120"
+  },
+  {
+    "text": "can be difficult to blend in with the noise so another option for more advanced",
+    "start": "431120",
+    "end": "436800"
+  },
+  {
+    "start": "435000",
+    "end": "435000"
+  },
+  {
+    "text": "actors i've seen is application specific hooking this is where you piggyback on one application specific communication",
+    "start": "436800",
+    "end": "443360"
+  },
+  {
+    "text": "channel to receive communications directly from the c2 now this is incredibly difficult to detect",
+    "start": "443360",
+    "end": "448960"
+  },
+  {
+    "text": "especially if it's using a legitimate protocol but it's not very flexible because if",
+    "start": "448960",
+    "end": "454319"
+  },
+  {
+    "text": "the machine you're infecting doesn't have that one service exposed then you're going to be out of luck",
+    "start": "454319",
+    "end": "459360"
+  },
+  {
+    "text": "unless you have backup communication methods exposed as well so what i wanted was a method that had",
+    "start": "459360",
+    "end": "465919"
+  },
+  {
+    "start": "465000",
+    "end": "465000"
+  },
+  {
+    "text": "limited detection vectors flexibility for a variety of environments and my assumptions were",
+    "start": "465919",
+    "end": "471599"
+  },
+  {
+    "text": "that victim machines will have some services exposed which is especially true for corporate environments",
+    "start": "471599",
+    "end": "477199"
+  },
+  {
+    "text": "and inbound and half pound access may be monitored as well so application specific cooking was",
+    "start": "477199",
+    "end": "482639"
+  },
+  {
+    "text": "perfect for my needs except for the flexibility is there any way we can change application specific hooking to",
+    "start": "482639",
+    "end": "489919"
+  },
+  {
+    "text": "where it isn't dependent on any single application well what if instead of hooking an",
+    "start": "489919",
+    "end": "495120"
+  },
+  {
+    "text": "application directly we hooked network communication similar to tools such as wireshark then",
+    "start": "495120",
+    "end": "501120"
+  },
+  {
+    "start": "498000",
+    "end": "498000"
+  },
+  {
+    "text": "what we would do is we create these malicious packets in our c2 and insert a magic constant value that",
+    "start": "501120",
+    "end": "507039"
+  },
+  {
+    "text": "the malware is aware of as well then we send this malicious packet over to",
+    "start": "507039",
+    "end": "512320"
+  },
+  {
+    "text": "any legitimate port on the victim machine since our malware is intercepting all packets being received",
+    "start": "512320",
+    "end": "518719"
+  },
+  {
+    "text": "it also constantly searches these packets for the magic constant that the c2 inserted so what we can do",
+    "start": "518719",
+    "end": "525040"
+  },
+  {
+    "text": "is we can piggyback off of all legitimate communication channels by simply abusing the fact of",
+    "start": "525040",
+    "end": "530959"
+  },
+  {
+    "text": "intercepting all packets because what we can do is again from the c2 to the victim any open port",
+    "start": "530959",
+    "end": "537040"
+  },
+  {
+    "text": "and with that magic constant the malware then knows that packet is from the c2 and it processes out other data from it",
+    "start": "537040",
+    "end": "544080"
+  },
+  {
+    "text": "so let's talk about how we would hook the user mode network stack so a significant amount of services on",
+    "start": "544080",
+    "end": "550399"
+  },
+  {
+    "start": "547000",
+    "end": "547000"
+  },
+  {
+    "text": "windows can be found in user mode but how can we globally intercept this traffic well",
+    "start": "550399",
+    "end": "555680"
+  },
+  {
+    "text": "networking relating to wind socket is handled by afd.cis otherwise known as the ancillary",
+    "start": "555680",
+    "end": "561440"
+  },
+  {
+    "text": "function driver for windsock reversing a few functions inside of mswsoc.dll revealed that",
+    "start": "561440",
+    "end": "567279"
+  },
+  {
+    "text": "they're using an iactal interface by the afd driver to communicate now if we could intercept",
+    "start": "567279",
+    "end": "573360"
+  },
+  {
+    "text": "these requests we could snoop in on the data being received so when you call nt device i o control",
+    "start": "573360",
+    "end": "580399"
+  },
+  {
+    "text": "file how does it actually know how does the kernel know what function to call well first it gets the device object",
+    "start": "580399",
+    "end": "587680"
+  },
+  {
+    "text": "associated with the file object by calling i o get related device object this is for our purposes just going to",
+    "start": "587680",
+    "end": "594399"
+  },
+  {
+    "text": "be retrieving the device object member of the file object if the driver supports fast dio",
+    "start": "594399",
+    "end": "600080"
+  },
+  {
+    "text": "it'll dispatch the request using the fast i o dispatch table of the driver object if it doesn't support fast io",
+    "start": "600080",
+    "end": "607120"
+  },
+  {
+    "text": "then what it'll do is allocate and fill out a nerp and then use i o call driver to dispatch to europe",
+    "start": "607120",
+    "end": "614399"
+  },
+  {
+    "start": "614000",
+    "end": "614000"
+  },
+  {
+    "text": "so let's talk about standard methods of intercepting herbs so the few common methods include so in",
+    "start": "614399",
+    "end": "619839"
+  },
+  {
+    "text": "the driver object there is this major function array now this major function array",
+    "start": "619839",
+    "end": "625279"
+  },
+  {
+    "text": "it contains pointers to dispatch functions and the index for this array corresponds to the major function code",
+    "start": "625279",
+    "end": "631839"
+  },
+  {
+    "text": "so let's say we want to hook a specific major function code what we would do is we would go into the major function array",
+    "start": "631839",
+    "end": "637920"
+  },
+  {
+    "text": "and for that index replace the dispatch function pointer to our own dispatch function",
+    "start": "637920",
+    "end": "643279"
+  },
+  {
+    "text": "another option is to just perform a code hook directly on the dispatch handler so for picking these picking a method",
+    "start": "643279",
+    "end": "649680"
+  },
+  {
+    "text": "there are a few common questions you should ask yourself how many detection vectors are you potentially exposed to",
+    "start": "649680",
+    "end": "655760"
+  },
+  {
+    "text": "how usable is the method from a stability and compatibility perspective and how",
+    "start": "655760",
+    "end": "661279"
+  },
+  {
+    "text": "expensive would it be to detect that method so for hooking a driver object's major",
+    "start": "661279",
+    "end": "666399"
+  },
+  {
+    "text": "function table you're going to be exposing yourself to memory artifacts from a usability perspective it's going to be quite",
+    "start": "666399",
+    "end": "672480"
+  },
+  {
+    "text": "stable because driver objects are well documented and easy to find",
+    "start": "672480",
+    "end": "678079"
+  },
+  {
+    "text": "finally for how expensive is it to detect well it's not going to be that expensive",
+    "start": "678079",
+    "end": "683120"
+  },
+  {
+    "text": "because if you think about it all antivirus would need to do is enumerate the loaded drivers and check their major function table",
+    "start": "683120",
+    "end": "690000"
+  },
+  {
+    "text": "for any patches so for code hooking you're going to be exposing yourself to memory artifacts",
+    "start": "690000",
+    "end": "695680"
+  },
+  {
+    "start": "693000",
+    "end": "693000"
+  },
+  {
+    "text": "and unless the function is exported you're going to need to find a function yourself now the problem with this is is present",
+    "start": "695680",
+    "end": "702880"
+  },
+  {
+    "text": "especially if the driver file changes between operating system versions",
+    "start": "702880",
+    "end": "708320"
+  },
+  {
+    "text": "and also not all driver is going to be compatible with this code hook because of patch card",
+    "start": "708320",
+    "end": "713440"
+  },
+  {
+    "text": "and if hvcis hvci's enabled this method won't be viable at all it's",
+    "start": "713440",
+    "end": "719680"
+  },
+  {
+    "text": "very how expensive is it to detect well it's potentially inexpensive because there's so many different ways to detect",
+    "start": "719680",
+    "end": "725360"
+  },
+  {
+    "text": "hooking for example if an antivirus implemented a generic detection functionality where they would",
+    "start": "725360",
+    "end": "730639"
+  },
+  {
+    "text": "enumerate the executable sections for loaded drivers with what's on disk now that's quite",
+    "start": "730639",
+    "end": "736160"
+  },
+  {
+    "text": "expensive but if they know that you're hooking a specific function of a specific driver",
+    "start": "736160",
+    "end": "741279"
+  },
+  {
+    "text": "then checking the first few bytes isn't going to be very expensive at all",
+    "start": "741279",
+    "end": "746399"
+  },
+  {
+    "text": "so i wanted a method that was undocumented stable and relatively expensive to detect well",
+    "start": "746399",
+    "end": "752720"
+  },
+  {
+    "text": "what if instead instead of hooking the original driver object we hook the file object instead so what",
+    "start": "752720",
+    "end": "759519"
+  },
+  {
+    "text": "i'm talking about is well the device retrieved for a file file object is going to end up being the device",
+    "start": "759519",
+    "end": "765200"
+  },
+  {
+    "text": "object pointer inside of that file object so what is actually stopping us from overwriting this pointer of that one",
+    "start": "765200",
+    "end": "771360"
+  },
+  {
+    "text": "file object with our own well it turns out absolutely nothing so what we can do is create our own",
+    "start": "771360",
+    "end": "777760"
+  },
+  {
+    "text": "device and driver object patch our copy of the driver object so this is not the same thing as",
+    "start": "777760",
+    "end": "783839"
+  },
+  {
+    "text": "patching the original driver object which can be easily found this is patching our own copy then we",
+    "start": "783839",
+    "end": "790240"
+  },
+  {
+    "text": "can replace the device object pointer of the file object we're hooking with our own device the neat thing with",
+    "start": "790240",
+    "end": "795680"
+  },
+  {
+    "text": "this method is that instead of hooking globally for every for every different herb from any process",
+    "start": "795680",
+    "end": "801920"
+  },
+  {
+    "text": "we specifically hook the specific handle we'd like to hook",
+    "start": "801920",
+    "end": "807680"
+  },
+  {
+    "text": "let's talk about how we would actually do this well we need to first find file objects to hook and the way we can",
+    "start": "807680",
+    "end": "813120"
+  },
+  {
+    "text": "do this is through the great api called cw query system information which exposes a variety of information about",
+    "start": "813120",
+    "end": "819279"
+  },
+  {
+    "text": "your system now one of the classes you can request is the system handle information class which will allow you to query all",
+    "start": "819279",
+    "end": "826240"
+  },
+  {
+    "text": "handles on a system including the process id behind that handle and the kernel pointer for the object",
+    "start": "826240",
+    "end": "832399"
+  },
+  {
+    "text": "that that handle points to now if we open the afd device ourselves",
+    "start": "832399",
+    "end": "837760"
+  },
+  {
+    "text": "before scanning for these file objects we can easily determine if a file object is for the afd device",
+    "start": "837760",
+    "end": "844079"
+  },
+  {
+    "text": "by comparing the device object member of the file object with the afd device we already retrieved",
+    "start": "844079",
+    "end": "850800"
+  },
+  {
+    "text": "so before we can overwrite the device object member we need to actually create our fake objects and fortunately the kernel actually exports",
+    "start": "850959",
+    "end": "858399"
+  },
+  {
+    "text": "the function it uses to create these objects them itself so all we need to do",
+    "start": "858399",
+    "end": "863680"
+  },
+  {
+    "text": "is call ob create object the i o device object type an i o driver object type depending on",
+    "start": "863680",
+    "end": "869600"
+  },
+  {
+    "text": "what object you're creating once you've created objects you can just simply copy over the existing values",
+    "start": "869600",
+    "end": "876000"
+  },
+  {
+    "text": "so with our fake objects created we're almost ready to set the device object of our file object but first we need to hook our driver",
+    "start": "876000",
+    "end": "882880"
+  },
+  {
+    "text": "object now the way we're going to do this is again by using that standard hookah driver object method",
+    "start": "882880",
+    "end": "888399"
+  },
+  {
+    "text": "but except we are not performing it on the original driver object this is our own copy which",
+    "start": "888399",
+    "end": "894480"
+  },
+  {
+    "text": "an antivirus cannot easily retrieve so to prevent race conditions while replacing the device object member",
+    "start": "894480",
+    "end": "901040"
+  },
+  {
+    "text": "the original device object we use inside of our hooked dispatch function needs to be set at the same time that",
+    "start": "901040",
+    "end": "907600"
+  },
+  {
+    "text": "our that we replace the device object of the file object so the way i did this is by simply using",
+    "start": "907600",
+    "end": "913199"
+  },
+  {
+    "text": "interlocked exchange so now that we've hooked our file object",
+    "start": "913199",
+    "end": "918959"
+  },
+  {
+    "text": "there's not much work left so in our dispatch hook if the major function code that is being called is",
+    "start": "918959",
+    "end": "924160"
+  },
+  {
+    "text": "hooked then we should pass the original dispatch function the original device object and the erp",
+    "start": "924160",
+    "end": "930000"
+  },
+  {
+    "text": "to the hooked function then if the major function code erp matrix",
+    "start": "930000",
+    "end": "935519"
+  },
+  {
+    "text": "function cleanup is requested then we need to replace the device object member of the file object",
+    "start": "935519",
+    "end": "942240"
+  },
+  {
+    "text": "with the original device this is to prevent any issues during teardown",
+    "start": "942240",
+    "end": "947440"
+  },
+  {
+    "text": "so how many detection vectors are you potentially exposed to well it's going to be memory artifacts and",
+    "start": "947440",
+    "end": "952880"
+  },
+  {
+    "text": "how usable is the method well since most of the functions we use are at least semi-documented",
+    "start": "952880",
+    "end": "958800"
+  },
+  {
+    "text": "they're probably not going to change too much how expensive would it be to detect method well it's also going to be pretty",
+    "start": "958800",
+    "end": "964560"
+  },
+  {
+    "text": "expensive because an antivirus would have to replicate our hooking process and scan each file object to see if it's",
+    "start": "964560",
+    "end": "970959"
+  },
+  {
+    "text": "device object has been patched let's talk about how the spectrorootkit abuses user mode network stack",
+    "start": "970959",
+    "end": "978720"
+  },
+  {
+    "start": "978000",
+    "end": "978000"
+  },
+  {
+    "text": "so using the file object hook we can now intercept earps to the afd driver",
+    "start": "978720",
+    "end": "985120"
+  },
+  {
+    "text": "this allows us to intercept all user mode networking traffic and send and receive our own data over",
+    "start": "985120",
+    "end": "991360"
+  },
+  {
+    "text": "any socket so to review our existing plan is to hook network communication in our",
+    "start": "991360",
+    "end": "997600"
+  },
+  {
+    "text": "malware that is on the victim machine similar to tools such as wireshark and then we place a special indicator",
+    "start": "997600",
+    "end": "1003680"
+  },
+  {
+    "text": "in the packets we create in our c2 then when this packet is sent the malware scans for that magic",
+    "start": "1003680",
+    "end": "1009279"
+  },
+  {
+    "text": "constant and then recognizes that magic constant and it parses out any extra data that that packet might have",
+    "start": "1009279",
+    "end": "1015120"
+  },
+  {
+    "text": "but how can we actually retrieve the content of packets that are received just because we intercept afd",
+    "start": "1015120",
+    "end": "1020800"
+  },
+  {
+    "text": "communication doesn't mean we have immediate access to those buffers so for receive operations an iot code i",
+    "start": "1020800",
+    "end": "1028160"
+  },
+  {
+    "text": "octal afd receive is sent to the afd driver here's the structures that are sent to the input buffer",
+    "start": "1028160",
+    "end": "1033678"
+  },
+  {
+    "text": "now the afd receive info structure is the one that's actually sent and it has some flags and an array of",
+    "start": "1033679",
+    "end": "1038798"
+  },
+  {
+    "text": "buffers this array of buffers is what actually contains the content of the data that was",
+    "start": "1038799",
+    "end": "1044558"
+  },
+  {
+    "text": "received let's talk about how the spectre rootkit",
+    "start": "1044559",
+    "end": "1049600"
+  },
+  {
+    "start": "1047000",
+    "end": "1047000"
+  },
+  {
+    "text": "was designed specifically the packet structure that gets sent from the c2 to any legitimate port well",
+    "start": "1049600",
+    "end": "1055840"
+  },
+  {
+    "text": "the packet structure allows you to prepend any data you want as long as it isn't the magic value then",
+    "start": "1055840",
+    "end": "1061440"
+  },
+  {
+    "text": "you can have your magic constant and what you can do is this magic constant will act as a reference point",
+    "start": "1061440",
+    "end": "1067760"
+  },
+  {
+    "text": "for the rest of the structures after the magic constant you're going to have a base packet structure which is seen on the right as",
+    "start": "1067760",
+    "end": "1074080"
+  },
+  {
+    "text": "well and all it contains is the packet length and the packet operation being requested",
+    "start": "1074080",
+    "end": "1080160"
+  },
+  {
+    "text": "after the base packet structure is an optional custom structure now this custom structure will vary or",
+    "start": "1080160",
+    "end": "1086240"
+  },
+  {
+    "text": "may not even exist depending on type of operation being requested after the custom structure you",
+    "start": "1086240",
+    "end": "1091760"
+  },
+  {
+    "text": "can append any data you'd like the idea is with this packet structure is that you can send any packets you'd like before",
+    "start": "1091760",
+    "end": "1098640"
+  },
+  {
+    "text": "the malicious packet or after the malicious packet and even in the malicious packet itself you can pre-pend or append any data",
+    "start": "1098640",
+    "end": "1105520"
+  },
+  {
+    "text": "you'd like besides the magic value so once a packet is received by the",
+    "start": "1105520",
+    "end": "1110880"
+  },
+  {
+    "start": "1109000",
+    "end": "1109000"
+  },
+  {
+    "text": "malware what it does is it'll search a buffer search the buffer received for the magic value",
+    "start": "1110880",
+    "end": "1116640"
+  },
+  {
+    "text": "and if the buffer contains the magic it'll go ahead and pass it on for processing if it does not it'll simply ignore the",
+    "start": "1116640",
+    "end": "1122240"
+  },
+  {
+    "text": "packet for processing it'll use the res it'll check to see if there's enough bytes",
+    "start": "1122240",
+    "end": "1127919"
+  },
+  {
+    "start": "1124000",
+    "end": "1124000"
+  },
+  {
+    "text": "to fill out a base packet structure in the already received data if there is enough bytes it'll use to",
+    "start": "1127919",
+    "end": "1133840"
+  },
+  {
+    "text": "check to see if the there's enough bytes for the custom structure if there is one",
+    "start": "1133840",
+    "end": "1138880"
+  },
+  {
+    "text": "only when both of these base packet in the optional custom structure is fulfilled will it dispatch packet if in any case",
+    "start": "1138880",
+    "end": "1145280"
+  },
+  {
+    "text": "it needs to get extra bytes it'll go ahead and receive it using the socket handle",
+    "start": "1145280",
+    "end": "1150799"
+  },
+  {
+    "text": "so before we go any further let's also talk about packet handlers in the spectre rookie so the spectroroute contains a general",
+    "start": "1150799",
+    "end": "1156960"
+  },
+  {
+    "text": "packet handler class that exposes a virtual process packet function now this base packet handler",
+    "start": "1156960",
+    "end": "1162799"
+  },
+  {
+    "text": "class has a default constructor that accepts a pointer to the current packet dispatcher instance",
+    "start": "1162799",
+    "end": "1168480"
+  },
+  {
+    "text": "and the process packet function below it accepts a pointer to the current packet we'll talk about the dispatcher at a",
+    "start": "1168480",
+    "end": "1174799"
+  },
+  {
+    "text": "later slide so an example of a packet handler included with the spectre rootkit",
+    "start": "1174799",
+    "end": "1180799"
+  },
+  {
+    "text": "is the ping packet handler now this handler is used specifically to determine if a machine or port is",
+    "start": "1180799",
+    "end": "1187679"
+  },
+  {
+    "text": "infected now the incoming packet has no actual data",
+    "start": "1187679",
+    "end": "1192720"
+  },
+  {
+    "text": "other than indicating that its type is a ping and that the handler responds to the",
+    "start": "1192720",
+    "end": "1198080"
+  },
+  {
+    "text": "client or the c2 with just another empty base packet with this type set to ping",
+    "start": "1198080",
+    "end": "1205200"
+  },
+  {
+    "start": "1205000",
+    "end": "1205000"
+  },
+  {
+    "text": "so once packet is completely populated during dispatching the packet dispatcher",
+    "start": "1205360",
+    "end": "1211440"
+  },
+  {
+    "text": "will allocate a packet handler depending on the type of operation being requested",
+    "start": "1211440",
+    "end": "1216640"
+  },
+  {
+    "text": "it'll call the packet handler's process packet function and then it'll free the packet handler once it's done now the reason the packet",
+    "start": "1216640",
+    "end": "1223520"
+  },
+  {
+    "text": "dispatcher is really awesome is because since it passes a pointer to itself to",
+    "start": "1223520",
+    "end": "1228799"
+  },
+  {
+    "text": "packet handlers what can happen is that the packet handler can re-dispatch recursively a brand new packet so the",
+    "start": "1228799",
+    "end": "1236720"
+  },
+  {
+    "text": "best way i can explain this is through an example so let's talk about the zorb packet handler included with the spectre rookie",
+    "start": "1236720",
+    "end": "1243039"
+  },
+  {
+    "start": "1238000",
+    "end": "1238000"
+  },
+  {
+    "text": "the zorp packet handler takes in a zora packet structure and this structure contains a xor key and a zork content",
+    "start": "1243039",
+    "end": "1249760"
+  },
+  {
+    "text": "so what the c2 does is let's say it wants to request some operation it'll take the bytes of that base packet",
+    "start": "1249760",
+    "end": "1255600"
+  },
+  {
+    "text": "in optional custom structure and stick it into the zor content array then",
+    "start": "1255600",
+    "end": "1260880"
+  },
+  {
+    "text": "it'll generate a random byte in place of the zorky and use this random byte to perform a zero operation on each byte",
+    "start": "1260880",
+    "end": "1267360"
+  },
+  {
+    "text": "of the zor content when the zorb packet is received by the malware",
+    "start": "1267360",
+    "end": "1273679"
+  },
+  {
+    "text": "it'll use a zorky to de-obfuscate the zorg content and then what it'll do is call the dispatch function again",
+    "start": "1273679",
+    "end": "1280000"
+  },
+  {
+    "text": "except it'll pass the zorg content as the new packet to dispatch so to explain this is pretty simple",
+    "start": "1280000",
+    "end": "1288000"
+  },
+  {
+    "text": "the spectre rootkit allows you to create infinite layers of encapsulation now this is great because for example if",
+    "start": "1288000",
+    "end": "1294559"
+  },
+  {
+    "text": "you create a few different type of packet handlers such as a door packet handler you can create layers of obfuscation and change",
+    "start": "1294559",
+    "end": "1301280"
+  },
+  {
+    "text": "the bytes of packets randomly and allowing to add entropy even if you're requesting",
+    "start": "1301280",
+    "end": "1306960"
+  },
+  {
+    "text": "the same operation another common feature seen in kernel",
+    "start": "1306960",
+    "end": "1312720"
+  },
+  {
+    "text": "malware or sorry malware in general is executing commands but before we can actually execute commands in the kernel",
+    "start": "1312720",
+    "end": "1319840"
+  },
+  {
+    "text": "we need to understand how do you actually connect execute commands in user mode well to follow a basic example first",
+    "start": "1319840",
+    "end": "1327440"
+  },
+  {
+    "start": "1326000",
+    "end": "1326000"
+  },
+  {
+    "text": "you need to create pipes for your output now this is going to have a reading hand",
+    "start": "1327440",
+    "end": "1332640"
+  },
+  {
+    "text": "read and write handle to this new pipe and you can you just use the create pipe function for this then",
+    "start": "1332640",
+    "end": "1338320"
+  },
+  {
+    "text": "you're going to create a startup info structure and in the structure you're going to set the standard error and standard output",
+    "start": "1338320",
+    "end": "1344880"
+  },
+  {
+    "text": "handles to the unknown pipe you just created and you can here you can also set window flags such as hide the window",
+    "start": "1344880",
+    "end": "1351679"
+  },
+  {
+    "text": "so that the victim doesn't see the command prompt window being created once you set those structures you just",
+    "start": "1351679",
+    "end": "1357600"
+  },
+  {
+    "text": "can call create process and you can wait for it to exit using wait for a single object",
+    "start": "1357600",
+    "end": "1363120"
+  },
+  {
+    "text": "once the process is exited you can retrieve the output of the process by calling read file on the unnamed pipe",
+    "start": "1363120",
+    "end": "1373919"
+  },
+  {
+    "start": "1372000",
+    "end": "1372000"
+  },
+  {
+    "text": "so first let's begin by re-implementing the create pipe function so what the creep pipe function does",
+    "start": "1373919",
+    "end": "1379520"
+  },
+  {
+    "text": "in the background is name if it'll check if the device named pipe is already opened",
+    "start": "1379520",
+    "end": "1385039"
+  },
+  {
+    "text": "if it is not it'll go ahead and open it then it'll set the root directory for the object attributes for the brand",
+    "start": "1385039",
+    "end": "1391760"
+  },
+  {
+    "text": "new pipe test to this named pipe device when it calls nt create name type file",
+    "start": "1391760",
+    "end": "1397840"
+  },
+  {
+    "text": "it'll use the access right's generic read because this function creates both a read handle and a right handle",
+    "start": "1397840",
+    "end": "1404240"
+  },
+  {
+    "text": "once the pipe is created it'll call anti-open file with the root directory set to this",
+    "start": "1404240",
+    "end": "1409280"
+  },
+  {
+    "text": "brand new pipe this is used to obtain a right handle for that pipe",
+    "start": "1409280",
+    "end": "1416880"
+  },
+  {
+    "text": "so once we have the pipes we just need to create the actual process and we'll be using zw create user process",
+    "start": "1416880",
+    "end": "1423039"
+  },
+  {
+    "text": "because that's what the kernel 32 api uses itself the first thing you need to do is",
+    "start": "1423039",
+    "end": "1428720"
+  },
+  {
+    "text": "generate an attribute list now the actual attribute we're going to set is just a ps attribute image name",
+    "start": "1428720",
+    "end": "1434720"
+  },
+  {
+    "text": "which represents the image file name for the new process next we have to set an rtl user process",
+    "start": "1434720",
+    "end": "1442640"
+  },
+  {
+    "text": "parameter structure for the new process and in this it's very similar to the startup info structure we saw in user mode",
+    "start": "1442640",
+    "end": "1448960"
+  },
+  {
+    "text": "except we have to specify a little bit more information so besides the window flags and the output handles to our",
+    "start": "1448960",
+    "end": "1454000"
+  },
+  {
+    "text": "pipes we need to specify the current directory the command line arguments the process image path and the default",
+    "start": "1454000",
+    "end": "1460400"
+  },
+  {
+    "text": "desktop name from there all it takes is a call to zw",
+    "start": "1460400",
+    "end": "1465600"
+  },
+  {
+    "text": "create user process to start a process and once the process has exited similar to what we do in user mode we",
+    "start": "1465600",
+    "end": "1472080"
+  },
+  {
+    "text": "can just call zw read file to read the output of the process",
+    "start": "1472080",
+    "end": "1478000"
+  },
+  {
+    "text": "so let's talk a little bit about hiding a rootkit i'd like you to i'd like to introduce",
+    "start": "1478480",
+    "end": "1484320"
+  },
+  {
+    "start": "1482000",
+    "end": "1482000"
+  },
+  {
+    "text": "you to many filters so what many filter drivers allow you to do is attach to volumes and intercept",
+    "start": "1484320",
+    "end": "1489760"
+  },
+  {
+    "text": "certain file i o this is performed by registering with the filter manager driver",
+    "start": "1489760",
+    "end": "1495120"
+  },
+  {
+    "text": "so to give an example from microsoft when a user requests file io when it's sent to the file system the",
+    "start": "1495120",
+    "end": "1500799"
+  },
+  {
+    "text": "filter manager driver will actually intercept this request and then it will pass it along to the",
+    "start": "1500799",
+    "end": "1506000"
+  },
+  {
+    "text": "many filters that have registered with it these many filters have a lot of control and they can even edit",
+    "start": "1506000",
+    "end": "1512159"
+  },
+  {
+    "text": "or modify the file request once it's been edited or just pass",
+    "start": "1512159",
+    "end": "1517279"
+  },
+  {
+    "text": "through all the many filters it's then sent to the file system so many filters can be useful",
+    "start": "1517279",
+    "end": "1523200"
+  },
+  {
+    "text": "to mask the presence of our rootkit for example a mini filter can redirect all file",
+    "start": "1523200",
+    "end": "1528720"
+  },
+  {
+    "text": "access for a certain file to another one so we can use this to redirect access from our rootkit file",
+    "start": "1528720",
+    "end": "1534640"
+  },
+  {
+    "text": "to a legitimate driver file so again going back to the previous picking a",
+    "start": "1534640",
+    "end": "1539840"
+  },
+  {
+    "text": "method slide you were concerned about detection vectors how usable is the method and how expensive is it to detect",
+    "start": "1539840",
+    "end": "1549360"
+  },
+  {
+    "start": "1549000",
+    "end": "1549000"
+  },
+  {
+    "text": "the easiest way to abuse functionality of a mini filter is to become one yourself here here's",
+    "start": "1549760",
+    "end": "1555919"
+  },
+  {
+    "text": "the minimum requirements for flt register filter first you create an instances key under the service key",
+    "start": "1555919",
+    "end": "1561760"
+  },
+  {
+    "text": "then under the instances key you create an instance name key this can be any name you'd like you'll",
+    "start": "1561760",
+    "end": "1567520"
+  },
+  {
+    "text": "use you'll use this name for step 3 when you create a default instance value under the instances key",
+    "start": "1567520",
+    "end": "1573919"
+  },
+  {
+    "text": "and you set this name to the string value to the name you used in step 2. and finally in step 4 well under the",
+    "start": "1573919",
+    "end": "1580960"
+  },
+  {
+    "text": "instance name key we'll add we'll add the altitude and flags values",
+    "start": "1580960",
+    "end": "1586799"
+  },
+  {
+    "text": "so how many detection vectors are you potentially exposed to well you're going to be exposing yourself to registry and memory artifacts",
+    "start": "1586799",
+    "end": "1592880"
+  },
+  {
+    "text": "how usable is the method there's no concerns from a stability or usability perspective because this is how legitimate drivers",
+    "start": "1592880",
+    "end": "1599360"
+  },
+  {
+    "text": "register as a mini filter how expensive is it to detect well besides",
+    "start": "1599360",
+    "end": "1604400"
+  },
+  {
+    "text": "the registry artifacts you're going to be easily enumerable through functions such as flt enumerate",
+    "start": "1604400",
+    "end": "1609760"
+  },
+  {
+    "text": "filters and also filters can be enumerated from user mode with administrative privileges",
+    "start": "1609760",
+    "end": "1616000"
+  },
+  {
+    "text": "so really it's not that expensive to detect so another method is to just simply hook",
+    "start": "1616000",
+    "end": "1622400"
+  },
+  {
+    "text": "an existing mini filter and there's a couple of routes you can take you can code hook an existing callback or you can overwrite",
+    "start": "1622400",
+    "end": "1630080"
+  },
+  {
+    "text": "the flt registration structure that is used in the call to flt register filter",
+    "start": "1630080",
+    "end": "1635600"
+  },
+  {
+    "text": "before that function is actually called or you can decom an existing filter instance and replace",
+    "start": "1635600",
+    "end": "1642240"
+  },
+  {
+    "text": "the original callback with yours so again one of the easiest ways of",
+    "start": "1642240",
+    "end": "1647840"
+  },
+  {
+    "start": "1646000",
+    "end": "1646000"
+  },
+  {
+    "text": "intercepting callbacks is just perform a code hook there's going to be quite a few drawbacks even if you did something as",
+    "start": "1647840",
+    "end": "1654000"
+  },
+  {
+    "text": "simple as a jump book you're gonna be exposing yourself to memory artifacts you're gonna need to",
+    "start": "1654000",
+    "end": "1659760"
+  },
+  {
+    "text": "find a function yourself it's not compatible with patch card or hvci and",
+    "start": "1659760",
+    "end": "1664799"
+  },
+  {
+    "text": "it's gonna be pretty easy to detect to you uh because there's just so many",
+    "start": "1664799",
+    "end": "1670880"
+  },
+  {
+    "text": "different ways of detecting hooking so another semi-documented method of",
+    "start": "1670880",
+    "end": "1676080"
+  },
+  {
+    "text": "hooking is using an existing mini filter so what you can do is you can enumerate filters in their instances using flt",
+    "start": "1676080",
+    "end": "1682000"
+  },
+  {
+    "text": "enumerate filters and eval enumerate instances the function that gets called for a certain",
+    "start": "1682000",
+    "end": "1687840"
+  },
+  {
+    "text": "operation is specified in the flt instance structure",
+    "start": "1687840",
+    "end": "1692880"
+  },
+  {
+    "text": "so this flt instance structure has this callback nodes array and what this array contains is the free",
+    "start": "1692880",
+    "end": "1698799"
+  },
+  {
+    "text": "operation and post operation depending on the array index which is associated with the major function",
+    "start": "1698799",
+    "end": "1705039"
+  },
+  {
+    "text": "so what you can do is you can find the flt instance by first enumerating filters and then",
+    "start": "1705039",
+    "end": "1710159"
+  },
+  {
+    "text": "enumerating instances for that filter and if there's a callback node you'd like to replace you just simply set the",
+    "start": "1710159",
+    "end": "1715919"
+  },
+  {
+    "text": "pre-operation or post operation function to your own now a note with this is that",
+    "start": "1715919",
+    "end": "1721200"
+  },
+  {
+    "text": "you're going to also want to patch the flt filter structure as well which contains an flt registration structure",
+    "start": "1721200",
+    "end": "1728399"
+  },
+  {
+    "text": "this is because you don't want to leave any traces of your hooking so what you're going to want to do is inside of that registration structure",
+    "start": "1728399",
+    "end": "1734799"
+  },
+  {
+    "text": "inside of the filter structure is replace the pre-operation or post operation there as well",
+    "start": "1734799",
+    "end": "1740240"
+  },
+  {
+    "text": "now this doesn't have any actual impact other than making sure that the values align with the function",
+    "start": "1740240",
+    "end": "1745760"
+  },
+  {
+    "text": "that you're hooking so how many detection vectors are you potentially exposed to well you're going",
+    "start": "1745760",
+    "end": "1751520"
+  },
+  {
+    "text": "to be potentially exposed to memory artifacts how usable is the method now since",
+    "start": "1751520",
+    "end": "1756960"
+  },
+  {
+    "text": "finding an flt instance is semi-documented it's going to be pretty stable but the",
+    "start": "1756960",
+    "end": "1762799"
+  },
+  {
+    "text": "flt instance structure itself is undocumented so that can change randomly as well how",
+    "start": "1762799",
+    "end": "1768399"
+  },
+  {
+    "text": "expensive is it to detect it's going to be still relatively inexpensive because an antivirus can enumerate these filters",
+    "start": "1768399",
+    "end": "1775279"
+  },
+  {
+    "text": "and their instances and then check to see if any of the functions are outside of the bounds of the driver",
+    "start": "1775279",
+    "end": "1783760"
+  },
+  {
+    "start": "1784000",
+    "end": "1784000"
+  },
+  {
+    "text": "so let's say you have a mini filter and you like to abuse it what's an example of that",
+    "start": "1785520",
+    "end": "1790640"
+  },
+  {
+    "text": "well what you can do is inside of the pre-create callback you can use flt get name information to",
+    "start": "1790640",
+    "end": "1797360"
+  },
+  {
+    "text": "get the path of the file being accessed if a path contains a protected file you",
+    "start": "1797360",
+    "end": "1802960"
+  },
+  {
+    "text": "can replace that file name using i o replace file object name then if you return status reparse",
+    "start": "1802960",
+    "end": "1809760"
+  },
+  {
+    "text": "what will happen is that file access will be redirected to that brand new file and so what we",
+    "start": "1809760",
+    "end": "1815600"
+  },
+  {
+    "text": "can do is then when a person accesses our rootkit on the file system we can then redirect it to another",
+    "start": "1815600",
+    "end": "1821279"
+  },
+  {
+    "text": "legitimate driver so that it appears to be legitimate",
+    "start": "1821279",
+    "end": "1826158"
+  },
+  {
+    "text": "all right so wrapping up i'd like to give thanks to alex ionescu who's been a longtime mentor and is very",
+    "start": "1827120",
+    "end": "1833360"
+  },
+  {
+    "text": "experienced with windows internals react os because their documentation and",
+    "start": "1833360",
+    "end": "1838880"
+  },
+  {
+    "text": "source code is fantastic when you're reversing windows itself nemanja mas magic and vlad ionescu who",
+    "start": "1838880",
+    "end": "1846640"
+  },
+  {
+    "text": "helped review this presentation so thank you so much for coming to my",
+    "start": "1846640",
+    "end": "1851840"
+  },
+  {
+    "text": "talk uh during these hard times and i appreciate you coming out if you'd like to follow me on twitter",
+    "start": "1851840",
+    "end": "1857760"
+  },
+  {
+    "text": "you that's my twitter handle check out my blog and if you'd like to check out the spectre rootkit there's a link available hopefully it'll",
+    "start": "1857760",
+    "end": "1864240"
+  },
+  {
+    "text": "work",
+    "start": "1864240",
+    "end": "1866480"
+  },
+  {
+    "text": "hi there guys uh and thanks for coming out to my talk i'll be answering questions in chat now",
+    "start": "1869760",
+    "end": "1874960"
+  },
+  {
+    "text": "and uh if you ever want to reach out with any more feel free to contact me over twitter or by email",
+    "start": "1874960",
+    "end": "1883919"
+  }
+]

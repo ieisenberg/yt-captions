@@ -1,0 +1,2980 @@
+[
+  {
+    "start": "0",
+    "end": "92000"
+  },
+  {
+    "text": "because after another everyone let's begin thank you for coming to this talk my name is Adam and today",
+    "start": "9820",
+    "end": "16379"
+  },
+  {
+    "text": "to talk something about internals of exceptions so let's actually start actually with",
+    "start": "16380",
+    "end": "21660"
+  },
+  {
+    "text": "with this sleek slide showing us an excerpt from Microsoft documentation",
+    "start": "21660",
+    "end": "26820"
+  },
+  {
+    "text": "from MSDN and this this is an excerpt telling us where and how can we use",
+    "start": "26820",
+    "end": "32809"
+  },
+  {
+    "text": "exceptions and the dimensions the Fink code exceptional situations and in this",
+    "start": "32809",
+    "end": "38070"
+  },
+  {
+    "text": "talk what we are going to do is we are actually going to see what those exceptional situations are how they work",
+    "start": "38070",
+    "end": "44070"
+  },
+  {
+    "text": "under the hood and why they may be very tricky to handle we want to be talking",
+    "start": "44070",
+    "end": "49230"
+  },
+  {
+    "text": "about about simple things I generally assume you do understand that there is try catch finally that you can specify",
+    "start": "49230",
+    "end": "55500"
+  },
+  {
+    "text": "exception types and all those things today will focus on other things like situations when our finally blocks do",
+    "start": "55500",
+    "end": "62790"
+  },
+  {
+    "text": "not execute when someone tries to kill our application when we get stuck overflow and when we get access",
+    "start": "62790",
+    "end": "68820"
+  },
+  {
+    "text": "violation exception so those situations we typically do not consider when we do write our applications but still",
+    "start": "68820",
+    "end": "75780"
+  },
+  {
+    "text": "sometimes they happen and we need to be able to handle them correctly to preserve the user state to avoid any",
+    "start": "75780",
+    "end": "82890"
+  },
+  {
+    "text": "more like impacts on on the state and breaking the application even more and finally to talk safely carry on so my",
+    "start": "82890",
+    "end": "91289"
+  },
+  {
+    "text": "name is Adam Freeman ik and please join me in this tour of internals of exceptions so before we begin few words",
+    "start": "91289",
+    "end": "97770"
+  },
+  {
+    "start": "92000",
+    "end": "208000"
+  },
+  {
+    "text": "about me I have been adopted developer for over five years now I'm a big data scholar machine-learning guy at Amazon",
+    "start": "97770",
+    "end": "104159"
+  },
+  {
+    "text": "so I do personalization in Amazon Prime video I'm also a blogger and the public",
+    "start": "104159",
+    "end": "109920"
+  },
+  {
+    "text": "speaker feel free to take a look at my blog a blog Adam from anecdote PL also drop me a line on Twitter on email",
+    "start": "109920",
+    "end": "116130"
+  },
+  {
+    "text": "whatever works for you earlier this year I was so released a book called open internals cookbook if you are interested",
+    "start": "116130",
+    "end": "122969"
+  },
+  {
+    "text": "in dotnet internals like about GC memory management synchronization locks all those things",
+    "start": "122969",
+    "end": "128520"
+  },
+  {
+    "text": "feel free to take a look at this book it's like our 100 questions and answers about various aspects of doctor platform",
+    "start": "128520",
+    "end": "135090"
+  },
+  {
+    "text": "ok let's go this slide deck will be available for you at the very end there",
+    "start": "135090",
+    "end": "140700"
+  },
+  {
+    "text": "will be a QR code so you can download it easily also I feel free to drop me a line if you'd like to ask any more",
+    "start": "140700",
+    "end": "146640"
+  },
+  {
+    "text": "questions regarding this talker or what else so agenda for this talk is we have actually three significant parts as I",
+    "start": "146640",
+    "end": "153900"
+  },
+  {
+    "text": "said I do assume you understand them exceptions more or less so we'll try to dig deeper and see how all those things",
+    "start": "153900",
+    "end": "160110"
+  },
+  {
+    "text": "work under the hood and we'll see multi-book that multiple technologies today not only Seashore but those",
+    "start": "160110",
+    "end": "165960"
+  },
+  {
+    "text": "intermediate language c++ mean api some low-level mechanism you generate some",
+    "start": "165960",
+    "end": "171180"
+  },
+  {
+    "text": "machine code who see how those things work across platforms across operating systems and architectures so three",
+    "start": "171180",
+    "end": "177240"
+  },
+  {
+    "text": "different parts and first part we'll actually see the mechanisms which we are going to cover for today so we'll see",
+    "start": "177240",
+    "end": "183180"
+  },
+  {
+    "text": "how they look like like very simple snippet of code what they present then we'll take a look of other internals but",
+    "start": "183180",
+    "end": "189720"
+  },
+  {
+    "text": "from the like high-level point of view we'll see how those things work in those edge cases in those situations which we",
+    "start": "189720",
+    "end": "196260"
+  },
+  {
+    "text": "typically don't consider when we do implement our applications and in the last part we'll see how those things are",
+    "start": "196260",
+    "end": "202890"
+  },
+  {
+    "text": "implemented under the hood how this works on a cpu level or on the architecture level so let's go let's",
+    "start": "202890",
+    "end": "209010"
+  },
+  {
+    "text": "start with exception mechanisms overview and the first thing we're going to cover is basically c-sharp and c++ so c-sharp",
+    "start": "209010",
+    "end": "216269"
+  },
+  {
+    "text": "I presume you do know there is strike eight finally there is a full syntax on this slide even with exception filter",
+    "start": "216269",
+    "end": "222480"
+  },
+  {
+    "text": "which we'll cover a little later however on the left side of the slide what you can see is C++ equivalent of exception",
+    "start": "222480",
+    "end": "228959"
+  },
+  {
+    "text": "handling interesting thing here is there is no finally even though it's very similar platform at least like at the",
+    "start": "228959",
+    "end": "235500"
+  },
+  {
+    "text": "first side it's completely different because it doesn't support the finally block so how do we implement finally in",
+    "start": "235500",
+    "end": "240840"
+  },
+  {
+    "text": "C++ and in C++ what we do is we use the pattern code resource acquisition is",
+    "start": "240840",
+    "end": "246060"
+  },
+  {
+    "text": "initialization the way it works is we do allocate some object which is allocated on the stack and has a destructor",
+    "start": "246060",
+    "end": "253140"
+  },
+  {
+    "text": "whenever the stack is we start and winding the stack we exit the function and we need to remove that dead object",
+    "start": "253140",
+    "end": "258989"
+  },
+  {
+    "text": "the destructor is being called so that's the point when we can actually execute some code and the destructor works as a",
+    "start": "258989",
+    "end": "265680"
+  },
+  {
+    "text": "finally for us apart from that catch is very similar to c-sharp syntax so you can see that we do specify some",
+    "start": "265680",
+    "end": "272010"
+  },
+  {
+    "text": "exception so but more or less very similar nothing surprising here but if we start going down and if we take a",
+    "start": "272010",
+    "end": "279060"
+  },
+  {
+    "text": "look at for instance our handlers in the language what we can see is see",
+    "start": "279060",
+    "end": "284430"
+  },
+  {
+    "text": "sharpness almost everything from the aisle language there is one more thing added to aisle which is called thought",
+    "start": "284430",
+    "end": "291210"
+  },
+  {
+    "text": "hunger it's very similar in nature to finally block in the sense that it",
+    "start": "291210",
+    "end": "296280"
+  },
+  {
+    "text": "executes often only the difference is that finally executes often no matter what happened in the method whether",
+    "start": "296280",
+    "end": "302430"
+  },
+  {
+    "text": "there was an exception or not fault is being executed whether there was an exception no matter whether we handled",
+    "start": "302430",
+    "end": "308880"
+  },
+  {
+    "text": "it whether we ignored it exception fault is always being executed apart from that",
+    "start": "308880",
+    "end": "314370"
+  },
+  {
+    "text": "we also have try cash money and we do have the exception filter which we'll cover a little later and we'll also",
+    "start": "314370",
+    "end": "320310"
+  },
+  {
+    "text": "later see how those things are implemented in c-sharp using the constructor you can see an intermediate",
+    "start": "320310",
+    "end": "327030"
+  },
+  {
+    "text": "language let's go down and what we can see when we take a look at like under the hood on lower level system mechanism",
+    "start": "327030",
+    "end": "334350"
+  },
+  {
+    "start": "328000",
+    "end": "545000"
+  },
+  {
+    "text": "is we do have two mechanisms which we'll cover in details today first of them is",
+    "start": "334350",
+    "end": "339540"
+  },
+  {
+    "text": "called structured exception handling SH and the way it works is you can see it on the right-hand side of the slide is",
+    "start": "339540",
+    "end": "345990"
+  },
+  {
+    "text": "we can have try with exception blood with cash block or try with finally we",
+    "start": "345990",
+    "end": "351150"
+  },
+  {
+    "text": "cannot have try catch and finally in like one blood of code but the difference with exception hand removed",
+    "start": "351150",
+    "end": "357060"
+  },
+  {
+    "text": "with the catch handler is that we do not specify the type of the exception what",
+    "start": "357060",
+    "end": "362310"
+  },
+  {
+    "text": "we do is we provide the so called exception filter which is different but similar in nature to exception filter in",
+    "start": "362310",
+    "end": "368729"
+  },
+  {
+    "text": "c-sharp so let's see this in action can you see the code at the back there raise",
+    "start": "368729",
+    "end": "374430"
+  },
+  {
+    "text": "your hand if you can lovely ok so what we are going to do is we do have a very simple plus plus application which we'll",
+    "start": "374430",
+    "end": "380190"
+  },
+  {
+    "text": "see in details first structure of the demos which we'll have today generally you have some code which will start",
+    "start": "380190",
+    "end": "386820"
+  },
+  {
+    "text": "analyzing from the bottom there's probably some main function will go up through some functions functions",
+    "start": "386820",
+    "end": "392220"
+  },
+  {
+    "text": "functions till we get to some code the generating exception something simple like fro or generate a division by 0",
+    "start": "392220",
+    "end": "398789"
+  },
+  {
+    "text": "whatever else and then we start analyzing the application going from top to the bottom so we start in here in",
+    "start": "398789",
+    "end": "405270"
+  },
+  {
+    "text": "this man we call Meffert to try which has try and accept block and in except we provide the filter exception method",
+    "start": "405270",
+    "end": "411539"
+  },
+  {
+    "text": "and then we get in this try method we call the generate exception so what we here is we do generate division by zero",
+    "start": "411539",
+    "end": "417990"
+  },
+  {
+    "text": "now what is happening normally in c-sharp or in C++ we would specify here in this place the type of exception want",
+    "start": "417990",
+    "end": "424650"
+  },
+  {
+    "text": "to handle what we do here is we specify the method this method is supposed to",
+    "start": "424650",
+    "end": "429659"
+  },
+  {
+    "text": "answer a very simple question operating system comes to this method and asks hey what do you want to do with this",
+    "start": "429659",
+    "end": "435210"
+  },
+  {
+    "text": "exception and this method can return one of the three values so two values are",
+    "start": "435210",
+    "end": "441150"
+  },
+  {
+    "text": "pretty simple I don't want to handle this exception I don't care about it I don't know it so please go else find",
+    "start": "441150",
+    "end": "448199"
+  },
+  {
+    "text": "someone else who can handle this or the other value is yeah I do know this exception I want to handle it",
+    "start": "448199",
+    "end": "453689"
+  },
+  {
+    "text": "but there is third value meaning exception continue execution which basically tells the operating system hey",
+    "start": "453689",
+    "end": "459930"
+  },
+  {
+    "text": "I think everything is fine let's just try again and this is what we are actually doing in this simple sample",
+    "start": "459930",
+    "end": "466050"
+  },
+  {
+    "text": "code we do divide by zero and then we have a counter which we increment and we check whether is below 10 if it is below",
+    "start": "466050",
+    "end": "473279"
+  },
+  {
+    "text": "10 we tell the operating system hey everything is perfect try again so what operating system does now is it",
+    "start": "473279",
+    "end": "479939"
+  },
+  {
+    "text": "executes the last instruction again it restores all the registers ystos the",
+    "start": "479939",
+    "end": "485669"
+  },
+  {
+    "text": "state of the application and reruns the instruction this instruction is here it's 1 divided by 0 again so we get",
+    "start": "485669",
+    "end": "492930"
+  },
+  {
+    "text": "exactly the same behavior for the next time so we do continue for the first time for the second time for the first",
+    "start": "492930",
+    "end": "498539"
+  },
+  {
+    "text": "time and every single time we get the division by 0 exception so after 10",
+    "start": "498539",
+    "end": "503550"
+  },
+  {
+    "text": "times we finally decide that when this if does not execute then we tell operating system hey I want to handle",
+    "start": "503550",
+    "end": "510360"
+  },
+  {
+    "text": "this exception so we return the code saying hey execute the handler and at the very end with order we execute the",
+    "start": "510360",
+    "end": "517018"
+  },
+  {
+    "text": "exception blog which is here called underscore underscore accept so now we can see that even though this mechanism",
+    "start": "517019",
+    "end": "522899"
+  },
+  {
+    "text": "is very similar to what we have in C sharp or C++ we actually have this third option which we can use to do something",
+    "start": "522899",
+    "end": "529709"
+  },
+  {
+    "text": "else also it's worth noting here that this method filter exception is executed always no matter what the type of the",
+    "start": "529709",
+    "end": "536550"
+  },
+  {
+    "text": "exception was we don't declare the type we want to handle we only want to provide the callback which is called by",
+    "start": "536550",
+    "end": "543540"
+  },
+  {
+    "text": "the operating system let's go back to the slides there are two more mechanisms in Windows very similar in",
+    "start": "543540",
+    "end": "549750"
+  },
+  {
+    "start": "545000",
+    "end": "693000"
+  },
+  {
+    "text": "which we'll cover today they are called vectored exception handling and vector continuation handling vh and v CH they",
+    "start": "549750",
+    "end": "556350"
+  },
+  {
+    "text": "are very similar to signals in linux and the way they work is that they are they are not contextual to the opposite as",
+    "start": "556350",
+    "end": "564540"
+  },
+  {
+    "text": "their as the normal try catch block so what we do have in our second demo is we",
+    "start": "564540",
+    "end": "569970"
+  },
+  {
+    "text": "need to register handlers for exception handler and for continuation handler so",
+    "start": "569970",
+    "end": "574980"
+  },
+  {
+    "text": "we just do the operating system hey if there is an exception call this method no matter where this exception happens",
+    "start": "574980",
+    "end": "581190"
+  },
+  {
+    "text": "where exactly it is being from so again we call me for try in the method try we",
+    "start": "581190",
+    "end": "586380"
+  },
+  {
+    "text": "call generate exception we do some division by zero now this exception is being thrown it's worth noticing here that we do have seh",
+    "start": "586380",
+    "end": "593700"
+  },
+  {
+    "text": "installed as well here we do have try except block but the VH handler has a",
+    "start": "593700",
+    "end": "598830"
+  },
+  {
+    "text": "priority so it is being is executed first so what we can see is we are in VH",
+    "start": "598830",
+    "end": "604500"
+  },
+  {
+    "text": "exception handler method which is basically here and here again we want to",
+    "start": "604500",
+    "end": "609540"
+  },
+  {
+    "text": "return to the operating system the special code telling it what to do and if interesting thing is we can also we",
+    "start": "609540",
+    "end": "617430"
+  },
+  {
+    "text": "have access to all the registers and all the state of our application at the moment of the point of executing the",
+    "start": "617430",
+    "end": "624600"
+  },
+  {
+    "text": "instruction which calls the exception so here we have a structure which we can actually use to traverse the registers",
+    "start": "624600",
+    "end": "631440"
+  },
+  {
+    "text": "and modify them and we'll use this in one of the next demos but what we do here is we do division by zero by",
+    "start": "631440",
+    "end": "637680"
+  },
+  {
+    "text": "dividing one by this variable which we can modify so what we do in this handler",
+    "start": "637680",
+    "end": "642930"
+  },
+  {
+    "text": "is we modify this variable to one and we tell the operating system hey it's perfectly fine to continue just try",
+    "start": "642930",
+    "end": "649650"
+  },
+  {
+    "text": "again operating system now what it does it resumes the execution at the last instruction and also it caused the",
+    "start": "649650",
+    "end": "656160"
+  },
+  {
+    "text": "continuation handler which is called only when we told the operating system to continue so this handler is now being",
+    "start": "656160",
+    "end": "663270"
+  },
+  {
+    "text": "called and we execute the last instruction again but this time we have completely different effect because",
+    "start": "663270",
+    "end": "669450"
+  },
+  {
+    "text": "previously we were dividing by zero now this variable was modified and set to one so we don't get the division by zero",
+    "start": "669450",
+    "end": "676350"
+  },
+  {
+    "text": "exception anymore and we can safely continue so as you can see we are entering try and then we do execute VA",
+    "start": "676350",
+    "end": "683160"
+  },
+  {
+    "text": "vc8 we do not execute SCH handler at all and then we just exit try everything",
+    "start": "683160",
+    "end": "688649"
+  },
+  {
+    "text": "continues successfully so those are mechanisms which we will be covering today there are some more mechanism",
+    "start": "688649",
+    "end": "694980"
+  },
+  {
+    "start": "693000",
+    "end": "808000"
+  },
+  {
+    "text": "which we could discuss one of them is called dwarf which is similar to AC agent its nature only its table-based as",
+    "start": "694980",
+    "end": "701189"
+  },
+  {
+    "text": "he ages also table-based depending on architecture we'll see that later and there is one more approach very basic",
+    "start": "701189",
+    "end": "706949"
+  },
+  {
+    "text": "when it comes to exception handling which is called said jump long jump and we'll see it at the very end the basic",
+    "start": "706949",
+    "end": "711990"
+  },
+  {
+    "text": "idea is we do set jump which is basically we store all the registers",
+    "start": "711990",
+    "end": "717149"
+  },
+  {
+    "text": "that contact the lower application before we start executing some line which may cause an exception and then",
+    "start": "717149",
+    "end": "722790"
+  },
+  {
+    "text": "when it's something wrong happens we do the long jump to the place where we were when we knew something was good when we",
+    "start": "722790",
+    "end": "729660"
+  },
+  {
+    "text": "knew the state was correct so this is what we'll cover later during this talk and now comes the question actually one",
+    "start": "729660",
+    "end": "736529"
+  },
+  {
+    "text": "more thing if you have ever seen window like this in your operating system now",
+    "start": "736529",
+    "end": "741899"
+  },
+  {
+    "text": "you know what this first button means continue typically when you click it this window a pop ups again because",
+    "start": "741899",
+    "end": "747569"
+  },
+  {
+    "text": "nothing happens like you don't change the state but in theory you can continue and modify the state for instance by",
+    "start": "747569",
+    "end": "753420"
+  },
+  {
+    "text": "calling some handlers okay so we started with assumption that you more or less we more or less know how exception handlers",
+    "start": "753420",
+    "end": "760920"
+  },
+  {
+    "text": "work how trackage final works etc so if you do if you feel like you understand",
+    "start": "760920",
+    "end": "766620"
+  },
+  {
+    "text": "exceptions then you probably may want to answer some of the tricky questions about exception handling and this is",
+    "start": "766620",
+    "end": "773220"
+  },
+  {
+    "text": "only a subset of questions you may want to ask yourself and those includes things like very edge very edgy edge",
+    "start": "773220",
+    "end": "779399"
+  },
+  {
+    "text": "cases for instance what happens when you try to leave the application what happens when you get stuck overflow what",
+    "start": "779399",
+    "end": "784709"
+  },
+  {
+    "text": "happens when you get say like out-of-band exception from from some different thread what happens when",
+    "start": "784709",
+    "end": "790500"
+  },
+  {
+    "text": "execution engine exception comes in and all those things we typically do not cover when it comes to handling",
+    "start": "790500",
+    "end": "796290"
+  },
+  {
+    "text": "exceptions and in this talk what we are going to do is we will try to answer some of those questions at least and",
+    "start": "796290",
+    "end": "802740"
+  },
+  {
+    "text": "what's more important we'll try understanding how those things work under the hood so this concludes",
+    "start": "802740",
+    "end": "808079"
+  },
+  {
+    "start": "808000",
+    "end": "908000"
+  },
+  {
+    "text": "first part let's move on to implementation details so let's start with very simple thing one of the",
+    "start": "808079",
+    "end": "814019"
+  },
+  {
+    "text": "questions was what happens when we do when we do exit application is the finally block executed at all and",
+    "start": "814019",
+    "end": "820430"
+  },
+  {
+    "text": "interesting oddly enough it's depends on the platform significantly and it can",
+    "start": "820430",
+    "end": "825630"
+  },
+  {
+    "text": "differ also depending on the way how we exit the application so in c-sharp when we call environment dot exit family",
+    "start": "825630",
+    "end": "832650"
+  },
+  {
+    "text": "blocks are executed but when we try calling environment for fast or when someone tries to kill our application",
+    "start": "832650",
+    "end": "838650"
+  },
+  {
+    "text": "all those things finally is not being executed what's worse when we do have Stack Overflow",
+    "start": "838650",
+    "end": "844010"
+  },
+  {
+    "text": "exception our application is being killed immediately and we cannot stop",
+    "start": "844010",
+    "end": "849300"
+  },
+  {
+    "text": "that we cannot handle that at all which is pretty nasty because now you can imagine that you are running some unit",
+    "start": "849300",
+    "end": "855150"
+  },
+  {
+    "text": "tests and one of your tests has a bug because it from Stack Overflow exception",
+    "start": "855150",
+    "end": "861510"
+  },
+  {
+    "text": "what happens then your whole test runner just dies your tests are not executed",
+    "start": "861510",
+    "end": "867000"
+  },
+  {
+    "text": "anymore you have no logs you have no structures you have nothing it just dies you cannot do anything about this in",
+    "start": "867000",
+    "end": "873150"
+  },
+  {
+    "text": "c-sharp will actually see later how it worked before and if we can do anything about this but general rule of thumb is",
+    "start": "873150",
+    "end": "879990"
+  },
+  {
+    "text": "we are just doomed in that case in SH finally is not being executed in Java it",
+    "start": "879990",
+    "end": "886200"
+  },
+  {
+    "text": "is also not executed but it also depends because we can configure this depending",
+    "start": "886200",
+    "end": "891690"
+  },
+  {
+    "text": "on the permissions we have it may work it may not work but think is interesting that in Java you can handle Stack",
+    "start": "891690",
+    "end": "897300"
+  },
+  {
+    "text": "Overflow exception easily and just carry on so Java is like allows you to do this thing even if this terrible thing",
+    "start": "897300",
+    "end": "903600"
+  },
+  {
+    "text": "happens like Stack Overflow exception Java just allows you to go on okay that",
+    "start": "903600",
+    "end": "908970"
+  },
+  {
+    "start": "908000",
+    "end": "1218000"
+  },
+  {
+    "text": "was simple so let's start with typical thing we do handle exceptions what we",
+    "start": "908970",
+    "end": "914460"
+  },
+  {
+    "text": "typically want to do is we handle them we want to lock some state or Naga message that hey something wrong happened then we just reframe this",
+    "start": "914460",
+    "end": "921330"
+  },
+  {
+    "text": "exception so it sounded it sounded like above in some layers on the top and probably returned some code to user or",
+    "start": "921330",
+    "end": "927840"
+  },
+  {
+    "text": "whatever else so the question is how do we refer exception that correct the right way so let's go through this very",
+    "start": "927840",
+    "end": "934440"
+  },
+  {
+    "text": "simple code once again we start from the bottom so we have some main when we call the method then in this method we call",
+    "start": "934440",
+    "end": "940350"
+  },
+  {
+    "text": "method Froemming exception twice but we do have try catch and then that try catch we want to refer the exception and",
+    "start": "940350",
+    "end": "947070"
+  },
+  {
+    "text": "you probably do know that if we replace line 20 with frou e it's not the right answer",
+    "start": "947070",
+    "end": "953070"
+  },
+  {
+    "text": "what we see on this slide is in bottom left corner you have the outer did you see in your console meaning printed out",
+    "start": "953070",
+    "end": "960690"
+  },
+  {
+    "text": "to your output bottom right corner shows you what you see when you start debugging application using win debug",
+    "start": "960690",
+    "end": "966660"
+  },
+  {
+    "text": "and you dump the stack trace as seen by the CLR fret so on the low level of the",
+    "start": "966660",
+    "end": "972390"
+  },
+  {
+    "text": "threading platform so we can see that only two lines are indicated here only the line calling them effort and only",
+    "start": "972390",
+    "end": "979290"
+  },
+  {
+    "text": "the line throwing the exception so this is not what we want because we just lost the source of the exception we don't",
+    "start": "979290",
+    "end": "985200"
+  },
+  {
+    "text": "know where it was exactly from and why also see LR stack command shows us",
+    "start": "985200",
+    "end": "990390"
+  },
+  {
+    "text": "nothing so can we do better probably the typical answer you know is",
+    "start": "990390",
+    "end": "995580"
+  },
+  {
+    "text": "instead of doing fro e just do fro and it works better indeed we can now see that the exception was from in line 10",
+    "start": "995580",
+    "end": "1002600"
+  },
+  {
+    "text": "at the top and it works generally pretty well the only thing here is can you tell",
+    "start": "1002600",
+    "end": "1007940"
+  },
+  {
+    "text": "me whether the method we called which which ultimately from the exception",
+    "start": "1007940",
+    "end": "1013160"
+  },
+  {
+    "text": "whether we called it in line 17 or 18 in this sample code you probably can do it",
+    "start": "1013160",
+    "end": "1018530"
+  },
+  {
+    "text": "because it's super simple but you can imagine there is some if condition there is some loop there is some state in the",
+    "start": "1018530",
+    "end": "1023660"
+  },
+  {
+    "text": "play so the code is not necessarily like deterministic so we're where did we",
+    "start": "1023660",
+    "end": "1029569"
+  },
+  {
+    "text": "exactly call this method and this is the answer which you typically see in the books just do fro and you are good to go",
+    "start": "1029570",
+    "end": "1035209"
+  },
+  {
+    "text": "and as we can see it's not necessarily perfect because we would like to have this line so can we do better can we",
+    "start": "1035209",
+    "end": "1041870"
+  },
+  {
+    "text": "somehow get this line and print it out so we know where we exactly call them effort maybe instead of referring the",
+    "start": "1041870",
+    "end": "1048620"
+  },
+  {
+    "text": "original exception let's try something different let's throw new exception and pass the old one as the inner exception",
+    "start": "1048620",
+    "end": "1054830"
+  },
+  {
+    "text": "it works as you can see we have all the lines in bottom left corner so all the lines are highlighted they work pretty",
+    "start": "1054830",
+    "end": "1060650"
+  },
+  {
+    "text": "well the only problem here is originally we thrown a system argument exception but",
+    "start": "1060650",
+    "end": "1067280"
+  },
+  {
+    "text": "now we are throwing system exception so we change the exception type we significantly change the behavior of our",
+    "start": "1067280",
+    "end": "1073700"
+  },
+  {
+    "text": "application probably introduced some bug brain by making this line of code so while it is better I mean we do have",
+    "start": "1073700",
+    "end": "1081620"
+  },
+  {
+    "text": "this line and that's what we wanted we probably broke the application which is definitely not a thing we'd like to",
+    "start": "1081620",
+    "end": "1087890"
+  },
+  {
+    "text": "do so can we somehow get all the lies in the output and still capture or continue",
+    "start": "1087890",
+    "end": "1094640"
+  },
+  {
+    "text": "with the same logic and there are actually two answers to that first one is based on some of the little trickery",
+    "start": "1094640",
+    "end": "1100429"
+  },
+  {
+    "text": "Wolf's reflection you had something called dotnet remoting previously in dotnet which was think basically you",
+    "start": "1100429",
+    "end": "1106160"
+  },
+  {
+    "text": "could do RPC across processes so you could do some network call which seem to for you to be like a local call and now",
+    "start": "1106160",
+    "end": "1113750"
+  },
+  {
+    "text": "if you actually do the reflection trickery what you can do is you can prepare the exception for remoting and",
+    "start": "1113750",
+    "end": "1119960"
+  },
+  {
+    "text": "then you can call them method which we can call this exception and throw it again",
+    "start": "1119960",
+    "end": "1125090"
+  },
+  {
+    "text": "so what happens now is you do have all the lines of code you do have all the lines highlighted so it works well you",
+    "start": "1125090",
+    "end": "1132140"
+  },
+  {
+    "text": "do have the same type of exception so it works well the only problem is or maybe the only drawback of this approach is",
+    "start": "1132140",
+    "end": "1139160"
+  },
+  {
+    "text": "you are using some nasty a reflection so now if you submit this as a code review or as a pull request probably your",
+    "start": "1139160",
+    "end": "1146000"
+  },
+  {
+    "text": "reader will start asking questions hey why not just from semicolons so maybe it's not the way to go not to mention",
+    "start": "1146000",
+    "end": "1151730"
+  },
+  {
+    "text": "that reflection may give you another exception that you have no permissions to call this method so while it may work",
+    "start": "1151730",
+    "end": "1157400"
+  },
+  {
+    "text": "it may actually introduce even more problems but there is a good way how to do it and this way was introduced with",
+    "start": "1157400",
+    "end": "1163610"
+  },
+  {
+    "text": "dotnet 4.5 moves with C sharp 5 when async was introduced because in that",
+    "start": "1163610",
+    "end": "1168679"
+  },
+  {
+    "text": "case we had a lot of use cases when we had an exception in some different context probably on different thread",
+    "start": "1168679",
+    "end": "1174470"
+  },
+  {
+    "text": "probably executing somewhere else so we had to capture this exception and reflow it by preserving the stack and",
+    "start": "1174470",
+    "end": "1180110"
+  },
+  {
+    "text": "everything else so what was introduced was an exception dispatch in for capture and fro so we do capture the exception",
+    "start": "1180110",
+    "end": "1187160"
+  },
+  {
+    "text": "and we restore the data and starting dope net 4.5 billion to the and refer",
+    "start": "1187160",
+    "end": "1196820"
+  },
+  {
+    "text": "them like this and this is what is actually being done by the dotnet platform under the hood when you do use",
+    "start": "1196820",
+    "end": "1202100"
+  },
+  {
+    "text": "async await so it's not a black magic trickery which you should never touch however it's slightly longer than just",
+    "start": "1202100",
+    "end": "1208010"
+  },
+  {
+    "text": "fro semicolon okay so we started with how we want to",
+    "start": "1208010",
+    "end": "1213200"
+  },
+  {
+    "text": "handle exceptions we want to lock something that probably throw them so but the thing is how to handle",
+    "start": "1213200",
+    "end": "1219490"
+  },
+  {
+    "start": "1218000",
+    "end": "1373000"
+  },
+  {
+    "text": "everything yes so how to catch everything in C++ it's super easy just use ellipses in seh and V H it just",
+    "start": "1219490",
+    "end": "1226420"
+  },
+  {
+    "text": "works because the exception filters are called always operating system just asks you hey do you want to catch this or not",
+    "start": "1226420",
+    "end": "1233020"
+  },
+  {
+    "text": "so it's called for all the exceptions we do not declare the exception type in dotnet things become tricky again so",
+    "start": "1233020",
+    "end": "1240070"
+  },
+  {
+    "text": "depending on the dotnet version in like very old open version dot one we have",
+    "start": "1240070",
+    "end": "1245260"
+  },
+  {
+    "text": "different behavior when it comes to things which do not inherit from system to the exception we need to remember",
+    "start": "1245260",
+    "end": "1251140"
+  },
+  {
+    "text": "that there are other languages on dotted platform for instance one of them is c++ c RI which is basically a managed",
+    "start": "1251140",
+    "end": "1257830"
+  },
+  {
+    "text": "version of C++ and in dead language you can throw anything you can throw string you can from exception you can from",
+    "start": "1257830",
+    "end": "1263590"
+  },
+  {
+    "text": "integer you can throw whatever you want so what was happening dotnet one when you throwed something like this",
+    "start": "1263590",
+    "end": "1270010"
+  },
+  {
+    "text": "it wasn't wrapped with any exception so what you had was you had two exception handlers one of them was catch exception",
+    "start": "1270010",
+    "end": "1276370"
+  },
+  {
+    "text": "one of them was catch with no type specified and the latter handler was catching those exceptions in dotnet",
+    "start": "1276370",
+    "end": "1283150"
+  },
+  {
+    "text": "though they changed this behavior now those things are wrapped with a runtime wrapped exception this broke the",
+    "start": "1283150",
+    "end": "1288610"
+  },
+  {
+    "text": "compatibility slightly so there were attribute attributes to fix that but generally this is the way to go right",
+    "start": "1288610",
+    "end": "1294190"
+  },
+  {
+    "text": "now we do catch exception or catch without specifying the type and it should catch everything the answer in",
+    "start": "1294190",
+    "end": "1301240"
+  },
+  {
+    "text": "Java is we can catch flowable it should catch everything including the memory errors including stack overflow error",
+    "start": "1301240",
+    "end": "1307750"
+  },
+  {
+    "text": "exceptions etc etc the only question now we should ask is do we really want to",
+    "start": "1307750",
+    "end": "1313120"
+  },
+  {
+    "text": "catch everything because believe it or not there are platforms which do use exceptions to control the front of your",
+    "start": "1313120",
+    "end": "1319090"
+  },
+  {
+    "text": "application one of them is for instance scala in scala there is no a break keyword whenever you have a loop and you",
+    "start": "1319090",
+    "end": "1325240"
+  },
+  {
+    "text": "want to break there is no break keyword the break is just a method which froze an exception and there is completely",
+    "start": "1325240",
+    "end": "1330910"
+  },
+  {
+    "text": "different branch of exceptions in scala which is controlled like flow control",
+    "start": "1330910",
+    "end": "1336130"
+  },
+  {
+    "text": "exceptions so you should never catch them unless you want to break this cover language because if you do try catch and",
+    "start": "1336130",
+    "end": "1342670"
+  },
+  {
+    "text": "then you catch this exception the break keyword or the break method stops working so generally catching everything",
+    "start": "1342670",
+    "end": "1349060"
+  },
+  {
+    "text": "may not be the best idea also because developers were catching everything dotnet and Microsoft actually",
+    "start": "1349060",
+    "end": "1355180"
+  },
+  {
+    "text": "changed the internals and stopped or blocked the possibility to catch a lot",
+    "start": "1355180",
+    "end": "1360880"
+  },
+  {
+    "text": "of things in dot that we'll see that later during this talk but it the reason why it was changed is because people",
+    "start": "1360880",
+    "end": "1366910"
+  },
+  {
+    "text": "were catching those exceptions but not necessarily thinking how to handle them correctly okay so we know how to catch",
+    "start": "1366910",
+    "end": "1374050"
+  },
+  {
+    "start": "1373000",
+    "end": "1463000"
+  },
+  {
+    "text": "and reflow we know how to catch everything now the opposite are the things which we cannot catch and",
+    "start": "1374050",
+    "end": "1380260"
+  },
+  {
+    "text": "obviously there are there are uncatchable things in darkness or things which will never catch one of them is",
+    "start": "1380260",
+    "end": "1385600"
+  },
+  {
+    "text": "already mention stack overflow exception other things are for instance Fred abort exception while we do can catch it with",
+    "start": "1385600",
+    "end": "1392530"
+  },
+  {
+    "text": "try catch we cannot just swallow it in order to swallow it to get rid of this exception and stop it from propagating",
+    "start": "1392530",
+    "end": "1398290"
+  },
+  {
+    "text": "we need to call the reset upwards method and that's the way to handle it and",
+    "start": "1398290",
+    "end": "1403420"
+  },
+  {
+    "text": "swallow it but there are other exceptions one of them is for instance access violation exception depending on",
+    "start": "1403420",
+    "end": "1408910"
+  },
+  {
+    "text": "how it was thrown we may or may not be able to handle it there is also much more severe exception code execution",
+    "start": "1408910",
+    "end": "1415780"
+  },
+  {
+    "text": "engine exceptions raise your hand if you have ever seen that oh yeah I do see",
+    "start": "1415780",
+    "end": "1421180"
+  },
+  {
+    "text": "some hands so generally if you do have exception like this execution engine exception you probably have much bigger",
+    "start": "1421180",
+    "end": "1427150"
+  },
+  {
+    "text": "issues than just not handling this exception correctly because then nothing may work in your dotnet platform and out",
+    "start": "1427150",
+    "end": "1435610"
+  },
+  {
+    "text": "of memory exception which may or may not be able which we may be able to catch depending how it was thrown and there",
+    "start": "1435610",
+    "end": "1442300"
+  },
+  {
+    "text": "are also some generic exceptions like seh exception is the exception thrown passed by the seh mechanism which we",
+    "start": "1442300",
+    "end": "1448930"
+  },
+  {
+    "text": "have already seen the same exception is thrown when we do not map it to some dotted manors exceptions so generally",
+    "start": "1448930",
+    "end": "1455350"
+  },
+  {
+    "text": "there are a lot of things which we cannot catch at all so now the thing is okay if there are things which we cannot",
+    "start": "1455350",
+    "end": "1462580"
+  },
+  {
+    "text": "catch so can we at least tell when those things will be thrown so when are those",
+    "start": "1462580",
+    "end": "1468820"
+  },
+  {
+    "start": "1463000",
+    "end": "1728000"
+  },
+  {
+    "text": "exceptions from and like obviously there is one simple scenario we just do throw something then exception is being thrown",
+    "start": "1468820",
+    "end": "1474670"
+  },
+  {
+    "text": "but there are also exceptions from in so code out-of-band manner so those",
+    "start": "1474670",
+    "end": "1479710"
+  },
+  {
+    "text": "exceptions are being propagated outside of the normal flow of our application and typical scenario when we",
+    "start": "1479710",
+    "end": "1486879"
+  },
+  {
+    "text": "do see those exceptions in when we play with a sink and our weight so let's actually see a demo how it works with",
+    "start": "1486879",
+    "end": "1493629"
+  },
+  {
+    "text": "icing and a weight so let's do the a demo called exception in the icing let's make it as a starter project and let's",
+    "start": "1493629",
+    "end": "1500469"
+  },
+  {
+    "text": "run it so what we do have here is we do",
+    "start": "1500469",
+    "end": "1505690"
+  },
+  {
+    "text": "have a main method in which we do have try-catch and we call method fro twice and then we do some printing we sleep",
+    "start": "1505690",
+    "end": "1513459"
+  },
+  {
+    "text": "for 900 milliseconds we sleep again etc etcetera and quick print again what we do in this method this method is async",
+    "start": "1513459",
+    "end": "1520269"
+  },
+  {
+    "text": "voice something you probably should never do and we do a way to task delay and then we throw exceptions so what",
+    "start": "1520269",
+    "end": "1526059"
+  },
+  {
+    "text": "happens is we do fro and this method waits 300 milliseconds and throws the",
+    "start": "1526059",
+    "end": "1531459"
+  },
+  {
+    "text": "exception and what we can see in the output like apart from the fact that our application crashed because there was an",
+    "start": "1531459",
+    "end": "1537309"
+  },
+  {
+    "text": "unhandled exception what we can see here is if we do close this window we can see",
+    "start": "1537309",
+    "end": "1542919"
+  },
+  {
+    "text": "that exception was thrown but also the two lines after the exception and after",
+    "start": "1542919",
+    "end": "1549039"
+  },
+  {
+    "text": "this method which we called then those two lines were executed as well so we",
+    "start": "1549039",
+    "end": "1554440"
+  },
+  {
+    "text": "did print out after sleep and done so it seems that our application safely continued so however if we do introduce",
+    "start": "1554440",
+    "end": "1562149"
+  },
+  {
+    "text": "some random sleep in the middle so I do introduce Fred sleep here so first thing we may want to actually think about here",
+    "start": "1562149",
+    "end": "1568869"
+  },
+  {
+    "text": "is that hey we do have this fro method which waits for 300 milliseconds but then we sleep here for 600 milliseconds",
+    "start": "1568869",
+    "end": "1576190"
+  },
+  {
+    "text": "shouldn't we catch this exception well the fact is we cannot catch it here because it's from in this out-of-band",
+    "start": "1576190",
+    "end": "1582129"
+  },
+  {
+    "text": "manner so it's thrown outside of this normal execution context and what happens is they accept the application",
+    "start": "1582129",
+    "end": "1588869"
+  },
+  {
+    "text": "crashed again but this time we do not have those two lines executed so just by",
+    "start": "1588869",
+    "end": "1594519"
+  },
+  {
+    "text": "introducing random delay into our application we significantly change the behavior of the code and we don't",
+    "start": "1594519",
+    "end": "1600759"
+  },
+  {
+    "text": "continue now safely the application just dies and doesn't execute anything else so this is when we call async void",
+    "start": "1600759",
+    "end": "1608319"
+  },
+  {
+    "text": "method what happens when we execute async task method and the thing here is even though we do not await those method",
+    "start": "1608319",
+    "end": "1615969"
+  },
+  {
+    "text": "this method anymore what is happening here is exception from in this method is propagated and handled by the",
+    "start": "1615969",
+    "end": "1622900"
+  },
+  {
+    "text": "state machine of icing and await and then it's stored on the task object and not propagated anymore so actually the",
+    "start": "1622900",
+    "end": "1630850"
+  },
+  {
+    "text": "question is is it better than what we had before because before we had an exception which was frowned propagated",
+    "start": "1630850",
+    "end": "1637420"
+  },
+  {
+    "text": "out of bounds but at least we knew there was an exception we observed the exception here in this situation the",
+    "start": "1637420",
+    "end": "1644260"
+  },
+  {
+    "text": "exception is basically hidden it's not visible for us anymore so the exception is stored on the on the",
+    "start": "1644260",
+    "end": "1650290"
+  },
+  {
+    "text": "task object and the thing is when garbage collector starts cleaning the memory when it notices there is a task",
+    "start": "1650290",
+    "end": "1656590"
+  },
+  {
+    "text": "which it needs to be cleaned up and this task has an exception then GC starts propagating it and depending on the",
+    "start": "1656590",
+    "end": "1663520"
+  },
+  {
+    "text": "version of.net we are using whether it's docked at four four point five or something later they behavior differs it",
+    "start": "1663520",
+    "end": "1669460"
+  },
+  {
+    "text": "may crossover application it may not cross our application it depends but generally we can also handle the",
+    "start": "1669460",
+    "end": "1675310"
+  },
+  {
+    "text": "exception by calling the unobserved or actually we can register a callback for",
+    "start": "1675310",
+    "end": "1680800"
+  },
+  {
+    "text": "the exception which is called an observe does exception which is very similar in nature to first chance exception for",
+    "start": "1680800",
+    "end": "1687400"
+  },
+  {
+    "text": "instance on up domain so the takeaway here is async void methods they do propagate exceptions out of bounds",
+    "start": "1687400",
+    "end": "1694060"
+  },
+  {
+    "text": "generally never use async void method unless you are forced to and also the problem with them is you cannot await",
+    "start": "1694060",
+    "end": "1700420"
+  },
+  {
+    "text": "them easily but it's possible to our way they sink void methods and with async task methods whenever you use them",
+    "start": "1700420",
+    "end": "1706600"
+  },
+  {
+    "text": "always await them if you do not at least have this handler otherwise your exceptions will get",
+    "start": "1706600",
+    "end": "1712320"
+  },
+  {
+    "text": "unnoticed and will run away okay so we now we answer the question when our",
+    "start": "1712320",
+    "end": "1718180"
+  },
+  {
+    "text": "exception like thrown the thing is can we ask the dopant hey stop throwing",
+    "start": "1718180",
+    "end": "1723250"
+  },
+  {
+    "text": "exceptional exceptions on us please do not throw anything for us and the answer is we can do this and the thing is it's",
+    "start": "1723250",
+    "end": "1731470"
+  },
+  {
+    "start": "1728000",
+    "end": "2033000"
+  },
+  {
+    "text": "called constrained executed region so whenever we setup a thing called constrained executed region we told the",
+    "start": "1731470",
+    "end": "1737380"
+  },
+  {
+    "text": "doctor hey we don't want to have any exceptions in this part of code what",
+    "start": "1737380",
+    "end": "1742510"
+  },
+  {
+    "text": "dotnet does after we ask it for a for this thing is it prefers the special",
+    "start": "1742510",
+    "end": "1747640"
+  },
+  {
+    "text": "block of code it compiles all the methods using JIT compiler it checks whether we have enough space on",
+    "start": "1747640",
+    "end": "1753670"
+  },
+  {
+    "text": "the stack it dis allows us to use for instance locking and some other methods",
+    "start": "1753670",
+    "end": "1759130"
+  },
+  {
+    "text": "but generally then dotnet art tells us hey I probably won't throw any exceptions on you I don't want you dead",
+    "start": "1759130",
+    "end": "1765760"
+  },
+  {
+    "text": "but I will try to do my best to not do so so generally we can ask dotnet to stop propagating the exceptions and the",
+    "start": "1765760",
+    "end": "1772210"
+  },
+  {
+    "text": "way we use it is we need to use it with trackage and finally the interesting thing here is as a constraint executed",
+    "start": "1772210",
+    "end": "1779350"
+  },
+  {
+    "text": "region is only in catch and finally block so typical pattern you see in the code base is you do have try finally",
+    "start": "1779350",
+    "end": "1785800"
+  },
+  {
+    "text": "with empty try block and all the code being in finally your resharper plug-in will tell you hey this try finally is",
+    "start": "1785800",
+    "end": "1792670"
+  },
+  {
+    "text": "not needed here just remove it and then you break constraint executed region so beware of that so this is how we can",
+    "start": "1792670",
+    "end": "1798970"
+  },
+  {
+    "text": "stop propagating the exceptions but now the thing is we have already seen some exceptions being propagated in the",
+    "start": "1798970",
+    "end": "1806020"
+  },
+  {
+    "text": "out-of-band manner what happens when we throw exceptions on other frets and the",
+    "start": "1806020",
+    "end": "1811360"
+  },
+  {
+    "text": "thing is in dotnet it really depends on the version again depending whether we use value oh the dotnet like dadada we",
+    "start": "1811360",
+    "end": "1818290"
+  },
+  {
+    "text": "use dotnet for or doesn't 4.5 whether this exception is being from known Fred pool or normal Fred or whatever else the",
+    "start": "1818290",
+    "end": "1824770"
+  },
+  {
+    "text": "exception may or may not kill your application but general rule of thumb is whenever you do create a new fret and",
+    "start": "1824770",
+    "end": "1830830"
+  },
+  {
+    "text": "you don't handle the exceptions it will kill your application so unfounded exceptions on a fret on Fred's they do",
+    "start": "1830830",
+    "end": "1837520"
+  },
+  {
+    "text": "kill your application immediately and the thing is you cannot do anything about that not only your ex your Fred",
+    "start": "1837520",
+    "end": "1844210"
+  },
+  {
+    "text": "dies but the whole process dies and you cannot stop it even when using like first chance exception handlers on",
+    "start": "1844210",
+    "end": "1850960"
+  },
+  {
+    "text": "abdomen or whatever else this is just how it goes it was different it dotnet previously and it cannot be changed now",
+    "start": "1850960",
+    "end": "1858880"
+  },
+  {
+    "text": "the fingers can we somehow stop the frets from being from stop the process",
+    "start": "1858880",
+    "end": "1864310"
+  },
+  {
+    "text": "from being killed when an unhandled exception is being from and the thing we",
+    "start": "1864310",
+    "end": "1869440"
+  },
+  {
+    "text": "can do here easily is or at least we can do maybe not that easily is we can",
+    "start": "1869440",
+    "end": "1874480"
+  },
+  {
+    "text": "modify the thread constructor to handle those exceptions so let's see another demo which is called Fred exception",
+    "start": "1874480",
+    "end": "1880000"
+  },
+  {
+    "text": "handler let's just run it and what we are doing here we do have we do have create new fret",
+    "start": "1880000",
+    "end": "1887859"
+  },
+  {
+    "text": "which uses this piece of code to which runs this piece of code and this piece of code is just telling us that is",
+    "start": "1887859",
+    "end": "1894190"
+  },
+  {
+    "text": "running in you fret and from some exception which is unhandled what is happening here is we would like to",
+    "start": "1894190",
+    "end": "1900219"
+  },
+  {
+    "text": "somehow handle this exception because otherwise if we don't handle it it kills our process what we can do is here we",
+    "start": "1900219",
+    "end": "1907690"
+  },
+  {
+    "text": "just use that new fret constructor we can modify the code of this constructor",
+    "start": "1907690",
+    "end": "1912789"
+  },
+  {
+    "text": "bar generating some machine code under the hood so what we do is we generate code like this which basically takes the",
+    "start": "1912789",
+    "end": "1919749"
+  },
+  {
+    "text": "original fret constructor code jumps to some other place and then calls our",
+    "start": "1919749",
+    "end": "1924999"
+  },
+  {
+    "text": "method by doing the jump here which basically does very simple thing and changes the lambda which we originally",
+    "start": "1924999",
+    "end": "1931809"
+  },
+  {
+    "text": "passed to that thread constructor with this try catch Handler and calling the lambda so what is happening here first",
+    "start": "1931809",
+    "end": "1938379"
+  },
+  {
+    "text": "we hijack the thread constructor to introduce our own matching code to do the magic we then code this method and",
+    "start": "1938379",
+    "end": "1944979"
+  },
+  {
+    "text": "when this thing is being called it effectively calls the Finke here so we",
+    "start": "1944979",
+    "end": "1950469"
+  },
+  {
+    "text": "take the original lambda which was there and which we call you the fret start and when then we wrap it with try catch call",
+    "start": "1950469",
+    "end": "1957519"
+  },
+  {
+    "text": "them effort and when the exception is being thrown we can just catch it easily here so as we can see here not only",
+    "start": "1957519",
+    "end": "1964059"
+  },
+  {
+    "text": "their exception was printed out but also we are saying that all done that everything worked correctly so this all",
+    "start": "1964059",
+    "end": "1969729"
+  },
+  {
+    "text": "done is being executed in line here so while it's not that super simple to",
+    "start": "1969729",
+    "end": "1975099"
+  },
+  {
+    "text": "handle those exceptions there is a technical way to do this obviously this is not something you should do in normal",
+    "start": "1975099",
+    "end": "1981129"
+  },
+  {
+    "text": "production code it's only when you for instance have really severe situations that you cannot modify those threads to",
+    "start": "1981129",
+    "end": "1988149"
+  },
+  {
+    "text": "handle exceptions on the on their own for instance if you do use a VM which is a Java implementation in dotnet adopted",
+    "start": "1988149",
+    "end": "1995889"
+  },
+  {
+    "text": "implementation of Java Virtual Machine you can run the Java code directly and because in Java exceptions and hundred",
+    "start": "1995889",
+    "end": "2003149"
+  },
+  {
+    "text": "exceptions on fred's do not kill the process Java programmers don't don't necessarily handle them with global",
+    "start": "2003149",
+    "end": "2009089"
+  },
+  {
+    "text": "try/catch so if you do run this via Eike Eike a vm then it will kill your process",
+    "start": "2009089",
+    "end": "2014129"
+  },
+  {
+    "text": "here so this is how you can avoid doing that the same problem maybe actually with for instance if you use we if use any f or",
+    "start": "2014129",
+    "end": "2021910"
+  },
+  {
+    "text": "math so a extensibility framework for loading plugins if you do load some code which you don't control the programmer",
+    "start": "2021910",
+    "end": "2028660"
+  },
+  {
+    "text": "the owner of that code may actually introduce a bug into your application just like that okay so that was constrained executed",
+    "start": "2028660",
+    "end": "2035740"
+  },
+  {
+    "start": "2033000",
+    "end": "2153000"
+  },
+  {
+    "text": "region and and handling and we throwing and seeing how to count them exceptions",
+    "start": "2035740",
+    "end": "2040990"
+  },
+  {
+    "text": "on all those things and this concludes the second part how those things work like from the behavioral point of view",
+    "start": "2040990",
+    "end": "2046750"
+  },
+  {
+    "text": "so now let's see how those things are implemented under the hood how they work like on the lower level so let's start",
+    "start": "2046750",
+    "end": "2053500"
+  },
+  {
+    "text": "with how do we see exceptions like in a windy buck whenever something happens and when we do have an exception handler",
+    "start": "2053500",
+    "end": "2060460"
+  },
+  {
+    "text": "being called like a senator VH what we do have is we do have a structure",
+    "start": "2060460",
+    "end": "2065580"
+  },
+  {
+    "text": "explaining or describing the exception which has been thrown and this structure actually has two important pieces first",
+    "start": "2065580",
+    "end": "2072490"
+  },
+  {
+    "text": "of them is the exception type because we do know what exception type is because",
+    "start": "2072490",
+    "end": "2078580"
+  },
+  {
+    "text": "the CPU tells us that it's not that division by 0 goes like unrecognized",
+    "start": "2078580",
+    "end": "2083830"
+  },
+  {
+    "text": "that we need to figure out whether it was division by 0 or not CPU is being kicked out by like memory management",
+    "start": "2083830",
+    "end": "2090310"
+  },
+  {
+    "text": "unit or by FP unit of calculations or whatever else and it has the exception",
+    "start": "2090310",
+    "end": "2096100"
+  },
+  {
+    "text": "type so it knows what is happening different interruption is being used so we do have this code and it's magical",
+    "start": "2096100",
+    "end": "2102460"
+  },
+  {
+    "text": "number telling us what the exception type is and when it comes to like exceptions which are of some some dotnet",
+    "start": "2102460",
+    "end": "2109150"
+  },
+  {
+    "text": "or C++ language type there are two different well-known values which we can use so we can recognize both C++ and CLR",
+    "start": "2109150",
+    "end": "2116050"
+  },
+  {
+    "text": "exceptions because they have separate codes and also what we also have is the pointer to actually the S structure",
+    "start": "2116050",
+    "end": "2123400"
+  },
+  {
+    "text": "called runtime type information which is like a poor man's reflection it doesn't",
+    "start": "2123400",
+    "end": "2128440"
+  },
+  {
+    "text": "allow us to examine the objects completely but at least it allows us to grab the type of the exception for",
+    "start": "2128440",
+    "end": "2134260"
+  },
+  {
+    "text": "instance in C++ so whenever you need to debug those low-level things just keep in mind the digits it may be super",
+    "start": "2134260",
+    "end": "2140860"
+  },
+  {
+    "text": "useful for you how to traverse this structure you just need to go through for pointers and then you get the exception type name like human readable",
+    "start": "2140860",
+    "end": "2147850"
+  },
+  {
+    "text": "so this is how we can do on windy like super low lever on mashing code what happens when we go slightly like to",
+    "start": "2147850",
+    "end": "2155830"
+  },
+  {
+    "start": "2153000",
+    "end": "2231000"
+  },
+  {
+    "text": "the higher levels so in seh there are actually two different implementations of structure of exception handling",
+    "start": "2155830",
+    "end": "2161620"
+  },
+  {
+    "text": "depending on the architecture in 86 or in 32-bit architecture what we have is a",
+    "start": "2161620",
+    "end": "2167920"
+  },
+  {
+    "text": "structure based on the stack so we do have a stack chain of handlers which we",
+    "start": "2167920",
+    "end": "2173710"
+  },
+  {
+    "text": "can use to actually traverse the exceptions whenever we start the new method and we do try catch the operating",
+    "start": "2173710",
+    "end": "2180610"
+  },
+  {
+    "text": "system or actually the code of our application just registers new handler in the stack chain which then is",
+    "start": "2180610",
+    "end": "2188080"
+  },
+  {
+    "text": "traversed by operating system to see which try-catch can use or can handle the exception so this is why we can see",
+    "start": "2188080",
+    "end": "2194980"
+  },
+  {
+    "text": "that when we nest multiple try catches blocks one after another operating",
+    "start": "2194980",
+    "end": "2200890"
+  },
+  {
+    "text": "system can go from like very very bottom to the very top and see which catch could handle them this is how it works",
+    "start": "2200890",
+    "end": "2207340"
+  },
+  {
+    "text": "in 32-bit scenario in 64-bit seh as well as some other mechanisms like dwarf or",
+    "start": "2207340",
+    "end": "2213340"
+  },
+  {
+    "text": "intermediate language exceptions handlers they are based on tables table",
+    "start": "2213340",
+    "end": "2218680"
+  },
+  {
+    "text": "based means that we do have some metadata describing how the exceptions should be held and propagated and we'll",
+    "start": "2218680",
+    "end": "2224890"
+  },
+  {
+    "text": "actually see this in a sec when we focus on on the intermediate language exceptions but let's stick with seh and",
+    "start": "2224890",
+    "end": "2232120"
+  },
+  {
+    "start": "2231000",
+    "end": "2538000"
+  },
+  {
+    "text": "what we can do is we can see how this works under the hood by creating our own",
+    "start": "2232120",
+    "end": "2237250"
+  },
+  {
+    "text": "seh exception like manually with machine code so let's make this start first",
+    "start": "2237250",
+    "end": "2243670"
+  },
+  {
+    "text": "start a project and run the run this code so what we are doing here is we need to put a special structure on the",
+    "start": "2243670",
+    "end": "2250120"
+  },
+  {
+    "text": "stack which basically has two pointers first pointer is the pointer pointing to",
+    "start": "2250120",
+    "end": "2255220"
+  },
+  {
+    "text": "the previous exception handler so we are in a try-catch block we are actually in",
+    "start": "2255220",
+    "end": "2260350"
+  },
+  {
+    "text": "a try executing some other method this other method wants to set up another try",
+    "start": "2260350",
+    "end": "2265480"
+  },
+  {
+    "text": "catch block so this new try catch block must point to the previous try catch",
+    "start": "2265480",
+    "end": "2270490"
+  },
+  {
+    "text": "block so it can be traversed later on so first pointer points to the previous try",
+    "start": "2270490",
+    "end": "2275650"
+  },
+  {
+    "text": "catch block the other pointer is basically a pointer to a method to our handler so what we are doing here is we",
+    "start": "2275650",
+    "end": "2282520"
+  },
+  {
+    "text": "do set up this store and put it in special well-known place in FS register then we again generate",
+    "start": "2282520",
+    "end": "2289070"
+  },
+  {
+    "text": "some exception let's stick with assembler why not so we do generate newly reference exception here or a null",
+    "start": "2289070",
+    "end": "2294620"
+  },
+  {
+    "text": "pointer you like we explicitly assign 0 to some register and we try to dereference it and what is happening",
+    "start": "2294620",
+    "end": "2301160"
+  },
+  {
+    "text": "here now is we do get an exception we try to read null so this is not allowed our handler is being caught and our",
+    "start": "2301160",
+    "end": "2308780"
+  },
+  {
+    "text": "handler looks like this notable things important for us here is we do get a",
+    "start": "2308780",
+    "end": "2314840"
+  },
+  {
+    "text": "full details of the exception what happened we do get exception record frame could dispatcher context record",
+    "start": "2314840",
+    "end": "2321260"
+  },
+  {
+    "text": "what is important for us or what is most useful for us is this context record variable it contains all the registers",
+    "start": "2321260",
+    "end": "2328490"
+  },
+  {
+    "text": "and the state of the CPU at the point of throwing the exception since it has all",
+    "start": "2328490",
+    "end": "2333740"
+  },
+  {
+    "text": "the registers we can try modifying them so what we are doing here is similarly",
+    "start": "2333740",
+    "end": "2339050"
+  },
+  {
+    "text": "to what we did in VH demo when we modified one of ours one of our",
+    "start": "2339050",
+    "end": "2344540"
+  },
+  {
+    "text": "variables what we do here is what you just modify the CPU register and we",
+    "start": "2344540",
+    "end": "2349670"
+  },
+  {
+    "text": "increase instruction pointer by free why by free because if we decompile this code and see the Machine Co machine",
+    "start": "2349670",
+    "end": "2356210"
+  },
+  {
+    "text": "level we can see that this movie x1 is actually free bytes long so we told the",
+    "start": "2356210",
+    "end": "2361520"
+  },
+  {
+    "text": "operating system high increase the instruction pointer by free and then again just continue everything is",
+    "start": "2361520",
+    "end": "2367610"
+  },
+  {
+    "text": "perfect just carry on operating system takes the structure restores it and then because we increase the instruction",
+    "start": "2367610",
+    "end": "2373760"
+  },
+  {
+    "text": "pointer by free we just skip this instruction and we carry on so we land in these boots and we can see",
+    "start": "2373760",
+    "end": "2379460"
+  },
+  {
+    "text": "that if we zoom here it works as a charm and this is actually how things are",
+    "start": "2379460",
+    "end": "2384590"
+  },
+  {
+    "text": "implemented under the hood this is not a trickery we just here do here just for fun this is how things are implemented",
+    "start": "2384590",
+    "end": "2391310"
+  },
+  {
+    "text": "under the hood the exception handler is being called we just need to examine the",
+    "start": "2391310",
+    "end": "2396380"
+  },
+  {
+    "text": "state we need to see where we are what happened what is the state of CPU and then effectively just jump somewhere",
+    "start": "2396380",
+    "end": "2402980"
+  },
+  {
+    "text": "else and carry on also interesting thing here is if you have ever considered or",
+    "start": "2402980",
+    "end": "2408740"
+  },
+  {
+    "text": "actually wondered how is it that whenever you access newly reference in",
+    "start": "2408740",
+    "end": "2413780"
+  },
+  {
+    "text": "dotnet you get know the reference exception you may come to a illusion that dotnet must introduce some",
+    "start": "2413780",
+    "end": "2419760"
+  },
+  {
+    "text": "checks like if this reference is now from now the reference exception something like this and you would be",
+    "start": "2419760",
+    "end": "2425610"
+  },
+  {
+    "text": "very wrong what is happening in dotnet actually and the same is done in Java and in other platforms is we want to",
+    "start": "2425610",
+    "end": "2431850"
+  },
+  {
+    "text": "avoid this code which is expensive what we do is we just assume there is no null",
+    "start": "2431850",
+    "end": "2437220"
+  },
+  {
+    "text": "reference here and that reference is correct so we just take the reference and we just the reference it similarly",
+    "start": "2437220",
+    "end": "2443430"
+  },
+  {
+    "text": "to what we do here when we do something like this and we in fact have the know the reference exception the memory",
+    "start": "2443430",
+    "end": "2450600"
+  },
+  {
+    "text": "management unit keeps the CPU and tells how you access the invalid memory then",
+    "start": "2450600",
+    "end": "2455610"
+  },
+  {
+    "text": "CPU cause dotnet memory dotnet exception handler then dotnet exception handler checks okay I was actually trying to the",
+    "start": "2455610",
+    "end": "2463110"
+  },
+  {
+    "text": "reference some some reference which I assumed was not know but it looked like",
+    "start": "2463110",
+    "end": "2468300"
+  },
+  {
+    "text": "it is now now what do I do just from you know the reference exception it's even more interesting for",
+    "start": "2468300",
+    "end": "2474360"
+  },
+  {
+    "text": "instance in Java and probably will work the same in dotnet sooner or later because in Java even if you do",
+    "start": "2474360",
+    "end": "2480750"
+  },
+  {
+    "text": "explicitly check for know the reference or null pointer jgit compiler",
+    "start": "2480750",
+    "end": "2486990"
+  },
+  {
+    "text": "just-in-time compiler in Java may ignore this check completely it will not compile this if for you that if won't be",
+    "start": "2486990",
+    "end": "2494070"
+  },
+  {
+    "text": "there so now what happens then no reference is being from the MMU kicks the cpu java is being notified JVM",
+    "start": "2494070",
+    "end": "2501090"
+  },
+  {
+    "text": "checks okay I was trying to the reference the the reference some object and it happened to be null so what do I",
+    "start": "2501090",
+    "end": "2507900"
+  },
+  {
+    "text": "do now I go and check if the user checked whether the reference was non null if the check was there if we",
+    "start": "2507900",
+    "end": "2514260"
+  },
+  {
+    "text": "explicitly put if not now then what Java does it just gets rid of the coded",
+    "start": "2514260",
+    "end": "2520830"
+  },
+  {
+    "text": "compiled recom pounds it again with including the if condition this time so this is like multiple compilation of the",
+    "start": "2520830",
+    "end": "2527700"
+  },
+  {
+    "text": "method something which will have or actually already having the indata platform because we are going towards",
+    "start": "2527700",
+    "end": "2533400"
+  },
+  {
+    "text": "the multi tired compilation so maybe this optimization will be introduced as well okay so that was a CH and V in x86",
+    "start": "2533400",
+    "end": "2542490"
+  },
+  {
+    "text": "and x64 when it comes to VH and VCH those two mechanism are hardly undocumented it's very hard to figure",
+    "start": "2542490",
+    "end": "2549420"
+  },
+  {
+    "text": "out actually how they work on the hood if you want to figure them out well in 32-bit application it's easy you can",
+    "start": "2549420",
+    "end": "2556380"
+  },
+  {
+    "text": "find all the handlers by iterating through the whole memory in memory addresses which takes around ten seconds",
+    "start": "2556380",
+    "end": "2562710"
+  },
+  {
+    "text": "at least on this machine in 64-bit is probably would take a little longer you could do some optimizations like check",
+    "start": "2562710",
+    "end": "2568590"
+  },
+  {
+    "text": "which pages are where mapped into the process or something like this but generally those things are not very very",
+    "start": "2568590",
+    "end": "2574950"
+  },
+  {
+    "text": "well explained not even in documentation if you would like to take a look at those you",
+    "start": "2574950",
+    "end": "2580410"
+  },
+  {
+    "text": "probably need to start debugging your operating system kernel this can be done you don't need to have two machines",
+    "start": "2580410",
+    "end": "2586440"
+  },
+  {
+    "text": "right now you can do live debugging of your kernel of operating system but then you probably need to read some machine",
+    "start": "2586440",
+    "end": "2592410"
+  },
+  {
+    "text": "code so it's not super super nice at the very end I do have a link which points to some forum where people were actually",
+    "start": "2592410",
+    "end": "2598500"
+  },
+  {
+    "text": "doing things like this so if you're interested take a look at this now going up so we mentioned that in SCH 64 bit",
+    "start": "2598500",
+    "end": "2607980"
+  },
+  {
+    "start": "2602000",
+    "end": "2695000"
+  },
+  {
+    "text": "exceptions were table based and the same goes in intermediate language so what happens is when we actually execute some",
+    "start": "2607980",
+    "end": "2615510"
+  },
+  {
+    "text": "code so when we start with method like this we have try catch catch finally what what happens when we compile this",
+    "start": "2615510",
+    "end": "2621840"
+  },
+  {
+    "text": "method for intermediate language is we do have some instructions like in the aisle language and all those",
+    "start": "2621840",
+    "end": "2627780"
+  },
+  {
+    "text": "instructions they have numbers you can see in here in the snippet for instance this instruction like here at the top",
+    "start": "2627780",
+    "end": "2633060"
+  },
+  {
+    "text": "has numbers 0 0 1 so what is happening is we just specify which lines of code",
+    "start": "2633060",
+    "end": "2639750"
+  },
+  {
+    "text": "contain which exception handlers so here at the very bottom we can see that do we",
+    "start": "2639750",
+    "end": "2645510"
+  },
+  {
+    "text": "do say that instructions from number 1 to number 10 that's a catch block for something then we also say there is",
+    "start": "2645510",
+    "end": "2652080"
+  },
+  {
+    "text": "another catch blog and there is another and another finally with pointers to different two different instructions so",
+    "start": "2652080",
+    "end": "2658200"
+  },
+  {
+    "text": "this is how it works when we say it's table based when you do have some exception dot that goes checks",
+    "start": "2658200",
+    "end": "2663780"
+  },
+  {
+    "text": "the metadata and sees whether that give an instruction which from the exception was actually in one of those handlers or",
+    "start": "2663780",
+    "end": "2670080"
+  },
+  {
+    "text": "not so another thing is interesting thing to notice here is we have quite a",
+    "start": "2670080",
+    "end": "2675330"
+  },
+  {
+    "text": "lot of instructions like this nope NOP no operation and those instructions are",
+    "start": "2675330",
+    "end": "2680760"
+  },
+  {
+    "text": "introduced by just-in-time compiler when we read for instance come applications in debug mode in order to",
+    "start": "2680760",
+    "end": "2687359"
+  },
+  {
+    "text": "first simplify the debugging but also that sometimes introduced to make the alignment of the code better then it",
+    "start": "2687359",
+    "end": "2693660"
+  },
+  {
+    "text": "executes faster and the question is because just-in-time compiler inducted",
+    "start": "2693660",
+    "end": "2698849"
+  },
+  {
+    "start": "2695000",
+    "end": "2810000"
+  },
+  {
+    "text": "at some point was introducing those nope instructions in almost all the places to simplify debugging and as a side note",
+    "start": "2698849",
+    "end": "2705749"
+  },
+  {
+    "text": "the question is is it safe to introduce introduce this seemingly not harmful instruction in any place and actually",
+    "start": "2705749",
+    "end": "2712829"
+  },
+  {
+    "text": "when you take a look at dogma there was a nice bug because previously in some dotnet before doclet for I believe the",
+    "start": "2712829",
+    "end": "2719249"
+  },
+  {
+    "text": "lock mechanism which we were using work is on the left hand side of this slide so whenever we had lock on some object",
+    "start": "2719249",
+    "end": "2726329"
+  },
+  {
+    "text": "it was compiled to monitor enter then try catch block try finally and in finally what we do is we do monitor exit",
+    "start": "2726329",
+    "end": "2732720"
+  },
+  {
+    "text": "now the thing is because knob was introduced in multiple places whenever we landed in this line free with no",
+    "start": "2732720",
+    "end": "2739319"
+  },
+  {
+    "text": "construction we could get out of bound exception so our application could start crashing and because we are not in the",
+    "start": "2739319",
+    "end": "2746430"
+  },
+  {
+    "text": "try block yet the finally was not executed so if we had situation like",
+    "start": "2746430",
+    "end": "2751470"
+  },
+  {
+    "text": "this this this caused the deadlock and there was a this was a real back in dotnet platform which was then fixed by",
+    "start": "2751470",
+    "end": "2757739"
+  },
+  {
+    "text": "changing the underlying implementation to use something like monitor enter which was atomically setting the flag",
+    "start": "2757739",
+    "end": "2763769"
+  },
+  {
+    "text": "telling us whether their whether their exception whether the monitor was taken or not and then in finally we need we",
+    "start": "2763769",
+    "end": "2771029"
+  },
+  {
+    "text": "just need to check this this flag this is especially important because a lot of snippets either on MSDN or in java",
+    "start": "2771029",
+    "end": "2778650"
+  },
+  {
+    "text": "documentation or in any other languages they typically show you the implementation as on the left side of",
+    "start": "2778650",
+    "end": "2784380"
+  },
+  {
+    "text": "this slide do take the lock then enter the try block but if you have no guarantee that there is no nothing",
+    "start": "2784380",
+    "end": "2792029"
+  },
+  {
+    "text": "between you taking the lock and entering the try block then it may happen that at some point you get a very nasty deadlock",
+    "start": "2792029",
+    "end": "2798900"
+  },
+  {
+    "text": "because of code like this so just beware that things if you do follow the pattern on the left it may crash one day",
+    "start": "2798900",
+    "end": "2805680"
+  },
+  {
+    "text": "depending if everything is fine or maybe if there is some optimization under the hood trivia again returning and finally",
+    "start": "2805680",
+    "end": "2813599"
+  },
+  {
+    "start": "2810000",
+    "end": "2923000"
+  },
+  {
+    "text": "in c-sharp sipara in c-sharp entire it's super easy because it's not allowed in",
+    "start": "2813599",
+    "end": "2819239"
+  },
+  {
+    "text": "C++ it's even easier because there is no finally so we cannot return but in seh and VCH and in Java we can do those",
+    "start": "2819239",
+    "end": "2826859"
+  },
+  {
+    "text": "things and they work us more or less as expected only let's see what is happening in seh when we do return in",
+    "start": "2826859",
+    "end": "2834119"
+  },
+  {
+    "text": "finally so we do go to global our new infinium let's start this project and",
+    "start": "2834119",
+    "end": "2840839"
+  },
+  {
+    "text": "what we do here is we start again from main we go to try at the first try try catch second try in second try we have",
+    "start": "2840839",
+    "end": "2848099"
+  },
+  {
+    "text": "try finally in first try we do have try finally but here in the finally we do return generate exception again some",
+    "start": "2848099",
+    "end": "2855420"
+  },
+  {
+    "text": "division by zero as always what is happening here in our application is we do enter try one try to try free",
+    "start": "2855420",
+    "end": "2861920"
+  },
+  {
+    "text": "exception is being from the evasion by zero what we do is we go through the stack which okay is anyone willing to",
+    "start": "2861920",
+    "end": "2868859"
+  },
+  {
+    "text": "handle this exception we get to this first try filter tells us hey I would actually like to handle this exception",
+    "start": "2868859",
+    "end": "2875579"
+  },
+  {
+    "text": "so what we do now is we start unwinding the stack so what we do next is we execute the finally in this method and",
+    "start": "2875579",
+    "end": "2883079"
+  },
+  {
+    "text": "then we do return and now things go wrong because in second try instead of",
+    "start": "2883079",
+    "end": "2888299"
+  },
+  {
+    "text": "executing finally again what is happening here instead of doing this",
+    "start": "2888299",
+    "end": "2893369"
+  },
+  {
+    "text": "puts in finally two we are actually calling exiting try to so we just stopped executing the finally and catch",
+    "start": "2893369",
+    "end": "2900989"
+  },
+  {
+    "text": "blocks because we just called the return instruction what's more we do execute",
+    "start": "2900989",
+    "end": "2906180"
+  },
+  {
+    "text": "finally normally because it is still in try catch block but then we just call exiting try one and we never call this",
+    "start": "2906180",
+    "end": "2913529"
+  },
+  {
+    "text": "exception handler so just by doing return in seh we just break the thing",
+    "start": "2913529",
+    "end": "2918599"
+  },
+  {
+    "text": "and let's beware of that that it may be broken very easily and the thing which we actually broke is called to pass",
+    "start": "2918599",
+    "end": "2925890"
+  },
+  {
+    "start": "2923000",
+    "end": "3006000"
+  },
+  {
+    "text": "exception system and the thing is the same as in dotnet whenever we do have exception in dotnet the.net platform",
+    "start": "2925890",
+    "end": "2932519"
+  },
+  {
+    "text": "does two passes in first pass it goes through the exception handlers and ask",
+    "start": "2932519",
+    "end": "2938069"
+  },
+  {
+    "text": "them hey do you want to handle this distance or not then when it finally finds the handler to catch to handle the",
+    "start": "2938069",
+    "end": "2944309"
+  },
+  {
+    "text": "exception it goes again through the same structure and start unwinding the stack and here comes the difference",
+    "start": "2944309",
+    "end": "2951119"
+  },
+  {
+    "text": "between the exception filter and between catching the exception and then referring it if we do throw an exception",
+    "start": "2951119",
+    "end": "2958650"
+  },
+  {
+    "text": "and want to check the message and we do this like on the left hand side or on the right hand side what happens is when",
+    "start": "2958650",
+    "end": "2964859"
+  },
+  {
+    "text": "we catch the exception and reflow it what happens air with the code on the left side is we don't have the line",
+    "start": "2964859",
+    "end": "2971759"
+  },
+  {
+    "text": "throwing the exception why because we referral exception in the second pass of",
+    "start": "2971759",
+    "end": "2977279"
+  },
+  {
+    "text": "the system not in the first pass with the code on the right hand side we do",
+    "start": "2977279",
+    "end": "2982289"
+  },
+  {
+    "text": "the if check effectively in the first pass of the exception mechanism so whenever this exception is being ignored",
+    "start": "2982289",
+    "end": "2988979"
+  },
+  {
+    "text": "we don't lose the stack trace so exception filters in doubt net are not just syntax sugar or whatever else they",
+    "start": "2988979",
+    "end": "2996359"
+  },
+  {
+    "text": "are actually super useful because they allow us to handle exceptions completely differently by introducing some code",
+    "start": "2996359",
+    "end": "3003109"
+  },
+  {
+    "text": "into the first pass of exception system now a few words about fret abort",
+    "start": "3003109",
+    "end": "3008719"
+  },
+  {
+    "start": "3006000",
+    "end": "3068000"
+  },
+  {
+    "text": "whenever you call Fred abort is actually tricky because it's not inducted core anymore so this slide is probably",
+    "start": "3008719",
+    "end": "3014029"
+  },
+  {
+    "text": "getting outdated super fast but when it was being executed what happened is it",
+    "start": "3014029",
+    "end": "3019190"
+  },
+  {
+    "text": "was setting some nice flags on the threads to actually do some interpreting communication to throw this exception so",
+    "start": "3019190",
+    "end": "3026599"
+  },
+  {
+    "text": "how it worked under the hood the fred aboard was suspending the fret setting some metadata and and queuing some piece",
+    "start": "3026599",
+    "end": "3033319"
+  },
+  {
+    "text": "of code which was actually checking whether the flag is being set and then propagating the exception the",
+    "start": "3033319",
+    "end": "3039079"
+  },
+  {
+    "text": "interesting thing here is because the other thread which we want to abort may actually be doing something useful may",
+    "start": "3039079",
+    "end": "3045739"
+  },
+  {
+    "text": "be working how do we force it or how do we convince it to check the flag and",
+    "start": "3045739",
+    "end": "3051049"
+  },
+  {
+    "text": "throw the exception if needed and the thing is dope net was doing something similar to what garbage collector does",
+    "start": "3051049",
+    "end": "3057019"
+  },
+  {
+    "text": "it was hijacking the threads by modifying the instruction pointers directly this should not happen anymore",
+    "start": "3057019",
+    "end": "3062569"
+  },
+  {
+    "text": "because in dotnet call we don't even have Fred abort exception however is nice a very nice piece of history when",
+    "start": "3062569",
+    "end": "3069259"
+  },
+  {
+    "start": "3068000",
+    "end": "3203000"
+  },
+  {
+    "text": "it comes to very nasty things like exceptions which we cannot handle one of them is access violation and depending",
+    "start": "3069259",
+    "end": "3075769"
+  },
+  {
+    "text": "on how we flow this exception to maker get completely different behavior because if we start writing on the new",
+    "start": "3075769",
+    "end": "3082729"
+  },
+  {
+    "text": "pointer petition the same way I told you about how Dogma checks whether there is a new reference or not depending how",
+    "start": "3082729",
+    "end": "3088969"
+  },
+  {
+    "text": "we access this part this piece of memory may cause completely different reason so if we write for to that place directly",
+    "start": "3088969",
+    "end": "3097309"
+  },
+  {
+    "text": "using some native code we may actually generate exception which is not mapped to a known reference exception each",
+    "start": "3097309",
+    "end": "3104509"
+  },
+  {
+    "text": "which is mapped to access violation exception directly so we may get this exception depending on which methods we",
+    "start": "3104509",
+    "end": "3111079"
+  },
+  {
+    "text": "use and the thing is different dotnet api's for instance right bad weather car versus copy they may use or may not use",
+    "start": "3111079",
+    "end": "3118489"
+  },
+  {
+    "text": "the negative code and the managed code so they may completely work completely differently when it comes to accessing",
+    "start": "3118489",
+    "end": "3125509"
+  },
+  {
+    "text": "the wrong or invalid memory and what happens with with access violation",
+    "start": "3125509",
+    "end": "3131049"
+  },
+  {
+    "text": "depending how it comes we may not be able to catch it and the thing is we were not able to we were able to catch",
+    "start": "3131049",
+    "end": "3137779"
+  },
+  {
+    "text": "it previously but now are not able to do it anymore and in doclet point one there was",
+    "start": "3137779",
+    "end": "3143660"
+  },
+  {
+    "text": "actually inducted one there was no access violation exception at all again in dota 2 there was an exception but we",
+    "start": "3143660",
+    "end": "3149539"
+  },
+  {
+    "text": "could we could can do it now we cannot handle it it depends on the configuration an interesting thing here",
+    "start": "3149539",
+    "end": "3156289"
+  },
+  {
+    "text": "is if you ever imagined is it possible that only some of your finally blocks are being executed this is what can",
+    "start": "3156289",
+    "end": "3163459"
+  },
+  {
+    "text": "happen with access violation because when access violation is being thrown only things only methods marked with the",
+    "start": "3163459",
+    "end": "3171079"
+  },
+  {
+    "text": "special attribute called HP CSC found due process corrupted state exception only try catch handlers in that methods",
+    "start": "3171079",
+    "end": "3177829"
+  },
+  {
+    "text": "are being executed when access violation is being thrown so it may happen that even though you do catch the exception",
+    "start": "3177829",
+    "end": "3184119"
+  },
+  {
+    "text": "half of your application is now completely broken because finally and blocks were not executed locks are not",
+    "start": "3184119",
+    "end": "3190940"
+  },
+  {
+    "text": "released and all those things so even if you do catch those exceptions just beware that it may be safer to just stop",
+    "start": "3190940",
+    "end": "3197690"
+  },
+  {
+    "text": "doing stop working just kill the applications save the state and turn off everything and finally just to wrap up",
+    "start": "3197690",
+    "end": "3205969"
+  },
+  {
+    "start": "3203000",
+    "end": "3340000"
+  },
+  {
+    "text": "this presentation we started with very nice case of stack overflow exception which was which we were unable to handle",
+    "start": "3205969",
+    "end": "3212509"
+  },
+  {
+    "text": "so now let's do it in darkness so how do we handle the stack overflow exception and for the to do",
+    "start": "3212509",
+    "end": "3218050"
+  },
+  {
+    "text": "we will actually use all the things we learned during this talk so we learned about low-level mechanism called ACH of",
+    "start": "3218050",
+    "end": "3225640"
+  },
+  {
+    "text": "VCH we learned about things that we can modify the registers we learned that we can generate some machine code in dotnet",
+    "start": "3225640",
+    "end": "3232540"
+  },
+  {
+    "text": "and all those things if we put them together in this very simple demo what we can do is let me just start this",
+    "start": "3232540",
+    "end": "3238240"
+  },
+  {
+    "text": "application so it's preparing to throw the Stack Overflow exception what we are doing here is I do have a very simple",
+    "start": "3238240",
+    "end": "3246070"
+  },
+  {
+    "text": "method code to do work and this method do work what it does it just goes and in",
+    "start": "3246070",
+    "end": "3251230"
+  },
+  {
+    "text": "infinity recursion calls itself to generate Stack Overflow exception what I do in this",
+    "start": "3251230",
+    "end": "3257020"
+  },
+  {
+    "text": "application is I register the veh exception handler and I want to follow",
+    "start": "3257020",
+    "end": "3262870"
+  },
+  {
+    "text": "the set jump long jump approach to handle the exception so with this handler I want it to be called when the",
+    "start": "3262870",
+    "end": "3269380"
+  },
+  {
+    "text": "exception is being thrown but before I call this do work LeFort I execute some",
+    "start": "3269380",
+    "end": "3274990"
+  },
+  {
+    "text": "machine code to persist all the registers I have so i AIX cspp all the",
+    "start": "3274990",
+    "end": "3280780"
+  },
+  {
+    "text": "crucial registers i need and then i call the method so dork is now being called and then",
+    "start": "3280780",
+    "end": "3286810"
+  },
+  {
+    "text": "when do work causes the stack overflow exception my handler is being called finally what I can do now is I have all",
+    "start": "3286810",
+    "end": "3294640"
+  },
+  {
+    "text": "those four parameters which we have seen in seh demo so I do have access to all the registers I can check the exception",
+    "start": "3294640",
+    "end": "3301540"
+  },
+  {
+    "text": "code I can restore they accepts their registers and then effectively do the",
+    "start": "3301540",
+    "end": "3306820"
+  },
+  {
+    "text": "jump to the place which I know is safe and effectively this place is here to",
+    "start": "3306820",
+    "end": "3312700"
+  },
+  {
+    "text": "the return instruction so I generate some machine code register all the founders do the set jump long jump",
+    "start": "3312700",
+    "end": "3318040"
+  },
+  {
+    "text": "approach and ultimately when I call my function I can handle Stack Overflow exception and ultimately I can write",
+    "start": "3318040",
+    "end": "3325240"
+  },
+  {
+    "text": "successfully I am done so this is how we can do this obviously this is probably not something you want to do in your",
+    "start": "3325240",
+    "end": "3331900"
+  },
+  {
+    "text": "production code it only shows that you can do this if you do understand all the",
+    "start": "3331900",
+    "end": "3337120"
+  },
+  {
+    "text": "mechanisms of exceptions under the hood just to wrap up probably for document",
+    "start": "3337120",
+    "end": "3343570"
+  },
+  {
+    "start": "3340000",
+    "end": "3600000"
+  },
+  {
+    "text": "developers here the most important thing is whenever you do async/await always await all your tasks do not use async",
+    "start": "3343570",
+    "end": "3350650"
+  },
+  {
+    "text": "void if you do use async voice make sure that you can do all the exceptions handle all",
+    "start": "3350650",
+    "end": "3356170"
+  },
+  {
+    "text": "the unobserved exceptions from tasks and do not create frets with unfounded exceptions apart from that if you are",
+    "start": "3356170",
+    "end": "3363369"
+  },
+  {
+    "text": "just playing with exceptions at some point think about them think what it's better when those severe exceptions",
+    "start": "3363369",
+    "end": "3369520"
+  },
+  {
+    "text": "happen whether it's better to crush the application or maybe there is something you need to do save the state protect",
+    "start": "3369520",
+    "end": "3376869"
+  },
+  {
+    "text": "the user from breaking its context application whatever else and then maybe just terminate always consider whether",
+    "start": "3376869",
+    "end": "3382809"
+  },
+  {
+    "text": "it's safe to continue having said all of that this QR code points to this slide",
+    "start": "3382809",
+    "end": "3388690"
+  },
+  {
+    "text": "deck and now it's a Q&A time any questions yes",
+    "start": "3388690",
+    "end": "3394529"
+  },
+  {
+    "text": "okay two questions here first question our second question I'll start with the",
+    "start": "3427780",
+    "end": "3433310"
+  },
+  {
+    "text": "second one was we do have an exception that there are generally two approaches whether either if something goes wrong",
+    "start": "3433310",
+    "end": "3438770"
+  },
+  {
+    "text": "we throw exceptions to the higher layers or instead of like from your exceptions",
+    "start": "3438770",
+    "end": "3443930"
+  },
+  {
+    "text": "we can return some error codes showing what was happening I would add to that there is another exception which is",
+    "start": "3443930",
+    "end": "3449720"
+  },
+  {
+    "text": "based on for instance optionals which is like very popular in functional programming the question is which one",
+    "start": "3449720",
+    "end": "3455390"
+  },
+  {
+    "text": "exception is better faster generally which should be followed there is no definite answer for that depending on",
+    "start": "3455390",
+    "end": "3461119"
+  },
+  {
+    "text": "the platform for instance like if you work with low level languages C++ assembly you probably just return the",
+    "start": "3461119",
+    "end": "3466609"
+  },
+  {
+    "text": "code if you work with higher-level languages throwing exception is okay there is one thing I would add to that",
+    "start": "3466609",
+    "end": "3472099"
+  },
+  {
+    "text": "it depends who calls who because if this exception is being caught from some",
+    "start": "3472099",
+    "end": "3477980"
+  },
+  {
+    "text": "external color like this is RPC or something else don't throw the exception",
+    "start": "3477980",
+    "end": "3483410"
+  },
+  {
+    "text": "because then you kill yourself instead of killing the color so in that case return the code but if",
+    "start": "3483410",
+    "end": "3489020"
+  },
+  {
+    "text": "you do propagate the exception in the in the same process or something else it's a bit safer to kill the kill yourself",
+    "start": "3489020",
+    "end": "3495859"
+  },
+  {
+    "text": "because at the same time you kill the colors of the color is like in need of how of having that the further the",
+    "start": "3495859",
+    "end": "3501830"
+  },
+  {
+    "text": "previous question was about a comparing performance of exception filters and normal catch with if condition I don't",
+    "start": "3501830",
+    "end": "3509060"
+  },
+  {
+    "text": "know if there is a dense difference never measured it to be honest I would be a bit surprised if there was a",
+    "start": "3509060",
+    "end": "3515500"
+  },
+  {
+    "text": "significant difference but in my guess would be exception filters should be faster but I never benchmarked this so I",
+    "start": "3515500",
+    "end": "3523339"
+  },
+  {
+    "text": "cannot give a definite answer cool any other questions yep",
+    "start": "3523339",
+    "end": "3533049"
+  },
+  {
+    "text": "the question is is VH used by CLR as far as I understand only SCH is used by CL",
+    "start": "3536470",
+    "end": "3542650"
+  },
+  {
+    "text": "are so dotnet exceptions mechanism are based on SCH I don't know how it is",
+    "start": "3542650",
+    "end": "3548020"
+  },
+  {
+    "text": "working in dotnet core depending on the platform I believe for C for Windows",
+    "start": "3548020",
+    "end": "3553180"
+  },
+  {
+    "text": "platform it should be the same for for Linux platform it may work on signals but I never saw a dotnet using v8",
+    "start": "3553180",
+    "end": "3561099"
+  },
+  {
+    "text": "handlers I'm not saying they are not used but I did not find any usage of those cool if there are no more",
+    "start": "3561099",
+    "end": "3571480"
+  },
+  {
+    "text": "exceptions there is is the question do",
+    "start": "3571480",
+    "end": "3583420"
+  },
+  {
+    "text": "we always want to catch everything okay okay why is it bad it's not necessarily bad",
+    "start": "3583420",
+    "end": "3590530"
+  },
+  {
+    "text": "the thing is we should not cut everything on like the bottom layers we probably want to cut everything on the",
+    "start": "3590530",
+    "end": "3596950"
+  },
+  {
+    "text": "very top layer like in your controller or somewhere else in that place just lock the error or save the state and",
+    "start": "3596950",
+    "end": "3604059"
+  },
+  {
+    "text": "probably crush the application if this exception wasn't handled down the stack handling all the exceptions may be very",
+    "start": "3604059",
+    "end": "3610030"
+  },
+  {
+    "text": "harmful when doing this at the bottom under of the stuff like in deep goes",
+    "start": "3610030",
+    "end": "3615599"
+  },
+  {
+    "text": "okay any more questions I don't see any more questions so let's quickly we wrap up with references if you are interested",
+    "start": "3615750",
+    "end": "3621790"
+  },
+  {
+    "text": "in the things I showed you today a few things some books if you are interested in like CLR via C sharp dotnet internals",
+    "start": "3621790",
+    "end": "3628329"
+  },
+  {
+    "text": "cookbook depending on which area you're interested in those books may be super useful for you if you are interested in",
+    "start": "3628329",
+    "end": "3634359"
+  },
+  {
+    "text": "the things like in the way I presented them to you there is a great block code the old new thing which shows you a lot",
+    "start": "3634359",
+    "end": "3641770"
+  },
+  {
+    "text": "of architectures or low level system mechanism if you are interested in if you want to see the things I showed you",
+    "start": "3641770",
+    "end": "3647980"
+  },
+  {
+    "text": "today again I'll read them on my blog here are some links you may be interested in reading if you want to",
+    "start": "3647980",
+    "end": "3654670"
+  },
+  {
+    "text": "read the same things or read about exceptions generally but outside of my block there are also some more links which I",
+    "start": "3654670",
+    "end": "3661839"
+  },
+  {
+    "text": "would like to show you so here are some places you may start your your journey when bringing about exceptions of very very",
+    "start": "3661839",
+    "end": "3668200"
+  },
+  {
+    "text": "different architectures and having said all of that I think it's Oh what I",
+    "start": "3668200",
+    "end": "3674529"
+  },
+  {
+    "text": "wanted to tell you so my name is Adam Freeman again I'd like to thank you for attending this talk I hope you enjoyed",
+    "start": "3674529",
+    "end": "3680289"
+  },
+  {
+    "text": "it thank you",
+    "start": "3680289",
+    "end": "3682769"
+  }
+]

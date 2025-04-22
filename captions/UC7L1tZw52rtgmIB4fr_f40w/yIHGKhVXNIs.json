@@ -1,0 +1,1628 @@
+[
+  {
+    "start": "0",
+    "end": "59000"
+  },
+  {
+    "text": "okay I've been giving the signal that it is time to start so welcome everyone",
+    "start": "3799",
+    "end": "8820"
+  },
+  {
+    "text": "apologies for the slight delay in getting started here and I I understand that I am all that's standing between",
+    "start": "8820",
+    "end": "15120"
+  },
+  {
+    "text": "you and lunch so I'll Endeavor to keep things Lively here hello everyone I am Fred rice I work for IBM research and",
+    "start": "15120",
+    "end": "22320"
+  },
+  {
+    "text": "the title of my talk today is zero copy model loading with Ray and pytorch",
+    "start": "22320",
+    "end": "28439"
+  },
+  {
+    "text": "and the topic of this talk is we're going to talk about why model serving is",
+    "start": "28439",
+    "end": "33960"
+  },
+  {
+    "text": "hard and why it doesn't need to be that way so let's start with the first part of",
+    "start": "33960",
+    "end": "39540"
+  },
+  {
+    "text": "that sentence why is model serving hard and when I talk about models for the",
+    "start": "39540",
+    "end": "44760"
+  },
+  {
+    "text": "purpose of this talk I'm going to be talking about modern deep learning models these are the very large models",
+    "start": "44760",
+    "end": "50640"
+  },
+  {
+    "text": "with many layers of linear Transformations that are responsible for most of the advances in AI in the last",
+    "start": "50640",
+    "end": "56460"
+  },
+  {
+    "text": "10 years deep learning models are usually deployed in production when you are serving them on top of a deep",
+    "start": "56460",
+    "end": "62940"
+  },
+  {
+    "start": "59000",
+    "end": "59000"
+  },
+  {
+    "text": "learning framework such as tensorflow or pytorch and the model is packaged as two parts there is a graph of root",
+    "start": "62940",
+    "end": "71659"
+  },
+  {
+    "text": "operations that describe the Transformations that go from input to Output when they're applied one after",
+    "start": "71659",
+    "end": "77939"
+  },
+  {
+    "text": "the other and there are weights that parametrize these operations and model serving for a deep learning",
+    "start": "77939",
+    "end": "84240"
+  },
+  {
+    "text": "model consists of two major steps first to get the model into a place where you",
+    "start": "84240",
+    "end": "90119"
+  },
+  {
+    "text": "can use it you need to do what is known as loading the model this is where you first instantiate The Operators of the",
+    "start": "90119",
+    "end": "95579"
+  },
+  {
+    "text": "graph and then load the weights that parametrize these operators from disk or",
+    "start": "95579",
+    "end": "101520"
+  },
+  {
+    "text": "network and plug them into each other to create something that you can use for the Second Step which is known as model",
+    "start": "101520",
+    "end": "107159"
+  },
+  {
+    "text": "inference for historical reasons the first generation of AI models were literally based on first order logic and",
+    "start": "107159",
+    "end": "113579"
+  },
+  {
+    "text": "we're actually doing logical inference we still use the term inference today to describe the process of running the",
+    "start": "113579",
+    "end": "120479"
+  },
+  {
+    "text": "model to go from an input to a prediction so there's model loading and there's model prediction model inference",
+    "start": "120479",
+    "end": "126960"
+  },
+  {
+    "text": "or prediction and with deep learning models today the latest generation of models have billions of parameters in",
+    "start": "126960",
+    "end": "133500"
+  },
+  {
+    "text": "their weights and require billions of floating Point operations to run inference and this makes inference in",
+    "start": "133500",
+    "end": "138900"
+  },
+  {
+    "text": "production very expensive to run very perform intensive however",
+    "start": "138900",
+    "end": "144300"
+  },
+  {
+    "text": "it turns out that that first step of loading the model just getting the model ready to run inference is actually",
+    "start": "144300",
+    "end": "149940"
+  },
+  {
+    "text": "orders of magnitude more expensive for a deep learning model I have a graph here over on the uh",
+    "start": "149940",
+    "end": "157680"
+  },
+  {
+    "text": "right left right hand side of the slide that shows some timings for bird base",
+    "start": "157680",
+    "end": "163680"
+  },
+  {
+    "text": "this is a commonly used natural language processing model that we use at the core of a number of our production models at",
+    "start": "163680",
+    "end": "169739"
+  },
+  {
+    "text": "IBM and Bert base is kind of a medium-sized deep learning model in the",
+    "start": "169739",
+    "end": "174959"
+  },
+  {
+    "text": "realm of deep learning models deployed today running inference with bird base for a natural language input about one",
+    "start": "174959",
+    "end": "181860"
+  },
+  {
+    "text": "sentence long takes 10 to 20 milliseconds if you have Hardware accelerator like a GPU it takes more",
+    "start": "181860",
+    "end": "187500"
+  },
+  {
+    "text": "like 50 to 100 milliseconds if you're running on a general purpose CPU and that's inference loading the model on",
+    "start": "187500",
+    "end": "194099"
+  },
+  {
+    "text": "the other hand if you're loading the model from memory that is loading it from your local computer's file system",
+    "start": "194099",
+    "end": "199739"
+  },
+  {
+    "text": "buffer cache you're looking at about a second and a half and if you need to load that model over the network say out",
+    "start": "199739",
+    "end": "206040"
+  },
+  {
+    "text": "of an object storage bucket you'll be lucky to get that done in 10 seconds so the fastest way to load this model is",
+    "start": "206040",
+    "end": "213239"
+  },
+  {
+    "text": "an order of magnitude slower than the slowest way to run inference this means that we have to really manage",
+    "start": "213239",
+    "end": "219780"
+  },
+  {
+    "text": "this loading cost if we are going to do inference on these deep learning models in production we need to make sure that",
+    "start": "219780",
+    "end": "225780"
+  },
+  {
+    "text": "we amortize the cost of loading over many inference requests now different systems have different ways of",
+    "start": "225780",
+    "end": "232500"
+  },
+  {
+    "text": "implementing this amortization some systems such as a torch serve and",
+    "start": "232500",
+    "end": "238440"
+  },
+  {
+    "text": "race serve amortize this cost by maintaining a pool of long-running processes one process for each copy of",
+    "start": "238440",
+    "end": "245040"
+  },
+  {
+    "text": "the model that you're keeping ready to run for inference in in racer that's a pool of actors and each actor is of",
+    "start": "245040",
+    "end": "250920"
+  },
+  {
+    "text": "course a process other systems such as tensorflow serving and model mesh work",
+    "start": "250920",
+    "end": "257100"
+  },
+  {
+    "text": "by having a pool of processes but it's a smaller pool of larger processes and they're stuffing multiple models into",
+    "start": "257100",
+    "end": "262919"
+  },
+  {
+    "text": "each process this of course means that instead of having infrastructure to manage a process pool now you have to",
+    "start": "262919",
+    "end": "268500"
+  },
+  {
+    "text": "build infrastructure to map models onto process and manage that bin papping problem as you adjust your allocation of",
+    "start": "268500",
+    "end": "275699"
+  },
+  {
+    "text": "resources some other model serving systems such as k-serv or Selden core",
+    "start": "275699",
+    "end": "282380"
+  },
+  {
+    "text": "put each model into a separate container this gives you a more isolated version of that process pool model also gives",
+    "start": "282380",
+    "end": "289139"
+  },
+  {
+    "text": "you the option to maybe deploy a copy of tensorflow serving in one of those containers to hybridize things and of",
+    "start": "289139",
+    "end": "295139"
+  },
+  {
+    "text": "course this requires all of the infrastructure for managing and routing among a pool of containers",
+    "start": "295139",
+    "end": "300419"
+  },
+  {
+    "text": "so in all these different cases you start out from this design problem that",
+    "start": "300419",
+    "end": "306300"
+  },
+  {
+    "text": "loading deep learning models is very expensive relative to entrance and that leads you to a place where you have this",
+    "start": "306300",
+    "end": "311940"
+  },
+  {
+    "text": "complex architecture to amortize that loading cost and where that in turn leaves you because there are many",
+    "start": "311940",
+    "end": "317400"
+  },
+  {
+    "text": "components in this architecture is there are many Lobster tune you need to as the deployer of these models control how",
+    "start": "317400",
+    "end": "324300"
+  },
+  {
+    "text": "many copies of each model are running in each process or container you need to manage how you adjust that allocation as",
+    "start": "324300",
+    "end": "330840"
+  },
+  {
+    "text": "the load on the system changes you need to manage how quickly you adjust that allocation to avoid oscillations and you",
+    "start": "330840",
+    "end": "337500"
+  },
+  {
+    "text": "have to deal with the the routing of requests among these different containers if you have an application that uses more than one model at a time",
+    "start": "337500",
+    "end": "343680"
+  },
+  {
+    "text": "and so on right so we have this design Journey if you will that starts out at",
+    "start": "343680",
+    "end": "349020"
+  },
+  {
+    "text": "loading models is expensive and it kind of ends up in a place where you have lots of lots of boxes and arrows and",
+    "start": "349020",
+    "end": "356220"
+  },
+  {
+    "text": "lots of knobs to two and now there are a lot of talks in this conference that are going to talk about",
+    "start": "356220",
+    "end": "361320"
+  },
+  {
+    "text": "how you manage that complexity in today's talk what I would like to do is try a different direction try literally",
+    "start": "361320",
+    "end": "367860"
+  },
+  {
+    "text": "taking this journey in a different direction instead of starting out with loading models as expensive let's try",
+    "start": "367860",
+    "end": "374520"
+  },
+  {
+    "text": "starting out in a different way let's try starting out by making loading models cheap",
+    "start": "374520",
+    "end": "380940"
+  },
+  {
+    "text": "and after I've shown how that is possible what we will hopefully see is that by using the facilities built into",
+    "start": "380940",
+    "end": "387000"
+  },
+  {
+    "text": "Ray for managing stateless tasks in parallel at scale we can get to a point where we",
+    "start": "387000",
+    "end": "394259"
+  },
+  {
+    "text": "can get the performance of it manually too and very complex serving system without all the tuning and complexity",
+    "start": "394259",
+    "end": "400139"
+  },
+  {
+    "text": "part and get to equivalent performance basically out of the box but but I'm getting a bit of ahead of",
+    "start": "400139",
+    "end": "405960"
+  },
+  {
+    "text": "myself here I think we need to start at step one so how do we go from loading deep learning models is super expensive",
+    "start": "405960",
+    "end": "411780"
+  },
+  {
+    "text": "to loading deep learning new models is cheap well to get there we need to first ask why is it expensive to load a deep",
+    "start": "411780",
+    "end": "418919"
+  },
+  {
+    "text": "learning model here again we have our timings for the Burt based deep learning model for natural language processing",
+    "start": "418919",
+    "end": "424680"
+  },
+  {
+    "text": "and I'm going to focus in on the third bar here the one where it took about a",
+    "start": "424680",
+    "end": "430259"
+  },
+  {
+    "text": "second and a half to be more precise 1.4 seconds on our test machine to load this model from the local buffer cache and",
+    "start": "430259",
+    "end": "438360"
+  },
+  {
+    "text": "the code that we ran to do that is what we see up here this is the standard way of loading any model in the hugging face",
+    "start": "438360",
+    "end": "444479"
+  },
+  {
+    "text": "Transformers library of general purpose natural language processing models and",
+    "start": "444479",
+    "end": "449699"
+  },
+  {
+    "text": "most deep learning models have a similar way of doing loading that is in this case portable in that it can handle a",
+    "start": "449699",
+    "end": "456360"
+  },
+  {
+    "text": "range of versions of Pi torch this is a pytorch Model A range of versions of the Transformers library that implements the",
+    "start": "456360",
+    "end": "463020"
+  },
+  {
+    "text": "graph and a range of different versions of the model weights themselves to get that portability we load the model in a",
+    "start": "463020",
+    "end": "469080"
+  },
+  {
+    "text": "three-step process first we instantiate the graph with some python code create",
+    "start": "469080",
+    "end": "474180"
+  },
+  {
+    "text": "that graph then we load a pytorch state dictionary from local disk to get the",
+    "start": "474180",
+    "end": "480120"
+  },
+  {
+    "text": "weights then we plug those weights into the graph and we're that 1.4 seconds that",
+    "start": "480120",
+    "end": "486240"
+  },
+  {
+    "text": "encompasses these three steps is going is into all of the copy operations that make that are part of these three steps",
+    "start": "486240",
+    "end": "493740"
+  },
+  {
+    "text": "each of these steps is actually copying the weights of the model multiple times for the purpose of portability so that",
+    "start": "493740",
+    "end": "499740"
+  },
+  {
+    "text": "we're using very narrow public apis and the cost of that portability is that",
+    "start": "499740",
+    "end": "505199"
+  },
+  {
+    "text": "nearly 100 percent of that second and a half is going to copying model weights",
+    "start": "505199",
+    "end": "511919"
+  },
+  {
+    "text": "now if you're willing to give up portability across versions of Pi torch across versions of Transformers and",
+    "start": "511919",
+    "end": "518399"
+  },
+  {
+    "text": "versions of your weights you can actually get much faster by fixing pinning yourself to one version of the",
+    "start": "518399",
+    "end": "524159"
+  },
+  {
+    "text": "model and one version of all your software and serializing the model just for that application pytorch has a",
+    "start": "524159",
+    "end": "530760"
+  },
+  {
+    "text": "somewhat ill documented way to do this if you load the model with the portable",
+    "start": "530760",
+    "end": "536220"
+  },
+  {
+    "text": "way and then save it with torch.save and then reload it with torch.load you will",
+    "start": "536220",
+    "end": "541500"
+  },
+  {
+    "text": "hit the a fast path within Pi torch that lets you load this model with one copy operation of the weights and that gets",
+    "start": "541500",
+    "end": "548220"
+  },
+  {
+    "text": "you down to 125 milliseconds for the loading time you can do something similar on top of Ray by serializing the",
+    "start": "548220",
+    "end": "555120"
+  },
+  {
+    "text": "model to raise Plasma in memory object store and then deserializing it this gets you down to about a copy and a half",
+    "start": "555120",
+    "end": "561240"
+  },
+  {
+    "text": "because when uh re and instantiating the model on the rate on ray.get call you",
+    "start": "561240",
+    "end": "568140"
+  },
+  {
+    "text": "will Zero out all the internal tensors whereas torch is internal implement station skips that but in any case if we",
+    "start": "568140",
+    "end": "574560"
+  },
+  {
+    "text": "get this down to one copy operation that makes loading 11 times faster which naturally leads to the question",
+    "start": "574560",
+    "end": "581100"
+  },
+  {
+    "text": "if load if reducing the number of copies to one makes loading 11 times faster what would happen if we'd reduced the",
+    "start": "581100",
+    "end": "587519"
+  },
+  {
+    "text": "number of copies to zero which of course leads to the question can you reduce the number of copy",
+    "start": "587519",
+    "end": "593580"
+  },
+  {
+    "text": "operations to zero when loading one of these giant models well there are some hints that that",
+    "start": "593580",
+    "end": "599640"
+  },
+  {
+    "start": "597000",
+    "end": "597000"
+  },
+  {
+    "text": "might be possible if you look through the documentation for Rey there is a facility within Ray for loading",
+    "start": "599640",
+    "end": "606180"
+  },
+  {
+    "text": "um numpy arrays directly from the plasma Object Store",
+    "start": "606180",
+    "end": "613019"
+  },
+  {
+    "text": "that is built into array without copying any of the data in the numpy array so if you write a numpy array to plasma using",
+    "start": "613019",
+    "end": "620100"
+  },
+  {
+    "text": "the code you see at the lower left here and then read it back in what you will get is the structure that's depicted at",
+    "start": "620100",
+    "end": "625920"
+  },
+  {
+    "text": "the right where you have some python objects that represent the API for accessing that array data but the data",
+    "start": "625920",
+    "end": "632220"
+  },
+  {
+    "text": "itself resides in the plasma shared memory segment so no copying is done to get this array to you",
+    "start": "632220",
+    "end": "638700"
+  },
+  {
+    "text": "so numpy arrays can hold model weights but they're not usable for actually doing model inference in that form",
+    "start": "638700",
+    "end": "644640"
+  },
+  {
+    "text": "because what you need is not a nump IRA you need a tensor which is kind of like a similar data structure with with some",
+    "start": "644640",
+    "end": "650579"
+  },
+  {
+    "text": "additional features to support the actual operations of inference but it turns out that pytorch has a",
+    "start": "650579",
+    "end": "657959"
+  },
+  {
+    "text": "facility for creating a tensor out of a numpy array without copying any data",
+    "start": "657959",
+    "end": "663480"
+  },
+  {
+    "text": "this is a little bit almost undocumented but if you call",
+    "start": "663480",
+    "end": "668660"
+  },
+  {
+    "text": "torch.edge tensor on a numpy array you will get back a tensor object for use in",
+    "start": "668660",
+    "end": "674700"
+  },
+  {
+    "text": "your pytorch model that did not copy any of the data because it has a pointer",
+    "start": "674700",
+    "end": "679860"
+  },
+  {
+    "text": "directly to the data segment of the numpy array so if we chain these two operations",
+    "start": "679860",
+    "end": "685500"
+  },
+  {
+    "text": "together we can create a procedure for loading a tensor of model weights out of",
+    "start": "685500",
+    "end": "691320"
+  },
+  {
+    "text": "Ray's plasma Object Store without doing any copy operations",
+    "start": "691320",
+    "end": "696779"
+  },
+  {
+    "text": "and so once we have that way to load a single tensor we can of course power this up to loading all of the tensors",
+    "start": "696779",
+    "end": "702420"
+  },
+  {
+    "text": "that comprise the model's weights and plugging them into the model and that gives us a three-step process for",
+    "start": "702420",
+    "end": "708300"
+  },
+  {
+    "text": "serializing a model to plasma so we can do loading of the model with zero copies and a three-step process for reloading",
+    "start": "708300",
+    "end": "715079"
+  },
+  {
+    "text": "the model to serialize the model first we walk through the model identify the weights convert them to numpy arrays and",
+    "start": "715079",
+    "end": "722399"
+  },
+  {
+    "text": "then replace them with placeholders to get the model back once we've written those those numpy arrays and the model",
+    "start": "722399",
+    "end": "728700"
+  },
+  {
+    "text": "the model graph with placeholders to plasma we read those back and then we",
+    "start": "728700",
+    "end": "734100"
+  },
+  {
+    "text": "can walk the reconstituted graph again convert the numpy arrays to tensors",
+    "start": "734100",
+    "end": "739320"
+  },
+  {
+    "text": "without copying any data and then plug that back into the graph and now we have the model without doing any copyright",
+    "start": "739320",
+    "end": "746100"
+  },
+  {
+    "text": "operations so three steps each way now of course one of these steps in either case is a",
+    "start": "746100",
+    "end": "753240"
+  },
+  {
+    "text": "graph rewrite and that can get a little hairy to implement but fortunately we have implemented that for you we have",
+    "start": "753240",
+    "end": "759300"
+  },
+  {
+    "text": "published a small open source Library which is called xero copy you can get this library off of Pi Pi by doing a pip",
+    "start": "759300",
+    "end": "766139"
+  },
+  {
+    "text": "install or you can get the source code the link is at the lower left and this library's primary functionality",
+    "start": "766139",
+    "end": "772440"
+  },
+  {
+    "text": "is to implement those two rewrites that enable zero copy loading of models pytorch models from Ray's plasma Object",
+    "start": "772440",
+    "end": "779760"
+  },
+  {
+    "text": "Store the one that converts the model into numpy arrays and the skeleton of the graph and the one that puts it back",
+    "start": "779760",
+    "end": "785820"
+  },
+  {
+    "text": "together again after loading from plasma so if we use this the code in the zero",
+    "start": "785820",
+    "end": "792360"
+  },
+  {
+    "text": "copy library we can Implement these two three-step processes with basically two lines of python code on the",
+    "start": "792360",
+    "end": "799200"
+  },
+  {
+    "text": "serialization front this step that you do once on your application startup first you load the model in the portable",
+    "start": "799200",
+    "end": "804959"
+  },
+  {
+    "text": "way then you run it through zero copies extract tensors function this walks",
+    "start": "804959",
+    "end": "810839"
+  },
+  {
+    "text": "through the graph that comprises the model identifies the weights pulls them out replaces them with placeholders and",
+    "start": "810839",
+    "end": "816300"
+  },
+  {
+    "text": "converts to numpy arrays that returns a tuple that you can directly write to raise Object Store with ray.put and then",
+    "start": "816300",
+    "end": "824100"
+  },
+  {
+    "text": "to load the model back from plasma without copying any of the weights data you just call ray.get on the the thing",
+    "start": "824100",
+    "end": "831120"
+  },
+  {
+    "text": "you put into plasma and then pass the resulting Tuple through a zero copies re",
+    "start": "831120",
+    "end": "836480"
+  },
+  {
+    "text": "replace tensor's function and that gives you back a model that you can run inference on immediately again without",
+    "start": "836480",
+    "end": "843240"
+  },
+  {
+    "text": "copying any data and if you load a model this way you're loading the model with and doing zero copies you can load vert",
+    "start": "843240",
+    "end": "850920"
+  },
+  {
+    "text": "base in point zero zero zero four seconds four milliseconds",
+    "start": "850920",
+    "end": "856139"
+  },
+  {
+    "text": "so to come back to our original question if reducing the number of copy operations for this model reduce and",
+    "start": "856139",
+    "end": "862620"
+  },
+  {
+    "text": "reduce makes monomial loading 11 times faster what happens if we reduce the number of copies to zero",
+    "start": "862620",
+    "end": "868560"
+  },
+  {
+    "text": "well it gets 340 times faster and this is this is a really huge",
+    "start": "868560",
+    "end": "874200"
+  },
+  {
+    "text": "Improvement in the speed with which you can load any deep learning model and this gets loading into the point where",
+    "start": "874200",
+    "end": "881220"
+  },
+  {
+    "text": "relative to running inference on a CPU loading doesn't really matter anymore we",
+    "start": "881220",
+    "end": "886560"
+  },
+  {
+    "text": "can load the model every time we run inference and then throw it away we don't have to worry about keeping that model around in between inference",
+    "start": "886560",
+    "end": "892740"
+  },
+  {
+    "text": "requests which is going to lead to a great deal of simplicity and that's kind of the second part of",
+    "start": "892740",
+    "end": "898680"
+  },
+  {
+    "text": "the talk once we make it possible to load models really cheap with zero copy",
+    "start": "898680",
+    "end": "903779"
+  },
+  {
+    "text": "model loading how can we leverage that to build scalable model inference that reacts to changes in your application",
+    "start": "903779",
+    "end": "910380"
+  },
+  {
+    "text": "workload without having to tune a lot of parameters by leveraging raise built-in facilities for scheduling stateless",
+    "start": "910380",
+    "end": "916860"
+  },
+  {
+    "text": "tasks so as some background here here's how you would deploy a typical deep learning",
+    "start": "916860",
+    "end": "922500"
+  },
+  {
+    "text": "model to Ray without using xero copy model loading if you're just using raised facilities to maintain a pool of",
+    "start": "922500",
+    "end": "930180"
+  },
+  {
+    "text": "pre-loaded models so you're amortizing the loading cost that way basically you would wrap the model in Array actor",
+    "start": "930180",
+    "end": "936120"
+  },
+  {
+    "text": "array actor is a python class with an Associated process that is attached to",
+    "start": "936120",
+    "end": "941399"
+  },
+  {
+    "text": "the class and holds the classes State the Constructor for this actor class will load the model",
+    "start": "941399",
+    "end": "947339"
+  },
+  {
+    "text": "which may take a second or two but it's only doing that once all your inference requests go to a method of the actor",
+    "start": "947339",
+    "end": "953339"
+  },
+  {
+    "text": "class which you can invoke remotely and that will hit that persistent copy of",
+    "start": "953339",
+    "end": "959100"
+  },
+  {
+    "text": "the model that's in memory and to get scalability you would create a pool of these actors and Route your inference",
+    "start": "959100",
+    "end": "965459"
+  },
+  {
+    "text": "requests to the elements of the pool we can do the same thing with zero copy",
+    "start": "965459",
+    "end": "970860"
+  },
+  {
+    "start": "969000",
+    "end": "969000"
+  },
+  {
+    "text": "model loading with a smaller amount of simpler code so at on Startup we copy",
+    "start": "970860",
+    "end": "977339"
+  },
+  {
+    "text": "the model we rewrite the model using our xerocopy library and loaded onto plasma and then to do inference we Define a",
+    "start": "977339",
+    "end": "983579"
+  },
+  {
+    "text": "function like what we see on the right here and what that function is doing is it's loading the model in a zero copy",
+    "start": "983579",
+    "end": "988800"
+  },
+  {
+    "text": "fashion which as you recall takes like four milliseconds for vert base is running inference and then it's throwing",
+    "start": "988800",
+    "end": "995279"
+  },
+  {
+    "text": "away the copy of the model that it loaded and that's that's basically it once you",
+    "start": "995279",
+    "end": "1001040"
+  },
+  {
+    "text": "have this function you turn that function into a stateless Ray task because there's no state that resides in",
+    "start": "1001040",
+    "end": "1006139"
+  },
+  {
+    "text": "between invocations of the function and then you call ray.remote on that task and raise scheduler takes care of",
+    "start": "1006139",
+    "end": "1013160"
+  },
+  {
+    "text": "figuring out how many copies of this function to run in parallel and every one of these functions is only dealing",
+    "start": "1013160",
+    "end": "1018980"
+  },
+  {
+    "text": "with ephemeral state so it's much simpler you don't have to manage the size of Your Action Pool and",
+    "start": "1018980",
+    "end": "1025040"
+  },
+  {
+    "text": "all you you'll you'll notice by the way that that the body of that function even though we're using brute base that model",
+    "start": "1025040",
+    "end": "1030558"
+  },
+  {
+    "text": "in here there's nothing specific to Brick base so we include a generic version of this function in our zero",
+    "start": "1030559",
+    "end": "1036199"
+  },
+  {
+    "text": "copy library which gets that running step down to one line of python code you",
+    "start": "1036199",
+    "end": "1041240"
+  },
+  {
+    "text": "just call our pre-built xerocopy.com call model reactor and pass it the",
+    "start": "1041240",
+    "end": "1046760"
+  },
+  {
+    "text": "appropriate parameters to run a inference on a Model that's stored on plasma without copying any weights data",
+    "start": "1046760",
+    "end": "1054380"
+  },
+  {
+    "text": "another thing to note here is memory footprint when you are running a deep",
+    "start": "1054380",
+    "end": "1060679"
+  },
+  {
+    "text": "learning model the traditional way to do inference on Ray each of those actors if the model is Bert base is going to need",
+    "start": "1060679",
+    "end": "1067340"
+  },
+  {
+    "text": "about 1200 megabytes of standing memory in between inference requests",
+    "start": "1067340",
+    "end": "1073100"
+  },
+  {
+    "text": "whereas if we do things on the right here we're only needing a total of 490 megabytes to store the serialized",
+    "start": "1073100",
+    "end": "1080240"
+  },
+  {
+    "text": "weights on plasma so you got 1200 megabytes times the times the number of actors which in this case there's five",
+    "start": "1080240",
+    "end": "1086840"
+  },
+  {
+    "text": "actors so six gigabytes of memory required just to be locked down in between inference requests versus half a",
+    "start": "1086840",
+    "end": "1094160"
+  },
+  {
+    "text": "gigabyte and the reason for this blow up is because a python process that is ready to run inference on a model has a",
+    "start": "1094160",
+    "end": "1100760"
+  },
+  {
+    "text": "lot of additional overheads Beyond just the packed size of the weights because",
+    "start": "1100760",
+    "end": "1106220"
+  },
+  {
+    "text": "Python's memory manager keeps extra space around to avoid re-allocating buffers and Pi torches memory manager is",
+    "start": "1106220",
+    "end": "1113960"
+  },
+  {
+    "text": "also reusing buffers and of course there's the python byte code and the program execution code that you need to",
+    "start": "1113960",
+    "end": "1120919"
+  },
+  {
+    "text": "keep memory all told you're looking at a two to five 2.5 to 3x blow up in the",
+    "start": "1120919",
+    "end": "1126740"
+  },
+  {
+    "text": "base memory requirement in between inference requests multiplied by the number of copies of that model that",
+    "start": "1126740",
+    "end": "1132860"
+  },
+  {
+    "text": "you're keeping loaded in the traditional way versus just keeping one copy on plasma and of course if you put a whole",
+    "start": "1132860",
+    "end": "1139400"
+  },
+  {
+    "text": "lot of data onto plasma you also have the possibility of spilling extra data to local flash if you want to be able to",
+    "start": "1139400",
+    "end": "1146559"
+  },
+  {
+    "text": "enhance the amount of space you have for other uses so so to summarize here with",
+    "start": "1146559",
+    "end": "1151880"
+  },
+  {
+    "start": "1151000",
+    "end": "1151000"
+  },
+  {
+    "text": "zero copy model loading we can a run inference basically from a",
+    "start": "1151880",
+    "end": "1157700"
+  },
+  {
+    "text": "stateless rate task because we no longer need to keep that persistent State containing a copy of the model in memory",
+    "start": "1157700",
+    "end": "1164059"
+  },
+  {
+    "text": "somewhere on our cluster or in multiple places on our cluster that's these weights of the model just need to be",
+    "start": "1164059",
+    "end": "1169760"
+  },
+  {
+    "text": "somewhere in the local plasma shared memory segment and we can just run a task that loads the model from plasma",
+    "start": "1169760",
+    "end": "1175880"
+  },
+  {
+    "text": "and throws it away when it's done the steady state memory footprint when we do this even if we're keeping a copy",
+    "start": "1175880",
+    "end": "1182480"
+  },
+  {
+    "text": "of that weights live in your local plasma shared memory segment is much smaller than even one copy of the model",
+    "start": "1182480",
+    "end": "1188179"
+  },
+  {
+    "text": "kept in memory in the form of an actor and because we don't have to manage the",
+    "start": "1188179",
+    "end": "1193280"
+  },
+  {
+    "text": "size of this actor pool and adjust that in response to traffic we basically get zero tuning but at really fast",
+    "start": "1193280",
+    "end": "1200660"
+  },
+  {
+    "text": "adaptation to changes in your traffic patterns because race task scheduler is going to look at the tasks it has to run",
+    "start": "1200660",
+    "end": "1206900"
+  },
+  {
+    "text": "and run as many of them in parallel as it needs to work through that work queue and spawn new task Runners and get rid",
+    "start": "1206900",
+    "end": "1213440"
+  },
+  {
+    "text": "of old task Runners when it doesn't need them and so on it does all that before you behind the scenes without needing",
+    "start": "1213440",
+    "end": "1218660"
+  },
+  {
+    "text": "any tuning so in principle this gives you a way to get equivalent performance to deploying one of those really complex",
+    "start": "1218660",
+    "end": "1225320"
+  },
+  {
+    "text": "model serving systems and tuning it very carefully but without the complexity and without the tuning which of course",
+    "start": "1225320",
+    "end": "1232100"
+  },
+  {
+    "text": "raises the question how well does this work in practice well to answer that question we put together",
+    "start": "1232100",
+    "end": "1237620"
+  },
+  {
+    "text": "a simple benchmark and the way this Benchmark works is The Benchmark models a customer care chat",
+    "start": "1237620",
+    "end": "1243980"
+  },
+  {
+    "start": "1239000",
+    "end": "1239000"
+  },
+  {
+    "text": "bot application where we have an AI chat bot that's working off a pre-programmed dialog flow the dialog flow you can",
+    "start": "1243980",
+    "end": "1250400"
+  },
+  {
+    "text": "think of it as a tree shaped graph where each node of the graph describes one state that the conversation could be in",
+    "start": "1250400",
+    "end": "1256940"
+  },
+  {
+    "text": "and some of these nodes in the graph are calling out to a model serving layer that is going to do various AI tasks to",
+    "start": "1256940",
+    "end": "1264440"
+  },
+  {
+    "text": "derive decisions about where to move next in the graph and how to respond to the current request from the customer",
+    "start": "1264440",
+    "end": "1271100"
+  },
+  {
+    "text": "and our Benchmark is going to model the operation of this model serving layer that's driven by this chatbot",
+    "start": "1271100",
+    "end": "1277460"
+  },
+  {
+    "text": "inside this model serving layer our imaginary trotbot calls on four different types of models we have intent",
+    "start": "1277460",
+    "end": "1283340"
+  },
+  {
+    "text": "detection models to judge what is the user trying to accomplish what is the customer rather trying to accomplish we",
+    "start": "1283340",
+    "end": "1289280"
+  },
+  {
+    "text": "have sentiment analysis models to judge what is the mood of the set the user are they angry are they happy are they",
+    "start": "1289280",
+    "end": "1295760"
+  },
+  {
+    "text": "feeling okay do we need to switch tracks to get them onto a real human customer service rep we have a question answering",
+    "start": "1295760",
+    "end": "1302840"
+  },
+  {
+    "text": "model for dealing with small factual questions that need to be answered from our documentation and we have a natural",
+    "start": "1302840",
+    "end": "1309020"
+  },
+  {
+    "text": "language generation model to make the responses from the chatbot have a more",
+    "start": "1309020",
+    "end": "1314240"
+  },
+  {
+    "text": "natural feel and don't look as so scripted now for each of these four tasks are because our chat bot speaks",
+    "start": "1314240",
+    "end": "1320539"
+  },
+  {
+    "text": "three different languages we have three different models because with deep learning models for NLP you have to",
+    "start": "1320539",
+    "end": "1326299"
+  },
+  {
+    "text": "fine-tune each one separately for each combination of task and language so that",
+    "start": "1326299",
+    "end": "1331340"
+  },
+  {
+    "text": "gives us a total of 12 models that we need to deploy in this back end to support this AI chatbot",
+    "start": "1331340",
+    "end": "1337880"
+  },
+  {
+    "text": "now the models that we use in our Benchmark we basically took each of these four tasks and went to the hugging",
+    "start": "1337880",
+    "end": "1344179"
+  },
+  {
+    "text": "face open source model Marketplace and picked the most popular model in each of these categories and then instead of",
+    "start": "1344179",
+    "end": "1350960"
+  },
+  {
+    "text": "training actually training a copy of this model for three different languages we just replicated that model three",
+    "start": "1350960",
+    "end": "1356000"
+  },
+  {
+    "text": "times to give our total of 12 models and you can see at the chart down here some descriptions of the models these the",
+    "start": "1356000",
+    "end": "1362840"
+  },
+  {
+    "text": "smallest models are about the size of that bird-based model that I talked about earlier and in fact are based on a",
+    "start": "1362840",
+    "end": "1368780"
+  },
+  {
+    "text": "enhanced version of bird Base called Roberta so each of these models being real",
+    "start": "1368780",
+    "end": "1374179"
+  },
+  {
+    "text": "natural language processing models and not just bare inference graphs have some pre and post-processing involved in them",
+    "start": "1374179",
+    "end": "1381260"
+  },
+  {
+    "text": "because deep learning models deal with numbers and these number models in application context are dealing with",
+    "start": "1381260",
+    "end": "1387679"
+  },
+  {
+    "text": "text so there's pre-processing to turn text into those numbers that are the input of the model and there's",
+    "start": "1387679",
+    "end": "1393200"
+  },
+  {
+    "text": "post-processing to turn the resulting numbers in back into something in text form and to to shoehorn that pre and",
+    "start": "1393200",
+    "end": "1399740"
+  },
+  {
+    "text": "post processing and also of course the serving part the network i o part you would typically encapsulate these models",
+    "start": "1399740",
+    "end": "1406220"
+  },
+  {
+    "text": "inside if you were using ray a ray serve endpoint so here's how you would run for example that inference sorry the model",
+    "start": "1406220",
+    "end": "1414860"
+  },
+  {
+    "start": "1410000",
+    "end": "1410000"
+  },
+  {
+    "text": "that does intent detection and deploy it to Ray serve it's very similar to what we saw before except I had to make this",
+    "start": "1414860",
+    "end": "1421700"
+  },
+  {
+    "text": "font a bit smaller because there's real pre and post prosperous in code remember the example from earlier with an actor",
+    "start": "1421700",
+    "end": "1427220"
+  },
+  {
+    "text": "deploying a model this is the same kind of thing there is an actor class it's Constructor creates the model total but",
+    "start": "1427220",
+    "end": "1433039"
+  },
+  {
+    "text": "the actors annotated annotated with rey.serve.deployment which tells Ray serve to create a pool of these actors",
+    "start": "1433039",
+    "end": "1439760"
+  },
+  {
+    "text": "and to front them with an HTTP endpoint inside the call method that actually uses the actor's local copy of the model",
+    "start": "1439760",
+    "end": "1446780"
+  },
+  {
+    "text": "to do inference there is pre and post processing code and race server is going to wrap that with an HTTP endpoint so",
+    "start": "1446780",
+    "end": "1453140"
+  },
+  {
+    "text": "this is how you would deploy things without zero copy model loading and we actually deployed our four models in",
+    "start": "1453140",
+    "end": "1458539"
+  },
+  {
+    "text": "this way to serve as a baseline to do this with uh with zero copy model",
+    "start": "1458539",
+    "end": "1463820"
+  },
+  {
+    "text": "loading though all we do is we take this code for deploying on Race serve and we change two lines okay in the",
+    "start": "1463820",
+    "end": "1471500"
+  },
+  {
+    "text": "Constructor where we're loading the model instead of loading the model into the actors processes local memory we",
+    "start": "1471500",
+    "end": "1478280"
+  },
+  {
+    "text": "read in the model and then immediately write it out to plasma now the active process is local memory is very much it",
+    "start": "1478280",
+    "end": "1484159"
+  },
+  {
+    "text": "goes back to a very small size because it doesn't have a persistent copy of the model around the model's weights and",
+    "start": "1484159",
+    "end": "1489919"
+  },
+  {
+    "text": "serialized graph are now in plasma that's a one line change the other one line change that we do is when we're",
+    "start": "1489919",
+    "end": "1495740"
+  },
+  {
+    "text": "running inference inside the call method of this actor instead of running the actual inference process doing all the",
+    "start": "1495740",
+    "end": "1502340"
+  },
+  {
+    "text": "math inside the active process we Farm all that math out to a stateless Ray task that's going to load the model",
+    "start": "1502340",
+    "end": "1508100"
+  },
+  {
+    "text": "dynamically from plasma run inference unload the model and return the result and so now one copy of this actor now",
+    "start": "1508100",
+    "end": "1515059"
+  },
+  {
+    "text": "can handle many requests in parallel because all the actual work of model inference is running in the background",
+    "start": "1515059",
+    "end": "1520340"
+  },
+  {
+    "text": "in these stateless rate tasks and we get to that point by just changing these two lines of code",
+    "start": "1520340",
+    "end": "1525559"
+  },
+  {
+    "text": "so once we've done that we we implemented all four of these models with race serve we also did a",
+    "start": "1525559",
+    "end": "1531380"
+  },
+  {
+    "start": "1526000",
+    "end": "1526000"
+  },
+  {
+    "text": "comparative implementation on top of torch serve just for comparison purposes and then we converted the ray server",
+    "start": "1531380",
+    "end": "1537020"
+  },
+  {
+    "text": "implementations to use zero copy model loading in the way I just described that gives us the back end for our Benchmark",
+    "start": "1537020",
+    "end": "1543020"
+  },
+  {
+    "text": "the driver for our Benchmark was a discrete Sim event simulation of a number of users hitting that chatbot on",
+    "start": "1543020",
+    "end": "1549440"
+  },
+  {
+    "text": "the front end and we gradually ramped up the number of simulated users each user would send a chat think for a random",
+    "start": "1549440",
+    "end": "1555620"
+  },
+  {
+    "text": "amount of time send another chat and we ramped up that number of users until the response time of the back end exceeded a",
+    "start": "1555620",
+    "end": "1562700"
+  },
+  {
+    "text": "fixed threshold of five seconds because there were too many users and then we stopped looking at the particular",
+    "start": "1562700",
+    "end": "1569059"
+  },
+  {
+    "text": "backend that we were experimenting with so with this setup the front end and the back end and the 12 models deployed on a",
+    "start": "1569059",
+    "end": "1575720"
+  },
+  {
+    "text": "single parallel machine we got these results on the on on the x-axis we can",
+    "start": "1575720",
+    "end": "1581179"
+  },
+  {
+    "start": "1578000",
+    "end": "1578000"
+  },
+  {
+    "text": "see the number of simulated customers reaching our customer care chatbot cut and on the y-axis we have the fraction",
+    "start": "1581179",
+    "end": "1588980"
+  },
+  {
+    "text": "of requests that timed out at the machine learning layer so obviously you",
+    "start": "1588980",
+    "end": "1594080"
+  },
+  {
+    "text": "want that lower to lower refraction is better in fact you want zero timeouts otherwise customers are not getting any",
+    "start": "1594080",
+    "end": "1600860"
+  },
+  {
+    "text": "responses and you can see that out to about 25 simultaneous sessions our two Baseline",
+    "start": "1600860",
+    "end": "1606740"
+  },
+  {
+    "text": "deployments race serve with just one actor per model and torch serve with one Handler per model we're able to handle",
+    "start": "1606740",
+    "end": "1613039"
+  },
+  {
+    "text": "things and stay underneath that designed constraint of response time but when we",
+    "start": "1613039",
+    "end": "1619100"
+  },
+  {
+    "text": "get past 25 things get bad they get bad very quickly for a torch serve because it has more code path length but they",
+    "start": "1619100",
+    "end": "1625640"
+  },
+  {
+    "text": "also get bad pretty quickly with our Ray serve Baseline because there just isn't any additional capacity to start new",
+    "start": "1625640",
+    "end": "1631940"
+  },
+  {
+    "text": "actors all the memory on the machine is used by those 12 actors you have to keep around",
+    "start": "1631940",
+    "end": "1637100"
+  },
+  {
+    "text": "uh with our zero copy based solution though because our all of the models are",
+    "start": "1637100",
+    "end": "1642559"
+  },
+  {
+    "text": "on plasma there's much lower steady state usage of memory and because everything is done in stateless rate",
+    "start": "1642559",
+    "end": "1648860"
+  },
+  {
+    "text": "tasks race task scheduler can allocate all of the processing power of the entire cluster to whatever models happen",
+    "start": "1648860",
+    "end": "1656179"
+  },
+  {
+    "text": "to be getting the most requests right now so this gives us end to end a scalability Improvement where we can go",
+    "start": "1656179",
+    "end": "1661760"
+  },
+  {
+    "text": "out to about 225 simultaneous sessions and that's overall a seven times",
+    "start": "1661760",
+    "end": "1667640"
+  },
+  {
+    "text": "Improvement in the scalability that we can achieve while still staying within our service level requirement",
+    "start": "1667640",
+    "end": "1673940"
+  },
+  {
+    "text": "now obviously if we took one of these Baseline deployments and we carefully hand tuned things maybe switched to",
+    "start": "1673940",
+    "end": "1680059"
+  },
+  {
+    "text": "multi-threaded actors you'd adjusted the batching and stuff we could probably get",
+    "start": "1680059",
+    "end": "1685220"
+  },
+  {
+    "text": "those bass Lanes up pretty close to that 7x Improvement but that's that's kind of the whole point we got there with zero",
+    "start": "1685220",
+    "end": "1692059"
+  },
+  {
+    "text": "copy model loading by just changing two lines of code and tuning nothing because zero cop being model loading",
+    "start": "1692059",
+    "end": "1698840"
+  },
+  {
+    "text": "gets you zero effort Performance Tuning so thank you very much for coming to my",
+    "start": "1698840",
+    "end": "1704840"
+  },
+  {
+    "text": "talk I appreciate you sticking around until lunch um we have about one minute for",
+    "start": "1704840",
+    "end": "1710480"
+  },
+  {
+    "text": "questions if you want to find out more our source code is available on the web and we also have some detailed blogs",
+    "start": "1710480",
+    "end": "1716120"
+  },
+  {
+    "text": "thank you again [Applause] and we've got some time for questions",
+    "start": "1716120",
+    "end": "1722419"
+  },
+  {
+    "text": "and there's someone with a microphone here I think these guys in the middle had their hands raised first",
+    "start": "1722419",
+    "end": "1727880"
+  },
+  {
+    "text": "oh you want",
+    "start": "1727880",
+    "end": "1730539"
+  },
+  {
+    "text": "uh yeah so how does zero copy model loading interact with gpus gpus I have a",
+    "start": "1733400",
+    "end": "1739159"
+  },
+  {
+    "text": "backup slide for that and the short answer is it's complex so it is we do not currently have an",
+    "start": "1739159",
+    "end": "1747440"
+  },
+  {
+    "text": "implementation for gpus there are some some of my colleagues at IBM research are looking into it right now and other",
+    "start": "1747440",
+    "end": "1753320"
+  },
+  {
+    "text": "colleagues at IBM research have done similar things in the context of model training uh basically so there's a",
+    "start": "1753320",
+    "end": "1760100"
+  },
+  {
+    "text": "couple there are two main things that are different with the GPU first of all to get performance out of a GPU full",
+    "start": "1760100",
+    "end": "1765440"
+  },
+  {
+    "text": "performance for inferential purposes you have to do batching it's just not an option not to and second the memory",
+    "start": "1765440",
+    "end": "1772399"
+  },
+  {
+    "text": "architecture of gpus is complex and I see we're running out of time so maybe",
+    "start": "1772399",
+    "end": "1777799"
+  },
+  {
+    "text": "we want to take this offline if you want to go into a detailed explanation but it's it's quite challenging I would say",
+    "start": "1777799",
+    "end": "1783980"
+  },
+  {
+    "text": "the quickest way forward if you want to try that is have a setup where you copy them on the model to GPU memory with a",
+    "start": "1783980",
+    "end": "1790880"
+  },
+  {
+    "text": "single copy and amortize that copy over a batch and you can do that on top of zero copy model loading into CPU memory",
+    "start": "1790880",
+    "end": "1797740"
+  },
+  {
+    "text": "there is a question over here how does that Improvement go as you the",
+    "start": "1797740",
+    "end": "1805220"
+  },
+  {
+    "text": "model gets bigger if you scale to larger and larger models does it hold up or does it",
+    "start": "1805220",
+    "end": "1811039"
+  },
+  {
+    "text": "um I have only done this we've only done experiments for a small number of different models we have a fairly narrow",
+    "start": "1811039",
+    "end": "1817340"
+  },
+  {
+    "text": "range of models that we're using actively in our the products I work with but generally for the larger models it",
+    "start": "1817340",
+    "end": "1823820"
+  },
+  {
+    "text": "works better because there is a fixed cost to loading a model in a zero copy fashion that is",
+    "start": "1823820",
+    "end": "1830720"
+  },
+  {
+    "text": "about loading the nodes of the graph and larger versions of a model tend to have roughly the same number of nodes in",
+    "start": "1830720",
+    "end": "1837679"
+  },
+  {
+    "text": "their graph but much more weight data so with a really large model you'll get more of a speed up from zero copy model",
+    "start": "1837679",
+    "end": "1844460"
+  },
+  {
+    "text": "loading than with a small model where a lot of the cost of deserializing is actually in creating those tensor",
+    "start": "1844460",
+    "end": "1850640"
+  },
+  {
+    "text": "objects that comprise the graph we got one more I'm not sure which of",
+    "start": "1850640",
+    "end": "1857720"
+  },
+  {
+    "text": "you was uh here first",
+    "start": "1857720",
+    "end": "1860679"
+  },
+  {
+    "text": "all right thank you from the chart that you show after 200 chats yeah the the",
+    "start": "1867500",
+    "end": "1872960"
+  },
+  {
+    "text": "timeout has a spike even for the zero copy right why is that that is because",
+    "start": "1872960",
+    "end": "1878779"
+  },
+  {
+    "text": "we have um coming back to the Chart here the front end the discrete event simulation",
+    "start": "1878779",
+    "end": "1885020"
+  },
+  {
+    "text": "is simulating a number of users with a plus undistributed think time in between",
+    "start": "1885020",
+    "end": "1890120"
+  },
+  {
+    "text": "their chats and so what's that is going to give you is a roughly a bursty",
+    "start": "1890120",
+    "end": "1895520"
+  },
+  {
+    "text": "distribution of the actual offered load and the num these the size of the burst",
+    "start": "1895520",
+    "end": "1902120"
+  },
+  {
+    "text": "is going to be proportional to the number of users when that size gets too big the the number of requests that are",
+    "start": "1902120",
+    "end": "1909440"
+  },
+  {
+    "text": "in that burst starts to exceed what the aggregate capacity of the cluster can handle within the time limit and",
+    "start": "1909440",
+    "end": "1915500"
+  },
+  {
+    "text": "everything in the brush came at roughly the same time so basically once you get past a threshold you start uh queuing up events",
+    "start": "1915500",
+    "end": "1924260"
+  },
+  {
+    "text": "uh in at the tail end of the burst every time that there is a burst and no",
+    "start": "1924260",
+    "end": "1930799"
+  },
+  {
+    "text": "without adding more CPU resources there's really no way to get around that with scheduling",
+    "start": "1930799",
+    "end": "1936080"
+  },
+  {
+    "text": "and the reason why you get the same kind of breakdown earlier here is because there's less free resources to allocate",
+    "start": "1936080",
+    "end": "1942200"
+  },
+  {
+    "text": "to whatever model happens to be getting the largest burst right now when you do not have zero copy model loading because",
+    "start": "1942200",
+    "end": "1948500"
+  },
+  {
+    "text": "you're keeping most of the Clusters resources pinned down for those pre-loaded copies of models many of",
+    "start": "1948500",
+    "end": "1953960"
+  },
+  {
+    "text": "which are not being heavily used I think do we have time for one more question or do we have to send people to",
+    "start": "1953960",
+    "end": "1960140"
+  },
+  {
+    "text": "lunch out of time but um yeah I think we're out of time we're out of time okay I'm",
+    "start": "1960140",
+    "end": "1967520"
+  },
+  {
+    "text": "afraid that we're out of time but I will be over at the IBM Booth um upstairs in the lounge",
+    "start": "1967520",
+    "end": "1974179"
+  },
+  {
+    "text": "um if anybody wants to add talk to me more in Greater detail and thank you very much for coming to my talk",
+    "start": "1974179",
+    "end": "1980400"
+  },
+  {
+    "text": "[Applause]",
+    "start": "1980400",
+    "end": "1983579"
+  }
+]

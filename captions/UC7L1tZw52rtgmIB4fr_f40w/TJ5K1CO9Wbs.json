@@ -1,0 +1,1462 @@
+[
+  {
+    "text": "all right hey everybody thank you for attending um as mat mentioned today we're going to be discussing cost-efficient LM serving with RAC serve",
+    "start": "4000",
+    "end": "11679"
+  },
+  {
+    "text": "uh my name is ton I'm an engineer working on any scale endpoints uh this is my colleague Kade hi I work on Ray",
+    "start": "11679",
+    "end": "18359"
+  },
+  {
+    "text": "core and llm is any scale um and today we're really going to be diving into some of the technical details that make",
+    "start": "18359",
+    "end": "24400"
+  },
+  {
+    "text": "Ray serve the most cost-effective solution for doing llms uh at scale and",
+    "start": "24400",
+    "end": "29599"
+  },
+  {
+    "text": "in produ so for a little bit of background uh as many of you already know llama 2 is like",
+    "start": "29599",
+    "end": "36879"
+  },
+  {
+    "text": "the leading OSS LM right now um the whole Community has been jumping on the wagon and it's been growing extremely",
+    "start": "36879",
+    "end": "43239"
+  },
+  {
+    "text": "fast but there's still some challenges in terms of deriving real business value from llama 2 and the biggest challenge",
+    "start": "43239",
+    "end": "49840"
+  },
+  {
+    "text": "that we're going to focus on today is that llama 2 is really expensive the last few months we have at",
+    "start": "49840",
+    "end": "55559"
+  },
+  {
+    "text": "any scale we've been optimizing race Sur for LM inference to address this problem and the result of this optimization has",
+    "start": "55559",
+    "end": "61879"
+  },
+  {
+    "text": "been any scale endpoints if you remember from the keynote yesterday any scale endpoints is",
+    "start": "61879",
+    "end": "67479"
+  },
+  {
+    "text": "the cheapest way to use llama 2 70b in production um and since we've launched",
+    "start": "67479",
+    "end": "73000"
+  },
+  {
+    "text": "just a few weeks ago we've already served billions of tokens at $1 per million tokens which is you know the",
+    "start": "73000",
+    "end": "78200"
+  },
+  {
+    "text": "cheapest rate as we mentioned um so today we're going to break down",
+    "start": "78200",
+    "end": "83280"
+  },
+  {
+    "text": "how serve uses gpus efficiently um and one thing I really want to emphasize throughout this entire",
+    "start": "83280",
+    "end": "88840"
+  },
+  {
+    "text": "talk is that if effent LM serving is a full stack problem you need to make optimizations at the infrastructure",
+    "start": "88840",
+    "end": "94680"
+  },
+  {
+    "text": "layer at the serving layer and at the model layer and these all need to work together to really optimize your",
+    "start": "94680",
+    "end": "101079"
+  },
+  {
+    "text": "price here's a quick diagram of the LM inference landscape so across the top",
+    "start": "101079",
+    "end": "106680"
+  },
+  {
+    "text": "here you can see all of the different categories uh I had in the previous slide this includes cross region and",
+    "start": "106680",
+    "end": "112000"
+  },
+  {
+    "text": "Cloud inference Auto scaling serving speculative decoding continuous batching",
+    "start": "112000",
+    "end": "117439"
+  },
+  {
+    "text": "and other multi- uh GPU anding single GPU optimizations most of the libraries in",
+    "start": "117439",
+    "end": "123560"
+  },
+  {
+    "text": "this diagram cover one specific section or two sections in in this landscape um",
+    "start": "123560",
+    "end": "129959"
+  },
+  {
+    "text": "and what we're really going to walk you through today is how Ray LM and any scale take you end to end um and",
+    "start": "129959",
+    "end": "136160"
+  },
+  {
+    "text": "integrate with all a lot of these different players to provide a full solution so let's start by discussing",
+    "start": "136160",
+    "end": "143120"
+  },
+  {
+    "text": "whym serving is expensive and then we'll hop into two technical areas the first is infrastructure where we're going to",
+    "start": "143120",
+    "end": "149239"
+  },
+  {
+    "text": "focus on Auto scaling and heterogenous compute and in the second section we'll discuss inference and how you can really",
+    "start": "149239",
+    "end": "155400"
+  },
+  {
+    "text": "get the most out of each GPU and saturate uh its usage so let's start with the basics of",
+    "start": "155400",
+    "end": "162720"
+  },
+  {
+    "text": "LM serving this is a p4d ec2 instance it has eight gpus let's say we want to",
+    "start": "162720",
+    "end": "169800"
+  },
+  {
+    "text": "serve these three models on these eight gpus the small blue square there is the Llama 7B model the green square is the",
+    "start": "169800",
+    "end": "177120"
+  },
+  {
+    "text": "Llama 13B model and the the Red Square is a llama 70b model as you can see each of these boxes are different sizes",
+    "start": "177120",
+    "end": "183519"
+  },
+  {
+    "text": "because each of these models requires a different amount of gpus to run when we start these models with",
+    "start": "183519",
+    "end": "189920"
+  },
+  {
+    "text": "serve LM it's going to allocate the models to the gpus based on the resource requirements so it might allocate them",
+    "start": "189920",
+    "end": "196599"
+  },
+  {
+    "text": "like this then Ray serve is going to start an HTP server on the instance so that when",
+    "start": "196599",
+    "end": "202879"
+  },
+  {
+    "text": "traffic comes in say a user asks how do I make fried rice and it wants to query the Llama 70b model",
+    "start": "202879",
+    "end": "210400"
+  },
+  {
+    "text": "this request is going to be routed through the HTTP server to the Llama 70b model which is going to run inference",
+    "start": "210400",
+    "end": "217000"
+  },
+  {
+    "text": "and then the response is going to be given back to the user and this whole setup kind of draws",
+    "start": "217000",
+    "end": "223200"
+  },
+  {
+    "text": "attention to an obvious problem here which is that we have an unused GPU and I really want to emphasize that",
+    "start": "223200",
+    "end": "228920"
+  },
+  {
+    "text": "this is a really substantial problem because gpus are extremely expensive so one this one GPU for a month would cost",
+    "start": "228920",
+    "end": "236680"
+  },
+  {
+    "text": "$3,000 um and you know this is this is really not great so what what we're",
+    "start": "236680",
+    "end": "242640"
+  },
+  {
+    "text": "going to discuss for the rest of this talk is in order to save money you need to save gpus and you need to use the",
+    "start": "242640",
+    "end": "247920"
+  },
+  {
+    "text": "gpus that you are using as efficiently as possible so hopefully this gives some motivation",
+    "start": "247920",
+    "end": "253400"
+  },
+  {
+    "text": "um from now we're going to hop into the auto scaling section uh and discuss how",
+    "start": "253400",
+    "end": "258600"
+  },
+  {
+    "text": "we can start saving these unused gpus so to motivate autoscaling uh",
+    "start": "258600",
+    "end": "264280"
+  },
+  {
+    "text": "here's a plot of endpoints traffic over the course of a few days as you can see at the traffic we have three times more",
+    "start": "264280",
+    "end": "271759"
+  },
+  {
+    "text": "requests coming in than at the valley and this is a huge opportunity because this means that we can save two-thirds",
+    "start": "271759",
+    "end": "279039"
+  },
+  {
+    "text": "of our gpus during off hours and dramatically reduce our costs so the way racer addresses this is",
+    "start": "279039",
+    "end": "286600"
+  },
+  {
+    "text": "it scales each model independently based on the amount of traffic that that model is receiving and it can do this across",
+    "start": "286600",
+    "end": "292240"
+  },
+  {
+    "text": "multiple nodes and across multiple models let's go through a quick example",
+    "start": "292240",
+    "end": "297639"
+  },
+  {
+    "text": "let's say you start in the morning um and there's just a small amount of traffic coming in as you can see there's",
+    "start": "297639",
+    "end": "303080"
+  },
+  {
+    "text": "one blue user using the blue model and there's one green user using the green model because the amount of traffic is",
+    "start": "303080",
+    "end": "308840"
+  },
+  {
+    "text": "small these like having a single replica of the blue and the green model is is more than enough but once use more users",
+    "start": "308840",
+    "end": "315960"
+  },
+  {
+    "text": "start coming in we we see the need to scale so now that we have three users say at noon some more users come in now",
+    "start": "315960",
+    "end": "321720"
+  },
+  {
+    "text": "we have three users um one replica is not sufficient so surf is going to",
+    "start": "321720",
+    "end": "327240"
+  },
+  {
+    "text": "automatically add a replica of the blue model to meet this additional",
+    "start": "327240",
+    "end": "333000"
+  },
+  {
+    "text": "demand let's say we get even more users so at 3 p.m. a whole flood of blue users comes in a whole flood of green users",
+    "start": "333000",
+    "end": "339840"
+  },
+  {
+    "text": "comes in what do we do now what serve is going to do in this case is we're going to start a new instance and it's going",
+    "start": "339840",
+    "end": "347120"
+  },
+  {
+    "text": "to scale up the models that are receiving traffic to populate the new instance so as you can see we've added",
+    "start": "347120",
+    "end": "353080"
+  },
+  {
+    "text": "four replicas of the blue model and two replicas of the green model and this is sufficient to serve all of the new users",
+    "start": "353080",
+    "end": "358360"
+  },
+  {
+    "text": "that are coming in importantly serve will not scale the red model this is to make sure that we're",
+    "start": "358360",
+    "end": "363800"
+  },
+  {
+    "text": "not wasting gpus on models that aren't actually receiving traffic so now what happens when the",
+    "start": "363800",
+    "end": "370759"
+  },
+  {
+    "text": "traffic goes down so let's say we get to the end of the day and serve users are",
+    "start": "370759",
+    "end": "375800"
+  },
+  {
+    "text": "starting to log off so as the traffic goes down serve is going to start downscaling these models so it removes",
+    "start": "375800",
+    "end": "382919"
+  },
+  {
+    "text": "all the extra replicas and it goes ahead and removes the extra node once that node is released um",
+    "start": "382919",
+    "end": "390560"
+  },
+  {
+    "text": "so with this simple sort of optimization that rayor automatically does based on traffic we can save a whole GPU node",
+    "start": "390560",
+    "end": "396560"
+  },
+  {
+    "text": "overnight and even in this very simple example we're seeing a 50% cost saving over just allocating a fixed uh number",
+    "start": "396560",
+    "end": "402280"
+  },
+  {
+    "text": "of gpus for our Peak traffic so just to quickly recap serve",
+    "start": "402280",
+    "end": "409160"
+  },
+  {
+    "text": "automatically scales each of your models Up and Down based on usage and this enables you to save gpus during off",
+    "start": "409160",
+    "end": "414280"
+  },
+  {
+    "text": "hours and have gpus during uh peak hours",
+    "start": "414280",
+    "end": "420160"
+  },
+  {
+    "text": "next we're going to discuss heter heterogenous compute uh and the idea here is",
+    "start": "420160",
+    "end": "425800"
+  },
+  {
+    "text": "that there are many different types of GPU instances so each different GPU instance",
+    "start": "425800",
+    "end": "431560"
+  },
+  {
+    "text": "has different pros and cons and is effective for serving different types of models so this is the previous instance",
+    "start": "431560",
+    "end": "437919"
+  },
+  {
+    "text": "I was using in the example before this is a p4d instance but on AWS there are many",
+    "start": "437919",
+    "end": "444560"
+  },
+  {
+    "text": "different types of instances some of them have less gpus some of them have different types of gpus",
+    "start": "444560",
+    "end": "450039"
+  },
+  {
+    "text": "and some of them are you know on different clouds altogether so there's other clouds uh you might have gpus on",
+    "start": "450039",
+    "end": "455599"
+  },
+  {
+    "text": "Prem or you might have gpus in GCE um that are not accessible in AWS so now",
+    "start": "455599",
+    "end": "461560"
+  },
+  {
+    "text": "the question is how do we utilize all of these different types of instances and all these different clouds so that we",
+    "start": "461560",
+    "end": "466919"
+  },
+  {
+    "text": "can cut costs as much as possible so one simple optimization here",
+    "start": "466919",
+    "end": "473759"
+  },
+  {
+    "text": "using smaller instances enables finer grained uh Auto scaling which reduces waste so for smaller models we can put",
+    "start": "473759",
+    "end": "481319"
+  },
+  {
+    "text": "them on the smaller nodes right if we put this blue model on the small node then during peak hours we can have very",
+    "start": "481319",
+    "end": "487560"
+  },
+  {
+    "text": "fine grain upscaling so we only request as many gpus as we need and then during off hours we can have very fine grain",
+    "start": "487560",
+    "end": "493280"
+  },
+  {
+    "text": "downscaling so that we don't waste even a single extra",
+    "start": "493280",
+    "end": "498479"
+  },
+  {
+    "text": "GPU on the other hand for our larger models we want to use bigger nodes and this is because bigger nodes are",
+    "start": "498479",
+    "end": "504039"
+  },
+  {
+    "text": "actually cheaper per GPU it's kind of like bulk pricing larger nodes also generally tend",
+    "start": "504039",
+    "end": "510120"
+  },
+  {
+    "text": "to be more performant and these bigger models require that additional performance to perform uh to to serve",
+    "start": "510120",
+    "end": "515440"
+  },
+  {
+    "text": "you know significant amounts of traffic we can take this a step further",
+    "start": "515440",
+    "end": "521240"
+  },
+  {
+    "text": "right serve runs on all clouds it can even run hybrid Cloud so let's go",
+    "start": "521240",
+    "end": "526399"
+  },
+  {
+    "text": "through a quick example of that right we can have a single Ray cluster that spans multiple different clouds so that you",
+    "start": "526399",
+    "end": "531959"
+  },
+  {
+    "text": "can find instances in the cloud that is cheapest for you um and you know depending on your organization you might",
+    "start": "531959",
+    "end": "538959"
+  },
+  {
+    "text": "have different discounts and deals in different clouds and you can really take advantage of the best compute you're able to",
+    "start": "538959",
+    "end": "544399"
+  },
+  {
+    "text": "get so let's take the same two noes from the previous example now I can run the small node the A10 node in AWS with my",
+    "start": "544399",
+    "end": "551880"
+  },
+  {
+    "text": "small model and I can run the big node in Oracle where I'm getting a 50% discount on my uh GPU",
+    "start": "551880",
+    "end": "558959"
+  },
+  {
+    "text": "instances serve when it receives traffic is going to automatically find the cor",
+    "start": "558959",
+    "end": "564760"
+  },
+  {
+    "text": "like where the model is located and it's going to Route traffic over a VPN so that you seamlessly see your traffic hit",
+    "start": "564760",
+    "end": "571120"
+  },
+  {
+    "text": "the correct model without you needing to um worry about where the model is actually located",
+    "start": "571120",
+    "end": "579240"
+  },
+  {
+    "text": "um so just a quick recap um we went through two features here so the first",
+    "start": "579240",
+    "end": "584519"
+  },
+  {
+    "text": "is Autos scaling which enables you to save unused gpus we want to have gpus during peak hours when we need them and",
+    "start": "584519",
+    "end": "590399"
+  },
+  {
+    "text": "we want to return gpus when we don't need them and the second is heterogeneous compute which enables us",
+    "start": "590399",
+    "end": "596440"
+  },
+  {
+    "text": "to find the cheapest gpus and find gpus in the right clouds using smaller instances for smaller models and bigger",
+    "start": "596440",
+    "end": "603160"
+  },
+  {
+    "text": "instances for bigger models as well as cheaper clouds for bigger instances is going to enable us to",
+    "start": "603160",
+    "end": "609959"
+  },
+  {
+    "text": "really find the absolute cheapest machines for our workloads all of this also integrates seamlessly with the auto",
+    "start": "609959",
+    "end": "615920"
+  },
+  {
+    "text": "scaling and all the features that Kade is about to discuss next so next I'm going to hand it off to",
+    "start": "615920",
+    "end": "622519"
+  },
+  {
+    "text": "Kade and he's going to discuss how to get the most out of each of the gpus uh using model level optimizations here's",
+    "start": "622519",
+    "end": "630959"
+  },
+  {
+    "text": "kid thanks T great explanations um so as tme said I'll be talking about how to",
+    "start": "630959",
+    "end": "636920"
+  },
+  {
+    "text": "get the most out of each GPU with Ray serve these are llm specific optimizations um that are really system",
+    "start": "636920",
+    "end": "643240"
+  },
+  {
+    "text": "level so it's really how can we maximize the utilization of the GPU and how can we reduce the latency for each token we",
+    "start": "643240",
+    "end": "651720"
+  },
+  {
+    "text": "generate so as tme said before cost efficient llm",
+    "start": "651720",
+    "end": "656800"
+  },
+  {
+    "text": "inference is a full stack problem we have to have optimizations in every layer of the stack that may covered Auto",
+    "start": "656800",
+    "end": "662360"
+  },
+  {
+    "text": "scaling and serving which are great and we need those but they're necessary not sufficient how do we get more out of",
+    "start": "662360",
+    "end": "669000"
+  },
+  {
+    "text": "each GPU I'll be talking about two optimizations one continuous batching and two speculative decoding that help",
+    "start": "669000",
+    "end": "676360"
+  },
+  {
+    "text": "get more out of the gpus so first continuous batching it gets 5.5x",
+    "start": "676360",
+    "end": "681440"
+  },
+  {
+    "text": "additional throughput versus naive patching this comes from the fact that the sequences um from an llm have",
+    "start": "681440",
+    "end": "687639"
+  },
+  {
+    "text": "different lengths and so if you make naive batching decisions you underutilize your",
+    "start": "687639",
+    "end": "692959"
+  },
+  {
+    "text": "gpus continuous batching is a way to optimize the batching decisions get higher throughput more concurrency for",
+    "start": "692959",
+    "end": "699760"
+  },
+  {
+    "text": "the GPU and therefore cost savings the second optimization as I said is speculative decoding and this is",
+    "start": "699760",
+    "end": "707320"
+  },
+  {
+    "text": "to optimize latency per sequence up to 50% uh and then the key idea of specula",
+    "start": "707320",
+    "end": "713000"
+  },
+  {
+    "text": "the coding is that some models are easier some tokens are easier to predict than others and so maybe you don't need",
+    "start": "713000",
+    "end": "718639"
+  },
+  {
+    "text": "llama 70b to predict some tokens you can use llama 7B and spec of decoding works",
+    "start": "718639",
+    "end": "725079"
+  },
+  {
+    "text": "by having a small model speculate what the large model will say and the large model verifies if it's correct in the",
+    "start": "725079",
+    "end": "731519"
+  },
+  {
+    "text": "happy path if the small model predicts correctly then you can have the large model emit more than one token per",
+    "start": "731519",
+    "end": "737760"
+  },
+  {
+    "text": "forward pass um doubling the amount of tokens you get so first off going to",
+    "start": "737760",
+    "end": "742920"
+  },
+  {
+    "text": "give a quick background on how LM inference Works um so I I drew this this little diagram here this is a toy model",
+    "start": "742920",
+    "end": "750279"
+  },
+  {
+    "text": "with eight total tokens uh along the the x-axis and then the yellow boxes are our prompt tokens",
+    "start": "750279",
+    "end": "756920"
+  },
+  {
+    "text": "so if you're a user of chat gbt you'll enter your prompt your question whatever it may be now the way LM inference works",
+    "start": "756920",
+    "end": "763959"
+  },
+  {
+    "text": "is it's iterative each time that your system queries the model the model does",
+    "start": "763959",
+    "end": "769120"
+  },
+  {
+    "text": "one forward pass and generates a token so here the blue tokens blue boxes are generated tokens this repeats and each",
+    "start": "769120",
+    "end": "776399"
+  },
+  {
+    "text": "time that you're asking the model for the next token it looks back at all the tokens it's previously generated and the",
+    "start": "776399",
+    "end": "782120"
+  },
+  {
+    "text": "prompt tokens so it's iterative one token at a time it's Auto regressive it",
+    "start": "782120",
+    "end": "787199"
+  },
+  {
+    "text": "looks at all the previous tokens it's generated and lastly the completion of the sequence is potentially decided by",
+    "start": "787199",
+    "end": "793560"
+  },
+  {
+    "text": "the model of course the model can emit a special token called the end of sequence token which here we represent with a red",
+    "start": "793560",
+    "end": "800560"
+  },
+  {
+    "text": "box um and and because of this you can see that you have no idea of when a particular sequence will",
+    "start": "800560",
+    "end": "807199"
+  },
+  {
+    "text": "end so now now continuous batching the motivation here are two prompts that I",
+    "start": "807199",
+    "end": "812360"
+  },
+  {
+    "text": "put into chat GPT the first one is what is 2 plus two I got 10 tokens in response 2 plus 2 equals 4 and then the",
+    "start": "812360",
+    "end": "821000"
+  },
+  {
+    "text": "second one is how our neutron stars formed I got 558 tokens in response um",
+    "start": "821000",
+    "end": "827199"
+  },
+  {
+    "text": "it was a great answer I gave all the all the steps of how they're formed I learned a lot um but we can see here",
+    "start": "827199",
+    "end": "832639"
+  },
+  {
+    "text": "that these have very different lengths and if we naively batch these on the GPU",
+    "start": "832639",
+    "end": "838079"
+  },
+  {
+    "text": "we're going to severely underutilize the GPU let's look at a diagram to explain what I",
+    "start": "838079",
+    "end": "843199"
+  },
+  {
+    "text": "mean so here on the left we have our initial condition our initial State um and instead of having one sequence that",
+    "start": "843199",
+    "end": "850040"
+  },
+  {
+    "text": "we are um continuing we have four different sequences so sequence one two",
+    "start": "850040",
+    "end": "855680"
+  },
+  {
+    "text": "three and four and we've already generated one token and with each iteration we'll generate a new token on",
+    "start": "855680",
+    "end": "861800"
+  },
+  {
+    "text": "the right side we have the end state where all four sequences have emitted their completion token and you can see",
+    "start": "861800",
+    "end": "868519"
+  },
+  {
+    "text": "that sequence three in particular is very short it's kind of like the answer to what is 2 plus two and sequence two",
+    "start": "868519",
+    "end": "876199"
+  },
+  {
+    "text": "is much longer maybe how a neutron star is formed and with this naive batching",
+    "start": "876199",
+    "end": "881800"
+  },
+  {
+    "text": "where we just put things together without thinking about it we waste a lot of GPU time so at the very last",
+    "start": "881800",
+    "end": "889199"
+  },
+  {
+    "text": "iteration when only sequence 2 is going we're wasting three of the available spaces on the GPU these these white",
+    "start": "889199",
+    "end": "896600"
+  },
+  {
+    "text": "boxes represent waste so this is a toy example batch size of four in reality",
+    "start": "896600",
+    "end": "902000"
+  },
+  {
+    "text": "you could have a batch size of like 32 and if one of them goes until the very end but all the others finish early",
+    "start": "902000",
+    "end": "908040"
+  },
+  {
+    "text": "you're massively wasting your gpu's capability and therefore the money you're paying for that GPU so can we do better yes continuous",
+    "start": "908040",
+    "end": "916680"
+  },
+  {
+    "text": "batching the key idea behind continuous batching is that after each forward pass you create a new batch um this gives you",
+    "start": "916680",
+    "end": "924320"
+  },
+  {
+    "text": "the opportunity to look if there's any end of sequence tokens and if there are remove them from the batch this allows",
+    "start": "924320",
+    "end": "930560"
+  },
+  {
+    "text": "us to use the empty space and replace it with an empty prompt oh sorry with a waiting",
+    "start": "930560",
+    "end": "935839"
+  },
+  {
+    "text": "prompt so putting this all together on top here we have naive batching and on",
+    "start": "935839",
+    "end": "940959"
+  },
+  {
+    "text": "the bottom we have continuous batching they begin from the same state the same four sequences and those four sequences",
+    "start": "940959",
+    "end": "947160"
+  },
+  {
+    "text": "go for the same number of iterations but what you can see here and this is the key innovation of continuous batching is",
+    "start": "947160",
+    "end": "952839"
+  },
+  {
+    "text": "that when continuous batching is enabled you can fit in Waiting sequences waiting prompts while the other other one with",
+    "start": "952839",
+    "end": "959079"
+  },
+  {
+    "text": "naive batching is is wasting time so if you look on the bottom sequences five",
+    "start": "959079",
+    "end": "964759"
+  },
+  {
+    "text": "sequence is six and sequence is 7 have been put onto the GPU and beun processing while in naive batching the",
+    "start": "964759",
+    "end": "971360"
+  },
+  {
+    "text": "GPU is just waiting for sequence 2 to complete again batch size of four this",
+    "start": "971360",
+    "end": "976600"
+  },
+  {
+    "text": "is just to show how it works but becomes really impactful for larger batch sizes so now I'm going to talk about",
+    "start": "976600",
+    "end": "983560"
+  },
+  {
+    "text": "benchmarks we benchmarked continuous batching and the Improvement it produces",
+    "start": "983560",
+    "end": "988720"
+  },
+  {
+    "text": "over static batching so there's two naive batching libraries which I call static batching um one is called hugging",
+    "start": "988720",
+    "end": "994800"
+  },
+  {
+    "text": "face pipelines this is your very easy to use hugging face um Library um it's not",
+    "start": "994800",
+    "end": "1001160"
+  },
+  {
+    "text": "efficient for inference you should not use it and it's our most naive comparison we also have Nvidia faster",
+    "start": "1001160",
+    "end": "1006759"
+  },
+  {
+    "text": "Transformer this is a research level Library which uses C++ to schedule Cuda",
+    "start": "1006759",
+    "end": "1012160"
+  },
+  {
+    "text": "kernels and so it's a much more optimized implementation of naive batching for continuous batching We",
+    "start": "1012160",
+    "end": "1019720"
+  },
+  {
+    "text": "compare VM against the two naive batching libraries in our workload we",
+    "start": "1019720",
+    "end": "1025160"
+  },
+  {
+    "text": "have a model which is 13 billion parameters it's opt 13B and we're running on an a100 40 GB GPU just a",
+    "start": "1025160",
+    "end": "1032520"
+  },
+  {
+    "text": "single one the way we measure the throughputs is we generate a th prompts",
+    "start": "1032520",
+    "end": "1038438"
+  },
+  {
+    "text": "each prompt has 512 input tokens uh and then with a random number of output tokens following an exponential",
+    "start": "1038439",
+    "end": "1045360"
+  },
+  {
+    "text": "distribution and then we run this experiment four times one will recap the output links to 32 tokens one to 128 512",
+    "start": "1045360",
+    "end": "1053480"
+  },
+  {
+    "text": "and in the largest case 1536 the idea here is that as we",
+    "start": "1053480",
+    "end": "1058960"
+  },
+  {
+    "text": "increase the number of tokens allowed the variance between two sequences in a",
+    "start": "1058960",
+    "end": "1064000"
+  },
+  {
+    "text": "batch increases when we cap at 32 the variance is very small and static batching will do well compared to",
+    "start": "1064000",
+    "end": "1070360"
+  },
+  {
+    "text": "continuous batching but as we increase the cap and more realistically represent uh a production workload then the",
+    "start": "1070360",
+    "end": "1077679"
+  },
+  {
+    "text": "variance between two sequences in a batch is much higher and we should expect continuous batching to do much",
+    "start": "1077679",
+    "end": "1082919"
+  },
+  {
+    "text": "better than naive batching so the results on the y-axis",
+    "start": "1082919",
+    "end": "1089039"
+  },
+  {
+    "text": "here we have a relative improvement over hugging face pipelines notice that this is a log scale and on the x-axis we have",
+    "start": "1089039",
+    "end": "1096400"
+  },
+  {
+    "text": "the four experiments I discussed and blue is faster Transformer the optimized",
+    "start": "1096400",
+    "end": "1101480"
+  },
+  {
+    "text": "naive batching and VM is continuous patching we can see that exactly as I",
+    "start": "1101480",
+    "end": "1107600"
+  },
+  {
+    "text": "said for the cases When there's less variance in the batch static batching continuous batching perform similarly so",
+    "start": "1107600",
+    "end": "1114799"
+  },
+  {
+    "text": "VM is 2x naive batching in this case and as we increase the number of tokens",
+    "start": "1114799",
+    "end": "1120600"
+  },
+  {
+    "text": "allowed in our batch and therefore increase the variance between two different sequences um we see the the",
+    "start": "1120600",
+    "end": "1126159"
+  },
+  {
+    "text": "Gap increases so for naive batching with Hing face pipelines versus faster",
+    "start": "1126159",
+    "end": "1131480"
+  },
+  {
+    "text": "Transformer we see a 4X improvement with faster Transformer in the worst case and",
+    "start": "1131480",
+    "end": "1136760"
+  },
+  {
+    "text": "VM is a crazy number 23x um over naive batching so of course it's it's really",
+    "start": "1136760",
+    "end": "1143200"
+  },
+  {
+    "text": "easy to you know see how the most naive solution is bad but even comparing",
+    "start": "1143200",
+    "end": "1148240"
+  },
+  {
+    "text": "against the optimized solution um VM with continuous batching is a 5.5x",
+    "start": "1148240",
+    "end": "1153360"
+  },
+  {
+    "text": "improvement over static batching with nvidia's research quality Library bleeding edge",
+    "start": "1153360",
+    "end": "1159080"
+  },
+  {
+    "text": "technology um this is a a high level overview it's a conclusion from our blog post I highly recommend you check that",
+    "start": "1159080",
+    "end": "1164919"
+  },
+  {
+    "text": "out if you want to understand more so just a recap continuous batching",
+    "start": "1164919",
+    "end": "1170600"
+  },
+  {
+    "text": "llms generate varying length outputs this causes challenges for efficiently",
+    "start": "1170600",
+    "end": "1176080"
+  },
+  {
+    "text": "batching them on the GPU and waste time continuous batching makes optimized",
+    "start": "1176080",
+    "end": "1181240"
+  },
+  {
+    "text": "batching decisions and allows you to increase the throughput and we see in our Benchmark a",
+    "start": "1181240",
+    "end": "1186880"
+  },
+  {
+    "text": "5.5x improvement over state-of-the-art faster Transformer and 23x over",
+    "start": "1186880",
+    "end": "1193440"
+  },
+  {
+    "text": "naive next I'll talk about speculative decoding and as I said before continuous batching is is a throughput optimization",
+    "start": "1193440",
+    "end": "1200440"
+  },
+  {
+    "text": "spect of decoding is a latency optimization to reduce the latency for each",
+    "start": "1200440",
+    "end": "1205559"
+  },
+  {
+    "text": "token so the first observation we'll make is that the difficulty of predicting each token is not equal so I",
+    "start": "1205559",
+    "end": "1211919"
+  },
+  {
+    "text": "have two sentences here the city of sand blank and this means that GPU is blank",
+    "start": "1211919",
+    "end": "1217360"
+  },
+  {
+    "text": "um the amount of number of tokens that I would reasonably say for the first case is much smaller maybe I'll say San Jose",
+    "start": "1217360",
+    "end": "1223320"
+  },
+  {
+    "text": "maybe I'll say San Francisco whereas in the latter case the sentence could go many different directions you don't know",
+    "start": "1223320",
+    "end": "1228760"
+  },
+  {
+    "text": "what I'll say next so you could say that you need a smaller model smaller modeling power for the first sequence",
+    "start": "1228760",
+    "end": "1235200"
+  },
+  {
+    "text": "and a larger model for the second one so speculative decoding it follows with this idea of using a small model",
+    "start": "1235200",
+    "end": "1241840"
+  },
+  {
+    "text": "easier tokens just a back of the napkin calculation a 7 billion parameter model is 10x faster than a 70 billion",
+    "start": "1241840",
+    "end": "1248440"
+  },
+  {
+    "text": "parameter Model 9 milliseconds versus 90 milliseconds on a single GPU but we can do this but how do we",
+    "start": "1248440",
+    "end": "1254880"
+  },
+  {
+    "text": "know which tokens are easier specul of decoding one way to do this is to have the draft model the small model",
+    "start": "1254880",
+    "end": "1261880"
+  },
+  {
+    "text": "speculate a sliding window ahead of the large model so some number of K tokens usually you pick a small K like three or",
+    "start": "1261880",
+    "end": "1268440"
+  },
+  {
+    "text": "five now every time that the small model speculates a new token the large model will verify the correctness of that",
+    "start": "1268440",
+    "end": "1274960"
+  },
+  {
+    "text": "token and if it's correct it'll emit the tokens as its own so let's give an illustration of of",
+    "start": "1274960",
+    "end": "1282159"
+  },
+  {
+    "text": "really how this works so here again Yellow Boxes are our prompt green boxes are from our small model so we have k",
+    "start": "1282159",
+    "end": "1290000"
+  },
+  {
+    "text": "equals 2 in this case so we've predicted two tokens speculated two tokens ahead of the prompt and now the large model",
+    "start": "1290000",
+    "end": "1295880"
+  },
+  {
+    "text": "will verify both those and then this example it accepted both of them so now",
+    "start": "1295880",
+    "end": "1301720"
+  },
+  {
+    "text": "in the verification pass we also get a token from the large model and now with a single forward pass we've gotten a",
+    "start": "1301720",
+    "end": "1308200"
+  },
+  {
+    "text": "large model token and two accepted small model tokens this process continues another",
+    "start": "1308200",
+    "end": "1314200"
+  },
+  {
+    "text": "example the draft model continues two tokens ahead the large model accepts the",
+    "start": "1314200",
+    "end": "1319360"
+  },
+  {
+    "text": "first one but rejects the second one and what that means is that we throw away the rejected token and replace it with a",
+    "start": "1319360",
+    "end": "1325799"
+  },
+  {
+    "text": "token from the large model um we can continue this and let's",
+    "start": "1325799",
+    "end": "1331559"
+  },
+  {
+    "text": "say that this time both tokens are rejected or better yet the first token was rejected and therefore all the ones",
+    "start": "1331559",
+    "end": "1336960"
+  },
+  {
+    "text": "after it are also rejected again Spectrum decoding is going to replace the rejected token with",
+    "start": "1336960",
+    "end": "1342000"
+  },
+  {
+    "text": "a large um model token and the process goes on uh so this is another cas where",
+    "start": "1342000",
+    "end": "1349039"
+  },
+  {
+    "text": "both draft tokens are accepted by the large model and here at the end of this",
+    "start": "1349039",
+    "end": "1354919"
+  },
+  {
+    "text": "example we can see that five tokens were generated were speculated by a small model it's cheaper and we only needed",
+    "start": "1354919",
+    "end": "1361960"
+  },
+  {
+    "text": "four forward passes to generate all nine of those tokens huge cost-saving technique in latency",
+    "start": "1361960",
+    "end": "1369039"
+  },
+  {
+    "text": "reduction so just to summarize draft model guesses K tokens ahead large model",
+    "start": "1369039",
+    "end": "1374120"
+  },
+  {
+    "text": "scores each of the K tokens and tokens are accepted or rejected left to",
+    "start": "1374120",
+    "end": "1379919"
+  },
+  {
+    "text": "right so benchmarks um we are working on speculative decoding in BLM BLM is an",
+    "start": "1379919",
+    "end": "1387039"
+  },
+  {
+    "text": "open source library and we're going to open source the engine for speculative decoding but it's under development we don't have good numbers yet so we will",
+    "start": "1387039",
+    "end": "1394400"
+  },
+  {
+    "text": "show um there's a paper a few papers on specul of decoding one by Chen from Deep Mind and we'll show the benchmarks from",
+    "start": "1394400",
+    "end": "1401200"
+  },
+  {
+    "text": "that paper on the latency reduction so in this Benchmark they're comparing a 70 billion parameter model with a 4 ion",
+    "start": "1401200",
+    "end": "1408360"
+  },
+  {
+    "text": "parameter model um as the draft or small model so here is the The Benchmark in",
+    "start": "1408360",
+    "end": "1414840"
+  },
+  {
+    "text": "the paper we can see that the on the y- axis we have token generation time and with normal decoding blue this is 14",
+    "start": "1414840",
+    "end": "1422240"
+  },
+  {
+    "text": "milliseconds this is true if the task is summarization or if the task is code generation now when we apply speculative",
+    "start": "1422240",
+    "end": "1429760"
+  },
+  {
+    "text": "decoding we see that the latency goes down by about 2X or sometimes even more",
+    "start": "1429760",
+    "end": "1434960"
+  },
+  {
+    "text": "if there's more predictable tokens this shows that um you can actually feasibly",
+    "start": "1434960",
+    "end": "1441080"
+  },
+  {
+    "text": "get a 2X reduction in your per token latency and in my mind this is",
+    "start": "1441080",
+    "end": "1446520"
+  },
+  {
+    "text": "amazing so to recap on spective decoding some tokens are easier to predict than",
+    "start": "1446520",
+    "end": "1452080"
+  },
+  {
+    "text": "others you can have a small model speculate ahead of the large model the large model verifies the tokens make",
+    "start": "1452080",
+    "end": "1458440"
+  },
+  {
+    "text": "sure they're correct and if the small model guesses correctly then you can emit more than one token per forward",
+    "start": "1458440",
+    "end": "1464520"
+  },
+  {
+    "text": "pass directly reducing your per token latency",
+    "start": "1464520",
+    "end": "1469799"
+  },
+  {
+    "text": "okay to finish out our talk I'm going to tie itself together into Ray llm so as thme discussed earlier llm",
+    "start": "1469799",
+    "end": "1477919"
+  },
+  {
+    "text": "inference is a full stack problem cost efficiency requires Great cross Cloud autoscaling surveying it requires",
+    "start": "1477919",
+    "end": "1484159"
+  },
+  {
+    "text": "continuous batching spect of decoding and other optimizations we haven't discussed",
+    "start": "1484159",
+    "end": "1489360"
+  },
+  {
+    "text": "today another thing is that open source LMS move extremely fast I'm sure you all are familiar frequent Innovations",
+    "start": "1489360",
+    "end": "1496200"
+  },
+  {
+    "text": "released on hiking face and really to win you need flexibility and developer speed otherwise you'll be left",
+    "start": "1496200",
+    "end": "1503880"
+  },
+  {
+    "text": "behind so going back to this this this high level llm inference landscape we",
+    "start": "1503880",
+    "end": "1509279"
+  },
+  {
+    "text": "have all of these optimizations in these different libraries some of these are open source like VM um some of them are",
+    "start": "1509279",
+    "end": "1515760"
+  },
+  {
+    "text": "close Source like deep speed M Mii their proprietary service um and because this",
+    "start": "1515760",
+    "end": "1521600"
+  },
+  {
+    "text": "is full stack we really need a way to package this all together in one place and this is why we built Ray llm Ray llm",
+    "start": "1521600",
+    "end": "1528799"
+  },
+  {
+    "text": "takes the best optimizations from each area in open source and packages them together into an easy to deploy solution",
+    "start": "1528799",
+    "end": "1535960"
+  },
+  {
+    "text": "the idea here is that you can combine all your cost saving features and make it easy to deploy and you don't have to",
+    "start": "1535960",
+    "end": "1541799"
+  },
+  {
+    "text": "um update all your libraries with all the features so you can rely on like Ray serve for serving and VM for the other",
+    "start": "1541799",
+    "end": "1549360"
+  },
+  {
+    "text": "ones uh so as I said um Ray llm will integrate with llm engines like VM",
+    "start": "1549360",
+    "end": "1555039"
+  },
+  {
+    "text": "combines the best optimizations across open source and because Ray is python it's extremely",
+    "start": "1555039",
+    "end": "1560960"
+  },
+  {
+    "text": "flexible and high development speed you can support any hugging face model and Ray makes developments to production",
+    "start": "1560960",
+    "end": "1567640"
+  },
+  {
+    "text": "extremely fast you can own it end to end all right that's our talk thank",
+    "start": "1567640",
+    "end": "1575519"
+  },
+  {
+    "text": "you yeah we have four minutes or questions yeah we just just go right",
+    "start": "1578880",
+    "end": "1585200"
+  },
+  {
+    "text": "here thank uh I have two questions um which parts of the the ones you mention",
+    "start": "1585840",
+    "end": "1592399"
+  },
+  {
+    "text": "in this talk are uh not available in open source and then the second question",
+    "start": "1592399",
+    "end": "1597960"
+  },
+  {
+    "text": "in the speculative decoding seems like we're calling the larger model anyway so how does it actually save the latency",
+    "start": "1597960",
+    "end": "1605440"
+  },
+  {
+    "text": "good questions um do you want to take the first one yeah I'll take the first one so um the first part of the talk um",
+    "start": "1605440",
+    "end": "1612960"
+  },
+  {
+    "text": "all of that is basically available in open source with Reserve except for multicloud so the part where you can",
+    "start": "1612960",
+    "end": "1618039"
+  },
+  {
+    "text": "operate over multiple clouds that's only available on any scale um for the second part of the talk both of those pieces",
+    "start": "1618039",
+    "end": "1624360"
+  },
+  {
+    "text": "are going to be open sourced uh but right now um aren't yet available in open source",
+    "start": "1624360",
+    "end": "1629760"
+  },
+  {
+    "text": "so um for the most part you can access a lot of this in open source yeah so the key idea is like if V",
+    "start": "1629760",
+    "end": "1636600"
+  },
+  {
+    "text": "has continuous patching which it does we can use that on Ray um and the second question was how",
+    "start": "1636600",
+    "end": "1642360"
+  },
+  {
+    "text": "do we get speed up if we have to ask the model every time so the way it works is that you can",
+    "start": "1642360",
+    "end": "1649720"
+  },
+  {
+    "text": "actually um have let's say you have two speculative tokens the large model can actually score those in parallel to",
+    "start": "1649720",
+    "end": "1655880"
+  },
+  {
+    "text": "accept or reject them so you can do a single forward pass which is your expensive operation and you can get the",
+    "start": "1655880",
+    "end": "1661399"
+  },
+  {
+    "text": "output whether it accepted or rejected each token in the sequence um happy to go with more details after after the",
+    "start": "1661399",
+    "end": "1669600"
+  },
+  {
+    "text": "talk thank you so much it's a great talk I have a question regarding the auto scaling in the sense that when loading",
+    "start": "1671360",
+    "end": "1677760"
+  },
+  {
+    "text": "the uh language model checkpoints for example the 70 billion it's really gigantic and takes a lot of time for the",
+    "start": "1677760",
+    "end": "1683640"
+  },
+  {
+    "text": "io do you pre-warm the containers for those uh or how do we handle this coastar problem thank you yeah I'll take",
+    "start": "1683640",
+    "end": "1691399"
+  },
+  {
+    "text": "that one um so in open source um the way this works",
+    "start": "1691399",
+    "end": "1696480"
+  },
+  {
+    "text": "is that we just start a new node and we pull the container and we load the model so it's exactly what you're describing",
+    "start": "1696480",
+    "end": "1702080"
+  },
+  {
+    "text": "there's like overhead there uh and pulling the containers are slow loading the models are slow uh on any scale we",
+    "start": "1702080",
+    "end": "1707799"
+  },
+  {
+    "text": "we've put in a lot of optimizations to make this really really fast so uh what's going to happen is that the",
+    "start": "1707799",
+    "end": "1713279"
+  },
+  {
+    "text": "container start is going to be like extremely like the container pull will be extremely fast the instance start will be extremely fast and the uh model",
+    "start": "1713279",
+    "end": "1719760"
+  },
+  {
+    "text": "loading from S3 will be extremely fast so the end to endend time for getting that new model on is going to be like on",
+    "start": "1719760",
+    "end": "1725519"
+  },
+  {
+    "text": "the order of like less than a few minutes right so um I think that we can",
+    "start": "1725519",
+    "end": "1730880"
+  },
+  {
+    "text": "get a lot of that in open source but a lot of the best optimizations are on any scale",
+    "start": "1730880",
+    "end": "1736399"
+  },
+  {
+    "text": "so thank you uh when you say realm package",
+    "start": "1736399",
+    "end": "1742840"
+  },
+  {
+    "text": "uh you know all this open source libraries take together does that mean you can just import them you can pick and choose individual ones or actually",
+    "start": "1742840",
+    "end": "1750799"
+  },
+  {
+    "text": "re rewrite your own versions for for those individual libraries right so there's",
+    "start": "1750799",
+    "end": "1757600"
+  },
+  {
+    "text": "two things that you can do with realm um the first is we have a lot of these models just supported out of the box so",
+    "start": "1757600",
+    "end": "1763279"
+  },
+  {
+    "text": "we have pre pre-written yaml and stuff uh and you can just run them and it'll just work uh so you install RM you",
+    "start": "1763279",
+    "end": "1770399"
+  },
+  {
+    "text": "install the dependencies and you just run it out of the box it'll just work um the second is that we expose an engine",
+    "start": "1770399",
+    "end": "1775720"
+  },
+  {
+    "text": "interface uh that lets you customize a lot of these pieces so if you want to use it with some um custom open source",
+    "start": "1775720",
+    "end": "1782720"
+  },
+  {
+    "text": "library or if you want to use it with some custom model that you know isn't supported already uh you have the full",
+    "start": "1782720",
+    "end": "1788679"
+  },
+  {
+    "text": "flexibility of going in and doing that is that answer the question or and just to add to that um this is a brand new",
+    "start": "1788679",
+    "end": "1794679"
+  },
+  {
+    "text": "project and we're moving really fast to add things the best support is with BLM that's the engine that we've built but",
+    "start": "1794679",
+    "end": "1800000"
+  },
+  {
+    "text": "the interface is there for any engine okay I think we have time for one more",
+    "start": "1800000",
+    "end": "1806039"
+  },
+  {
+    "text": "question yeah and if you have other questions we'll be here after the talk and you can come ask us questions um",
+    "start": "1807240",
+    "end": "1812519"
+  },
+  {
+    "text": "what's the difference between Ray llm and the Avary project is it the same",
+    "start": "1812519",
+    "end": "1817720"
+  },
+  {
+    "text": "thing it's the same thing we renamed it people are getting confused so",
+    "start": "1817720",
+    "end": "1825360"
+  },
+  {
+    "text": "question",
+    "start": "1826240",
+    "end": "1829240"
+  }
+]

@@ -1,0 +1,1585 @@
+[
+  {
+    "start": "0",
+    "end": "34000"
+  },
+  {
+    "text": "[Music]",
+    "start": "1130",
+    "end": "13040"
+  },
+  {
+    "text": "hi and welcome to the presentation bridging security infrastructure between the data center and aws lambda",
+    "start": "13040",
+    "end": "20240"
+  },
+  {
+    "text": "as you all know serverless is all the rage but creating secure infrastructure that integrates serverless technology",
+    "start": "20240",
+    "end": "27279"
+  },
+  {
+    "text": "with existing data center services remains a challenge and we'll talk today about how to",
+    "start": "27279",
+    "end": "32800"
+  },
+  {
+    "text": "overcome these so to give an overview first we'll talk about background and context and the",
+    "start": "32800",
+    "end": "40239"
+  },
+  {
+    "start": "34000",
+    "end": "34000"
+  },
+  {
+    "text": "goals we want to achieve in this talk and then about the two solutions we implemented",
+    "start": "40239",
+    "end": "45760"
+  },
+  {
+    "text": "so the first one is going to be how we made uh enable lambda to call into the",
+    "start": "45760",
+    "end": "51920"
+  },
+  {
+    "text": "envoy service mesh and the second one is how we keep application secrets in sync between the",
+    "start": "51920",
+    "end": "58800"
+  },
+  {
+    "text": "data center and lambda we'll close with some key learnings",
+    "start": "58800",
+    "end": "64878"
+  },
+  {
+    "text": "briefly about myself i'm michael weisbacher i work on the infrastructure",
+    "start": "64879",
+    "end": "70080"
+  },
+  {
+    "text": "security team at square in new york i've been there for three years and i work on",
+    "start": "70080",
+    "end": "75680"
+  },
+  {
+    "text": "a sub team that is working on cryptographic identity and secrets",
+    "start": "75680",
+    "end": "81360"
+  },
+  {
+    "text": "management and before that i was doing security research and getting a phd at",
+    "start": "81360",
+    "end": "86880"
+  },
+  {
+    "text": "northeastern university so some background",
+    "start": "86880",
+    "end": "94400"
+  },
+  {
+    "text": "let's first talk about the benefits of serverless and lambda specifically it lets developers focus their attention",
+    "start": "94880",
+    "end": "102000"
+  },
+  {
+    "text": "on business logic and not worry about infrastructure too much it is handled by aws magic",
+    "start": "102000",
+    "end": "108560"
+  },
+  {
+    "text": "also it's fast landos have very fast response times but they're not only fast they are also very",
+    "start": "108560",
+    "end": "115200"
+  },
+  {
+    "text": "scalable and an underappreciated feature here is scaling down",
+    "start": "115200",
+    "end": "120479"
+  },
+  {
+    "text": "workloads that are not needed anymore will be automatically deallocated there is no need to maintain idle",
+    "start": "120479",
+    "end": "127040"
+  },
+  {
+    "text": "servers what is also great is how well connected lambda is with the ews ecosystem it is",
+    "start": "127040",
+    "end": "134319"
+  },
+  {
+    "text": "possible to trigger a lambda via an as freewrite in email or many other options",
+    "start": "134319",
+    "end": "142680"
+  },
+  {
+    "start": "143000",
+    "end": "143000"
+  },
+  {
+    "text": "so the big question is of course how does it all work these functions are called without",
+    "start": "143840",
+    "end": "149760"
+  },
+  {
+    "text": "assigned infrastructure lambdas are running on small vms on amazon linux",
+    "start": "149760",
+    "end": "155680"
+  },
+  {
+    "text": "they use firecracker vm and they land the sandbox to achieve speed and scalability",
+    "start": "155680",
+    "end": "162560"
+  },
+  {
+    "text": "when invoked for the first time a lander performs a cold start these take a bit longer to allocate",
+    "start": "162560",
+    "end": "168840"
+  },
+  {
+    "text": "infrastructure but once this happens additional implications can reuse state from previously invoked lambdas and when",
+    "start": "168840",
+    "end": "175920"
+  },
+  {
+    "text": "orlando stops being invoked for a while infrastructure is automatically unassigned",
+    "start": "175920",
+    "end": "182159"
+  },
+  {
+    "start": "182000",
+    "end": "182000"
+  },
+  {
+    "text": "i showed you the good size of lambda but what we learned quickly is what makes land attractive also makes it",
+    "start": "183599",
+    "end": "189599"
+  },
+  {
+    "text": "incompatible with dc infrastructure there are several reasons",
+    "start": "189599",
+    "end": "195200"
+  },
+  {
+    "text": "lambda workloads are short-lived as opposed to long-lived workloads in the dc",
+    "start": "195200",
+    "end": "200400"
+  },
+  {
+    "text": "the deploy process here is different infrastructure is assigned ad-hoc",
+    "start": "200400",
+    "end": "205760"
+  },
+  {
+    "text": "much differently than any dc where server nodes are assigned ahead of time",
+    "start": "205760",
+    "end": "211200"
+  },
+  {
+    "text": "also speed and scalability are core features of lambda after a cold start and lambda is",
+    "start": "211200",
+    "end": "217440"
+  },
+  {
+    "text": "expected to respond near instantaneously security infrastructure can't slow down",
+    "start": "217440",
+    "end": "222959"
+  },
+  {
+    "text": "or block the hot path of responding also infrastructure is not highly available",
+    "start": "222959",
+    "end": "229040"
+  },
+  {
+    "text": "with jeopardizes property",
+    "start": "229040",
+    "end": "232959"
+  },
+  {
+    "text": "and now about the goals we want to achieve",
+    "start": "234400",
+    "end": "238400"
+  },
+  {
+    "text": "to achieve higher flexibility and scalability square has been moving to the cloud",
+    "start": "239680",
+    "end": "246799"
+  },
+  {
+    "text": "lambda plays a role in that but lambda can't be an isolated island what we needed is for lambdas to be",
+    "start": "246799",
+    "end": "253040"
+  },
+  {
+    "text": "treated the same as other workloads in the dc we have a kubernetes-like platform and in aws we have kubernetes",
+    "start": "253040",
+    "end": "261199"
+  },
+  {
+    "text": "running on top of aws eks we connect these environments with an",
+    "start": "261199",
+    "end": "267120"
+  },
+  {
+    "text": "envoy service mesh to connect services to each other what we want out of lambda are two",
+    "start": "267120",
+    "end": "273440"
+  },
+  {
+    "text": "things one they should be able to communicate securely with any application connected",
+    "start": "273440",
+    "end": "279120"
+  },
+  {
+    "text": "to the mesh and also we want to access application secrets which are in a",
+    "start": "279120",
+    "end": "285440"
+  },
+  {
+    "text": "dc-based system",
+    "start": "285440",
+    "end": "288800"
+  },
+  {
+    "start": "289000",
+    "end": "289000"
+  },
+  {
+    "text": "to break this down into two top-level goals we want landlords to be treated equally as other workloads",
+    "start": "290479",
+    "end": "297440"
+  },
+  {
+    "text": "we also want to keep the benefits of lambda intact so more specifically functionality that",
+    "start": "297440",
+    "end": "303520"
+  },
+  {
+    "text": "we want is to communicate with envoy service mesh and have access to application secrets",
+    "start": "303520",
+    "end": "310880"
+  },
+  {
+    "text": "but we also want to maintain important features such as response time and scalability",
+    "start": "310880",
+    "end": "316639"
+  },
+  {
+    "text": "we also want to be compatible with our dc infrastructure and obviously availability can't be degraded power",
+    "start": "316639",
+    "end": "323840"
+  },
+  {
+    "text": "security infrastructure so part one",
+    "start": "323840",
+    "end": "329440"
+  },
+  {
+    "text": "calling the service mesh from lambda to give a motivational example consider",
+    "start": "329440",
+    "end": "336800"
+  },
+  {
+    "start": "334000",
+    "end": "334000"
+  },
+  {
+    "text": "two services in the these square dc service one and service two service one is calling service two",
+    "start": "336800",
+    "end": "344560"
+  },
+  {
+    "text": "and service one turns out is a bursty workload so once a week or once a month it has a",
+    "start": "344560",
+    "end": "350960"
+  },
+  {
+    "text": "high load spike and otherwise these servers are idle and not doing much",
+    "start": "350960",
+    "end": "356319"
+  },
+  {
+    "text": "so this is a perfect candidate to move to lambda but once it's in lambda it still needs",
+    "start": "356319",
+    "end": "362720"
+  },
+  {
+    "text": "to call service 2 and this is the interesting part now so for service 2 nothing should change it's",
+    "start": "362720",
+    "end": "368639"
+  },
+  {
+    "text": "it should still be able to receive calls from service 1 where they are in the square data center or",
+    "start": "368639",
+    "end": "375039"
+  },
+  {
+    "text": "residing in aws lambda we don't want to change the the code for service 2 or the infrastructure for service 2. it should",
+    "start": "375039",
+    "end": "381840"
+  },
+  {
+    "text": "just work and how we'll make this work we'll talk",
+    "start": "381840",
+    "end": "387199"
+  },
+  {
+    "text": "about that but first how do services communicate at",
+    "start": "387199",
+    "end": "392479"
+  },
+  {
+    "start": "389000",
+    "end": "389000"
+  },
+  {
+    "text": "square at square everything is a microservice this predates me but square has been",
+    "start": "392479",
+    "end": "398000"
+  },
+  {
+    "text": "using mtls since 2012. you might know this technology as zero trust networking or identity is the new",
+    "start": "398000",
+    "end": "405600"
+  },
+  {
+    "text": "parameter what this really means the network is as trusted as a public wi-fi",
+    "start": "405600",
+    "end": "412000"
+  },
+  {
+    "text": "we don't trust the network and assume it compromised all trust we have is anchored in identities and everything else is",
+    "start": "412000",
+    "end": "418639"
+  },
+  {
+    "text": "assumed bad for connecting securely we use an envoy",
+    "start": "418639",
+    "end": "423759"
+  },
+  {
+    "text": "service mesh services connect and clear text to their envoy sidecar which",
+    "start": "423759",
+    "end": "428800"
+  },
+  {
+    "text": "handles the connection our workloads are available in square dc's but also on kubernetes on a",
+    "start": "428800",
+    "end": "435840"
+  },
+  {
+    "text": "platform based on aws eks and the way we look at identity is a",
+    "start": "435840",
+    "end": "441919"
+  },
+  {
+    "text": "tuple of service name and environment encoded under certificate for example",
+    "start": "441919",
+    "end": "447759"
+  },
+  {
+    "text": "service 1 staging or service to production",
+    "start": "447759",
+    "end": "452800"
+  },
+  {
+    "text": "enter speaking spifi is a workload identity standard that is based on the way workloads have",
+    "start": "461039",
+    "end": "467280"
+  },
+  {
+    "text": "been handled within companies such as google square and others the standard formalizes how to tie",
+    "start": "467280",
+    "end": "474240"
+  },
+  {
+    "text": "identity to worklets or workloads and how to issue it",
+    "start": "474240",
+    "end": "479520"
+  },
+  {
+    "text": "there is also a reference implementation for this pp standard which is called spire",
+    "start": "479520",
+    "end": "485919"
+  },
+  {
+    "text": "square began migrating to spire three years ago we did this to move from an in-house built identity issuance to an",
+    "start": "485919",
+    "end": "493039"
+  },
+  {
+    "text": "open source standard solution and we use spiffy for every",
+    "start": "493039",
+    "end": "498800"
+  },
+  {
+    "text": "service for every environment where we need service identity",
+    "start": "498800",
+    "end": "505639"
+  },
+  {
+    "start": "505000",
+    "end": "505000"
+  },
+  {
+    "text": "so what do we want identity to look like for landis square is using an architecture with",
+    "start": "506319",
+    "end": "511440"
+  },
+  {
+    "text": "many aws accounts and the way services are mapped to aws accounts at square is the following",
+    "start": "511440",
+    "end": "518399"
+  },
+  {
+    "text": "each tuple of service and environment which i mentioned earlier has its own aws account for example service one will",
+    "start": "518399",
+    "end": "525760"
+  },
+  {
+    "text": "have different accounts for staging and production we get nice properties from that we know",
+    "start": "525760",
+    "end": "531200"
+  },
+  {
+    "text": "that any resource that is associated with a specific account belongs to a certain service environment pair",
+    "start": "531200",
+    "end": "537680"
+  },
+  {
+    "text": "and this is also true in reverse what this also means is that all lambdas",
+    "start": "537680",
+    "end": "544000"
+  },
+  {
+    "text": "within a single account belong to a single service and within each account we have multiple roles such as read only",
+    "start": "544000",
+    "end": "551760"
+  },
+  {
+    "text": "for security checks or an execution role where that we use to",
+    "start": "551760",
+    "end": "557120"
+  },
+  {
+    "text": "run lambdas and a bunch of others",
+    "start": "557120",
+    "end": "562279"
+  },
+  {
+    "start": "561000",
+    "end": "561000"
+  },
+  {
+    "text": "first we were wondering can we use what we have in a dc in the dc identity is a solved problem",
+    "start": "563120",
+    "end": "569040"
+  },
+  {
+    "text": "and it works well for our long-lived workloads but there were issues spira has no support for serverless and",
+    "start": "569040",
+    "end": "575760"
+  },
+  {
+    "text": "requires an agent to operate also lambda has no support for sidecars",
+    "start": "575760",
+    "end": "582320"
+  },
+  {
+    "text": "we were also looking whether we could bootstrap from aws account credentials",
+    "start": "582480",
+    "end": "587519"
+  },
+  {
+    "text": "we wanted to externally signal account ownership and identity a possible solution would be to",
+    "start": "587519",
+    "end": "594160"
+  },
+  {
+    "text": "construct via kms building barrier tokens this would have meant sending a signed",
+    "start": "594160",
+    "end": "599680"
+  },
+  {
+    "text": "request the issue of this is incompatibility with our mtls service mesh",
+    "start": "599680",
+    "end": "605760"
+  },
+  {
+    "text": "we wanted to avoid carrying cloud implementation details into the dc overall this didn't fit into our",
+    "start": "605760",
+    "end": "611920"
+  },
+  {
+    "text": "architecture picture since existing services steve made our",
+    "start": "611920",
+    "end": "618640"
+  },
+  {
+    "start": "616000",
+    "end": "616000"
+  },
+  {
+    "text": "goals we decided we should build identity issuance on our own",
+    "start": "618640",
+    "end": "624160"
+  },
+  {
+    "start": "625000",
+    "end": "625000"
+  },
+  {
+    "text": "one big decision we had to make is whether to issue identity in pull or push style we looked at these two in",
+    "start": "626560",
+    "end": "633760"
+  },
+  {
+    "text": "three metrics first what would identity issuance look like second",
+    "start": "633760",
+    "end": "639040"
+  },
+  {
+    "text": "what the security aspects were and also whether there were availability",
+    "start": "639040",
+    "end": "644079"
+  },
+  {
+    "text": "concerns in the pool model we would generate identity on invocation",
+    "start": "644079",
+    "end": "649600"
+  },
+  {
+    "text": "we would have to create a form of agent ourselves in terms of security we saw this as",
+    "start": "649600",
+    "end": "654880"
+  },
+  {
+    "text": "equivalent to the dc issuance in terms of availability however we",
+    "start": "654880",
+    "end": "660399"
+  },
+  {
+    "text": "noticed that poll creates a blocking dependency for invocation poll issuance is a higher dependency",
+    "start": "660399",
+    "end": "668800"
+  },
+  {
+    "text": "as for push we will have to issue ahead of time identity would be readily available",
+    "start": "669600",
+    "end": "675920"
+  },
+  {
+    "text": "this also means that identity will be present even if a lambda is rarely used",
+    "start": "675920",
+    "end": "681760"
+  },
+  {
+    "text": "what initially initially bothered me at the time was the push seems a real anti-pattern compared to spire which",
+    "start": "681760",
+    "end": "688720"
+  },
+  {
+    "text": "uses pull but in terms of security although we were first concerned we",
+    "start": "688720",
+    "end": "695360"
+  },
+  {
+    "text": "then concluded that if identity is tied to access within an aws account it is equivalent to pull we rely here on iem",
+    "start": "695360",
+    "end": "703760"
+  },
+  {
+    "text": "and scp and in terms of availability push was a clear winner",
+    "start": "703760",
+    "end": "710720"
+  },
+  {
+    "start": "711000",
+    "end": "711000"
+  },
+  {
+    "text": "to summarize push has no security downsides it also makes for a higher availability system since landers never",
+    "start": "712000",
+    "end": "718160"
+  },
+  {
+    "text": "have to block on identity based on that we decided to go with push",
+    "start": "718160",
+    "end": "724160"
+  },
+  {
+    "start": "724000",
+    "end": "724000"
+  },
+  {
+    "text": "here are some of the components used in our system identity governance and administration is a square internal",
+    "start": "725839",
+    "end": "732399"
+  },
+  {
+    "text": "service we use it in this context to query for whom to create land identity and receive",
+    "start": "732399",
+    "end": "738800"
+  },
+  {
+    "text": "tuples of service environment and account our asian system generates certificates",
+    "start": "738800",
+    "end": "745279"
+  },
+  {
+    "text": "per service with spf uris this whole system is also implemented as",
+    "start": "745279",
+    "end": "750959"
+  },
+  {
+    "text": "two lambdas we also use aws private ca this is an hsn backed ca that never",
+    "start": "750959",
+    "end": "758079"
+  },
+  {
+    "text": "exposes its root key and for storage we use aws secrets manager we centralize all secrets in one account",
+    "start": "758079",
+    "end": "765600"
+  },
+  {
+    "text": "and we make identity available via iam and scp",
+    "start": "765600",
+    "end": "771800"
+  },
+  {
+    "text": "so this is what the system looks like first let's focus on this area",
+    "start": "777839",
+    "end": "786120"
+  },
+  {
+    "text": "identity issuance is invoked on a crown schedule so we get an invocation every 15 minutes and the first thing that",
+    "start": "786639",
+    "end": "793279"
+  },
+  {
+    "text": "happens here is that the system connects to the iga service and receives a list",
+    "start": "793279",
+    "end": "798560"
+  },
+  {
+    "text": "of all services that should receive lambda identity then the system retrieves from secrets",
+    "start": "798560",
+    "end": "804560"
+  },
+  {
+    "text": "manager all previously issued certificates to compare with the iga response what we",
+    "start": "804560",
+    "end": "811120"
+  },
+  {
+    "text": "check for is any certificate that would be expiring or have newly added applications",
+    "start": "811120",
+    "end": "818800"
+  },
+  {
+    "text": "we issue certificates for 24 hours and refresh the half-life so anything that is older than 12 hours here will be",
+    "start": "818800",
+    "end": "824800"
+  },
+  {
+    "text": "refreshed those applications that need to be refreshed we",
+    "start": "824800",
+    "end": "830959"
+  },
+  {
+    "text": "create a csr and private key the private key we write the secrets manager with",
+    "start": "830959",
+    "end": "836720"
+  },
+  {
+    "text": "the correct permissions and the csr we submit to aws pca api",
+    "start": "836720",
+    "end": "843120"
+  },
+  {
+    "text": "this is where the first lander exits now let's focus here",
+    "start": "843120",
+    "end": "849040"
+  },
+  {
+    "text": "this is how another lambda that is subscribed to aws pca",
+    "start": "849040",
+    "end": "854839"
+  },
+  {
+    "text": "um events so whenever a certificate is issued this land is being invoked with",
+    "start": "854839",
+    "end": "860720"
+  },
+  {
+    "text": "that certificate and all this lambda does is store these in secrets manager with the correct permissions and exits",
+    "start": "860720",
+    "end": "868959"
+  },
+  {
+    "text": "now let's focus on this secrets manager so this is the same secrets manager that we'll see in the next slide",
+    "start": "868959",
+    "end": "874959"
+  },
+  {
+    "text": "it is a centralized resource so coming back to the motivational",
+    "start": "874959",
+    "end": "880240"
+  },
+  {
+    "text": "example service 1 now exists in lambda and wants to call service 2 in the dc",
+    "start": "880240",
+    "end": "885920"
+  },
+  {
+    "text": "on startup its lander layer reads the private key and certificate next it creates an mtls connection that",
+    "start": "885920",
+    "end": "892880"
+  },
+  {
+    "text": "is load balanced and routed via mesh proxy and now it can connect to service 2 again",
+    "start": "892880",
+    "end": "899839"
+  },
+  {
+    "start": "899000",
+    "end": "899000"
+  },
+  {
+    "text": "so in more detail how does it work for a lambda to make a call fetching the secrets happens in a lambda",
+    "start": "907120",
+    "end": "913440"
+  },
+  {
+    "text": "layer that our cloud foundation's team provides the fetching of identity is automatic and does not require developer work",
+    "start": "913440",
+    "end": "920800"
+  },
+  {
+    "text": "next a program in the layer starts listening a local host so the lambda can use it as a proxy to make calls",
+    "start": "920800",
+    "end": "929199"
+  },
+  {
+    "text": "the layer overloads the tls verify peer certificate function to perform spf uri",
+    "start": "929199",
+    "end": "934399"
+  },
+  {
+    "text": "validation important to note here the operation of the layer is transparent to developers",
+    "start": "934399",
+    "end": "939920"
+  },
+  {
+    "text": "so all this is abstracted away",
+    "start": "939920",
+    "end": "944000"
+  },
+  {
+    "text": "mesh proxy is a modified version of envoy that does not terminate tls",
+    "start": "945440",
+    "end": "950800"
+  },
+  {
+    "text": "a great property here is that it does not need to be trusted as content is encrypted",
+    "start": "950800",
+    "end": "957360"
+  },
+  {
+    "text": "it receives calls from the lambda layer and routes by sni based on service availability the call",
+    "start": "957360",
+    "end": "964480"
+  },
+  {
+    "text": "will be directed to either the dc or eks and",
+    "start": "964480",
+    "end": "970560"
+  },
+  {
+    "text": "once the lambda call arrives at the destination the call service performs a check against the caller spf uri to",
+    "start": "970560",
+    "end": "977360"
+  },
+  {
+    "text": "verified services allowed to perform this call",
+    "start": "977360",
+    "end": "982839"
+  },
+  {
+    "text": "to revisit our gold from earlier in terms of equal footing we have so far enabled communication however no secrets",
+    "start": "984000",
+    "end": "991040"
+  },
+  {
+    "text": "yet we were also able to maintain the land benefits push style issuance has no startup cost",
+    "start": "991040",
+    "end": "997440"
+  },
+  {
+    "text": "and is merely a secrets manager read lambda speed and scalability is not limited",
+    "start": "997440",
+    "end": "1003279"
+  },
+  {
+    "text": "we maintain compatibility by observing the spfe standard and we are highly available because we don't block",
+    "start": "1003279",
+    "end": "1011839"
+  },
+  {
+    "text": "pulling my attacker head on for a minute let's talk about the threats we consider and how we mitigate them",
+    "start": "1012480",
+    "end": "1019360"
+  },
+  {
+    "text": "the worst case attack to perform here would be stealing the ca route in this case an attacker would be able to issue",
+    "start": "1019360",
+    "end": "1025438"
+  },
+  {
+    "text": "certificates offline and you will have no way of telling however we keep the route protected in",
+    "start": "1025439",
+    "end": "1031360"
+  },
+  {
+    "text": "the hsm back in pca we rely here on an industry standard for protection",
+    "start": "1031360",
+    "end": "1036959"
+  },
+  {
+    "text": "if attackers were to break pca a lot of other internet infrastructure would be at risk as well",
+    "start": "1036959",
+    "end": "1043600"
+  },
+  {
+    "text": "the next option would be to attack the asian system issuance is in a specifically lockdown",
+    "start": "1050880",
+    "end": "1056080"
+  },
+  {
+    "text": "account that is closely monitored by our detection teams other than that pca has added",
+    "start": "1056080",
+    "end": "1062160"
+  },
+  {
+    "text": "capabilities that could serve to alert us to unusual activity",
+    "start": "1062160",
+    "end": "1067760"
+  },
+  {
+    "text": "another option would be to steal identity directly from a lambda function we are reducing the value here by",
+    "start": "1067760",
+    "end": "1073760"
+  },
+  {
+    "text": "limiting lifetime to 24 hours also our microservice ecosystem would limit",
+    "start": "1073760",
+    "end": "1079120"
+  },
+  {
+    "text": "what services can be called reducing value further so access is protected by iam and scp",
+    "start": "1079120",
+    "end": "1085840"
+  },
+  {
+    "text": "accessing the certificate requires access to the account in the first place overall we think we are well protected",
+    "start": "1085840",
+    "end": "1094360"
+  },
+  {
+    "text": "and this is my favorite part of this project so we finished the we finished the work we went to production and we",
+    "start": "1095360",
+    "end": "1103919"
+  },
+  {
+    "text": "wrote afterwards a blog post about this system and a month or so later an rfc",
+    "start": "1103919",
+    "end": "1109200"
+  },
+  {
+    "text": "was posted to the aspire github account",
+    "start": "1109200",
+    "end": "1114480"
+  },
+  {
+    "text": "this was about identity issuance for serverless applications",
+    "start": "1114480",
+    "end": "1120240"
+  },
+  {
+    "text": "what was interesting the rfc picked pole style over push but what we actually",
+    "start": "1120240",
+    "end": "1125600"
+  },
+  {
+    "text": "learned from our work is that push was preferable so we got involved in a",
+    "start": "1125600",
+    "end": "1130720"
+  },
+  {
+    "text": "discussion and advocated before for push issuance successfully",
+    "start": "1130720",
+    "end": "1137760"
+  },
+  {
+    "text": "and now work on the implementation has started inspire version 1.1 will include push identity issuance that is",
+    "start": "1137760",
+    "end": "1144559"
+  },
+  {
+    "text": "compatible with our architecture once it is released we are looking to migrate to the open source spire",
+    "start": "1144559",
+    "end": "1151039"
+  },
+  {
+    "text": "implementation in favor of our in-house development we are really excited to contribute our",
+    "start": "1151039",
+    "end": "1156799"
+  },
+  {
+    "text": "learnings to spire directly",
+    "start": "1156799",
+    "end": "1160159"
+  },
+  {
+    "text": "that brings us to part two and how we worked on syncing application secrets to lambda",
+    "start": "1162080",
+    "end": "1168480"
+  },
+  {
+    "text": "to motivate the system think of an application that operates in a dc the services access to a secret",
+    "start": "1169840",
+    "end": "1175919"
+  },
+  {
+    "text": "which is supplied by dc infrastructure the secret is used to access a third-party api",
+    "start": "1175919",
+    "end": "1183200"
+  },
+  {
+    "text": "if developers migrate the service to lambda they will still require access to the secret to continue being able to",
+    "start": "1183840",
+    "end": "1189280"
+  },
+  {
+    "text": "make these calls and how this works we'll see now",
+    "start": "1189280",
+    "end": "1195600"
+  },
+  {
+    "start": "1195000",
+    "end": "1195000"
+  },
+  {
+    "text": "we use keyways in a dc but first of all what are secrets these can be api keys",
+    "start": "1196320",
+    "end": "1202480"
+  },
+  {
+    "text": "gpg keys or other secret contents",
+    "start": "1202480",
+    "end": "1208000"
+  },
+  {
+    "text": "the system is open source and available on github we the way we model ownership is by mapping",
+    "start": "1208000",
+    "end": "1214799"
+  },
+  {
+    "text": "secrets to microservices and in a dc we operate the system the following way",
+    "start": "1214799",
+    "end": "1220559"
+  },
+  {
+    "text": "we use a parallel pki to establish trust so on each node we run a daemon set that",
+    "start": "1220559",
+    "end": "1226960"
+  },
+  {
+    "text": "synchronizes secrets that sucker has access to all applications secrets on that node and",
+    "start": "1226960",
+    "end": "1233840"
+  },
+  {
+    "text": "this is important for later also developers can use internal web tooling in a system that is called",
+    "start": "1233840",
+    "end": "1240320"
+  },
+  {
+    "text": "square console for example they can self-serve ad secrets",
+    "start": "1240320",
+    "end": "1245679"
+  },
+  {
+    "text": "and one very important feature is to track expiration of secrets before a potential outage happens so we can alert",
+    "start": "1245679",
+    "end": "1253039"
+  },
+  {
+    "text": "developers if something is about to happen",
+    "start": "1253039",
+    "end": "1257120"
+  },
+  {
+    "start": "1257000",
+    "end": "1257000"
+  },
+  {
+    "text": "we approach the situation with an open mind and performed interviews with developers one request received was to let",
+    "start": "1258320",
+    "end": "1265200"
+  },
+  {
+    "text": "developers use secrets manager directly they would add secrets themselves and",
+    "start": "1265200",
+    "end": "1270880"
+  },
+  {
+    "text": "share via iam secrets would be disconnected from the dc completely and this task would be",
+    "start": "1270880",
+    "end": "1277200"
+  },
+  {
+    "text": "solved we decided against it for a bunch of reasons for one security teams have developed",
+    "start": "1277200",
+    "end": "1283600"
+  },
+  {
+    "text": "expertise in the handling of secrets it is our everyday business a skill that is not necessarily",
+    "start": "1283600",
+    "end": "1289840"
+  },
+  {
+    "text": "something that all developers have another reason is that secrets that need",
+    "start": "1289840",
+    "end": "1295039"
+  },
+  {
+    "text": "to be available in multiple environments are not updated correctly",
+    "start": "1295039",
+    "end": "1300400"
+  },
+  {
+    "text": "we would rely on developers to perform synchronization themselves and lack of exploration tracking is a",
+    "start": "1300400",
+    "end": "1307200"
+  },
+  {
+    "text": "potential availability problem as expired secrets can lead to unexpected outages",
+    "start": "1307200",
+    "end": "1314320"
+  },
+  {
+    "text": "developers will also lose access to other centralized tooling we offer such as generation of gpg key material",
+    "start": "1314320",
+    "end": "1321440"
+  },
+  {
+    "text": "overall it would have been too risky and we want to do better",
+    "start": "1321440",
+    "end": "1327120"
+  },
+  {
+    "text": "we also considered full centralization essentially replicating our dc system",
+    "start": "1327120",
+    "end": "1332640"
+  },
+  {
+    "text": "same as for identity issuance there was no node equivalent and we also can't block on invoke essentially no",
+    "start": "1332640",
+    "end": "1339840"
+  },
+  {
+    "text": "infrastructure is available before an invocation where we could assign secrets so it was incompatible",
+    "start": "1339840",
+    "end": "1347840"
+  },
+  {
+    "start": "1354000",
+    "end": "1354000"
+  },
+  {
+    "text": "neither of these two solutions worked for us so we decided to build we wanted features of centralization but also",
+    "start": "1356320",
+    "end": "1362720"
+  },
+  {
+    "text": "features of decentralization we wanted the best of both worlds when synchronizing secrets cloud native",
+    "start": "1362720",
+    "end": "1368880"
+  },
+  {
+    "text": "reliability with the dc a single source of truth for ease of management",
+    "start": "1368880",
+    "end": "1375720"
+  },
+  {
+    "start": "1375000",
+    "end": "1375000"
+  },
+  {
+    "text": "so this project was a great opportunity to revisit how we think of security boundaries for secrets",
+    "start": "1376240",
+    "end": "1382400"
+  },
+  {
+    "text": "in the dc we have powerful sinkers with wide-ranging access for lambda we wanted to approach this in",
+    "start": "1382400",
+    "end": "1388720"
+  },
+  {
+    "text": "a more granular way and reduce blast radius also as lambda 7 concept of node we had",
+    "start": "1388720",
+    "end": "1394880"
+  },
+  {
+    "text": "to be creative anyway and this might seem obvious since we",
+    "start": "1394880",
+    "end": "1400000"
+  },
+  {
+    "text": "just talked about lambda identity earlier but something that really struck us we already had implemented spiffy",
+    "start": "1400000",
+    "end": "1406159"
+  },
+  {
+    "text": "identity this unlocked for us to communicate with the dc this was not an immediately obvious",
+    "start": "1406159",
+    "end": "1412320"
+  },
+  {
+    "text": "approach but so we wanted so we added spf support to keyways and",
+    "start": "1412320",
+    "end": "1417520"
+  },
+  {
+    "text": "this enabled us to build a client-side syncer essentially a site card that synchronizes secrets so we could always",
+    "start": "1417520",
+    "end": "1424640"
+  },
+  {
+    "text": "keep secrets within an aws account rather than having to traverse another idea was to require",
+    "start": "1424640",
+    "end": "1432080"
+  },
+  {
+    "text": "opt-in per secret rather than synchronize all our opt-out this way we made sure not to overshare",
+    "start": "1432080",
+    "end": "1439279"
+  },
+  {
+    "text": "secrets developers have to be explicit",
+    "start": "1439279",
+    "end": "1443720"
+  },
+  {
+    "start": "1443000",
+    "end": "1443000"
+  },
+  {
+    "text": "in terms of availability an observation we made with keyways is that secrets are updated rarely",
+    "start": "1444640",
+    "end": "1451360"
+  },
+  {
+    "text": "compared to how often they are accessed the majority of syncs is really a no op",
+    "start": "1451360",
+    "end": "1457039"
+  },
+  {
+    "text": "so it was more important for us to have a reliable cache over blocking on",
+    "start": "1457039",
+    "end": "1462240"
+  },
+  {
+    "text": "updates we also allow developers to trigger synchronization themselves",
+    "start": "1462240",
+    "end": "1467279"
+  },
+  {
+    "text": "in case they need an immediate update so for storage we decided to use secrets",
+    "start": "1467279",
+    "end": "1472559"
+  },
+  {
+    "text": "manager as a cache we wanted to have fast reads that don't depend on the dc",
+    "start": "1472559",
+    "end": "1478159"
+  },
+  {
+    "text": "we also decided to use the default key for encryption this can prevent out of account sharing",
+    "start": "1478159",
+    "end": "1485679"
+  },
+  {
+    "text": "aws enforces this feature to the default key",
+    "start": "1485679",
+    "end": "1490640"
+  },
+  {
+    "text": "now the system architecture on the far right you can see the deploy artifact we",
+    "start": "1492240",
+    "end": "1497279"
+  },
+  {
+    "text": "provide a single centralized artifact the developers can deploy from",
+    "start": "1497279",
+    "end": "1502320"
+  },
+  {
+    "text": "once deployed as first step the synchro is invoked on a crown schedule every 15 minutes",
+    "start": "1502320",
+    "end": "1507360"
+  },
+  {
+    "text": "step 2 when invoked the synchro makes an mtls call to key within a dc",
+    "start": "1507360",
+    "end": "1512799"
+  },
+  {
+    "text": "and this is what's interesting this call is made with the identity of the service in which the syncer runs",
+    "start": "1512799",
+    "end": "1519520"
+  },
+  {
+    "text": "and kiwis knows which secrets have which secrets are available to this service",
+    "start": "1519520",
+    "end": "1525279"
+  },
+  {
+    "text": "and the response with the metadata of the secret so the names and the hmacs of these secrets",
+    "start": "1525279",
+    "end": "1531279"
+  },
+  {
+    "text": "step three the sinker reads all secrets from its own secrets manager to compare",
+    "start": "1531279",
+    "end": "1536400"
+  },
+  {
+    "text": "the metadata from the response it is essentially a div operation and step four for secrets that require",
+    "start": "1536400",
+    "end": "1543679"
+  },
+  {
+    "text": "updating so anything with a changed hmac or new secrets or secrets that are going",
+    "start": "1543679",
+    "end": "1548720"
+  },
+  {
+    "text": "away the synchro requests secrets contents and finally step five updates are",
+    "start": "1548720",
+    "end": "1555520"
+  },
+  {
+    "text": "applied to secrets manager so secrets are either created updated or deleted",
+    "start": "1555520",
+    "end": "1561039"
+  },
+  {
+    "text": "and at this point the secrets manager is in sync with the shared secrets in the dc and the syncer",
+    "start": "1561039",
+    "end": "1568080"
+  },
+  {
+    "text": "can exit so what does this look like for developers who want to use secret",
+    "start": "1568080",
+    "end": "1574640"
+  },
+  {
+    "start": "1570000",
+    "end": "1570000"
+  },
+  {
+    "text": "syncing to install we offer a terraform module that can be installed with 24 lines and to access secrets all that is",
+    "start": "1574640",
+    "end": "1582400"
+  },
+  {
+    "text": "necessary is to read from local secrets manager and this can be done with normal aws apis",
+    "start": "1582400",
+    "end": "1590320"
+  },
+  {
+    "text": "we implemented the system as a lander and we also use workload identity from earlier in the talk to access secrets",
+    "start": "1590720",
+    "end": "1597600"
+  },
+  {
+    "text": "vspp id in terms of isolation the secret syncer operates in each account individually",
+    "start": "1597600",
+    "end": "1604080"
+  },
+  {
+    "text": "that requires secrets",
+    "start": "1604080",
+    "end": "1607200"
+  },
+  {
+    "text": "here's what the signings here's what assigning a secret looks like in square console this is a test application if",
+    "start": "1609120",
+    "end": "1615520"
+  },
+  {
+    "text": "you look at number one we have two different secrets here test secret one and test secret two",
+    "start": "1615520",
+    "end": "1622559"
+  },
+  {
+    "text": "test secret two is already available for lamda test secret one is not so we want to",
+    "start": "1622559",
+    "end": "1628640"
+  },
+  {
+    "text": "change that so we click on test secret one and then we click on update infras",
+    "start": "1628640",
+    "end": "1633919"
+  },
+  {
+    "text": "we're at number two then we get the screen which you see we log so we can assign the secret to a",
+    "start": "1633919",
+    "end": "1641279"
+  },
+  {
+    "text": "different infrastructure and we select lambda we can see at the bottom at number three that a change is being",
+    "start": "1641279",
+    "end": "1647279"
+  },
+  {
+    "text": "applied to make the secret available to lambda then we click update assignments",
+    "start": "1647279",
+    "end": "1652720"
+  },
+  {
+    "text": "number four and on the next run of the syncer the secret will be available in",
+    "start": "1652720",
+    "end": "1657919"
+  },
+  {
+    "text": "lambda after deploying the sync will show up as",
+    "start": "1657919",
+    "end": "1663440"
+  },
+  {
+    "text": "a regular lambda in the service account next to all other lambdas which are available there",
+    "start": "1663440",
+    "end": "1670240"
+  },
+  {
+    "text": "and here you can see that the shrinker is attached to a cron event the synchro is invoked every 15 minutes and takes",
+    "start": "1677279",
+    "end": "1683120"
+  },
+  {
+    "text": "about two seconds to verify that the local secrets are in sync all of these are no op operations so we are comparing",
+    "start": "1683120",
+    "end": "1690799"
+  },
+  {
+    "text": "against kiwis that all secrets are in sync",
+    "start": "1690799",
+    "end": "1696840"
+  },
+  {
+    "text": "so to revisit our goals with this project we established both goals of equal footing we can now communicate",
+    "start": "1696880",
+    "end": "1703440"
+  },
+  {
+    "text": "with the service mesh so this is what we had solved in in part one and what we",
+    "start": "1703440",
+    "end": "1709279"
+  },
+  {
+    "text": "solved now in part two is access to secrets in terms of maintaining lambda secrets and land the benefits our hot path for",
+    "start": "1709279",
+    "end": "1716720"
+  },
+  {
+    "text": "accessing secrets only contains a secret manager read so we don't block on a dc",
+    "start": "1716720",
+    "end": "1723840"
+  },
+  {
+    "text": "we also remain compatible with centralized tooling that makes secrets management easier such as tracking of",
+    "start": "1723840",
+    "end": "1729679"
+  },
+  {
+    "text": "expiration and other features of square console",
+    "start": "1729679",
+    "end": "1734880"
+  },
+  {
+    "start": "1734000",
+    "end": "1734000"
+  },
+  {
+    "text": "in terms of risk mitigation the most valuable research is to gain access to all secrets this would require either",
+    "start": "1735520",
+    "end": "1742399"
+  },
+  {
+    "text": "attacking keyways or impersonating services for both we think kiwis is secure and we",
+    "start": "1742399",
+    "end": "1748480"
+  },
+  {
+    "text": "trust our identity system another option would be to attack the synchro",
+    "start": "1748480",
+    "end": "1753679"
+  },
+  {
+    "text": "we protect artifacts with a cicd pipeline and we rely on s-free object",
+    "start": "1753679",
+    "end": "1759039"
+  },
+  {
+    "text": "version to prevent modifications and finally compromising individual",
+    "start": "1759039",
+    "end": "1764240"
+  },
+  {
+    "text": "secrets since secrets are strongly tied to identity accessing secrets via the api",
+    "start": "1764240",
+    "end": "1770559"
+  },
+  {
+    "text": "would really require compromising our identity system we are confident in that system we also",
+    "start": "1770559",
+    "end": "1776799"
+  },
+  {
+    "text": "further reduce secrets exposure by using opt-in and not synchronizing all secrets automatically",
+    "start": "1776799",
+    "end": "1784000"
+  },
+  {
+    "text": "currently the system is used in production and spf support in keywords",
+    "start": "1785520",
+    "end": "1790559"
+  },
+  {
+    "text": "is in our open source repository so you can use it too and for the future spiffy working",
+    "start": "1790559",
+    "end": "1796320"
+  },
+  {
+    "text": "keywords makes makes it easier for us to move to other environments through",
+    "start": "1796320",
+    "end": "1801840"
+  },
+  {
+    "text": "interoperability and now some key learnings",
+    "start": "1801840",
+    "end": "1809799"
+  },
+  {
+    "text": "success criteria for us are that both identity issuance and secrets are used in production this",
+    "start": "1810480",
+    "end": "1817039"
+  },
+  {
+    "text": "includes square financial services which is a subsidiary of square that is a bank",
+    "start": "1817039",
+    "end": "1823679"
+  },
+  {
+    "text": "spire the reference implementation of for spfe is implementing push architecture we see it as of a",
+    "start": "1823679",
+    "end": "1830000"
+  },
+  {
+    "text": "confirmation of our approach here so",
+    "start": "1830000",
+    "end": "1835600"
+  },
+  {
+    "start": "1834000",
+    "end": "1834000"
+  },
+  {
+    "text": "my advisor always used to say to close a talk with free takeaways so here they",
+    "start": "1835600",
+    "end": "1841120"
+  },
+  {
+    "text": "are your developers will want to use lambda whether you plan for it or not",
+    "start": "1841120",
+    "end": "1846720"
+  },
+  {
+    "text": "and lambda has many benefits but as we learned it's not compatible with dc infrastructure",
+    "start": "1846720",
+    "end": "1852480"
+  },
+  {
+    "text": "but there's a solution and this solution can be working with other environments",
+    "start": "1852480",
+    "end": "1858080"
+  },
+  {
+    "text": "we talked today about how to call into the envoy service mesh and how to sync application secrets from the dc",
+    "start": "1858080",
+    "end": "1866480"
+  },
+  {
+    "text": "both accelerate development and make things more secure",
+    "start": "1866480",
+    "end": "1871919"
+  },
+  {
+    "text": "there are also several learnings for hybrid environments that extend beyond lambda",
+    "start": "1871919",
+    "end": "1877120"
+  },
+  {
+    "text": "moving to the cloud really means that there will be tricky dependencies this interim state is quite challenging and",
+    "start": "1877120",
+    "end": "1883760"
+  },
+  {
+    "text": "for complex systems this can last years cloud services will rely on the dc and",
+    "start": "1883760",
+    "end": "1889840"
+  },
+  {
+    "text": "operability interoperability is key here and we found it helpful to use a bestop",
+    "start": "1889840",
+    "end": "1897120"
+  },
+  {
+    "text": "buffer pouch to let environment support each other and avoid blocking",
+    "start": "1897120",
+    "end": "1903519"
+  },
+  {
+    "text": "thank you both for paying attention and also to everyone who contributed",
+    "start": "1903919",
+    "end": "1910320"
+  },
+  {
+    "text": "this project involved a lot of people on various teams thank you also thank you to the spp community",
+    "start": "1910320",
+    "end": "1916960"
+  },
+  {
+    "text": "working together on working identity has been fun we had a lot of fruitful conversations",
+    "start": "1916960",
+    "end": "1922559"
+  },
+  {
+    "text": "to make identity stronger the slides will be posted after this",
+    "start": "1922559",
+    "end": "1928240"
+  },
+  {
+    "text": "talk i'll also be posting a write up with more details on lambda secret syncing the slides will contain links to",
+    "start": "1928240",
+    "end": "1935600"
+  },
+  {
+    "text": "reference material i'm ready to take questions now",
+    "start": "1935600",
+    "end": "1942640"
+  }
+]

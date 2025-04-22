@@ -1,0 +1,1485 @@
+[
+  {
+    "start": "0",
+    "end": "164000"
+  },
+  {
+    "text": "thank you for that um okay so let's get started uh we'll start off with a brief General motivation and overview of",
+    "start": "2840",
+    "end": "9559"
+  },
+  {
+    "text": "distributed techniques uh specifically as they apply to inference and then we'll go a little bit more into VM",
+    "start": "9559",
+    "end": "16240"
+  },
+  {
+    "text": "specific decisions and architecture um and then at the end we'll go into some",
+    "start": "16240",
+    "end": "22039"
+  },
+  {
+    "text": "uh Ray uh specific uh topics as well okay so what's really our our",
+    "start": "22039",
+    "end": "27760"
+  },
+  {
+    "text": "motivation here for the talk right I'm sure like everybody in the audience has encountered this situation at one point",
+    "start": "27760",
+    "end": "33600"
+  },
+  {
+    "text": "just when your GPU goes out of memory right uh and nowadays like models continue to grow beyond the memory of a",
+    "start": "33600",
+    "end": "41160"
+  },
+  {
+    "text": "single accelerator a single node and even uh you might need to use multiple nodes in some some cases and a really",
+    "start": "41160",
+    "end": "48480"
+  },
+  {
+    "text": "good example of this is llama 405b right one of the largest models today but the",
+    "start": "48480",
+    "end": "53879"
+  },
+  {
+    "text": "same time it's one of those models that uh most people want to use right but it can be quite challenging to serve for",
+    "start": "53879",
+    "end": "60480"
+  },
+  {
+    "text": "this reason and the challenge for us is really how can we continue to effectively serve these models um and",
+    "start": "60480",
+    "end": "67200"
+  },
+  {
+    "text": "that that's really a challenge for any inference engine out there but we'll take a look at uh what's been done in VM",
+    "start": "67200",
+    "end": "74720"
+  },
+  {
+    "text": "specifically so there's one solution here right which is to just reduce the number of bits needed primarily for your",
+    "start": "74720",
+    "end": "81040"
+  },
+  {
+    "text": "weights right and nowadays there's a lot of innovative research in this area people have gone down to very low",
+    "start": "81040",
+    "end": "87720"
+  },
+  {
+    "text": "precisions there's experimentation with with um like two three bits even and",
+    "start": "87720",
+    "end": "94880"
+  },
+  {
+    "text": "this can be a good solution right um but the challenge is that your accuracy is potentially affected right so you need",
+    "start": "94880",
+    "end": "100520"
+  },
+  {
+    "text": "to do a lot more work to ensure that like your model is still doing what you want it to do but at the same time this",
+    "start": "100520",
+    "end": "107600"
+  },
+  {
+    "text": "also has like limited scill ability especially for example when we go from fp16 uh or bf6 I should say to fp8 we're",
+    "start": "107600",
+    "end": "115759"
+  },
+  {
+    "text": "having the number of bits that we need but then at the same time um you might still need like one node right uh 400",
+    "start": "115759",
+    "end": "122520"
+  },
+  {
+    "text": "billion parameters is still 200 GB even at in4 so you still need in that case multiple",
+    "start": "122520",
+    "end": "129959"
+  },
+  {
+    "text": "accelerators and so the solution to that really is as I was alluding to is to use",
+    "start": "129959",
+    "end": "135440"
+  },
+  {
+    "text": "multiple um gpus or multiple accelerators right and so there's a",
+    "start": "135440",
+    "end": "140720"
+  },
+  {
+    "text": "variety of ways that we can split models across uh gpus and that's what we'll be diving into",
+    "start": "140720",
+    "end": "147200"
+  },
+  {
+    "text": "today and here one way of doing this is to divide your GPU up layerwise so each",
+    "start": "147200",
+    "end": "153319"
+  },
+  {
+    "text": "of the layers themselves get split up um and a GPU takes up a portion of that",
+    "start": "153319",
+    "end": "159319"
+  },
+  {
+    "text": "layer and this is from Megatron",
+    "start": "159319",
+    "end": "163640"
+  },
+  {
+    "start": "164000",
+    "end": "416000"
+  },
+  {
+    "text": "LM okay I'll hand it over to S bin to cover the next",
+    "start": "164400",
+    "end": "169760"
+  },
+  {
+    "text": "portion oh yeah so uh let me uh quickly go over the differences between the",
+    "start": "170360",
+    "end": "175519"
+  },
+  {
+    "text": "distributed pre-training and also inference um so pre trining usually have very complicated parallelism like it you",
+    "start": "175519",
+    "end": "183159"
+  },
+  {
+    "text": "apply like 2D 3D 4D parallelism on it but then generally comparing to the inference it has a less components it",
+    "start": "183159",
+    "end": "189599"
+  },
+  {
+    "text": "usually uh the commonly use something called spmd um architecture which you just run the same code on all the",
+    "start": "189599",
+    "end": "195560"
+  },
+  {
+    "text": "workers um and it uh there's not no other components for inference usually",
+    "start": "195560",
+    "end": "201159"
+  },
+  {
+    "text": "it has more complicated architecture for example for llm inference it has a scheduler and it has a KV cache and for",
+    "start": "201159",
+    "end": "207959"
+  },
+  {
+    "text": "different techniques like speculative decoding you can come with additional models um for in terms of Performance",
+    "start": "207959",
+    "end": "213879"
+  },
+  {
+    "text": "training usually requires just a throughput because you uh just patch a lot of input to your model to train",
+    "start": "213879",
+    "end": "220200"
+  },
+  {
+    "text": "versus inference you usually use both throughput and latency like depending on uh what What's your workload uh for the",
+    "start": "220200",
+    "end": "227360"
+  },
+  {
+    "text": "scale training typically has a very large scale um for uh language model training like it's pretty common you can",
+    "start": "227360",
+    "end": "234239"
+  },
+  {
+    "text": "have more than 10,000 more than 10,000 number of gpus inference usually you have small number of uh gpus is required",
+    "start": "234239",
+    "end": "241239"
+  },
+  {
+    "text": "but then instead you uh replicate the instances uh instead of like scaling",
+    "start": "241239",
+    "end": "246920"
+  },
+  {
+    "text": "your model to thousands of gpus in terms of dynamicity train usually has less",
+    "start": "246920",
+    "end": "252040"
+  },
+  {
+    "text": "dynamicity because you can know the inputs and everything ahead of time but inference usually has um more dynamicity",
+    "start": "252040",
+    "end": "258519"
+  },
+  {
+    "text": "because you don't know exactly which kind what kind of uh prompt is going to be accepted uh ahead of",
+    "start": "258519",
+    "end": "266080"
+  },
+  {
+    "text": "time then let's actually dive into the problem of and solution like what kind",
+    "start": "266080",
+    "end": "271560"
+  },
+  {
+    "text": "of solution V provides in large language model inference so as M brought up in",
+    "start": "271560",
+    "end": "277320"
+  },
+  {
+    "text": "the beginning the typical problem is your model cannot fit into a single GPU and it's also possible your model",
+    "start": "277320",
+    "end": "284520"
+  },
+  {
+    "text": "cannot fit into even a single node for example if you serve the Lama 405b model it it requires 900 GB of GPU on fp16 uh",
+    "start": "284520",
+    "end": "294199"
+  },
+  {
+    "text": "the biggest node in available in the cloud is having like 80 GB of GPU 8 of",
+    "start": "294199",
+    "end": "299960"
+  },
+  {
+    "text": "them in one machine so you cannot fit um the single model in a single node so you",
+    "start": "299960",
+    "end": "305960"
+  },
+  {
+    "text": "have to have a solution to actually distribute your model to multiple nodes with less performance",
+    "start": "305960",
+    "end": "311520"
+  },
+  {
+    "text": "penalty other common uh other issue we found from VM is that um because",
+    "start": "311520",
+    "end": "317000"
+  },
+  {
+    "text": "inference has more components the control plane which is like schedule other components their overhead coming",
+    "start": "317000",
+    "end": "323000"
+  },
+  {
+    "text": "from CPU actually harms those GPU utilization the two solvate VM supports",
+    "start": "323000",
+    "end": "328919"
+  },
+  {
+    "text": "tensor parallelism to Shard models to multiple GPU in a single note and also comes with pipeline parallelism which",
+    "start": "328919",
+    "end": "335639"
+  },
+  {
+    "text": "Shard models to multiple gpus across noes with a small um communication overhead compared to tensor",
+    "start": "335639",
+    "end": "341520"
+  },
+  {
+    "text": "parallelism and also VM has an optimized control plane",
+    "start": "341520",
+    "end": "346759"
+  },
+  {
+    "text": "architecture so let me go over how the VM architecture real quick so it comes",
+    "start": "346800",
+    "end": "352440"
+  },
+  {
+    "text": "with a API server which is a HTTP server that provides open AI compatible apis",
+    "start": "352440",
+    "end": "358199"
+  },
+  {
+    "text": "and once you get the prompts from the the API server um there's a tokenizer that tokenize your",
+    "start": "358199",
+    "end": "363520"
+  },
+  {
+    "text": "inputs and the inputs are cued and then it VM comes with the scheduler which uh",
+    "start": "363520",
+    "end": "369800"
+  },
+  {
+    "text": "keeps picking the batch and then sending to all the workers and get the result and keep repeating this",
+    "start": "369800",
+    "end": "376639"
+  },
+  {
+    "text": "process it has a executor component which basically manage resources like",
+    "start": "376639",
+    "end": "381720"
+  },
+  {
+    "text": "one example they use Ray under the food and they also have a microprocessing based back end so this executor um the",
+    "start": "381720",
+    "end": "388400"
+  },
+  {
+    "text": "schedule the process start the process manage the process as well as sending the inputs to all all of the workers to",
+    "start": "388400",
+    "end": "394759"
+  },
+  {
+    "text": "run the model and once you get the result from the workers um the sampled result is",
+    "start": "394759",
+    "end": "400880"
+  },
+  {
+    "text": "going to be going to detener and DET toiz uh result is going going to going",
+    "start": "400880",
+    "end": "407520"
+  },
+  {
+    "text": "back to the user through API server since it's the distributed inference we are going to mainly focus on um these",
+    "start": "407520",
+    "end": "414280"
+  },
+  {
+    "text": "three components today uh then actually let's start from what kind of G parallelism like how each",
+    "start": "414280",
+    "end": "421560"
+  },
+  {
+    "start": "416000",
+    "end": "651000"
+  },
+  {
+    "text": "different GPU parallelism Works in more details um so the problem one was that",
+    "start": "421560",
+    "end": "427599"
+  },
+  {
+    "text": "model cannot fit into a single GPU and as model gets bigger one GPU is not usually enough then you want to scale",
+    "start": "427599",
+    "end": "435280"
+  },
+  {
+    "text": "your model into multiple gpus and the most common solution um in a small scale",
+    "start": "435280",
+    "end": "441000"
+  },
+  {
+    "text": "is your sharting your wage horizontally and compute each pieces horizontally",
+    "start": "441000",
+    "end": "446440"
+  },
+  {
+    "text": "concurrently U there are two common techniques the first thing is called tensor parallelism and also another",
+    "start": "446440",
+    "end": "451759"
+  },
+  {
+    "text": "thing called sequence parallelism sequence parallelism is not supported at VM yet but we're going to talk details",
+    "start": "451759",
+    "end": "457960"
+  },
+  {
+    "text": "um and we're going to mostly talk about tensor parallelism today so this is how um tensor",
+    "start": "457960",
+    "end": "464319"
+  },
+  {
+    "text": "parallelism work in more detail um it's the uh basically diagram that shows the",
+    "start": "464319",
+    "end": "469759"
+  },
+  {
+    "text": "MLP layer for llama um in VM the first so the MLP layer contains three",
+    "start": "469759",
+    "end": "476400"
+  },
+  {
+    "text": "different weights uh in if you look at their GitHub it's called W1 W2 W3 but it's like gate gate and then up",
+    "start": "476400",
+    "end": "483120"
+  },
+  {
+    "text": "projection and down projection uh in BLM you combine multiplication of gate and of projection and then you multiply",
+    "start": "483120",
+    "end": "489800"
+  },
+  {
+    "text": "input with the first we and then you apply the activation function which which is uh MLP it's because it's",
+    "start": "489800",
+    "end": "496280"
+  },
+  {
+    "text": "MLP and then you you multiply the down projection weights so in this case A and B is usually large because it's large",
+    "start": "496280",
+    "end": "502560"
+  },
+  {
+    "text": "language model uh how a tensor parallelism works is for the first uh two layers you you",
+    "start": "502560",
+    "end": "510240"
+  },
+  {
+    "text": "um Shard your metrix by column and then you Shard the down",
+    "start": "510240",
+    "end": "517919"
+  },
+  {
+    "text": "projection matrix by row so this is how it actually looks like in two",
+    "start": "517919",
+    "end": "524039"
+  },
+  {
+    "text": "gpus um so as I mentioned before in the first W you Shard the matrix by column",
+    "start": "524040",
+    "end": "529959"
+  },
+  {
+    "text": "so if you look at the uh the upper part it has A1 which is the first GPU and the",
+    "start": "529959",
+    "end": "535320"
+  },
+  {
+    "text": "A2 is shed to the second GPU then you apply the activation function it's element y so you don't",
+    "start": "535320",
+    "end": "541240"
+  },
+  {
+    "text": "need to do anything here and then you get the result y1 and Y2 and if you look",
+    "start": "541240",
+    "end": "547040"
+  },
+  {
+    "text": "at the previous slides um y1 needs to be multiplied to B1 and there's a typo but",
+    "start": "547040",
+    "end": "552399"
+  },
+  {
+    "text": "Y2 has to be multiplied to the B2 which is the bottom part of the Matrix and you can see the y1 and Y2 is already",
+    "start": "552399",
+    "end": "559720"
+  },
+  {
+    "text": "naturally um splitted by the uh column by the like a first gate of projections",
+    "start": "559720",
+    "end": "565880"
+  },
+  {
+    "text": "column based sharting and then which means that you don't need any additional communication overhead here and you can",
+    "start": "565880",
+    "end": "571680"
+  },
+  {
+    "text": "directly multiply to different role B1 and B2 and you get the result and when you multiply um when you Shard your",
+    "start": "571680",
+    "end": "578880"
+  },
+  {
+    "text": "weight by row and do multiply matrix multiplication you need to sum the weights to get the final result so you",
+    "start": "578880",
+    "end": "585000"
+  },
+  {
+    "text": "oh sorry you reply the all reduce so this is how you get the um n how you run",
+    "start": "585000",
+    "end": "590040"
+  },
+  {
+    "text": "the tensor parallelism on on MLP layer then what the trade",
+    "start": "590040",
+    "end": "595160"
+  },
+  {
+    "text": "off so as you can see um tensor parallelism Shard your weights horizontally and then you're able to run",
+    "start": "595160",
+    "end": "602279"
+  },
+  {
+    "text": "uh each of computation concurrently so it can improve Ann latency but because",
+    "start": "602279",
+    "end": "608720"
+  },
+  {
+    "text": "you have to do all reduce at the end of your layer you it requires the higher communication overhead and usually if we",
+    "start": "608720",
+    "end": "616240"
+  },
+  {
+    "text": "you require it requires the specialized Hardware such as MV link which is much faster um which supports the much much",
+    "start": "616240",
+    "end": "623560"
+  },
+  {
+    "text": "faster communication speed and also um not just MLP layer but",
+    "start": "623560",
+    "end": "628800"
+  },
+  {
+    "text": "tension layer also use the tensor parallelism and for that case it's shed by the Hedge and one",
+    "start": "628800",
+    "end": "636200"
+  },
+  {
+    "text": "of con of tensor parallelism is that your hedge has to be divisible by tensor paralyze tensor paraly paralyzed size or",
+    "start": "636200",
+    "end": "643040"
+  },
+  {
+    "text": "you have to add padding manually which is pretty tedious process okay I'm going to pass back to morali and he's going to",
+    "start": "643040",
+    "end": "649040"
+  },
+  {
+    "text": "uh explain context and pipeline parallelism okay yep so um as Singin was alluding to earlier uh like when VM",
+    "start": "649040",
+    "end": "656639"
+  },
+  {
+    "start": "651000",
+    "end": "935000"
+  },
+  {
+    "text": "currently we support tensor parallelism there's also a class of techniques um some call it context parallelism",
+    "start": "656639",
+    "end": "662200"
+  },
+  {
+    "text": "sequence parallelism ring attention there's various ideas out there but essentially the idea here is that",
+    "start": "662200",
+    "end": "668440"
+  },
+  {
+    "text": "there's a flaw with tensor parallelism especially when it comes to the activations right in some cases you you",
+    "start": "668440",
+    "end": "674040"
+  },
+  {
+    "text": "still need to get the full activation on each GPU but for long context this is UND undesirable right so you have these",
+    "start": "674040",
+    "end": "680720"
+  },
+  {
+    "text": "Cass of techniques that um allow you to basically uh Shard the um tensors along",
+    "start": "680720",
+    "end": "688200"
+  },
+  {
+    "text": "the sequence dimension as well and so this is a way of extending tensor parallelism replacing it with a much",
+    "start": "688200",
+    "end": "695360"
+  },
+  {
+    "text": "more scalable approach okay and so we'll go to our next problem um which is multi note",
+    "start": "695360",
+    "end": "702480"
+  },
+  {
+    "text": "inference right and so the very beginning I talked about Lama 405b and at full Precision I should say bf16 um",
+    "start": "702480",
+    "end": "710079"
+  },
+  {
+    "text": "we have issued that with even with the full Noe of uh h100s it can't fit right",
+    "start": "710079",
+    "end": "716200"
+  },
+  {
+    "text": "so we need multiple uh nodes in this case of course you you can always go to fp8 that comes with its own set of",
+    "start": "716200",
+    "end": "723440"
+  },
+  {
+    "text": "challenges um yeah and so the issue here though is that across nodes tensor parallelism will result in um a lot of",
+    "start": "723440",
+    "end": "731240"
+  },
+  {
+    "text": "overhead and so that's something that we really want to avoid and that's where pipeline parallelism comes in and so the",
+    "start": "731240",
+    "end": "738399"
+  },
+  {
+    "text": "idea here with pipeline parallelism is we're really sharing across a different dimension instead right so we take a",
+    "start": "738399",
+    "end": "743720"
+  },
+  {
+    "text": "group of layers and then uh each group of layers is going to be on a single GPU",
+    "start": "743720",
+    "end": "750160"
+  },
+  {
+    "text": "and so you can see some code uh how this is exactly how we do it in VM where",
+    "start": "750160",
+    "end": "755760"
+  },
+  {
+    "text": "we're using a send and receive Paradigm to send from one accelerator to the other",
+    "start": "755760",
+    "end": "761399"
+  },
+  {
+    "text": "one and on each GPU uh we're just storing the layers that we need and then",
+    "start": "761399",
+    "end": "767079"
+  },
+  {
+    "text": "the rest of the layers are replaced with this identity layer or basically a",
+    "start": "767079",
+    "end": "772639"
+  },
+  {
+    "text": "noop okay and so there's some trade-offs here as well one of the main advantages of pipeline parallelism is that it does",
+    "start": "772639",
+    "end": "779440"
+  },
+  {
+    "text": "have a much lower communication overhead compared to tensor parilis but at the same time it doesn't actually improve",
+    "start": "779440",
+    "end": "784920"
+  },
+  {
+    "text": "end to- end latency the same way that tensor parm does and uh it's also prone",
+    "start": "784920",
+    "end": "790320"
+  },
+  {
+    "text": "to execution Bubbles and in general the implementation is a lot more comple complicated than tensor",
+    "start": "790320",
+    "end": "796839"
+  },
+  {
+    "text": "parallelism and so here really the solution is that you you kind of want to use both of the techniques together um",
+    "start": "796839",
+    "end": "803360"
+  },
+  {
+    "text": "maybe use tensor parallelism within a node and then pipeline parallelism AC cross nodes where it's more expensive",
+    "start": "803360",
+    "end": "810160"
+  },
+  {
+    "text": "okay and in naive implementation of uh pipeline parallelism you might come up with some schedule like this right you",
+    "start": "810160",
+    "end": "816720"
+  },
+  {
+    "text": "go through all the layers and then once the last GPU has finished its work you again repeat with GPU zero right but",
+    "start": "816720",
+    "end": "823199"
+  },
+  {
+    "text": "this carries some obvious drawbacks here which is the execution bubbles right we're wasting a lot of time with these",
+    "start": "823199",
+    "end": "830040"
+  },
+  {
+    "text": "gpus and so really what we want to do is something like this right where we bring the uh executions and and we we really",
+    "start": "830040",
+    "end": "836199"
+  },
+  {
+    "text": "have this pipelined uh fashion the way we accomplish this in VM is we",
+    "start": "836199",
+    "end": "842320"
+  },
+  {
+    "text": "take like all the requests that we have and these are split up into separate request groups right and once these are",
+    "start": "842320",
+    "end": "849720"
+  },
+  {
+    "text": "split up then they're all scheduled together and there's no cross-contamination so this is basically",
+    "start": "849720",
+    "end": "855000"
+  },
+  {
+    "text": "what allows us to maintain data dependencies but then at the same time we have this challenge that we need to",
+    "start": "855000",
+    "end": "861279"
+  },
+  {
+    "text": "have multiple request groups at the same time and the way we accomplish this is uh we actually launch four of these uh",
+    "start": "861279",
+    "end": "869240"
+  },
+  {
+    "text": "requests at the same time so we have all four request groups here that are kind of bolded operating at the same time and",
+    "start": "869240",
+    "end": "875800"
+  },
+  {
+    "text": "we use locks so that um we can reserve a",
+    "start": "875800",
+    "end": "881160"
+  },
+  {
+    "text": "GPU for the correct request group and then you can see those um last two",
+    "start": "881160",
+    "end": "887079"
+  },
+  {
+    "text": "request groups those are going to be scheduled in the next iteration so this is our strategy uh to implement pipeline",
+    "start": "887079",
+    "end": "894240"
+  },
+  {
+    "text": "parallelism within BLM okay and then there's another problem that you might have which is",
+    "start": "894240",
+    "end": "900759"
+  },
+  {
+    "text": "batching inefficiencies right so in inference as s been saying earlier it's",
+    "start": "900759",
+    "end": "906240"
+  },
+  {
+    "text": "a much more Dynamic workload where you might have pre-fills you might have decodes you might have a lot of requests",
+    "start": "906240",
+    "end": "911800"
+  },
+  {
+    "text": "at one time or you might have few requests and what you really want to do is ensure that that's still taken care",
+    "start": "911800",
+    "end": "917240"
+  },
+  {
+    "text": "of um you don't have these pipeline Bubbles and imbalances coming from that so we can leverage another technique",
+    "start": "917240",
+    "end": "924560"
+  },
+  {
+    "text": "called chunk prefill which is already in VM in order to allow us to kind of even",
+    "start": "924560",
+    "end": "929880"
+  },
+  {
+    "text": "this out and make sure that our pipeline is as efficient as",
+    "start": "929880",
+    "end": "935880"
+  },
+  {
+    "start": "935000",
+    "end": "1376000"
+  },
+  {
+    "text": "possible okay so we are going to the third problem the CPU becomes a bottleneck so llm inference has very",
+    "start": "938279",
+    "end": "945399"
+  },
+  {
+    "text": "high performance requirements so typically when you have llama uh a like AP model and you have like h00 GPU it",
+    "start": "945399",
+    "end": "952519"
+  },
+  {
+    "text": "can only take like 10 to 20 milliseconds or lower um for generating a single",
+    "start": "952519",
+    "end": "957560"
+  },
+  {
+    "text": "token for multiple batches so in this case um having the CPU actually CPU can become a bottleneck to",
+    "start": "957560",
+    "end": "964639"
+  },
+  {
+    "text": "100% utilize GPU of your engine and there have been actually a lot of techniques to reduce CP overhead",
+    "start": "964639",
+    "end": "971519"
+  },
+  {
+    "text": "across the board we're only going to focus on one technique today uh that use that's relevant to Ray but it there are",
+    "start": "971519",
+    "end": "978040"
+  },
+  {
+    "text": "a lot of different um things like Cuda graph or um they're currently working on rearchitecturing the scheduler to be",
+    "start": "978040",
+    "end": "985120"
+  },
+  {
+    "text": "asynchronous or some many other different techniques are there but but we're only going to focus on one technique today and then this also means",
+    "start": "985120",
+    "end": "993319"
+  },
+  {
+    "text": "that distributed architecture also should have low system overhead now let's actually go back to",
+    "start": "993319",
+    "end": "999199"
+  },
+  {
+    "text": "VM architecture last year like around 2023 so the original architecture has",
+    "start": "999199",
+    "end": "1007120"
+  },
+  {
+    "text": "this driver which has the llm engine class this llm engine class also",
+    "start": "1007120",
+    "end": "1012319"
+  },
+  {
+    "text": "contains a scheduler so it schedule it choose the group of batches and it's sending data to Ray workers through CPU",
+    "start": "1012319",
+    "end": "1020240"
+  },
+  {
+    "text": "and then each worker is preparing the argument which means they're moving the CPU data into GPU and run the model",
+    "start": "1020240",
+    "end": "1026918"
+  },
+  {
+    "text": "together so as I mentioned before it's called single program multiple data um programming style so you run exactly",
+    "start": "1026919",
+    "end": "1032480"
+  },
+  {
+    "text": "same code with different data with u tensor parallelism in it but the issue",
+    "start": "1032480",
+    "end": "1038319"
+  },
+  {
+    "text": "uh last year was that when they had this architecture Ray usually have one to uh two milliseconds overhead when you're",
+    "start": "1038319",
+    "end": "1044760"
+  },
+  {
+    "text": "sending a task and then there's additional serialization overhead because we have to sterilize your CPU",
+    "start": "1044760",
+    "end": "1050080"
+  },
+  {
+    "text": "data like a large prompts and then when you have really large prompts like tens of thousands of tokens and you have",
+    "start": "1050080",
+    "end": "1056240"
+  },
+  {
+    "text": "multiple batches it it's possible your calization can take more than T tens of milliseconds which is really high for",
+    "start": "1056240",
+    "end": "1062640"
+  },
+  {
+    "text": "n2n overhead so BLM they re architected the Contour plane to use ni broadcast",
+    "start": "1062640",
+    "end": "1069480"
+  },
+  {
+    "text": "instead of Ray here um so basically how it works now is",
+    "start": "1069480",
+    "end": "1074559"
+  },
+  {
+    "text": "that your first worker the rank zero worker coexist in the driver so in this",
+    "start": "1074559",
+    "end": "1081640"
+  },
+  {
+    "text": "case scheduler moved the data to GPU and then the data that's moved to GPU is",
+    "start": "1081640",
+    "end": "1087520"
+  },
+  {
+    "text": "going to be transferred through nickel and then you're running um all the workers at the same",
+    "start": "1087520",
+    "end": "1093400"
+  },
+  {
+    "text": "time this architecture reduce the serialization overhead in general but then it comes with other problem like",
+    "start": "1093400",
+    "end": "1099440"
+  },
+  {
+    "text": "model and contol plane actually interrupting each other because they're in the same process and python has a",
+    "start": "1099440",
+    "end": "1104600"
+  },
+  {
+    "text": "gill so you you actually cannot fully paralyze these two scheduler and the GPU",
+    "start": "1104600",
+    "end": "1112840"
+  },
+  {
+    "text": "workloads so we try uh so Ray has a new feature called Ray compiled graph so we",
+    "start": "1113559",
+    "end": "1119159"
+  },
+  {
+    "text": "leverage we try to leverage this feature to solve this problem so Ray compil graph is the uh feature that mimics the",
+    "start": "1119159",
+    "end": "1126840"
+  },
+  {
+    "text": "ray deag API that already existed so instead of the familiar do remote you use the bind apii and then you're able",
+    "start": "1126840",
+    "end": "1133720"
+  },
+  {
+    "text": "to construct the dag uh this way and then you call the compile API at the end",
+    "start": "1133720",
+    "end": "1139840"
+  },
+  {
+    "text": "compared to existing uh do remote solution the compile graph has very low",
+    "start": "1139840",
+    "end": "1145440"
+  },
+  {
+    "text": "system overhead so for example the original aray has two to three second millisecond overhead to send a task to",
+    "start": "1145440",
+    "end": "1151240"
+  },
+  {
+    "text": "other task uh with the compile compile dag you only have um 50 microc",
+    "start": "1151240",
+    "end": "1156799"
+  },
+  {
+    "text": "overhead and it also comes with uh direct GPU RDMA so it uses nickel or",
+    "start": "1156799",
+    "end": "1162559"
+  },
+  {
+    "text": "other communication primitive under the hood to actually support GPU to GPU transfer which was not possible with r",
+    "start": "1162559",
+    "end": "1168559"
+  },
+  {
+    "text": "before before which can also further optimize performance and also um Express",
+    "start": "1168559",
+    "end": "1173880"
+  },
+  {
+    "text": "a complicated program like pipeline parallelism and it also comes with the",
+    "start": "1173880",
+    "end": "1180799"
+  },
+  {
+    "text": "optimized scheduler like for example um when you have a lot of send and receive this uses uh this automatically schedule",
+    "start": "1180799",
+    "end": "1187480"
+  },
+  {
+    "text": "in a way it can avoid the deadlock when you when you use Niel and lot of have a lot of send and receive it's very common",
+    "start": "1187480",
+    "end": "1192720"
+  },
+  {
+    "text": "to have a deadlock but then uh compile that automatically sort um all the send and receive in a way it doesn't have a",
+    "start": "1192720",
+    "end": "1199280"
+  },
+  {
+    "text": "dead luck and then you also automatically overlay Compu and communication so you can um actually uh",
+    "start": "1199280",
+    "end": "1205720"
+  },
+  {
+    "text": "compute while you're getting the result for for the next patch this is the uh Benchmark result",
+    "start": "1205720",
+    "end": "1212600"
+  },
+  {
+    "text": "for the ray compile deck um so comparing to the regular Ray core it has about 20",
+    "start": "1212600",
+    "end": "1219320"
+  },
+  {
+    "text": "times faster performance across different CPU based workloads and also three times faster uh performance for",
+    "start": "1219320",
+    "end": "1225320"
+  },
+  {
+    "text": "multi note and then when you send 40 m by GPU tensor through just regular Ray",
+    "start": "1225320",
+    "end": "1230919"
+  },
+  {
+    "text": "API versus compile deck uh with MV link we can see it's about 140 times faster",
+    "start": "1230919",
+    "end": "1236640"
+  },
+  {
+    "text": "and without MV link even without MV link we could see um it's about 20 times faster compared to just regular",
+    "start": "1236640",
+    "end": "1242720"
+  },
+  {
+    "text": "way so we wanted to leverage this feature uh for the new um VM",
+    "start": "1242720",
+    "end": "1247919"
+  },
+  {
+    "text": "architecture so we go back to original architecture that has a scheduler um on",
+    "start": "1247919",
+    "end": "1253480"
+  },
+  {
+    "text": "the ray driver and then uh all the workers run the model so there's no G",
+    "start": "1253480",
+    "end": "1259000"
+  },
+  {
+    "text": "interrupting each other so with the compile deck you can actually remove the um huge Ray overhead",
+    "start": "1259000",
+    "end": "1265320"
+  },
+  {
+    "text": "and you can have very small overhead such as 100 to 200 microc um and then",
+    "start": "1265320",
+    "end": "1271279"
+  },
+  {
+    "text": "also we added another optimization in VM to send only the Delta input and at the",
+    "start": "1271279",
+    "end": "1276480"
+  },
+  {
+    "text": "end we could say there is less than 1 millisecond overhead uh in general for sending a",
+    "start": "1276480",
+    "end": "1283080"
+  },
+  {
+    "text": "data we can also Implement uh since um the compiled graph supports uh",
+    "start": "1283080",
+    "end": "1289159"
+  },
+  {
+    "text": "the GPU to GPU transfer we could also Implement tensor parallelism and pipeline parallelism with it so for tensor parallelism you can simply",
+    "start": "1289159",
+    "end": "1295960"
+  },
+  {
+    "text": "implement it by just running all the workers at the same time because it's spmd you just need to run the same",
+    "start": "1295960",
+    "end": "1302919"
+  },
+  {
+    "text": "code and for pipeline parallelism you can uh Leverage The GPU to GPU RDMA",
+    "start": "1303320",
+    "end": "1308919"
+  },
+  {
+    "text": "feature so first you send the input to all the workers with low CP overhead um",
+    "start": "1308919",
+    "end": "1314919"
+  },
+  {
+    "text": "feature and then you prepare the uh you execute the model on first two stages so",
+    "start": "1314919",
+    "end": "1321440"
+  },
+  {
+    "text": "this first two stage has also tensor parallelism that show there two workers so it's a 2d 2D",
+    "start": "1321440",
+    "end": "1327159"
+  },
+  {
+    "text": "parallelism and then for pipeline parallelism you have to send the intermediate act activation to the next",
+    "start": "1327159",
+    "end": "1333520"
+  },
+  {
+    "text": "layers uh this can be implemented using um the compiled graph the uh nickel RDMA and then for",
+    "start": "1333520",
+    "end": "1341799"
+  },
+  {
+    "text": "the second stage you can just execute the model with the activation transferred so this is the uh kind of",
+    "start": "1341799",
+    "end": "1348960"
+  },
+  {
+    "text": "like pseudo code for pipeline parallelism so you first have a input which is going to be a b prompt and then",
+    "start": "1348960",
+    "end": "1355799"
+  },
+  {
+    "text": "for each pipeline parallel stage you run the tensor par parallelism so you have to run the same code on multiple",
+    "start": "1355799",
+    "end": "1362640"
+  },
+  {
+    "text": "workers and then when it's not the last rank last stage you just send the",
+    "start": "1362640",
+    "end": "1368320"
+  },
+  {
+    "text": "intermediate activation to the next stage through Niel and you can specify how to use Niel in compiled the graph",
+    "start": "1368320",
+    "end": "1375360"
+  },
+  {
+    "text": "using this API uh and we performed the Benchmark with",
+    "start": "1375360",
+    "end": "1380480"
+  },
+  {
+    "start": "1376000",
+    "end": "1491000"
+  },
+  {
+    "text": "the new architecture the new architecture is not uh not completely settled down but we're planning to make",
+    "start": "1380480",
+    "end": "1385720"
+  },
+  {
+    "text": "it the default implementation for Ray back end uh we can see generally it reaches the performance parity with the",
+    "start": "1385720",
+    "end": "1391880"
+  },
+  {
+    "text": "default control plane um that uses the Niel broadcast for like speculative decoding tensor parallelism through and",
+    "start": "1391880",
+    "end": "1399120"
+  },
+  {
+    "text": "latency and all one thing to note is that default control plane was very highly optimized it has um a lot of",
+    "start": "1399120",
+    "end": "1405039"
+  },
+  {
+    "text": "optimization to make CPU uh transfer faster with with the Niel broadcast uh",
+    "start": "1405039",
+    "end": "1410279"
+  },
+  {
+    "text": "but then the compiled graph can do uh achieve the same performance without any additional code",
+    "start": "1410279",
+    "end": "1416039"
+  },
+  {
+    "text": "there and also we could see the better pipeline parallelism performance because now um scheduler and the first worker is",
+    "start": "1416039",
+    "end": "1422720"
+  },
+  {
+    "text": "decoupled and then pipeline Paralis tends to have a more complicated scheduler and we could see uh generally",
+    "start": "1422720",
+    "end": "1429600"
+  },
+  {
+    "text": "10 to 20% Improvement on uh latency Benchmark for 2D parallelism on a single",
+    "start": "1429600",
+    "end": "1435720"
+  },
+  {
+    "text": "note on 800 and in any scale we also uh run the batch inference with L4 GPU",
+    "start": "1435720",
+    "end": "1442919"
+  },
+  {
+    "text": "which doesn't come with MV link and in this kind of case we we so pipeline parallelism actually has a better",
+    "start": "1442919",
+    "end": "1448440"
+  },
+  {
+    "text": "performance compared to tensor parallelism and we are we use pp8 for our uh the batch inference workload and",
+    "start": "1448440",
+    "end": "1455960"
+  },
+  {
+    "text": "then for PPA workload we also could see 10% Improvement in the",
+    "start": "1455960",
+    "end": "1461320"
+  },
+  {
+    "text": "performance okay let's conclude the talk so VM supports various par parallelism",
+    "start": "1461320",
+    "end": "1466960"
+  },
+  {
+    "text": "strategy to support large Lang model inference and it also comes with the low",
+    "start": "1466960",
+    "end": "1472799"
+  },
+  {
+    "text": "overhead control plane which comes with a lot more features on top of what I",
+    "start": "1472799",
+    "end": "1478120"
+  },
+  {
+    "text": "just presented and then VM is going to leverage R compiled graph to support low",
+    "start": "1478120",
+    "end": "1484559"
+  },
+  {
+    "text": "overhead architecture um and also it it can also improve the the pipeline parall parallelism",
+    "start": "1484559",
+    "end": "1491080"
+  },
+  {
+    "start": "1491000",
+    "end": "1851000"
+  },
+  {
+    "text": "implementation okay thank you so much that's all for our talk and",
+    "start": "1491080",
+    "end": "1497240"
+  },
+  {
+    "text": "right yeah so compile graph uh is in active development so if you're interested in the feature uh doing the",
+    "start": "1499720",
+    "end": "1506360"
+  },
+  {
+    "text": "Race slack and join R accelerated Tech Channel it was the old name now now it's renamed to compiled graph and then any",
+    "start": "1506360",
+    "end": "1512679"
+  },
+  {
+    "text": "scale is also hiring so if you are interested please let me know all right any questions for the",
+    "start": "1512679",
+    "end": "1520000"
+  },
+  {
+    "text": "wonderful talk and the speakers if you can raise your hand if",
+    "start": "1520000",
+    "end": "1525159"
+  },
+  {
+    "text": "have questions yes we have two questions down",
+    "start": "1525159",
+    "end": "1533120"
+  },
+  {
+    "text": "there yeah so just wondering like if in Ray Ada can we send message like in out",
+    "start": "1538679",
+    "end": "1544480"
+  },
+  {
+    "text": "of order manner so that basically the send order and the receive order doesn't match oh so this one order uh the",
+    "start": "1544480",
+    "end": "1552279"
+  },
+  {
+    "text": "compiled graph automatically resolved the ordering so if you follow the API uh",
+    "start": "1552279",
+    "end": "1557640"
+  },
+  {
+    "text": "we so if there's a deadlock in your code then it give it raise an error and if",
+    "start": "1557640",
+    "end": "1563600"
+  },
+  {
+    "text": "it's working order then it's automatically ordering it runs the topological sort and make sure there's",
+    "start": "1563600",
+    "end": "1568720"
+  },
+  {
+    "text": "no deadlock uh so your send and receive order is always",
+    "start": "1568720",
+    "end": "1573640"
+  },
+  {
+    "text": "correct yeah so after you do the red deck and compile",
+    "start": "1574240",
+    "end": "1579799"
+  },
+  {
+    "text": "you move to the original design so rehad and rework they are on the different VMS",
+    "start": "1579799",
+    "end": "1586000"
+  },
+  {
+    "text": "do you try rehad and Rew work still on the VMS they are on the different",
+    "start": "1586000",
+    "end": "1592039"
+  },
+  {
+    "text": "processor so which maybe can also avoid your",
+    "start": "1592039",
+    "end": "1598120"
+  },
+  {
+    "text": "pram sorry can you can you just repeat one more time yeah yeah yeah so uh the",
+    "start": "1598120",
+    "end": "1604600"
+  },
+  {
+    "text": "the last presentation right you have the rehad and rework on the different machines did you try the rehad and",
+    "start": "1604600",
+    "end": "1611960"
+  },
+  {
+    "text": "rework on the same machines on the different processor oh yeah yeah that's right that's right same machine on the",
+    "start": "1611960",
+    "end": "1618279"
+  },
+  {
+    "text": "different process yeah do you try that oh that's how it works now okay",
+    "start": "1618279",
+    "end": "1624600"
+  },
+  {
+    "text": "okay not on the different VM oh yeah it's not on different V yeah that's",
+    "start": "1624600",
+    "end": "1630159"
+  },
+  {
+    "text": "right question can we pass this over thank",
+    "start": "1630159",
+    "end": "1637960"
+  },
+  {
+    "text": "you hi could you provide more guidance on using tensor parallelism and pipeline",
+    "start": "1638159",
+    "end": "1643480"
+  },
+  {
+    "text": "parallelism together um like in what cases might it make sense um for either",
+    "start": "1643480",
+    "end": "1648640"
+  },
+  {
+    "text": "like latency or through put yeah um so I think I briefly",
+    "start": "1648640",
+    "end": "1654440"
+  },
+  {
+    "text": "mentioned earlier but kind of the general rule of thumb so to speak is you want to use tensor parallelism within a",
+    "start": "1654440",
+    "end": "1661000"
+  },
+  {
+    "text": "node which is why like already default BLM just with tensor parallelism already",
+    "start": "1661000",
+    "end": "1666360"
+  },
+  {
+    "text": "so powerful um because uh let's say you have like eight gpus on a node um you",
+    "start": "1666360",
+    "end": "1672960"
+  },
+  {
+    "text": "pretty good like I guess with h100s pretty good to serve most of the models nowadays pipeline parallelism is really",
+    "start": "1672960",
+    "end": "1679200"
+  },
+  {
+    "text": "when you're in a communication um like constrained kind of mode right so that comes kind of",
+    "start": "1679200",
+    "end": "1685039"
+  },
+  {
+    "text": "automatically in a multi- node case because uh in general communication across nodes is going to be worse than",
+    "start": "1685039",
+    "end": "1691399"
+  },
+  {
+    "text": "within a node but then you also have cases even within a node where you might not have NV link right let's say using",
+    "start": "1691399",
+    "end": "1697679"
+  },
+  {
+    "text": "like l4s or a10s um basically cheaper gpus that don't have the um like Envy",
+    "start": "1697679",
+    "end": "1704240"
+  },
+  {
+    "text": "link or or better networking Solutions that's where you would um p peline parallelism could also be effective so",
+    "start": "1704240",
+    "end": "1710360"
+  },
+  {
+    "text": "it's just this like balance between the communication overhead and then the",
+    "start": "1710360",
+    "end": "1715880"
+  },
+  {
+    "text": "latency basically does that answer the question yeah I guess like for my own",
+    "start": "1715880",
+    "end": "1722840"
+  },
+  {
+    "text": "sanity checking so like if I wanted to put like a 400 billion model on two nodes I would put like tensor",
+    "start": "1722840",
+    "end": "1728919"
+  },
+  {
+    "text": "parallelism 8 and then pipeline parallelism 2 because there are two nodes exactly yeah and this is how it's",
+    "start": "1728919",
+    "end": "1734640"
+  },
+  {
+    "text": "done for example uh 45b serving at snowflake is done in this 8 by two way",
+    "start": "1734640",
+    "end": "1740399"
+  },
+  {
+    "text": "yeah with",
+    "start": "1740399",
+    "end": "1742720"
+  },
+  {
+    "text": "bf16 thank you got more questions all",
+    "start": "1746519",
+    "end": "1751880"
+  },
+  {
+    "text": "right me I pass this over hi um you you talked about hosting",
+    "start": "1752880",
+    "end": "1760799"
+  },
+  {
+    "text": "Lama 405b across notes but it still feels like you're bottlenecked by nickel",
+    "start": "1760799",
+    "end": "1766519"
+  },
+  {
+    "text": "am I right in that sense and is is there any research on like on the hardware level uh communication protocol between",
+    "start": "1766519",
+    "end": "1773600"
+  },
+  {
+    "text": "like multiple nodes um that any scale is focused",
+    "start": "1773600",
+    "end": "1779000"
+  },
+  {
+    "text": "on sry could you repeat uh uh like the first part again so the communication",
+    "start": "1779440",
+    "end": "1784600"
+  },
+  {
+    "text": "between the nodes it's still botom leg by nickel right yes is there any",
+    "start": "1784600",
+    "end": "1790080"
+  },
+  {
+    "text": "research by any scale on that part but Al so you're saying communication is still bottleneck by Nico and is there",
+    "start": "1790080",
+    "end": "1796159"
+  },
+  {
+    "text": "any research and any skill to improve performance yes that's uh my answer is no um but I think",
+    "start": "1796159",
+    "end": "1805159"
+  },
+  {
+    "text": "nickel is already pretty good for many cases um and then when you're in the",
+    "start": "1805159",
+    "end": "1810600"
+  },
+  {
+    "text": "single node with ulink it's really fast um I think when when you're actually multinode and then if you don't have the",
+    "start": "1810600",
+    "end": "1817960"
+  },
+  {
+    "text": "like direct RDMA Hardware then it can be really slow because it's using I think TCP under the foot um I think there are",
+    "start": "1817960",
+    "end": "1824519"
+  },
+  {
+    "text": "a lot of researches out there that how to optimize like performance in this kind of",
+    "start": "1824519",
+    "end": "1830399"
+  },
+  {
+    "text": "scenario with more like a slower network but then any any scale we don't have any specific uh work right",
+    "start": "1830399",
+    "end": "1837440"
+  },
+  {
+    "text": "now uh given the time constraint please ask the speaker once we finish this",
+    "start": "1837440",
+    "end": "1842760"
+  },
+  {
+    "text": "session and again please give Round of Applause for the speakers",
+    "start": "1842760",
+    "end": "1849519"
+  }
+]
