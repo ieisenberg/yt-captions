@@ -5,13 +5,11 @@ import logger from "@yt-captions/utils/logger";
 
 const configSchema = z.object({
   configurations: z.array(
-    z
-      .object({
-        channel: z.string().min(1, "Channel name must not be empty"),
-        includeLive: z.boolean().optional().default(false),
-      })
-      .strict()
-      .required()
+    z.object({
+      channel: z.string().min(1, "Channel name must not be empty"),
+      channelId: z.string().optional(),
+      includeLive: z.boolean().optional().default(false),
+    })
   ),
 });
 
@@ -37,4 +35,18 @@ export const getConfig = (): Config => {
     logger.error(`Failed to read config file ${configPath}: ${e}`);
     process.exit(1);
   }
+};
+
+export const saveConfig = (config: Config) => {
+  const configPath = path.join(__dirname, "..", "config", "config.json");
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        configurations: config,
+      },
+      null,
+      2
+    )
+  );
 };
