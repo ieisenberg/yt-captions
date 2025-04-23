@@ -1,0 +1,2332 @@
+[
+  {
+    "start": "0",
+    "end": "25000"
+  },
+  {
+    "text": "hi everybody my name is cliff verdict I work at ViaSat we're about 20 miles up",
+    "start": "480",
+    "end": "6750"
+  },
+  {
+    "text": "the street if any of you guys are looking for somewhere to work and you're interested in this stuff let me know",
+    "start": "6750",
+    "end": "13219"
+  },
+  {
+    "text": "today I'm going to talk about a topology aware scheduler that we built for kubernetes and we'll go over some of the",
+    "start": "13219",
+    "end": "20400"
+  },
+  {
+    "text": "reasons behind why we built it in the first place because that's a common question that we get so on the agenda",
+    "start": "20400",
+    "end": "25619"
+  },
+  {
+    "start": "25000",
+    "end": "52000"
+  },
+  {
+    "text": "today we're gonna go over some terminology that we're gonna be using throughout the presentation and then",
+    "start": "25619",
+    "end": "31320"
+  },
+  {
+    "text": "what are the requirements for each PC and nfe applications what does it mean",
+    "start": "31320",
+    "end": "36450"
+  },
+  {
+    "text": "to be topology aware as a scheduler some of the challenges that we hit when developing this type of application or",
+    "start": "36450",
+    "end": "43469"
+  },
+  {
+    "text": "these types of software when we deployed in kubernetes and then we'll introduce our new scheduler and some of the future",
+    "start": "43469",
+    "end": "49500"
+  },
+  {
+    "text": "work that we're looking at doing on it so before we get there there's some",
+    "start": "49500",
+    "end": "54690"
+  },
+  {
+    "start": "52000",
+    "end": "72000"
+  },
+  {
+    "text": "talks that are very very similar to this one I think if you're coming to this you're probably interested in these ones",
+    "start": "54690",
+    "end": "59789"
+  },
+  {
+    "text": "I updated the room numbers as well two of these are directly after this talk at",
+    "start": "59789",
+    "end": "64830"
+  },
+  {
+    "text": "the exact same time so you have to pick between one of those but then there's two more tomorrow that are kind of along",
+    "start": "64830",
+    "end": "70619"
+  },
+  {
+    "text": "the same lines as this one so first for terminology HPC stands for high",
+    "start": "70619",
+    "end": "76170"
+  },
+  {
+    "start": "72000",
+    "end": "125000"
+  },
+  {
+    "text": "performance computing and it's usually refers to a dense server a dense collection of servers that are",
+    "start": "76170",
+    "end": "81780"
+  },
+  {
+    "text": "performing really high speed calculations usually across many servers",
+    "start": "81780",
+    "end": "87799"
+  },
+  {
+    "text": "the most common use cases you have really dense GPU servers and you're fanning out a whole bunch of data back",
+    "start": "87799",
+    "end": "94320"
+  },
+  {
+    "text": "and forth between them to work on a problem the network function virtualization is where you implement a",
+    "start": "94320",
+    "end": "100229"
+  },
+  {
+    "text": "network function in software and usually it's at a fairly high rate multiple gigabits per second Numa stands for",
+    "start": "100229",
+    "end": "107520"
+  },
+  {
+    "text": "non-uniform memory access and this refers to how the processors access the memory in the system our DMA is remote",
+    "start": "107520",
+    "end": "114479"
+  },
+  {
+    "text": "DMA this is where you transfer data directly from the NIC to a GPU it's not",
+    "start": "114479",
+    "end": "120240"
+  },
+  {
+    "text": "referring to any particular protocol here just the act of doing that and",
+    "start": "120240",
+    "end": "125759"
+  },
+  {
+    "start": "125000",
+    "end": "184000"
+  },
+  {
+    "text": "these applications typically need very high in network throughput so 40 to 100",
+    "start": "125759",
+    "end": "131039"
+  },
+  {
+    "text": "gigabit per second interface is very common now with HP HP C&N EFI applications and finna bans another type",
+    "start": "131039",
+    "end": "138490"
+  },
+  {
+    "text": "of interface that's very common and usually there's multiple interfaces so instead of just the single interface",
+    "start": "138490",
+    "end": "144760"
+  },
+  {
+    "text": "which kubernetes limits you to usually you'll have multiple data plane interfaces in addition to the to the",
+    "start": "144760",
+    "end": "150490"
+  },
+  {
+    "text": "main interface they usually require low latency so under 10 micro second turnaround the time for a packet",
+    "start": "150490",
+    "end": "156490"
+  },
+  {
+    "text": "processing is pretty common and to get those numbers we usually use smart NIC",
+    "start": "156490",
+    "end": "162490"
+  },
+  {
+    "text": "so they have hardware offloads like checksum offloads tunneling some of them have encryption and compression and then",
+    "start": "162490",
+    "end": "170170"
+  },
+  {
+    "text": "last there's the accelerator cards so GPUs are probably the most common for kubernetes because they have first-class",
+    "start": "170170",
+    "end": "175780"
+  },
+  {
+    "text": "support now but you could have FPGAs CPUs and in the Google compute or any",
+    "start": "175780",
+    "end": "181030"
+  },
+  {
+    "text": "other type of accelerator card you can imagine so what's needed to do an HPC or",
+    "start": "181030",
+    "end": "187420"
+  },
+  {
+    "start": "184000",
+    "end": "251000"
+  },
+  {
+    "text": "an EFI application so user space networking specifically using DP DK is one of the main features of an NFC",
+    "start": "187420",
+    "end": "194380"
+  },
+  {
+    "text": "application which we'll get into next isolated CPUs so you don't want anyone else running on the same CPU as you Numa",
+    "start": "194380",
+    "end": "202300"
+  },
+  {
+    "text": "awareness for both memory and devices so if you're accessing memory you want to know that it's local memory not remote",
+    "start": "202300",
+    "end": "207940"
+  },
+  {
+    "text": "memory and similar to any device that's in your system you want to make sure that you're taking the fastest path to the device our DMA which I mentioned is",
+    "start": "207940",
+    "end": "216940"
+  },
+  {
+    "text": "when you transfer the data from the NIC directly to the other devices and that's that's instead of going through the CPU",
+    "start": "216940",
+    "end": "223360"
+  },
+  {
+    "text": "which is a normal path of taking data in from the NIC going through the CPU and out to the accelerator card and then",
+    "start": "223360",
+    "end": "229090"
+  },
+  {
+    "text": "lasses huge pages and huge phases are used in DP DK mostly because you don't",
+    "start": "229090",
+    "end": "234250"
+  },
+  {
+    "text": "want a lot of page misses when you're working with large memory sets so DP DK uses anywhere from two megabytes to one",
+    "start": "234250",
+    "end": "241180"
+  },
+  {
+    "text": "gigabyte huge pages and the key point between all these features is that they require some level of topology awareness",
+    "start": "241180",
+    "end": "247990"
+  },
+  {
+    "text": "to implement any of these so really briefly DP DK for those that don't know",
+    "start": "247990",
+    "end": "254800"
+  },
+  {
+    "text": "is a user packet processing framework one of the main features of in the reason why people use it is it",
+    "start": "254800",
+    "end": "260500"
+  },
+  {
+    "text": "completely bypasses the kernel for efficiency I wrote here most of the time because there are",
+    "start": "260500",
+    "end": "265900"
+  },
+  {
+    "text": "PDK drivers that don't bypass the colonel but it's much more common to use the ones that bypass the colonel and you're giving up a lot by not going",
+    "start": "265900",
+    "end": "272650"
+  },
+  {
+    "text": "through the colonel but the people who use DB DK typically don't need all the things that the Colonel's doing to the",
+    "start": "272650",
+    "end": "277930"
+  },
+  {
+    "text": "packets one of the main differences compared to normal Linux packet processing is DP decays polling based so",
+    "start": "277930",
+    "end": "284680"
+  },
+  {
+    "text": "you sit there and you have a core that's sitting there or a thread that's sitting there on a core pulling the NIC as fast",
+    "start": "284680",
+    "end": "289810"
+  },
+  {
+    "text": "as it can to see if packets are coming in as opposed to being interrupted when packets come in there's also dozens of",
+    "start": "289810",
+    "end": "296500"
+  },
+  {
+    "text": "pull mode drivers these is what DP DK calls the drivers that are used with it and the pull mode drivers are nice",
+    "start": "296500",
+    "end": "302410"
+  },
+  {
+    "text": "because they allow you to write an application using the DP DK API and if you switch to a different type of",
+    "start": "302410",
+    "end": "307900"
+  },
+  {
+    "text": "hardware a different network card you should only have to switch the driver underneath it and not change any of your",
+    "start": "307900",
+    "end": "313479"
+  },
+  {
+    "text": "code and usually that works but if you're using some of the more sophisticated features in DP DK you",
+    "start": "313479",
+    "end": "319270"
+  },
+  {
+    "text": "might not get one-to-one parity between manufacturers but from a high level it works pretty well and then last DVD K is",
+    "start": "319270",
+    "end": "326020"
+  },
+  {
+    "text": "not just for packet processing it has a really high performance Numa ware framework for things like inner thread",
+    "start": "326020",
+    "end": "332740"
+  },
+  {
+    "text": "communications or ring buffers memory pools the memory allocation algorithm is",
+    "start": "332740",
+    "end": "338530"
+  },
+  {
+    "text": "extremely efficient in crypto and compression as well they can perform in hardware and even if you haven't heard",
+    "start": "338530",
+    "end": "345340"
+  },
+  {
+    "text": "of DP DK it's it's usually the foundation of many of the high speed packet processing libraries out there so",
+    "start": "345340",
+    "end": "350409"
+  },
+  {
+    "text": "if you use tier X by Cisco there's another one by juniper they all use DP DK under the hood so what does it mean",
+    "start": "350409",
+    "end": "359080"
+  },
+  {
+    "start": "357000",
+    "end": "399000"
+  },
+  {
+    "text": "to be topology aware so in kubernetes from a simplistic point of view this is what it looks like when a pod gets",
+    "start": "359080",
+    "end": "364810"
+  },
+  {
+    "text": "scheduled comes up to the API server the scheduler sees that a pot is ready to be scheduled find some resources for the",
+    "start": "364810",
+    "end": "372159"
+  },
+  {
+    "text": "pod and then schedules it to a node so number two is really the part we are focusing on because that's the biggest",
+    "start": "372159",
+    "end": "377740"
+  },
+  {
+    "text": "problem what does it actually mean to be a CPU core what does it mean to be memory is it all the same amongst all",
+    "start": "377740",
+    "end": "383380"
+  },
+  {
+    "text": "your nodes so for high-performance computing I mentioned huge pages earlier so that's one of the applications where",
+    "start": "383380",
+    "end": "389380"
+  },
+  {
+    "text": "memory is not all the same some systems may not have huge pages turned on some might some might have different size",
+    "start": "389380",
+    "end": "394960"
+  },
+  {
+    "text": "huge pages and you really want to find what's appropriate for your application so from a top-level view when you look",
+    "start": "394960",
+    "end": "402449"
+  },
+  {
+    "start": "399000",
+    "end": "437000"
+  },
+  {
+    "text": "at a single socket Zeon with hyper-threading off it's fairly simple you have in this case 20 cores each core",
+    "start": "402449",
+    "end": "409979"
+  },
+  {
+    "text": "has an l1 and l2 cache that it uses and then there's a shared l3 cache for all",
+    "start": "409979",
+    "end": "416250"
+  },
+  {
+    "text": "the cores combined and then below you have a DDR controller that has about 80 gigabytes per second going out to main",
+    "start": "416250",
+    "end": "422610"
+  },
+  {
+    "text": "memory so when you're scheduling a pod on a processor like this it's not too difficult you can treat all the cores is",
+    "start": "422610",
+    "end": "428099"
+  },
+  {
+    "text": "mostly the same they all go through the memory the same memory controller and they all share the same l3 cache and",
+    "start": "428099",
+    "end": "433380"
+  },
+  {
+    "text": "they all have independent l1 and l2 but when you look at the much more common",
+    "start": "433380",
+    "end": "439110"
+  },
+  {
+    "text": "server processor which is a dual Xeon processor or a dual Xeon server with",
+    "start": "439110",
+    "end": "444870"
+  },
+  {
+    "text": "hyper-threading enabled now not only have two sockets but you have hyper threading out on both of them and the",
+    "start": "444870",
+    "end": "450690"
+  },
+  {
+    "text": "number of logical cores goes up to 40 in each processor and the main difference there is that now you have two logical",
+    "start": "450690",
+    "end": "456810"
+  },
+  {
+    "text": "cores that are paired up with each of your lower level cache as l1 and l2 and then l3 which is a still shared between",
+    "start": "456810",
+    "end": "463349"
+  },
+  {
+    "text": "a month still shared between all those cores on each of the processors and the",
+    "start": "463349",
+    "end": "468870"
+  },
+  {
+    "text": "other difference here is that you have two DDR controllers now each of those can independently go out to DDR at about",
+    "start": "468870",
+    "end": "473909"
+  },
+  {
+    "text": "80 gigabytes per second again and now you have an inner processor linked in Intel's cases called the UPI or qpi that",
+    "start": "473909",
+    "end": "481169"
+  },
+  {
+    "text": "runs at about 35 gigabytes per second so this is now you can start to see the",
+    "start": "481169",
+    "end": "486960"
+  },
+  {
+    "text": "problems where there's a scheduling issue where if you put an application on core 0 and then another application on",
+    "start": "486960",
+    "end": "492180"
+  },
+  {
+    "text": "core 20 on the processor on the left you could have a lot of cache thrashing because they're not aware that they're",
+    "start": "492180",
+    "end": "497430"
+  },
+  {
+    "text": "on the same they're sharing the same caches there and even if it was your own application that was being placed on 0",
+    "start": "497430",
+    "end": "504150"
+  },
+  {
+    "text": "and 20 your own application might have a situation where those cords don't share data so you wouldn't want them sharing",
+    "start": "504150",
+    "end": "509580"
+  },
+  {
+    "text": "the l1 and l2 cache and then similarly if if you have a thread that's on the Left processor you don't want to access",
+    "start": "509580",
+    "end": "516570"
+  },
+  {
+    "text": "memory on the right processor because that in curves more latency and more throughput penalties going through the UPI bus if you zoom out a little bit and",
+    "start": "516570",
+    "end": "525480"
+  },
+  {
+    "text": "now we're adding two GPUs and two Nix which are each connected directly to the the PCI bridge on the z",
+    "start": "525480",
+    "end": "532140"
+  },
+  {
+    "text": "processor it looks very similar before but now you have the PCI Express interface above that where the GPU and",
+    "start": "532140",
+    "end": "539070"
+  },
+  {
+    "text": "the NIC can both hit the processor at about a hundred gigabytes per second or twelve and a half gigabytes per second",
+    "start": "539070",
+    "end": "544740"
+  },
+  {
+    "text": "so this isn't too difficult but now if you're using our DMA you need to make sure that the NIC going to the GPU is on",
+    "start": "544740",
+    "end": "551550"
+  },
+  {
+    "text": "the same socket you don't again don't want it crossing the UPI socket but in this case there's still only two GPUs",
+    "start": "551550",
+    "end": "557339"
+  },
+  {
+    "text": "and two Nick's so it's not that high of a rate even at 100 gigabits per second the UPI bus may be able to sustain that",
+    "start": "557339",
+    "end": "563130"
+  },
+  {
+    "text": "without having any contention but if you",
+    "start": "563130",
+    "end": "568200"
+  },
+  {
+    "text": "look at the more common GPU servers now you have four GPUs and four Nick's which two are on each two are bound to each",
+    "start": "568200",
+    "end": "575700"
+  },
+  {
+    "text": "processor through a PCI uee switch so now in addition to having the two processors there and the link back to",
+    "start": "575700",
+    "end": "581850"
+  },
+  {
+    "text": "the processor you have each of the CPUs and the in the Jeep each of the GPUs and the Nick's going at about 100 gigabits",
+    "start": "581850",
+    "end": "588660"
+  },
+  {
+    "text": "per second back to a PCIe switch but now there's only a single hundred gigabit per second link going back to the Xeon",
+    "start": "588660",
+    "end": "594570"
+  },
+  {
+    "text": "which causes a bottleneck so you could see just by this if you needed to transfer the data all the way back to",
+    "start": "594570",
+    "end": "600209"
+  },
+  {
+    "text": "the processor and then back up to the GPU you wouldn't be able to do it with more than one of the throughputs of one",
+    "start": "600209",
+    "end": "605970"
+  },
+  {
+    "text": "of those nicks if it's 100 gig Nick so you really have to be aware of the PCIe topology here as well as things like our",
+    "start": "605970",
+    "end": "612779"
+  },
+  {
+    "text": "DMA and then if you want to get even more complicated this is an actual",
+    "start": "612779",
+    "end": "618060"
+  },
+  {
+    "start": "614000",
+    "end": "668000"
+  },
+  {
+    "text": "server from Super Micro where there's 16 GPUs and 16 NICs so you have a total of 32 PCIe 316 Lane links between the PCIe",
+    "start": "618060",
+    "end": "629670"
+  },
+  {
+    "text": "switches and the devices and not just that now you have a tiered PCIe switch",
+    "start": "629670",
+    "end": "634699"
+  },
+  {
+    "text": "topology where from the top level you still have the two GPUs and tunics plugged into each PCIe switch but if you",
+    "start": "634699",
+    "end": "641970"
+  },
+  {
+    "text": "go down one level you can still go back up to the other GPUs and NICs without going through the processor but again",
+    "start": "641970",
+    "end": "648060"
+  },
+  {
+    "text": "it's only one link so you're bound by that 12 and a half gigabyte per second link and again if you're transferring",
+    "start": "648060",
+    "end": "653970"
+  },
+  {
+    "text": "data from the left side of the processor to the right side now there's a huge bottleneck because UPI is only doing 35",
+    "start": "653970",
+    "end": "660569"
+  },
+  {
+    "text": "gigabytes per second roughly and you have 32 times 12.5 gigabytes per",
+    "start": "660569",
+    "end": "665720"
+  },
+  {
+    "text": "second from the top and from a network",
+    "start": "665720",
+    "end": "670879"
+  },
+  {
+    "text": "point of view if you're assuming that you have pods that have different bandwidth requirements some pods might want for example on the one on the",
+    "start": "670879",
+    "end": "677240"
+  },
+  {
+    "text": "bottom left it needs five gigabits per second the one in the middle might have two separate processing paths where one",
+    "start": "677240",
+    "end": "683930"
+  },
+  {
+    "text": "path needs about 25 gigabits per second and then the other path needs 30 gigabits per second and then you have",
+    "start": "683930",
+    "end": "689180"
+  },
+  {
+    "text": "yet another pod with 40 gigabit per second requirements now you want to place those potentially on multiple NICs",
+    "start": "689180",
+    "end": "695149"
+  },
+  {
+    "text": "but you also want to place them in a smart way where you can have podshare NIC and in this case this node has three",
+    "start": "695149",
+    "end": "700579"
+  },
+  {
+    "text": "data plane NICs that these three pods could share but you obviously can't take the pod on the right that needs 40",
+    "start": "700579",
+    "end": "706490"
+  },
+  {
+    "text": "gigabits per second and tie it to the NIC on the left which needs which is only a 10 gigabit NIC so some of the",
+    "start": "706490",
+    "end": "713540"
+  },
+  {
+    "start": "712000",
+    "end": "725000"
+  },
+  {
+    "text": "challenges that we face when writing the scheduler we're isolating CPU cores CPU",
+    "start": "713540",
+    "end": "719420"
+  },
+  {
+    "text": "selection and NIC interface sharing so first I'll go over isolating CPU cores",
+    "start": "719420",
+    "end": "724759"
+  },
+  {
+    "text": "and how we solve that so for isolating CPUs what you're doing",
+    "start": "724759",
+    "end": "730550"
+  },
+  {
+    "start": "725000",
+    "end": "842000"
+  },
+  {
+    "text": "is you're trying to prevent unwanted processes from running on the same core that you have something running on and",
+    "start": "730550",
+    "end": "735649"
+  },
+  {
+    "text": "the reason is that it prevents cache thrashing if you have two things running on the same core and they're both hitting the cache a lot then the cache",
+    "start": "735649",
+    "end": "742339"
+  },
+  {
+    "text": "is getting evicted quite a bit and it also reduces the time slicing so and you",
+    "start": "742339",
+    "end": "747920"
+  },
+  {
+    "text": "can actually eliminate it too in Linux where if your process is the only thing running on that core then you don't need",
+    "start": "747920",
+    "end": "753649"
+  },
+  {
+    "text": "a time slice between any of the other processes so one of the problems though is that kernel processors are little",
+    "start": "753649",
+    "end": "759620"
+  },
+  {
+    "text": "trickier so some kernel processes can't be moved at all if you try to move them using any of the provisions in the",
+    "start": "759620",
+    "end": "767000"
+  },
+  {
+    "text": "kernel to move them it won't do anything things like interrupts also need a special configuration if you try to move",
+    "start": "767000",
+    "end": "773660"
+  },
+  {
+    "text": "the interrupts processes they won't do anything but you can do that on boot",
+    "start": "773660",
+    "end": "778819"
+  },
+  {
+    "text": "so there's actively two ways to handle isolating CPUs so the first is to use isil cpus which is something that's been",
+    "start": "778819",
+    "end": "787430"
+  },
+  {
+    "text": "in linux basically since the beginning and this allows you to isolate CPUs on",
+    "start": "787430",
+    "end": "792500"
+  },
+  {
+    "text": "boot-up so it's a boot parameter that you set up and grub and you specify a list like in the top right up there",
+    "start": "792500",
+    "end": "798019"
+  },
+  {
+    "text": "we're in this case the first two cores of the first socket are not isolated in the first two of the",
+    "start": "798019",
+    "end": "803990"
+  },
+  {
+    "text": "second socket are not isolated so what's that what that means is that all the processes that will come up from on boot",
+    "start": "803990",
+    "end": "810140"
+  },
+  {
+    "text": "that can be on the non isolated cores will be moved there but some of the kernel processes will still be on the",
+    "start": "810140",
+    "end": "816079"
+  },
+  {
+    "text": "isolated cores and then when you want your application yep",
+    "start": "816079",
+    "end": "822190"
+  },
+  {
+    "text": "threads and processes yeah and if you want your application to use the isolated cores you would do something",
+    "start": "822459",
+    "end": "828709"
+  },
+  {
+    "text": "like task set or call sched set affinity or any of the other ways you could do it and you have to explicitly set it",
+    "start": "828709",
+    "end": "835640"
+  },
+  {
+    "text": "because if you don't set your application to use those cores it'll be forced back onto the read cores in this picture the second way is CPU sets so",
+    "start": "835640",
+    "end": "844670"
+  },
+  {
+    "start": "842000",
+    "end": "953000"
+  },
+  {
+    "text": "this is a more recent feature that was added in the kernel in about 2008 so these are nice because you can create",
+    "start": "844670",
+    "end": "850640"
+  },
+  {
+    "text": "and modify them after boot and creating a CPU set doesn't actually do anything until you put processes into the CPU set",
+    "start": "850640",
+    "end": "857600"
+  },
+  {
+    "text": "to isolate them so what it does is it creates a group of CPUs that are visible to any of the processes that are placed",
+    "start": "857600",
+    "end": "864110"
+  },
+  {
+    "text": "into that group so in the in the example on the top the group name is slash system D which is a common one if you're",
+    "start": "864110",
+    "end": "870950"
+  },
+  {
+    "text": "running system D and then within that there's five cores there that are not visible because you set them to not be",
+    "start": "870950",
+    "end": "877190"
+  },
+  {
+    "text": "visible in that in that group so when a process is moved into that system D",
+    "start": "877190",
+    "end": "882709"
+  },
+  {
+    "text": "group it won't be able to see those cores on the system anymore I can't use them and you can move any number of processes that you want into that group",
+    "start": "882709",
+    "end": "889190"
+  },
+  {
+    "text": "and the other nice thing is it's hierarchical so in the bottom example you have cube pods burstable which is",
+    "start": "889190",
+    "end": "895730"
+  },
+  {
+    "text": "one that you get with kubernetes and then cube plods burstable slash pod one so it's a nested group inside of the",
+    "start": "895730",
+    "end": "902750"
+  },
+  {
+    "text": "top-level group and when you have a nested group the child groups have to inherit all the rules from the parent",
+    "start": "902750",
+    "end": "907940"
+  },
+  {
+    "text": "group so in this case there's three cores that were not visible in cube pods and then one level down and the child",
+    "start": "907940",
+    "end": "913640"
+  },
+  {
+    "text": "there's six cores not visible and if you move a process into the parent they will they won't see those three cores if you",
+    "start": "913640",
+    "end": "920089"
+  },
+  {
+    "text": "move them into the child they won't see all six cores and as I mentioned earlier kubernetes uses this so if you look on",
+    "start": "920089",
+    "end": "925880"
+  },
+  {
+    "text": "your system and go into the filesystem to look at which CPU sets are set up you'll see those cube pods",
+    "start": "925880",
+    "end": "933550"
+  },
+  {
+    "text": "groups in there but one of the things we found was it needs special care with ISIL CPUs because when we brought up our",
+    "start": "933550",
+    "end": "940899"
+  },
+  {
+    "text": "systems with ISIL CPUs even though most of the kubernetes processes like cube proxy and cubelet were kind of isolated",
+    "start": "940899",
+    "end": "947380"
+  },
+  {
+    "text": "every once in a while you'd see a thread from those move over to the isolated cores from ISIL CPUs so what we did was",
+    "start": "947380",
+    "end": "954190"
+  },
+  {
+    "start": "953000",
+    "end": "1008000"
+  },
+  {
+    "text": "we solved it by making a demon called ISIL CPU set and this is essentially a",
+    "start": "954190",
+    "end": "959500"
+  },
+  {
+    "text": "daemon that runs on startup and it makes two groups on boot one is called the isolated CPU set and one's called the",
+    "start": "959500",
+    "end": "966010"
+  },
+  {
+    "text": "jailed CPU set and the first thing it does is it moves all the tasks or processes that it can into the jailed",
+    "start": "966010",
+    "end": "972310"
+  },
+  {
+    "text": "CPU set so anything that might have been on the isolated cores at that point will",
+    "start": "972310",
+    "end": "977589"
+  },
+  {
+    "text": "now be moved into the jailed set and then if your pod wants to be moved into the isolated said it communicates with",
+    "start": "977589",
+    "end": "983740"
+  },
+  {
+    "text": "this demon to tell it that it wants to be in there and then the daemon moves it to a CPU set that is allowed to go on the isolated cores so what this does is",
+    "start": "983740",
+    "end": "990730"
+  },
+  {
+    "text": "it gives you extra guarantees you have ISIL CPUs still in there but now you have an extra set that is jailing off",
+    "start": "990730",
+    "end": "997060"
+  },
+  {
+    "text": "all the the tasks that you use CPU sets and you can move any of your processes",
+    "start": "997060",
+    "end": "1003300"
+  },
+  {
+    "text": "into the isolated CPU set that you want to so the next thing we had challenges",
+    "start": "1003300",
+    "end": "1010440"
+  },
+  {
+    "start": "1008000",
+    "end": "1084000"
+  },
+  {
+    "text": "with was CPU selection so with most applications you don't really care about this if you launch a normal pod that",
+    "start": "1010440",
+    "end": "1017040"
+  },
+  {
+    "text": "doesn't it's not DP D K or doesn't require a special CPU core handling Linux will take care of that it'll",
+    "start": "1017040",
+    "end": "1022709"
+  },
+  {
+    "text": "usually leave your application on the same core or if that core gets overloaded by other tasks it might move",
+    "start": "1022709",
+    "end": "1028530"
+  },
+  {
+    "text": "it to a different one but when you're working with Numa and PCI aware PCIe aware topologies you need better than",
+    "start": "1028530",
+    "end": "1035280"
+  },
+  {
+    "text": "that because you're typically looking for very low latency so you don't not only do you not want your process is moving around but you want to pick a",
+    "start": "1035280",
+    "end": "1041760"
+  },
+  {
+    "text": "specific core that you can that you know is isolated from all the other processes on your system and in addition to that",
+    "start": "1041760",
+    "end": "1049260"
+  },
+  {
+    "text": "DP DK requires that you pass in the list of physical cores to it when it's initialized so you have to know it when",
+    "start": "1049260",
+    "end": "1054870"
+  },
+  {
+    "text": "you're initializing DP DK so the CPU manager for kubernetes that comes with the stock version will do this on a best",
+    "start": "1054870",
+    "end": "1062850"
+  },
+  {
+    "text": "effort basis but it won't do it by physical core numbers so it we'll give you some level of isolation but it won't tell you what the isolated",
+    "start": "1062850",
+    "end": "1069900"
+  },
+  {
+    "text": "cores are in your pod and in addition to that it's not hyper-threading aware so if you care about the difference between",
+    "start": "1069900",
+    "end": "1076410"
+  },
+  {
+    "text": "hyper-threaded cores and and non hyper threaded cores it's not going to know that it just treats them all as cores",
+    "start": "1076410",
+    "end": "1083420"
+  },
+  {
+    "text": "and the last thing we had to face was sharing a NIC or sharing an interface so",
+    "start": "1083420",
+    "end": "1089400"
+  },
+  {
+    "start": "1089000",
+    "end": "1126000"
+  },
+  {
+    "text": "again this isn't an issue without D P D K because if you're using standard CNI plugins like calico or flannel they all",
+    "start": "1089400",
+    "end": "1096120"
+  },
+  {
+    "text": "go through the Linux kernel and they set up things like IP tables or IP vs to",
+    "start": "1096120",
+    "end": "1101250"
+  },
+  {
+    "text": "route packets appropriately but when you're working with DB DK you're bypassing the kernel entirely so Linux",
+    "start": "1101250",
+    "end": "1107160"
+  },
+  {
+    "text": "and IP tables won't even see the packets and also cube proxy which was previously there to steer the packets for services",
+    "start": "1107160",
+    "end": "1113460"
+  },
+  {
+    "text": "won't see the puck won't see the packets either and also if you're using DP DK you want to share the interfaces without",
+    "start": "1113460",
+    "end": "1119940"
+  },
+  {
+    "text": "losing efficiency otherwise you wouldn't be using DP DK so we looked at three",
+    "start": "1119940",
+    "end": "1125010"
+  },
+  {
+    "text": "different methods for doing this the first was a virtual switch so with a virtual switch all the pods will",
+    "start": "1125010",
+    "end": "1131340"
+  },
+  {
+    "start": "1126000",
+    "end": "1202000"
+  },
+  {
+    "text": "communicate from their network namespace to the virtual switch over some interface which then hits the NIC and",
+    "start": "1131340",
+    "end": "1137700"
+  },
+  {
+    "text": "two of the most common interfaces are a V host user Verdejo user or benef so",
+    "start": "1137700",
+    "end": "1142799"
+  },
+  {
+    "text": "some of the virtual switches out there if you're not familiar OVS DP DK OVS VPP",
+    "start": "1142799",
+    "end": "1148679"
+  },
+  {
+    "text": "is another one there's probably more I'm missing so the nice thing about this is you have an external controller that",
+    "start": "1148679",
+    "end": "1154890"
+  },
+  {
+    "text": "programs a switch so you don't actually have have to have a switch that knows about kubernetes to begin with but you",
+    "start": "1154890",
+    "end": "1160290"
+  },
+  {
+    "text": "can have a controller that knows about the kubernetes network policies and things like that and program it after it",
+    "start": "1160290",
+    "end": "1165720"
+  },
+  {
+    "text": "started up the other nice thing is it's fairly flexible because it's its platform agnostic you can use a lot of",
+    "start": "1165720",
+    "end": "1172080"
+  },
+  {
+    "text": "these virtual switches between VMs and containers and they don't care which one they're running on but the problem is",
+    "start": "1172080",
+    "end": "1178140"
+  },
+  {
+    "text": "they can be inefficient so you have that extra interface there that you're going through and depending on which one you use it can be extremely inefficient like",
+    "start": "1178140",
+    "end": "1184710"
+  },
+  {
+    "text": "the host user or it could be somewhat inefficient like mem if they're always going to have some level of packet",
+    "start": "1184710",
+    "end": "1189870"
+  },
+  {
+    "text": "copies before it gets to the NIC but the the real problem for us was it doesn't have our DMA support and we really",
+    "start": "1189870",
+    "end": "1195419"
+  },
+  {
+    "text": "needed that so if you're bypassing the kernel entirely then the V switch wouldn't actually the packets so the next one we looked at",
+    "start": "1195419",
+    "end": "1205320"
+  },
+  {
+    "start": "1202000",
+    "end": "1237000"
+  },
+  {
+    "text": "was host device host device is a really simple scene I plug in that's in the upstream scene IO repo that basically",
+    "start": "1205320",
+    "end": "1212970"
+  },
+  {
+    "text": "just assigns the entire device into a pod and so once the pod consumes the",
+    "start": "1212970",
+    "end": "1218190"
+  },
+  {
+    "text": "device no other pods can use that device and the kernel actually won't see the device either or the the root namespace",
+    "start": "1218190",
+    "end": "1223559"
+  },
+  {
+    "text": "won't see the device either so it's nice because you can add multiple queues to a device and you can have your pod to use",
+    "start": "1223559",
+    "end": "1229679"
+  },
+  {
+    "text": "multiple queues but if you don't have a lot of NICs in your system and you're trying to put more pods than NICs this",
+    "start": "1229679",
+    "end": "1234720"
+  },
+  {
+    "text": "isn't really practical and the last one we looked at was SR iove so with us our",
+    "start": "1234720",
+    "end": "1241049"
+  },
+  {
+    "start": "1237000",
+    "end": "1307000"
+  },
+  {
+    "text": "iove each pod gets one or more virtual functions on the NIC which is a concept in the hardware of the NIC and each of",
+    "start": "1241049",
+    "end": "1247109"
+  },
+  {
+    "text": "those virtual functions has a unique MAC address and with most modern NICs it has",
+    "start": "1247109",
+    "end": "1252419"
+  },
+  {
+    "text": "more virtual functions than you could fit pods on a node so it's not uncommon to see 512 virtual functions or a",
+    "start": "1252419",
+    "end": "1258239"
+  },
+  {
+    "text": "thousand 24 and it's also very little overhead because your pod is sending directly to the NIC another nice feature",
+    "start": "1258239",
+    "end": "1265619"
+  },
+  {
+    "text": "on these is because it's in the NIC itself you can actually set up some of the Nick's to do kind of a switching",
+    "start": "1265619",
+    "end": "1271349"
+  },
+  {
+    "text": "interface or a bridging interface on the NIC so you can have local traffic from the same node without going out to the",
+    "start": "1271349",
+    "end": "1278009"
+  },
+  {
+    "text": "switch it could be bridged back into another pod and SRO V has mature",
+    "start": "1278009",
+    "end": "1284369"
+  },
+  {
+    "text": "kubernetes support so there's been a C and I plugin for a long time but there's also now a device plugin for the last",
+    "start": "1284369",
+    "end": "1289710"
+  },
+  {
+    "text": "year or so but the only downside that we found is that it may not have the same",
+    "start": "1289710",
+    "end": "1295590"
+  },
+  {
+    "text": "flow programming so if you need to use some of the sophisticated flow programming features than the Nix if",
+    "start": "1295590",
+    "end": "1300960"
+  },
+  {
+    "text": "you're using SR io v some of the virtual functions may not allow you to use certain flow features so with all that",
+    "start": "1300960",
+    "end": "1308070"
+  },
+  {
+    "start": "1307000",
+    "end": "1368000"
+  },
+  {
+    "text": "said now we're going to talk about our topology aware scheduler and why we did",
+    "start": "1308070",
+    "end": "1313889"
+  },
+  {
+    "text": "it so from a high high from a high level",
+    "start": "1313889",
+    "end": "1320669"
+  },
+  {
+    "text": "the NHC scheduler is topology aware and that means PCIe Numa hyper-threading",
+    "start": "1320669",
+    "end": "1327409"
+  },
+  {
+    "text": "GPUs data plane NICs and I'm differentiating that from control plane NICs or the standard cout",
+    "start": "1327409",
+    "end": "1333420"
+  },
+  {
+    "text": "Nettie's Knicks because this when you're using multiple Knicks the CPU and GPU architecture as well so if you have",
+    "start": "1333420",
+    "end": "1339510"
+  },
+  {
+    "text": "different types of GPUs or different types of CPUs in your cluster it would know about those and then helper versus",
+    "start": "1339510",
+    "end": "1345990"
+  },
+  {
+    "text": "data path course so in most data path applications you have some cores that are doing things like management or",
+    "start": "1345990",
+    "end": "1352470"
+  },
+  {
+    "text": "they're listening to G RPC request and you don't want them to be on isolated cores necessarily so you want to treat",
+    "start": "1352470",
+    "end": "1357840"
+  },
+  {
+    "text": "them as more fungible cores it's written in Python 3 and it has a G RPC interface",
+    "start": "1357840",
+    "end": "1363540"
+  },
+  {
+    "text": "for retrieving cluster statistics so the",
+    "start": "1363540",
+    "end": "1369390"
+  },
+  {
+    "start": "1368000",
+    "end": "1407000"
+  },
+  {
+    "text": "main algorithm for the scheduler is watches for pods to show up the that are looking to be scheduled by this",
+    "start": "1369390",
+    "end": "1374460"
+  },
+  {
+    "text": "particular scheduler translates the configuration from the pod into a common format that it uses to make a topology",
+    "start": "1374460",
+    "end": "1380850"
+  },
+  {
+    "text": "structure matches the pod to the node translates back to the pods configuration structure and then binds",
+    "start": "1380850",
+    "end": "1387510"
+  },
+  {
+    "text": "that to the node and the reason why we do the config translation is because the scheduler has a concept of a generic",
+    "start": "1387510",
+    "end": "1393510"
+  },
+  {
+    "text": "topology structure and every application has their own way of configuring it so the config translation takes your",
+    "start": "1393510",
+    "end": "1399660"
+  },
+  {
+    "text": "specific applications configuration and translates it into this generic format that it can use to schedule so the",
+    "start": "1399660",
+    "end": "1409110"
+  },
+  {
+    "start": "1407000",
+    "end": "1472000"
+  },
+  {
+    "text": "matcher step is the most important one because that's the one that actually does the packing so it tries to find the",
+    "start": "1409110",
+    "end": "1414150"
+  },
+  {
+    "text": "best possible node to place your workload but it it also tries to pack as",
+    "start": "1414150",
+    "end": "1419700"
+  },
+  {
+    "text": "many on there without being inefficient so you wouldn't want to just put as many pods on a node as you can and then",
+    "start": "1419700",
+    "end": "1425250"
+  },
+  {
+    "text": "overload the node so that you're causing jitter and latency that you don't want and also it can't predict the future so",
+    "start": "1425250",
+    "end": "1431180"
+  },
+  {
+    "text": "it would be nice too if you knew five minutes of incoming pods and what the requirements are and then you could",
+    "start": "1431180",
+    "end": "1437040"
+  },
+  {
+    "text": "schedule it and do better bin packing but usually in kubernetes you want to if you're deploying a pod you want it to be",
+    "start": "1437040",
+    "end": "1443280"
+  },
+  {
+    "text": "deployed as soon as possible so the first stage that it does is it filters the pod resources which are currently",
+    "start": "1443280",
+    "end": "1449430"
+  },
+  {
+    "text": "just huge pages and later we might add them once the kubernetes has support for more resources and then it does a Numa",
+    "start": "1449430",
+    "end": "1456420"
+  },
+  {
+    "text": "and PCIe a filter on both the CPU and the devices and then it intersects all those so to look at your GPU your NIC",
+    "start": "1456420",
+    "end": "1463260"
+  },
+  {
+    "text": "and your CPU requirements find which PCIe switches and Newman they're available and then intersect",
+    "start": "1463260",
+    "end": "1468720"
+  },
+  {
+    "text": "those to find which ones you can be placed on so this is a pretty common",
+    "start": "1468720",
+    "end": "1475830"
+  },
+  {
+    "start": "1472000",
+    "end": "1521000"
+  },
+  {
+    "text": "picture of a data plane application where at the top you have two hyper threaded helper cores which are the ones",
+    "start": "1475830",
+    "end": "1482280"
+  },
+  {
+    "text": "I was talking about earlier that are for kind of management types of and then in this case your pod has to processing",
+    "start": "1482280",
+    "end": "1488400"
+  },
+  {
+    "text": "groups so these are two independent data paths that might have no relation to each other but you want them in the same",
+    "start": "1488400",
+    "end": "1494100"
+  },
+  {
+    "text": "pod so on the top case the dark blue boxes are the non hyper threaded CPU",
+    "start": "1494100",
+    "end": "1499830"
+  },
+  {
+    "text": "cores that you require and then in that case you need three GPUs as well which are the dark red circles in the bottom",
+    "start": "1499830",
+    "end": "1506190"
+  },
+  {
+    "text": "processing group in this case is using hyper threaded cores and then on the left side is the receive networking",
+    "start": "1506190",
+    "end": "1511920"
+  },
+  {
+    "text": "requirements so you have 15 gigabits per second and 80 gigabits per second and those and on the right side is the",
+    "start": "1511920",
+    "end": "1517620"
+  },
+  {
+    "text": "transmit networking requirements so if",
+    "start": "1517620",
+    "end": "1522690"
+  },
+  {
+    "text": "we look at how we place this on to a node now if we take one of those processing groups from the bottom and try to place it on this node in this",
+    "start": "1522690",
+    "end": "1529230"
+  },
+  {
+    "text": "particular case it's asking for seven non hyper threaded cores which is the dark blue down there",
+    "start": "1529230",
+    "end": "1534360"
+  },
+  {
+    "text": "three GPUs 15 gigabits per second on the receive and 50 gigabits per second on",
+    "start": "1534360",
+    "end": "1539370"
+  },
+  {
+    "text": "the transmit so if we look at in this case there's only two servers it's a very simplified view but the two servers",
+    "start": "1539370",
+    "end": "1545310"
+  },
+  {
+    "text": "are broken up into two Numa nodes so on the left side the left green box is Numa node zero on the first server and the",
+    "start": "1545310",
+    "end": "1550950"
+  },
+  {
+    "text": "right one is Numa node one on the first server and similar on the second server so the first thing it'll do is it'll",
+    "start": "1550950",
+    "end": "1556590"
+  },
+  {
+    "text": "look at how many servers or how many Numa nodes can suit the CPU requirements",
+    "start": "1556590",
+    "end": "1562830"
+  },
+  {
+    "text": "so in this case it's asking for seven CPUs so we're looking for basically seven white boxes here and you can see",
+    "start": "1562830",
+    "end": "1569190"
+  },
+  {
+    "text": "both Numa node 1 on server 1 and Numa node 0 on server 2 can meet that",
+    "start": "1569190",
+    "end": "1574470"
+  },
+  {
+    "text": "requirement they both have 7 cores that they can assign but then we're also asking for 3 GPU cores and now the",
+    "start": "1574470",
+    "end": "1581520"
+  },
+  {
+    "text": "second Numa node on the first server doesn't have that many GPUs free so it's not allowed to schedule there so it'll",
+    "start": "1581520",
+    "end": "1586770"
+  },
+  {
+    "text": "put it on the second server in Numa node zero because also the root the networking requirements are met on the",
+    "start": "1586770",
+    "end": "1593010"
+  },
+  {
+    "text": "bottom there but now when you turn hyper-threading on",
+    "start": "1593010",
+    "end": "1598600"
+  },
+  {
+    "start": "1596000",
+    "end": "1686000"
+  },
+  {
+    "text": "it gets a little more difficult because now the cores are broken up into two separate groups there's two logical",
+    "start": "1598600",
+    "end": "1603850"
+  },
+  {
+    "text": "groups of the top and bottom they're so logical core zero would be paired with logical course six one with seven and so",
+    "start": "1603850",
+    "end": "1611110"
+  },
+  {
+    "text": "on and so now when it's when it's scheduling it has to be aware of hyper-threading so in this case we're",
+    "start": "1611110",
+    "end": "1617260"
+  },
+  {
+    "text": "acting asking for five hyper-threaded cores and two GPUs so if you look down at the bottom and you look at which ones",
+    "start": "1617260",
+    "end": "1623200"
+  },
+  {
+    "text": "have two GPUs free both Numa nodes on the first server have that free but only Numa node zero on the second server has",
+    "start": "1623200",
+    "end": "1629590"
+  },
+  {
+    "text": "that free and now we look at the cores that it's requesting now we're asking for five hyper threaded cores so it",
+    "start": "1629590",
+    "end": "1635980"
+  },
+  {
+    "text": "looks like Numa node one on server one has that as well as Numa node zero on server two but actually it won't work",
+    "start": "1635980",
+    "end": "1642190"
+  },
+  {
+    "text": "because server one on Neumann of one on server one can't be scheduled to in this case because if you look at the hyper",
+    "start": "1642190",
+    "end": "1648670"
+  },
+  {
+    "text": "threaded pairs which are two eight one seven zero six and so on the sibling",
+    "start": "1648670",
+    "end": "1653680"
+  },
+  {
+    "text": "Corrin in each of those cases is already used and you you don't place a workload on somewhere that already has a pod",
+    "start": "1653680",
+    "end": "1659950"
+  },
+  {
+    "text": "scheduled on a sibling core because now you have a pod that's not yours that would be sharing that sibling core and you can't control it so in this case",
+    "start": "1659950",
+    "end": "1666910"
+  },
+  {
+    "text": "the only place that could put it is on Numa node zero on server two because even though it shows four or eight hyper",
+    "start": "1666910",
+    "end": "1673900"
+  },
+  {
+    "text": "threaded cores unused these would still take up the two siblings so in this case it would put it on two eight five eleven",
+    "start": "1673900",
+    "end": "1680740"
+  },
+  {
+    "text": "and maybe one at the top and it would use those five hyper threaded cores so",
+    "start": "1680740",
+    "end": "1688090"
+  },
+  {
+    "start": "1686000",
+    "end": "1714000"
+  },
+  {
+    "text": "the last thing it does is it binds the pod to the node so this is exactly how the kubernetes scheduler does it it",
+    "start": "1688090",
+    "end": "1693700"
+  },
+  {
+    "text": "issues a bind command through the API server that basically sets the node parameter on the pod to the node that we",
+    "start": "1693700",
+    "end": "1700870"
+  },
+  {
+    "text": "want it bound to and then it makes native kubernetes events that will tell it that it's binding so if you look at",
+    "start": "1700870",
+    "end": "1706930"
+  },
+  {
+    "text": "cube CTL get events you will see something like at the bottom there showing that it's scheduling on to that",
+    "start": "1706930",
+    "end": "1711970"
+  },
+  {
+    "text": "node so one of the things that comes up is why not use the upstream topology",
+    "start": "1711970",
+    "end": "1718540"
+  },
+  {
+    "start": "1714000",
+    "end": "1774000"
+  },
+  {
+    "text": "manager so this was introduced in 1.16 the latest version of kubernetes as an",
+    "start": "1718540",
+    "end": "1724120"
+  },
+  {
+    "text": "alpha feature so the topology manager is a little bit different in that it gets topology hints from",
+    "start": "1724120",
+    "end": "1729370"
+  },
+  {
+    "text": "hint providers to map devices to other resources so one example that is you",
+    "start": "1729370",
+    "end": "1734529"
+  },
+  {
+    "text": "might have an NVIDIA GPU device plug-in that gives you a hint about which Numa node it's on and then the topology",
+    "start": "1734529",
+    "end": "1740649"
+  },
+  {
+    "text": "manager can then bind that particular GPU to a Numa node so but the biggest",
+    "start": "1740649",
+    "end": "1746769"
+  },
+  {
+    "text": "difference is this is not part of the kubernetes scheduler it's part of cubelet that runs on each node so it's possible for your workload to be",
+    "start": "1746769",
+    "end": "1753580"
+  },
+  {
+    "text": "scheduled to a node by the scheduler and then kicked off by a cubelet because the resources aren't matching the numeral",
+    "start": "1753580",
+    "end": "1759159"
+  },
+  {
+    "text": "requirements that you wanted but it looks like they're also adding PCIe awareness soon so our hope is that the",
+    "start": "1759159",
+    "end": "1766090"
+  },
+  {
+    "text": "upstream topology Manor manager can add the same features that we've been working on so that we don't actually have to use our scheduler anymore so",
+    "start": "1766090",
+    "end": "1775269"
+  },
+  {
+    "start": "1774000",
+    "end": "1920000"
+  },
+  {
+    "text": "some future work number one was open source it was going through legal up until yesterday so we",
+    "start": "1775269",
+    "end": "1780669"
+  },
+  {
+    "text": "were able to open source it so that's the the link there if you want to check it out we're also working on getting the",
+    "start": "1780669",
+    "end": "1787210"
+  },
+  {
+    "text": "the containers pushed to a public registry right now it's only internal so if you do go get the code you can build",
+    "start": "1787210",
+    "end": "1792759"
+  },
+  {
+    "text": "it but it it will not push anywhere right now pretty soon it will probably",
+    "start": "1792759",
+    "end": "1798039"
+  },
+  {
+    "text": "be on docker hub or maybe Quay and then we're also looking at inter intel's",
+    "start": "1798039",
+    "end": "1803649"
+  },
+  {
+    "text": "resource directory technology which is effectively a whole suite of things that",
+    "start": "1803649",
+    "end": "1809110"
+  },
+  {
+    "text": "you could do on a cpu to manage contention and manage resources so one of the things that's most interesting",
+    "start": "1809110",
+    "end": "1814269"
+  },
+  {
+    "text": "for our scheduler is you can manage the cache and memory bandwidth allocations so as an example if you had a pod that",
+    "start": "1814269",
+    "end": "1821200"
+  },
+  {
+    "text": "you know might use two megabytes of l3 cache you could make that a tree source",
+    "start": "1821200",
+    "end": "1826210"
+  },
+  {
+    "text": "going into this to the pods resource spec so that when the scheduler sees it",
+    "start": "1826210",
+    "end": "1832299"
+  },
+  {
+    "text": "it would also use that and its decision to place it on a node so if you had another pod that for example is going to",
+    "start": "1832299",
+    "end": "1837999"
+  },
+  {
+    "text": "use the entire l3 cache then you would only place that pod on a node that had no other pods running on it and it also",
+    "start": "1837999",
+    "end": "1845080"
+  },
+  {
+    "text": "allows you to segregate the cache so with that technology you can make a specific pod assign certain cache lines",
+    "start": "1845080",
+    "end": "1851740"
+  },
+  {
+    "text": "or certain cache ways so that no other pods can use that and you avoid the noisy neighbor problem we're also",
+    "start": "1851740",
+    "end": "1859600"
+  },
+  {
+    "text": "looking at some speed improvements right now it's it's a little slow it's it's definitely not as fast as the the upstream scheduler we",
+    "start": "1859600",
+    "end": "1867100"
+  },
+  {
+    "text": "didn't intend it to be that fast but it's it's definitely slower than it",
+    "start": "1867100",
+    "end": "1872710"
+  },
+  {
+    "text": "could be but right now we're running it on about 30 nodes and it's fast enough for that but at a higher scale with",
+    "start": "1872710",
+    "end": "1878230"
+  },
+  {
+    "text": "hundreds or thousands of nodes it would be far too slow to be used there another",
+    "start": "1878230",
+    "end": "1883509"
+  },
+  {
+    "text": "thing we've looked at is envy link topology so if you're if you're familiar with GPU servers the topology for the",
+    "start": "1883509",
+    "end": "1888610"
+  },
+  {
+    "text": "energy inter GPU connections can vary from server to server some of them have full mesh some of them don't some of",
+    "start": "1888610",
+    "end": "1894850"
+  },
+  {
+    "text": "them have more LANs going to certain GPUs than others so if we had that awareness as well we could build that",
+    "start": "1894850",
+    "end": "1901419"
+  },
+  {
+    "text": "into the scheduler and then last was to delete the project so we we don't feel",
+    "start": "1901419",
+    "end": "1906820"
+  },
+  {
+    "text": "like we want to maintain a scheduler from this point on so the only reason we have it is because the current scheduler",
+    "start": "1906820",
+    "end": "1912700"
+  },
+  {
+    "text": "doesn't meet our needs but if the kubernetes community starts to add in some of these features later we won't",
+    "start": "1912700",
+    "end": "1917919"
+  },
+  {
+    "text": "have to use the scheduler anymore so lastly I just wanted to say thanks to",
+    "start": "1917919",
+    "end": "1923110"
+  },
+  {
+    "start": "1920000",
+    "end": "1955000"
+  },
+  {
+    "text": "some people advice that Tim Federico and the rest of our signal processing team Peter's our kubernetes guy and then some",
+    "start": "1923110",
+    "end": "1931419"
+  },
+  {
+    "text": "of the other people at this conference Duffy Lewis and Doug that answered a lot of the questions I'm getting at this",
+    "start": "1931419",
+    "end": "1937750"
+  },
+  {
+    "text": "point my wife and kids and Intel and Red Hat mostly because they've done a ton of",
+    "start": "1937750",
+    "end": "1942879"
+  },
+  {
+    "text": "work in this area that we're leveraging so for example the node feature discovery plug in the Intel I think",
+    "start": "1942879",
+    "end": "1949600"
+  },
+  {
+    "text": "originally made we're using that heavily to make decisions on how to schedule and",
+    "start": "1949600",
+    "end": "1955690"
+  },
+  {
+    "start": "1955000",
+    "end": "2045000"
+  },
+  {
+    "text": "that's it any questions yep",
+    "start": "1955690",
+    "end": "1960029"
+  },
+  {
+    "text": "in v8 sorry nvidia a multi-process yeah so",
+    "start": "1966390",
+    "end": "1973590"
+  },
+  {
+    "text": "yeah that that wouldn't be hard to do we we have not had a need to share GPUs",
+    "start": "1973590",
+    "end": "1979809"
+  },
+  {
+    "text": "across pods right now because if you go back to that that one server that has either eight GPUs or sixteen GPUs",
+    "start": "1979809",
+    "end": "1986610"
+  },
+  {
+    "text": "usually our pods we wouldn't need to share those across many more pods than",
+    "start": "1986610",
+    "end": "1992200"
+  },
+  {
+    "text": "that because the type of CPU and and networking workloads that we have wouldn't allow for that many pods on",
+    "start": "1992200",
+    "end": "1998620"
+  },
+  {
+    "text": "that machine anyways so we haven't had a need for that but I know that people do that although once you once you start",
+    "start": "1998620",
+    "end": "2006240"
+  },
+  {
+    "text": "doing multi process on GPU you're starting to ask for more latency and",
+    "start": "2006240",
+    "end": "2011490"
+  },
+  {
+    "text": "jitter than than you would without that so it can be done but if you're going",
+    "start": "2011490",
+    "end": "2016650"
+  },
+  {
+    "text": "for the absolute lowest latency and jitter you probably don't want someone else running on the GPU that you don't",
+    "start": "2016650",
+    "end": "2022740"
+  },
+  {
+    "text": "know what they're doing I believe the latest NVIDIA GPUs of the v100 Elise has more segregation as to",
+    "start": "2022740",
+    "end": "2030419"
+  },
+  {
+    "text": "more fine-tuned granularity as to breaking up resources on the GPU but I haven't tried it yet yep",
+    "start": "2030419",
+    "end": "2039890"
+  },
+  {
+    "start": "2045000",
+    "end": "2090000"
+  },
+  {
+    "text": "where is what storage sorry Oh so yeah so right now we have it in a",
+    "start": "2046440",
+    "end": "2056620"
+  },
+  {
+    "text": "config map so when a pod comes up or in our particular case the pod comes up and it has a config map which is the",
+    "start": "2056620",
+    "end": "2062470"
+  },
+  {
+    "text": "configuration for the pod and that config map is what we mangle basically to assign physical resources so the",
+    "start": "2062470",
+    "end": "2069550"
+  },
+  {
+    "text": "config map might have something like you need two logical CPUs and two GPUs",
+    "start": "2069550",
+    "end": "2074560"
+  },
+  {
+    "text": "and then the scheduler goes and modifies the config map and puts the physical resources in there so that when the pod",
+    "start": "2074560",
+    "end": "2080408"
+  },
+  {
+    "text": "launches it takes in the config map and it has all the physical resources that it needs yeah so so we're using the node",
+    "start": "2080409",
+    "end": "2092770"
+  },
+  {
+    "start": "2090000",
+    "end": "2150000"
+  },
+  {
+    "text": "feature discovery tool from I think it's in the incubator program now that's what",
+    "start": "2092770",
+    "end": "2099640"
+  },
+  {
+    "text": "reports all the properties of the node and I forgot to mention we we did make some hooks onto the NFTE the node",
+    "start": "2099640",
+    "end": "2105550"
+  },
+  {
+    "text": "feature discovery tool so things like isil cpus weren't reported by that originally and it allows user hooks",
+    "start": "2105550",
+    "end": "2112660"
+  },
+  {
+    "text": "basically your own binary to report more things about the node so in addition to the default node feature discovery we",
+    "start": "2112660",
+    "end": "2119860"
+  },
+  {
+    "text": "have a couple more hooks in there that are used by this that report things like SR io v the number of virtual functions",
+    "start": "2119860",
+    "end": "2125680"
+  },
+  {
+    "text": "on the card the speed of the the network interface because some people have heterogeneous network interfaces in the",
+    "start": "2125680",
+    "end": "2132340"
+  },
+  {
+    "text": "in the node so all the node information is reported by node feature discovery",
+    "start": "2132340",
+    "end": "2139680"
+  },
+  {
+    "text": "sorryi which has to be",
+    "start": "2143160",
+    "end": "2146910"
+  },
+  {
+    "text": "no no we didn't touch any kubernetes code so the scheduler since curdled kubernetes allows custom schedulers by",
+    "start": "2149210",
+    "end": "2156210"
+  },
+  {
+    "start": "2150000",
+    "end": "2243000"
+  },
+  {
+    "text": "just setting the scheduler name field of the pod properties the default scheduler",
+    "start": "2156210",
+    "end": "2161609"
+  },
+  {
+    "text": "ignores anything that doesn't have no that has any field other than the",
+    "start": "2161609",
+    "end": "2167040"
+  },
+  {
+    "text": "default scheduler in there and then it's up to your own scheduler to watch for those pods so we didn't have to modify",
+    "start": "2167040",
+    "end": "2172380"
+  },
+  {
+    "text": "cubelet or any of kubernetes at all for this to work so this is effectively a pod that sits in your cluster just not",
+    "start": "2172380",
+    "end": "2179790"
+  },
+  {
+    "text": "like the scheduler but it's a it'll sit there running as a normal pod that's a replica set that when another pod comes",
+    "start": "2179790",
+    "end": "2186750"
+  },
+  {
+    "text": "online and it has this particular scheduler name in the scheduler field then that pod watches for it and it",
+    "start": "2186750",
+    "end": "2192690"
+  },
+  {
+    "text": "assigns it to a node instead of the default scheduler and what that also means is you can have both the default",
+    "start": "2192690",
+    "end": "2199050"
+  },
+  {
+    "text": "scheduler and the scheduler running at the same time so if you have other people that don't care about these type",
+    "start": "2199050",
+    "end": "2205230"
+  },
+  {
+    "text": "of things they could use the default scheduler and go to the nodes that are scheduled by the default scheduler yeah",
+    "start": "2205230",
+    "end": "2215730"
+  },
+  {
+    "text": "so typically the way that we do it is is any node that is going to be used for high performance stuff will have will be",
+    "start": "2215730",
+    "end": "2221490"
+  },
+  {
+    "text": "tainted for this particular scheduler and the default scheduler won't use it and then all the other nodes that are",
+    "start": "2221490",
+    "end": "2227160"
+  },
+  {
+    "text": "not used for that type of stuff will not have the taint on it and they'll they'll use those nodes yep",
+    "start": "2227160",
+    "end": "2235609"
+  },
+  {
+    "start": "2243000",
+    "end": "2302000"
+  },
+  {
+    "text": "so I don't know a whole lot about slurm so I can't really comment on that we the reason why we did this is we had quite a",
+    "start": "2244069",
+    "end": "2251299"
+  },
+  {
+    "text": "bit of run time on kubernetes and we were really happy with things like the deployment time and the stability and",
+    "start": "2251299",
+    "end": "2259130"
+  },
+  {
+    "text": "since custom schedulers were something that we could do without upstreaming anything it's it was just something that",
+    "start": "2259130",
+    "end": "2265549"
+  },
+  {
+    "text": "we we happen to do and we're we're pretty happy with it so we haven't really had any major issues we did see a",
+    "start": "2265549",
+    "end": "2273079"
+  },
+  {
+    "text": "difference - I mean before you do things like isolating CPUs before things like",
+    "start": "2273079",
+    "end": "2278179"
+  },
+  {
+    "text": "that daemon that moved them to the isolated set we were seeing stalls of like one millisecond which doesn't sound",
+    "start": "2278179",
+    "end": "2283910"
+  },
+  {
+    "text": "like a lot well when you're doing real-time applications it's a lot and those go away when you do those kind of",
+    "start": "2283910",
+    "end": "2289400"
+  },
+  {
+    "text": "things yep yes",
+    "start": "2289400",
+    "end": "2297008"
+  },
+  {
+    "text": "yeah so the question is are we using ISIL CPUs and CPU sets the answer is yes",
+    "start": "2301180",
+    "end": "2306829"
+  },
+  {
+    "start": "2302000",
+    "end": "2389000"
+  },
+  {
+    "text": "and the reason and this may not be needed but I believe that the kernel",
+    "start": "2306829",
+    "end": "2313130"
+  },
+  {
+    "text": "itself will pay attention to ISIL CPUs for the most part so if you said ISIL CPUs most of the kernel threads that can",
+    "start": "2313130",
+    "end": "2319099"
+  },
+  {
+    "text": "be moved will be moved right away CPU sets what we found was a lot of things wouldn't be moved they would be",
+    "start": "2319099",
+    "end": "2325400"
+  },
+  {
+    "text": "in the root CPU set which is wide open and so a lot of the kernel threads were still running on the isolated or yeah",
+    "start": "2325400",
+    "end": "2333049"
+  },
+  {
+    "text": "the isolated CPU said so we had to force them off with CPU sets so it was it was basically combining those two and we",
+    "start": "2333049",
+    "end": "2339079"
+  },
+  {
+    "text": "looked in the kernel documentation there's not a lot about how those two interact together it it seemed like ISIL",
+    "start": "2339079",
+    "end": "2346369"
+  },
+  {
+    "text": "CPUs just the legacy thing and and if you can avoid using it you should but",
+    "start": "2346369",
+    "end": "2351499"
+  },
+  {
+    "text": "using CPU sets alone didn't cut it for us there was some there are certain things we couldn't move by do by using",
+    "start": "2351499",
+    "end": "2358309"
+  },
+  {
+    "text": "just CPU sets if you have any more information about the loved to talk",
+    "start": "2358309",
+    "end": "2363890"
+  },
+  {
+    "text": "about it okay and by the way I have heard other people",
+    "start": "2363890",
+    "end": "2369200"
+  },
+  {
+    "text": "solving that problem differently this is just the way that we happen to do because we didn't know that they had",
+    "start": "2369200",
+    "end": "2374269"
+  },
+  {
+    "text": "solved it differently until after we already did yep",
+    "start": "2374269",
+    "end": "2380440"
+  },
+  {
+    "text": "so the question is how do you specify the CPU cores and the GPUs so that",
+    "start": "2388780",
+    "end": "2394070"
+  },
+  {
+    "start": "2389000",
+    "end": "2440000"
+  },
+  {
+    "text": "cubelet will recognize it so in our case cubelet doesn't care so when you start",
+    "start": "2394070",
+    "end": "2399590"
+  },
+  {
+    "text": "up a pod from this scheduler the the pod is allowed to see all the cores and it's",
+    "start": "2399590",
+    "end": "2405860"
+  },
+  {
+    "text": "but it's only using the ones that were mapped into its configuration so if your configuration says you're assigned four",
+    "start": "2405860",
+    "end": "2411110"
+  },
+  {
+    "text": "five six the pot is going to find itself two four five six and device one for GPU",
+    "start": "2411110",
+    "end": "2416540"
+  },
+  {
+    "text": "for example so it's it's not the best way to do because you could you could have a rogue pod that just starts using",
+    "start": "2416540",
+    "end": "2422480"
+  },
+  {
+    "text": "other ones and that's not ideal but right now we we haven't really done any",
+    "start": "2422480",
+    "end": "2427880"
+  },
+  {
+    "text": "multi-tenancy with kind of bad actors where we had faced that problem but cubelet doesn't need to know about the",
+    "start": "2427880",
+    "end": "2434030"
+  },
+  {
+    "text": "cores so the cores are in the config map",
+    "start": "2434030",
+    "end": "2441830"
+  },
+  {
+    "start": "2440000",
+    "end": "2484000"
+  },
+  {
+    "text": "and the pod starts up reads the config map and knows which cores it belongs to",
+    "start": "2441830",
+    "end": "2447560"
+  },
+  {
+    "text": "or which cores it needs you yeah and the reason why we did that is we had a",
+    "start": "2447560",
+    "end": "2452720"
+  },
+  {
+    "text": "legacy application that had a config map already where we assign physical resources and as as the project grew",
+    "start": "2452720",
+    "end": "2460730"
+  },
+  {
+    "text": "that was really difficult to have everybody assigned physical resources that weren't hitting someone else especially on you know the network side",
+    "start": "2460730",
+    "end": "2468640"
+  },
+  {
+    "text": "and so what this allows you to do was not specify any physical resources and",
+    "start": "2468640",
+    "end": "2473780"
+  },
+  {
+    "text": "have it just populated for you by the scheduler yep sorry",
+    "start": "2473780",
+    "end": "2482980"
+  },
+  {
+    "text": "yeah the question is will it work on PowerPC I don't see any reason why it",
+    "start": "2483440",
+    "end": "2488549"
+  },
+  {
+    "start": "2484000",
+    "end": "2542000"
+  },
+  {
+    "text": "wouldn't so you don't have to use GPUs for example even though they will work",
+    "start": "2488549",
+    "end": "2494940"
+  },
+  {
+    "text": "on PowerPC you the hyper threading I think on PowerPC has like eight threads per core or something like that so that",
+    "start": "2494940",
+    "end": "2503609"
+  },
+  {
+    "text": "should work so I haven't tried it I don't have a PowerPC to try on but if it",
+    "start": "2503609",
+    "end": "2510029"
+  },
+  {
+    "text": "doesn't work on PowerPC it would be a small change I think any other questions",
+    "start": "2510029",
+    "end": "2515959"
+  },
+  {
+    "text": "yep oh so your question is why doesn't",
+    "start": "2515959",
+    "end": "2533369"
+  },
+  {
+    "text": "the pod move itself to the right CPU said that's all it's doing",
+    "start": "2533369",
+    "end": "2543479"
+  },
+  {
+    "start": "2542000",
+    "end": "2579000"
+  },
+  {
+    "text": "yeah the and I'm I'm trying to remember why we did that I think the reason was",
+    "start": "2543479",
+    "end": "2549029"
+  },
+  {
+    "text": "basically the pit inside of the container is different I know you can set the host food to have the host pet",
+    "start": "2549029",
+    "end": "2554339"
+  },
+  {
+    "text": "outside of it but then it becomes more of a security issue because now you have to expose more things on the host of the",
+    "start": "2554339",
+    "end": "2560279"
+  },
+  {
+    "text": "pod to move itself I don't remember if that was the exact reason we did I'd have to think about it more but it I",
+    "start": "2560279",
+    "end": "2566569"
+  },
+  {
+    "text": "yeah good question yep",
+    "start": "2566569",
+    "end": "2574400"
+  },
+  {
+    "text": "yeah so so the problem we found with the Nvidia device plug-in is it doesn't",
+    "start": "2578719",
+    "end": "2584160"
+  },
+  {
+    "start": "2579000",
+    "end": "2637000"
+  },
+  {
+    "text": "allow you to select a device it gives you a random device that's on the machine and that's not good enough for",
+    "start": "2584160",
+    "end": "2589369"
+  },
+  {
+    "text": "the reason I explained so the the pot itself has the physical device ID and",
+    "start": "2589369",
+    "end": "2594779"
+  },
+  {
+    "text": "you no longer need the device plug-in anymore because it's not using the consumable resource from the pod spec",
+    "start": "2594779",
+    "end": "2600809"
+  },
+  {
+    "text": "anymore it's using just the device ID and CUDA visible devices the environment variable is basically wide open you can",
+    "start": "2600809",
+    "end": "2607140"
+  },
+  {
+    "text": "see all the devices it would be nice if the device plugin allowed you to specify",
+    "start": "2607140",
+    "end": "2612269"
+  },
+  {
+    "text": "the exact device that you wanted but it's that's not the case right now yeah",
+    "start": "2612269",
+    "end": "2619788"
+  },
+  {
+    "text": "sorry I mean it's I'm getting a lot of noise from out there yeah so in our",
+    "start": "2624169",
+    "end": "2637619"
+  },
+  {
+    "text": "particular case we we already had an application that did that we had an application that had a config file with",
+    "start": "2637619",
+    "end": "2642749"
+  },
+  {
+    "text": "physical resources in it that we would hand edit and then start at the pod and that was cumbersome so that takes the",
+    "start": "2642749",
+    "end": "2648929"
+  },
+  {
+    "text": "place of this so if you didn't have our application you were coming in with a different application you would have",
+    "start": "2648929",
+    "end": "2655109"
+  },
+  {
+    "text": "your own config format that had basically placeholders for all those physical resources that you could tie",
+    "start": "2655109",
+    "end": "2660659"
+  },
+  {
+    "text": "back into your application and let it assign them and then move them back into your application thanks that's a lot",
+    "start": "2660659",
+    "end": "2665969"
+  },
+  {
+    "text": "better",
+    "start": "2665969",
+    "end": "2668089"
+  },
+  {
+    "text": "yeah the application has to do the same thing but when you're using DP DK that's",
+    "start": "2672460",
+    "end": "2677470"
+  },
+  {
+    "text": "the the first thing you do when you initialize DP DK is passed a list of physical cores so you have to know that",
+    "start": "2677470",
+    "end": "2683720"
+  },
+  {
+    "text": "anyways you have to know your list of physical cores so yeah the pod has to do that but instead of maybe having a",
+    "start": "2683720",
+    "end": "2690670"
+  },
+  {
+    "text": "static list of physical cores you'll have one that's passed in from outside",
+    "start": "2690670",
+    "end": "2697270"
+  },
+  {
+    "text": "any more questions yep so we use DC GMI",
+    "start": "2698470",
+    "end": "2706970"
+  },
+  {
+    "start": "2705000",
+    "end": "2744000"
+  },
+  {
+    "text": "to do health checks in the background that is currently not fed back to this",
+    "start": "2706970",
+    "end": "2712040"
+  },
+  {
+    "text": "but that's a that's something we we should do in the future yeah the",
+    "start": "2712040",
+    "end": "2717050"
+  },
+  {
+    "text": "question was do we do any GPU health check so if a GPU dies you don't want to schedule to it anymore so we while we do",
+    "start": "2717050",
+    "end": "2723590"
+  },
+  {
+    "text": "that on the side it's not fed back to the scheduler currently and that's that's kind of one of the downsides of not using the device plugin is it does",
+    "start": "2723590",
+    "end": "2729770"
+  },
+  {
+    "text": "do the health checks for you and it'll get rid of it any more questions yep",
+    "start": "2729770",
+    "end": "2737920"
+  },
+  {
+    "start": "2744000",
+    "end": "2790000"
+  },
+  {
+    "text": "so the question is that the pods need special privileges to pick the resources themselves I don't think so I don't",
+    "start": "2744089",
+    "end": "2752039"
+  },
+  {
+    "text": "think we're running with any special privileges I'd have to check I I don't",
+    "start": "2752039",
+    "end": "2757589"
+  },
+  {
+    "text": "think we do though it originally we were running with host networking but we've",
+    "start": "2757589",
+    "end": "2764099"
+  },
+  {
+    "text": "moved away from that and this works without host networking because I was presenting a whole bunch of other problems but I I can't think of anything",
+    "start": "2764099",
+    "end": "2771390"
+  },
+  {
+    "text": "that else that's required the container",
+    "start": "2771390",
+    "end": "2777989"
+  },
+  {
+    "text": "I'd have to check I forget any more",
+    "start": "2777989",
+    "end": "2784619"
+  },
+  {
+    "text": "questions all right thank you",
+    "start": "2784619",
+    "end": "2791420"
+  }
+]

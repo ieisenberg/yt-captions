@@ -1,0 +1,1737 @@
+[
+  {
+    "text": "welcome everyone to the first session of the day in the waterfall room um I'm",
+    "start": "80",
+    "end": "5920"
+  },
+  {
+    "text": "very excited to introduce you to this session which is exploring stm's implementation of rolling updates with",
+    "start": "5920",
+    "end": "12519"
+  },
+  {
+    "text": "Tina Seng so with that Tina I'm going to hand over to",
+    "start": "12519",
+    "end": "18600"
+  },
+  {
+    "text": "you thank you Kate um hi everyone um thank you so much for joining the",
+    "start": "18600",
+    "end": "24880"
+  },
+  {
+    "text": "session my name is ktim Ming but I go by Tina um",
+    "start": "24880",
+    "end": "30679"
+  },
+  {
+    "text": "I work on redhead mq streams which is a data streaming platform based on Apache",
+    "start": "30679",
+    "end": "35680"
+  },
+  {
+    "text": "Kafka so as part of my role I work on stream as well um I so in the past year",
+    "start": "35680",
+    "end": "42280"
+  },
+  {
+    "text": "I worked on stream's rolling updates I spent quite some time working on that so",
+    "start": "42280",
+    "end": "47360"
+  },
+  {
+    "text": "in this session I'm excited to share what I've",
+    "start": "47360",
+    "end": "52039"
+  },
+  {
+    "text": "learned right um so here's an overview cluster operator and Kafka cluster it",
+    "start": "57680",
+    "end": "64320"
+  },
+  {
+    "text": "manages um Kafka cluster is typically deployed with three or more broker nodes",
+    "start": "64320",
+    "end": "69960"
+  },
+  {
+    "text": "and if you're running in craft mode you typically also have three or more controller nodes and as you know the",
+    "start": "69960",
+    "end": "76600"
+  },
+  {
+    "text": "operator uh deploys and manage all the resource needed for your Kafka cluster",
+    "start": "76600",
+    "end": "82280"
+  },
+  {
+    "text": "um and that includes the rolling update for yakka cluster as well so when you're",
+    "start": "82280",
+    "end": "87520"
+  },
+  {
+    "text": "doing rolling update for yakka cluster um it has to be done really carefully to",
+    "start": "87520",
+    "end": "92600"
+  },
+  {
+    "text": "avoid any impact on the cluster availability and client applications um",
+    "start": "92600",
+    "end": "97799"
+  },
+  {
+    "text": "it can't be just left to kues um even though it does have a rolling restart feature because kues doesn't have the",
+    "start": "97799",
+    "end": "105360"
+  },
+  {
+    "text": "kfka specific knowledge that he needs so this brings us to cfar Roller",
+    "start": "105360",
+    "end": "111680"
+  },
+  {
+    "text": "uh which is a component internal component of streamy that is responsible for coordinating the rolling reset for",
+    "start": "111680",
+    "end": "119079"
+  },
+  {
+    "text": "Kafka cluster it uses various sources to get information about Kafka cluster to",
+    "start": "119079",
+    "end": "124960"
+  },
+  {
+    "text": "perform the update with um as minimal disruption as",
+    "start": "124960",
+    "end": "130679"
+  },
+  {
+    "text": "possible so in this session we're going to Deep dive into Kafka roller component",
+    "start": "131280",
+    "end": "136480"
+  },
+  {
+    "text": "um we'll be looking at uh what triggers rolling update and how cak roller makes",
+    "start": "136480",
+    "end": "142239"
+  },
+  {
+    "text": "decisions whether to restart the pot not and what kind of safety checks it does",
+    "start": "142239",
+    "end": "147280"
+  },
+  {
+    "text": "perform before restarting to pot um to ensure a minimal impact on the cluster",
+    "start": "147280",
+    "end": "153840"
+  },
+  {
+    "text": "and what happens after the rolling After Rolling restart like what sort of",
+    "start": "153840",
+    "end": "159480"
+  },
+  {
+    "text": "outcomes we expect and um also cfar roller is very complex component and it",
+    "start": "159480",
+    "end": "165519"
+  },
+  {
+    "text": "works really well however it's not perfect there are still things we could improve with it so we'll look at some of",
+    "start": "165519",
+    "end": "171560"
+  },
+  {
+    "text": "the shortcomings of it as well so streamy has a periodic",
+    "start": "171560",
+    "end": "178800"
+  },
+  {
+    "text": "reconation uh we we uh it gets triggered every two minutes by default and this",
+    "start": "178800",
+    "end": "185400"
+  },
+  {
+    "text": "interval can be conf reconfigured using the streamy environment variable um",
+    "start": "185400",
+    "end": "191120"
+  },
+  {
+    "text": "reconcilation not only gets triggered by the timer but there are certain events that trigger the reconation as well and",
+    "start": "191120",
+    "end": "197280"
+  },
+  {
+    "text": "CF roller runs as part of this reconciliation",
+    "start": "197280",
+    "end": "202560"
+  },
+  {
+    "text": "process so this is from high level how cfal Works um the first thing it does is",
+    "start": "202560",
+    "end": "209000"
+  },
+  {
+    "text": "order PA pods um the restarting the pods in the right order is quite important um",
+    "start": "209000",
+    "end": "214959"
+  },
+  {
+    "text": "there are different nodes with different roles and responsibilities so which one you start first or last uh has different",
+    "start": "214959",
+    "end": "222080"
+  },
+  {
+    "text": "kind of impact and then uh repeats the process of uh determining the action for a part",
+    "start": "222080",
+    "end": "229599"
+  },
+  {
+    "text": "and doing the safety checks and and go going ahead and taking the action so this these three steps are repeated",
+    "start": "229599",
+    "end": "236000"
+  },
+  {
+    "text": "process um um which gets executed for each of the pods in the",
+    "start": "236000",
+    "end": "241519"
+  },
+  {
+    "text": "order um another thing the caar roller does is um try recovering any unhealthy",
+    "start": "241519",
+    "end": "249280"
+  },
+  {
+    "text": "Parts um which could result taking the action um immediately without doing the",
+    "start": "249280",
+    "end": "254920"
+  },
+  {
+    "text": "safety checks so we we'll take a look at those scenarios as well later and if the",
+    "start": "254920",
+    "end": "260359"
+  },
+  {
+    "text": "action fails for the Pod uh we might have to repeat this process again for that pot as well um so again this could",
+    "start": "260359",
+    "end": "267320"
+  },
+  {
+    "text": "be repeated um for each pot m multiple times and then at the end we'll complete",
+    "start": "267320",
+    "end": "272800"
+  },
+  {
+    "text": "the reconcilation with uh either success or failed",
+    "start": "272800",
+    "end": "278120"
+  },
+  {
+    "text": "result okay so let's walk through each of these steps uh let's have a look how",
+    "start": "278520",
+    "end": "283560"
+  },
+  {
+    "text": "cfar roller orders the pot um so roller always attempts to uh restart the",
+    "start": "283560",
+    "end": "291000"
+  },
+  {
+    "text": "unready pods first um because like I said it tries to recover the unhealthy Parts first um before do anything else",
+    "start": "291000",
+    "end": "298759"
+  },
+  {
+    "text": "with it um we also don't want to restart any of",
+    "start": "298759",
+    "end": "304320"
+  },
+  {
+    "text": "any of the healthy pods in case they break as well so this is why we do them first and in Craft um we also restart",
+    "start": "304320",
+    "end": "313039"
+  },
+  {
+    "text": "the controller pods first um because without the Quorum Brokers would not be able to operate correctly and it's quite",
+    "start": "313039",
+    "end": "320479"
+  },
+  {
+    "text": "important that we operate in the Quorum controller nodes first to make sure the Quorum is healthy and stable before we",
+    "start": "320479",
+    "end": "326960"
+  },
+  {
+    "text": "do anything with the Brokers so first we put the unready controller parts and then after that we",
+    "start": "326960",
+    "end": "333800"
+  },
+  {
+    "text": "put the controller parts and the one of the controller po will be the active",
+    "start": "333800",
+    "end": "339080"
+  },
+  {
+    "text": "controller or the Quorum leader and restarting the active controller U is",
+    "start": "339080",
+    "end": "344680"
+  },
+  {
+    "text": "potentially a destructive event because um that would mean the Brokers would",
+    "start": "344680",
+    "end": "350120"
+  },
+  {
+    "text": "need to reconnect and the new uh active controller need to be reelected um so",
+    "start": "350120",
+    "end": "355919"
+  },
+  {
+    "text": "this is why we want to do this at at last so we put the active controller at last of the uh controller",
+    "start": "355919",
+    "end": "363840"
+  },
+  {
+    "text": "nodes and then we put the unre broker pods and then the broker pods and if",
+    "start": "363840",
+    "end": "369919"
+  },
+  {
+    "text": "you're running in Zookeeper mode uh one of these broker is also the controller so again that controller would be uh put",
+    "start": "369919",
+    "end": "377960"
+  },
+  {
+    "text": "to be restarted at last okay so when I say I'm ready ready",
+    "start": "377960",
+    "end": "384280"
+  },
+  {
+    "text": "what does it really mean um so this is basically kuet Readiness check uh which",
+    "start": "384280",
+    "end": "390039"
+  },
+  {
+    "text": "is based on the broker state so when uh Kafka note starts up it",
+    "start": "390039",
+    "end": "396120"
+  },
+  {
+    "text": "transition through different kind of states and it emits that state as a metric which is called broker State and",
+    "start": "396120",
+    "end": "403319"
+  },
+  {
+    "text": "if the broker state is um equal or running equal or greater than running",
+    "start": "403319",
+    "end": "409240"
+  },
+  {
+    "text": "that uh means this uh broker is ready it just means it's ready to serve",
+    "start": "409240",
+    "end": "415520"
+  },
+  {
+    "text": "requests um and it applies to both zookeeper and craft BAS",
+    "start": "415520",
+    "end": "420960"
+  },
+  {
+    "text": "broker and in craft mode you can also have a node that is both controller and a broker um which we call mixed note or",
+    "start": "420960",
+    "end": "429080"
+  },
+  {
+    "text": "combined note and this check also applies to uh mix note as",
+    "start": "429080",
+    "end": "434639"
+  },
+  {
+    "text": "well um and then we also collect the broker State metrics and expose that by using Kafka agent uh which is a Java",
+    "start": "434639",
+    "end": "442039"
+  },
+  {
+    "text": "agent that we run with the Kafka noes and for craft controllers we have a",
+    "start": "442039",
+    "end": "449560"
+  },
+  {
+    "text": "different um Readiness check so the controller part is considered to be",
+    "start": "449560",
+    "end": "455120"
+  },
+  {
+    "text": "ready um if the controller process is listening on the part defined in controller listener names configuration",
+    "start": "455120",
+    "end": "462520"
+  },
+  {
+    "text": "so this is the part that Brokers use to communicate with the",
+    "start": "462520",
+    "end": "467360"
+  },
+  {
+    "text": "Corum okay so let's take a look at um how we determine the action for a",
+    "start": "468159",
+    "end": "473919"
+  },
+  {
+    "text": "PO um as I said earlier we always deal with the unready parts first to recover",
+    "start": "473919",
+    "end": "479560"
+  },
+  {
+    "text": "any of the unhealthy Parts um so there are different various different scenarios why Parts might be unready so",
+    "start": "479560",
+    "end": "486560"
+  },
+  {
+    "text": "we'll look at those different scenarios and see that what kind of uh decision Coller makes with",
+    "start": "486560",
+    "end": "493520"
+  },
+  {
+    "text": "it so first um the uh CF roller checks if the uh pot has been in unresolve",
+    "start": "493520",
+    "end": "502319"
+  },
+  {
+    "text": "unresolvable state for some time uh and this is indicated by one of these uh",
+    "start": "502319",
+    "end": "507720"
+  },
+  {
+    "text": "kubernetes pot state is a container state so if the pot is in any of this",
+    "start": "507720",
+    "end": "513719"
+  },
+  {
+    "text": "state it considers it to be stuck so let's see the flow what we do",
+    "start": "513719",
+    "end": "520479"
+  },
+  {
+    "text": "with that um so we check if the pot is stuck or not and if it's not stuck um",
+    "start": "520479",
+    "end": "528360"
+  },
+  {
+    "text": "they we're just going to give a chance to become ready so we'll just do some waiting and this weit has a timeout",
+    "start": "528360",
+    "end": "534640"
+  },
+  {
+    "text": "we'll talk about that more later and this is just to give the chance um give",
+    "start": "534640",
+    "end": "540839"
+  },
+  {
+    "text": "chance to the Pod to become ready in case it was just started uh it might just need a bit more time to start",
+    "start": "540839",
+    "end": "547160"
+  },
+  {
+    "text": "serving before it start serving request and if it is stuck um the next",
+    "start": "547160",
+    "end": "553600"
+  },
+  {
+    "text": "thing it checks is if this part is out of date meaning that if this part is",
+    "start": "553600",
+    "end": "558839"
+  },
+  {
+    "text": "running with the desired version desired configuration if is there any like pending update to be applied to this",
+    "start": "558839",
+    "end": "565160"
+  },
+  {
+    "text": "part and if it's not active dat so it is running with theet just uh the desired",
+    "start": "565160",
+    "end": "571200"
+  },
+  {
+    "text": "version then we going to immediately fail the reconation here this is because",
+    "start": "571200",
+    "end": "576839"
+  },
+  {
+    "text": "there's no really point of restarting this part because when it gets restarted it's probably going to end up in the",
+    "start": "576839",
+    "end": "582680"
+  },
+  {
+    "text": "same state and we also want to avoid restarting other parts as well in case they also end up in that um broken state",
+    "start": "582680",
+    "end": "590959"
+  },
+  {
+    "text": "so this is why we fail the reconation and then if it is activate if",
+    "start": "590959",
+    "end": "596560"
+  },
+  {
+    "text": "there's any pending updates then we're going to go ahead and immediately restart the pot um so this is because for example if",
+    "start": "596560",
+    "end": "604600"
+  },
+  {
+    "text": "the pot was stuck because um of you know because you misconfigured the node",
+    "start": "604600",
+    "end": "609680"
+  },
+  {
+    "text": "affinity for example and now you fixed the configuration so you want this part to be restarted with the right",
+    "start": "609680",
+    "end": "616200"
+  },
+  {
+    "text": "configuration now so next up uh pot performing lock",
+    "start": "616200",
+    "end": "622959"
+  },
+  {
+    "text": "covery so we said uh we will give the pot uh a chance to become ready by doing",
+    "start": "622959",
+    "end": "628880"
+  },
+  {
+    "text": "some weight and um after that we check if the pot's still not ready and if it",
+    "start": "628880",
+    "end": "634760"
+  },
+  {
+    "text": "is still not ready then we going to check the broker State and see if it's doing lock",
+    "start": "634760",
+    "end": "641360"
+  },
+  {
+    "text": "covery um so when broker starts up and if it previously had unclean shut down",
+    "start": "641360",
+    "end": "647040"
+  },
+  {
+    "text": "the log recovery process gets triggered to make sure the log is in a good State it's not in a corrupted um state so this",
+    "start": "647040",
+    "end": "656360"
+  },
+  {
+    "text": "is why why it does that so if it's not doing Lo covery there's nothing to do so",
+    "start": "656360",
+    "end": "661399"
+  },
+  {
+    "text": "we're just going to continue with rest of the process but if it is doing Locker covery um there's no much else colla can",
+    "start": "661399",
+    "end": "668760"
+  },
+  {
+    "text": "do other than wait um because we don't want to restart this pot in case you know when the rarts and it's going to do",
+    "start": "668760",
+    "end": "676399"
+  },
+  {
+    "text": "the log covery again and before it finishes we might restart again and we could end up in this Loop um so what it",
+    "start": "676399",
+    "end": "683839"
+  },
+  {
+    "text": "would do is it would apply some delay and then retry this part and wait again to see if it finished uh doing the Lo",
+    "start": "683839",
+    "end": "692000"
+  },
+  {
+    "text": "covery until we reach the max tempt so the max tempt is set to 10 in stmy and",
+    "start": "692000",
+    "end": "698600"
+  },
+  {
+    "text": "if we do reach the max attempt then uh we're going to fail the reconcilation",
+    "start": "698600",
+    "end": "704680"
+  },
+  {
+    "text": "immediately um so by failing the reconcilation we also notify the human",
+    "start": "704760",
+    "end": "709920"
+  },
+  {
+    "text": "operator because if the reconation reconcilation keeps failing because of rock covery and the human operator might",
+    "start": "709920",
+    "end": "716959"
+  },
+  {
+    "text": "have to intervene and investigate uh what the problem is and it's really hard",
+    "start": "716959",
+    "end": "722760"
+  },
+  {
+    "text": "to determine how long this lock covery might take it might take minutes it might take hours so the lock recovery",
+    "start": "722760",
+    "end": "729680"
+  },
+  {
+    "text": "progress gets logged in the operator you typically see this warning lock message which has the remaining log and",
+    "start": "729680",
+    "end": "737440"
+  },
+  {
+    "text": "segments left to recover so if you see these numbers",
+    "start": "737440",
+    "end": "742480"
+  },
+  {
+    "text": "decreasing uh maybe just Lo cover is taking longer than usual or like just",
+    "start": "742480",
+    "end": "748279"
+  },
+  {
+    "text": "maybe slow but is progressing then you might just have to give it some time um however if you don't see these numbers",
+    "start": "748279",
+    "end": "754440"
+  },
+  {
+    "text": "decreasing at all then you know something might not be right with the logs or the dis so you might have to go",
+    "start": "754440",
+    "end": "760600"
+  },
+  {
+    "text": "and investigate that so the next thing is um the pot",
+    "start": "760600",
+    "end": "765760"
+  },
+  {
+    "text": "unresponsive to connections um so this this check is done actually for not just un ready pods",
+    "start": "765760",
+    "end": "772519"
+  },
+  {
+    "text": "but also for ready pods so for any po we always check if the if we can connect to the pot or not and we do that by",
+    "start": "772519",
+    "end": "779399"
+  },
+  {
+    "text": "initializing Kafka admin client and if the connection is not successful we need",
+    "start": "779399",
+    "end": "784839"
+  },
+  {
+    "text": "to restart this part immediately and this this because um the potentially",
+    "start": "784839",
+    "end": "790240"
+  },
+  {
+    "text": "clients can can't connect to this part as well so we need to like try fix this",
+    "start": "790240",
+    "end": "795279"
+  },
+  {
+    "text": "as quickly as possible but if we can connect then great we just continue with",
+    "start": "795279",
+    "end": "801240"
+  },
+  {
+    "text": "the rest of the process so that was the various um",
+    "start": "801240",
+    "end": "806399"
+  },
+  {
+    "text": "scenarios that white part might be unready in what CER does with it uh for ready pods we also need to determine if",
+    "start": "806399",
+    "end": "813399"
+  },
+  {
+    "text": "we need to restart the pot or not so the main triggers for Rolling restart for ready pods um if if it if the broker TLS",
+    "start": "813399",
+    "end": "822880"
+  },
+  {
+    "text": "certificate is renewed so the BR the cafka noes need to be restarted to start using the new",
+    "start": "822880",
+    "end": "829120"
+  },
+  {
+    "text": "certificate and if the Pod and streamy pod set is annotated with manual rolling update so this is how the user U",
+    "start": "829120",
+    "end": "836600"
+  },
+  {
+    "text": "triggers rolling update manually and if there is any change in the Kafka",
+    "start": "836600",
+    "end": "842279"
+  },
+  {
+    "text": "custom resource detected so this change can be for example Kafka configuration um that cannot be updated",
+    "start": "842279",
+    "end": "850720"
+  },
+  {
+    "text": "dynamically if it can be updated dynamically uh kfka roller would just",
+    "start": "850720",
+    "end": "856120"
+  },
+  {
+    "text": "use the kka admin API to uh to update the configuration however if that",
+    "start": "856120",
+    "end": "862759"
+  },
+  {
+    "text": "configuration of dat repeatedly fails then as a r as a last resort we will",
+    "start": "862759",
+    "end": "868680"
+  },
+  {
+    "text": "also so go ahead and restart the Pod and then maybe Kafka version has",
+    "start": "868680",
+    "end": "874320"
+  },
+  {
+    "text": "changed and or container image is updated so this is not the exhaustive list um there are various different",
+    "start": "874320",
+    "end": "881720"
+  },
+  {
+    "text": "changes in the KA custom resource that can trigger the rolling",
+    "start": "881720",
+    "end": "887600"
+  },
+  {
+    "text": "update right so we determined the action and next we need to do the safe we need",
+    "start": "887600",
+    "end": "893759"
+  },
+  {
+    "text": "to do the safety checks um there are two safety conditions uh cfco roller checks",
+    "start": "893759",
+    "end": "899839"
+  },
+  {
+    "text": "um availability check is for Brokers and mixed notes if you're running in Craft",
+    "start": "899839",
+    "end": "906000"
+  },
+  {
+    "text": "um so this ensures that the replication count of topic partition um does not",
+    "start": "906000",
+    "end": "911040"
+  },
+  {
+    "text": "fall below the uh configured meaning single replicas and this is really important",
+    "start": "911040",
+    "end": "917040"
+  },
+  {
+    "text": "because uh producer clients with Exel settings won't be able to produce anymore and also consumer clients won't",
+    "start": "917040",
+    "end": "924279"
+  },
+  {
+    "text": "be able to commit upet because it produces it does that by producing to topic",
+    "start": "924279",
+    "end": "929759"
+  },
+  {
+    "text": "uh with AEL settings as well and then we do also Quorum health check for craft controllers and also for",
+    "start": "929759",
+    "end": "936959"
+  },
+  {
+    "text": "mixed noes and this ensures that majority of the controller nodes are up",
+    "start": "936959",
+    "end": "942360"
+  },
+  {
+    "text": "and running and also have the upto-date",
+    "start": "942360",
+    "end": "946720"
+  },
+  {
+    "text": "metadata okay so let's take some let's take a look at some examples of availability check what it does um so",
+    "start": "948199",
+    "end": "955839"
+  },
+  {
+    "text": "let's say I have three broker nodes um and broker Z is the partition leader for my topic partition and in here broker 2",
+    "start": "955839",
+    "end": "964240"
+  },
+  {
+    "text": "as you can see is fallen behind so it's not part of the ISR list anymore so the ins replica list so if I was to restart",
+    "start": "964240",
+    "end": "972800"
+  },
+  {
+    "text": "broker one that would mean the the ISR count will fall below the configured Min",
+    "start": "972800",
+    "end": "978600"
+  },
+  {
+    "text": "Min ISR of two so I can't restart brok one in this",
+    "start": "978600",
+    "end": "983720"
+  },
+  {
+    "text": "case again uh if we were to reset broker zero that cannot be done because broker",
+    "start": "983720",
+    "end": "989079"
+  },
+  {
+    "text": "2 is haing behind the same thing however we can restart broker 2",
+    "start": "989079",
+    "end": "995199"
+  },
+  {
+    "text": "because it's already not part of the ISR list so it will not impact the replica",
+    "start": "995199",
+    "end": "1000560"
+  },
+  {
+    "text": "account um against the main ISR replica to and if my topic partition is",
+    "start": "1000560",
+    "end": "1007560"
+  },
+  {
+    "text": "replicated across all my Brokers then any of the broker can be restarted",
+    "start": "1007560",
+    "end": "1014399"
+  },
+  {
+    "text": "safely okay so the craft controller quum um so the controll noes uh form a quorum",
+    "start": "1014440",
+    "end": "1022040"
+  },
+  {
+    "text": "and one of the controller node then becomes the Quorum leader or the active controller and all the Brokers then",
+    "start": "1022040",
+    "end": "1028160"
+  },
+  {
+    "text": "connect to this active controller to update the metadata or retrieve the",
+    "start": "1028160",
+    "end": "1033400"
+  },
+  {
+    "text": "metadata and then the other controller nodes just simply follow the active controller and tries to keep up up to",
+    "start": "1033400",
+    "end": "1040000"
+  },
+  {
+    "text": "date with the metadata updates and if the controller active",
+    "start": "1040000",
+    "end": "1045438"
+  },
+  {
+    "text": "controller was to go away uh we need at least the majority of the controller the other controller notes to be able to",
+    "start": "1045439",
+    "end": "1052400"
+  },
+  {
+    "text": "maintain the Quorum and also be able to uh elect a new leader so one of them",
+    "start": "1052400",
+    "end": "1057840"
+  },
+  {
+    "text": "will become the leader and then the Brokers will reconnect to",
+    "start": "1057840",
+    "end": "1062760"
+  },
+  {
+    "text": "that so if we let's take an example again um let's say I have three",
+    "start": "1063000",
+    "end": "1069559"
+  },
+  {
+    "text": "controller nodes and controller zero is the active controller and if we were to",
+    "start": "1069559",
+    "end": "1075280"
+  },
+  {
+    "text": "restart uh controller one we need to make sure controller rer two is up to date with the metadata topic if it's",
+    "start": "1075280",
+    "end": "1082480"
+  },
+  {
+    "text": "fallen behind then we won't be able to restart controller one if we were to restart active",
+    "start": "1082480",
+    "end": "1089159"
+  },
+  {
+    "text": "controller zero then we need to make sure both controller one and two have up",
+    "start": "1089159",
+    "end": "1094400"
+  },
+  {
+    "text": "toate of the metadata topic if any one of them has fallen behind then we won't",
+    "start": "1094400",
+    "end": "1099720"
+  },
+  {
+    "text": "be able to restart active controller okay so we took a look at the",
+    "start": "1099720",
+    "end": "1107440"
+  },
+  {
+    "text": "safety checks that we do and next we're going to uh go ahead and do the action",
+    "start": "1107440",
+    "end": "1112840"
+  },
+  {
+    "text": "so the action of restarting the podt under the cover we just doing keep CTL delete pot uh we wait for the pot to be",
+    "start": "1112840",
+    "end": "1120480"
+  },
+  {
+    "text": "deleted and then we wait for the new pot to become ready and I also in the previous steps mentioned about uh",
+    "start": "1120480",
+    "end": "1127440"
+  },
+  {
+    "text": "waiting for the pot to become ready uh in case it was just restarted so all of",
+    "start": "1127440",
+    "end": "1132600"
+  },
+  {
+    "text": "these weights have a time out of 5 minutes by default and this can be reconfigured using the exy environment",
+    "start": "1132600",
+    "end": "1139640"
+  },
+  {
+    "text": "variable called operation timeout so once we've done all the",
+    "start": "1139640",
+    "end": "1145080"
+  },
+  {
+    "text": "actions then we will go ahead and complete the reconciliation uh in these uh success",
+    "start": "1145080",
+    "end": "1150679"
+  },
+  {
+    "text": "scenario obviously all of the pods would be restarted and all of them will be in a healthy ready State uh and in that",
+    "start": "1150679",
+    "end": "1157960"
+  },
+  {
+    "text": "case the the rec consulation will complete with successful",
+    "start": "1157960",
+    "end": "1163440"
+  },
+  {
+    "text": "result but there are various scenarios that reconcilation will fail uh as you saw some of of it earlier so there are",
+    "start": "1163440",
+    "end": "1170400"
+  },
+  {
+    "text": "some non retriable failures will cause the reconcilation to fail immediately so",
+    "start": "1170400",
+    "end": "1175840"
+  },
+  {
+    "text": "one is uh we cannot connect to kubernetes API um obviously if we can't",
+    "start": "1175840",
+    "end": "1181080"
+  },
+  {
+    "text": "connect to kubernetes API there's not much we can do uh we can't do anything with the Pod we can check if the Pod is",
+    "start": "1181080",
+    "end": "1187200"
+  },
+  {
+    "text": "ready or not Etc and also we can't connect to Kafka agent to check the broker State Matrix um as you saw",
+    "start": "1187200",
+    "end": "1195720"
+  },
+  {
+    "text": "earlier that's quite important for uh for checking the again the Readiness of",
+    "start": "1195720",
+    "end": "1201200"
+  },
+  {
+    "text": "the broker to see if it's doing lock covery that kind of stuff so it's really",
+    "start": "1201200",
+    "end": "1206559"
+  },
+  {
+    "text": "important that we uh have the connection to Kafka agent and if the pot is stuck",
+    "start": "1206559",
+    "end": "1212159"
+  },
+  {
+    "text": "and does not have the Ultra Vision meaning that it's running with the desired version and configuration",
+    "start": "1212159",
+    "end": "1218120"
+  },
+  {
+    "text": "doesn't have any pending updates then yeah we're going to go ahead and fail to",
+    "start": "1218120",
+    "end": "1223760"
+  },
+  {
+    "text": "reconation and there are some retriable failures um that will eventually fail",
+    "start": "1223760",
+    "end": "1228919"
+  },
+  {
+    "text": "the reconation um if the maximum number of attempts reached so that is if pot is",
+    "start": "1228919",
+    "end": "1234840"
+  },
+  {
+    "text": "not ready because it's doing lock recovery we saw that earlier and if we can't connect to the Pod using the admin",
+    "start": "1234840",
+    "end": "1241240"
+  },
+  {
+    "text": "client and also the request to the admin API keeps failing so as we saw earlier",
+    "start": "1241240",
+    "end": "1247159"
+  },
+  {
+    "text": "that it's quite important um to interact with the admin API and have the successful request um you know to get",
+    "start": "1247159",
+    "end": "1254840"
+  },
+  {
+    "text": "the Kafka configurations or to do the available ility check that kind of stuff",
+    "start": "1254840",
+    "end": "1260360"
+  },
+  {
+    "text": "so it's quite important that we have this working and if the Pod never becomes",
+    "start": "1260360",
+    "end": "1267480"
+  },
+  {
+    "text": "ready so we looked at VAR scenarios and uh logic that um C roller has uh let's",
+    "start": "1268000",
+    "end": "1276080"
+  },
+  {
+    "text": "go through a quick example of a rolling update on a full cluster and see how that",
+    "start": "1276080",
+    "end": "1281840"
+  },
+  {
+    "text": "looks so let's say I have a cluster of six nodes and three of those nodes are",
+    "start": "1281840",
+    "end": "1288559"
+  },
+  {
+    "text": "controller nodes and actually one of them is mixed node meaning that it's both controller and the broker and",
+    "start": "1288559",
+    "end": "1295640"
+  },
+  {
+    "text": "controller two is the active controller and I have three broker nodes too which uh highlighted in red are",
+    "start": "1295640",
+    "end": "1303400"
+  },
+  {
+    "text": "unready so we're going to take a look at controller zero first and we find that",
+    "start": "1303400",
+    "end": "1309480"
+  },
+  {
+    "text": "partt is ready can be connected great and we find that controller stream Z hotset was annotated with man rolling",
+    "start": "1309480",
+    "end": "1317240"
+  },
+  {
+    "text": "update so that means all the controller nodes would need to be restarted so because it's controller",
+    "start": "1317240",
+    "end": "1324240"
+  },
+  {
+    "text": "node we're going to do the Quorum health check if that's all good then we're going to go ahead and restart okay let's say we restarted C uh",
+    "start": "1324240",
+    "end": "1332440"
+  },
+  {
+    "text": "controller zero and it's ready so we're going to move on to mixed",
+    "start": "1332440",
+    "end": "1337559"
+  },
+  {
+    "text": "one again exactly same um steps as controller zero uh except one uh",
+    "start": "1337559",
+    "end": "1344720"
+  },
+  {
+    "text": "different thing which is the availability check so because it's both controller and a broker uh we also do",
+    "start": "1344720",
+    "end": "1350960"
+  },
+  {
+    "text": "the availability check before we restart so if that's all good then we go",
+    "start": "1350960",
+    "end": "1356240"
+  },
+  {
+    "text": "ahead and restart mixed one and then uh as as last controller note we uh uh",
+    "start": "1356240",
+    "end": "1363600"
+  },
+  {
+    "text": "check the active controller now so again exactly the same scenario um but when we",
+    "start": "1363600",
+    "end": "1369360"
+  },
+  {
+    "text": "doing the Quorum health check for this node we need to make sure both mix one and controller zero are um have the",
+    "start": "1369360",
+    "end": "1376279"
+  },
+  {
+    "text": "upto-date metadata topic okay so we have restarted all of the",
+    "start": "1376279",
+    "end": "1382880"
+  },
+  {
+    "text": "controller nodes because we restarted controller two uh which was the active controller now the active controller",
+    "start": "1382880",
+    "end": "1389919"
+  },
+  {
+    "text": "moved to controller zero and then we're going to next check broker three which is one of the unready",
+    "start": "1389919",
+    "end": "1398039"
+  },
+  {
+    "text": "pods okay so PO is not ready and we find that broker 3 is in a crash loop back",
+    "start": "1398039",
+    "end": "1404840"
+  },
+  {
+    "text": "off then we go ahead and check if it has any if it has an old revision and if it",
+    "start": "1404840",
+    "end": "1411159"
+  },
+  {
+    "text": "and it does therefore we need to go ahead and restart it and then broker three comes back",
+    "start": "1411159",
+    "end": "1417840"
+  },
+  {
+    "text": "ready and great so then we move on to the next unready broker is broker four",
+    "start": "1417840",
+    "end": "1424279"
+  },
+  {
+    "text": "so this time pot is not ready but it is not stuck and so we're going to just give it",
+    "start": "1424279",
+    "end": "1430080"
+  },
+  {
+    "text": "chance to become ready in case it was just restarted and we find that pot is doing the lock recovery so we can to just",
+    "start": "1430080",
+    "end": "1437679"
+  },
+  {
+    "text": "apply some delay and retry this pot later on the second retry the pot is now",
+    "start": "1437679",
+    "end": "1443960"
+  },
+  {
+    "text": "ready however we can't connect to this pot therefore we're going to just go ahead and restart this",
+    "start": "1443960",
+    "end": "1450200"
+  },
+  {
+    "text": "pot okay the broker for then came back ready so all good and then now finally",
+    "start": "1450200",
+    "end": "1456000"
+  },
+  {
+    "text": "we're going to move on to broker 5 broker 5 is ready and can be connected",
+    "start": "1456000",
+    "end": "1461720"
+  },
+  {
+    "text": "great and we find that configuration has changed for this broker and this",
+    "start": "1461720",
+    "end": "1466919"
+  },
+  {
+    "text": "configuration cannot be app updated dynamically so we would need to restart this pod and we do the availability",
+    "start": "1466919",
+    "end": "1474360"
+  },
+  {
+    "text": "check before we restarted however the Brooker for that was previously restarted hasn't caught",
+    "start": "1474360",
+    "end": "1480080"
+  },
+  {
+    "text": "up yet that means that my topic partition would fall below the mean ISR",
+    "start": "1480080",
+    "end": "1485919"
+  },
+  {
+    "text": "uh configuration configured meain ISR if he restart broker 5 therefore this availability check fails and so we're",
+    "start": "1485919",
+    "end": "1494360"
+  },
+  {
+    "text": "going to just apply some delay and retry this later on on the secondary try uh",
+    "start": "1494360",
+    "end": "1500080"
+  },
+  {
+    "text": "broker 5 is ready can be connected again and we find the configuration has changed the same thing and we do the",
+    "start": "1500080",
+    "end": "1506559"
+  },
+  {
+    "text": "availability check again and we find that broker 4 has caught up now so it's",
+    "start": "1506559",
+    "end": "1512080"
+  },
+  {
+    "text": "joined the ISR list so it's all good and availability check passes and we go",
+    "start": "1512080",
+    "end": "1517279"
+  },
+  {
+    "text": "ahead and restart this broker okay so this is a successful",
+    "start": "1517279",
+    "end": "1522840"
+  },
+  {
+    "text": "scenario where we were able to restart all of the pods successfully and apply",
+    "start": "1522840",
+    "end": "1527960"
+  },
+  {
+    "text": "the up dates and in this case reconciliation will be completed with",
+    "start": "1527960",
+    "end": "1533000"
+  },
+  {
+    "text": "success result okay so let's take a look at",
+    "start": "1533000",
+    "end": "1539039"
+  },
+  {
+    "text": "shortcomings of kafar roller um as I mentioned it's a complex as you can see it's a complex component it has a lot of",
+    "start": "1539039",
+    "end": "1545919"
+  },
+  {
+    "text": "uh nested uh loops and Logics and decision different scenarios that it has",
+    "start": "1545919",
+    "end": "1551200"
+  },
+  {
+    "text": "to deal with um so the one of the major uh shortcoming is uh that we restart one",
+    "start": "1551200",
+    "end": "1559200"
+  },
+  {
+    "text": "broker at a time so it is the safest way of doing things but that makes the",
+    "start": "1559200",
+    "end": "1564399"
+  },
+  {
+    "text": "rolling update really slow in large clusters so if you had a cluster with",
+    "start": "1564399",
+    "end": "1570159"
+  },
+  {
+    "text": "hundred of Brokers you know the rolling update will could take hours and hours",
+    "start": "1570159",
+    "end": "1575960"
+  },
+  {
+    "text": "um possibly and even though we're doing this as many more disruption as possible",
+    "start": "1575960",
+    "end": "1581960"
+  },
+  {
+    "text": "is is it's still causing some level of disruption and that means um the longer",
+    "start": "1581960",
+    "end": "1587200"
+  },
+  {
+    "text": "the rolling upd it takes you cluster will be in that vulnerable state longer as",
+    "start": "1587200",
+    "end": "1592840"
+  },
+  {
+    "text": "well and the next thing is that the roller doesn't wait for partitions to be assigned back to the preferred leader",
+    "start": "1592840",
+    "end": "1599279"
+  },
+  {
+    "text": "after it gets restarted and this can cause unnecessary amount of partition",
+    "start": "1599279",
+    "end": "1604399"
+  },
+  {
+    "text": "leader elections and every time there's a new leader election um the clients will have to reconnect so it is causing",
+    "start": "1604399",
+    "end": "1611799"
+  },
+  {
+    "text": "more distruption than than necessary basically and this the code for this",
+    "start": "1611799",
+    "end": "1619840"
+  },
+  {
+    "text": "component has grown really complex over the years uh obviously Kafka has been",
+    "start": "1619840",
+    "end": "1624880"
+  },
+  {
+    "text": "changing so Kafka roller had to adapt to that and it has become so complex and",
+    "start": "1624880",
+    "end": "1631399"
+  },
+  {
+    "text": "not easy to grow and not easy to add new functionality and this was the pain",
+    "start": "1631399",
+    "end": "1636440"
+  },
+  {
+    "text": "point when we were introducing support for craft and there are still some age",
+    "start": "1636440",
+    "end": "1642240"
+  },
+  {
+    "text": "cases for craft that need to be addressed and it is not easy to address",
+    "start": "1642240",
+    "end": "1647440"
+  },
+  {
+    "text": "with the current St of the code and the code at the moment is not really",
+    "start": "1647440",
+    "end": "1653159"
+  },
+  {
+    "text": "testable um therefore we lack in test coverage and we miss those age cases",
+    "start": "1653159",
+    "end": "1658880"
+  },
+  {
+    "text": "because we're missing um lacking test coverage um so that makes it even more",
+    "start": "1658880",
+    "end": "1665399"
+  },
+  {
+    "text": "difficult to uh refactor this uh component and make it",
+    "start": "1665399",
+    "end": "1672039"
+  },
+  {
+    "text": "better so uh that brings us to uh kafar roller 2.0 that we introducing um so",
+    "start": "1672679",
+    "end": "1680960"
+  },
+  {
+    "text": "this is a new roller completely new uh roller component and aims to have",
+    "start": "1680960",
+    "end": "1686279"
+  },
+  {
+    "text": "simplified logic and has structured design resembling a finite State machine",
+    "start": "1686279",
+    "end": "1692600"
+  },
+  {
+    "text": "and the proposal for this new roller is under review at the moment so if you would like to go and learn about it",
+    "start": "1692600",
+    "end": "1699000"
+  },
+  {
+    "text": "please go and check out the proposal and we aim to enable this uh new roller only",
+    "start": "1699000",
+    "end": "1705200"
+  },
+  {
+    "text": "for craft mode so it wouldn't apply to the Zookeeper mode",
+    "start": "1705200",
+    "end": "1710120"
+  },
+  {
+    "text": "um and having simplified logic and uh better code it will make it easier to",
+    "start": "1710399",
+    "end": "1718360"
+  },
+  {
+    "text": "add more changes later on as well that's the aim um which is really important for craft because you know craft is still",
+    "start": "1718360",
+    "end": "1725440"
+  },
+  {
+    "text": "new for us as we learn more about it we might have to make more changes to the roller so um yeah so when I say finite",
+    "start": "1725440",
+    "end": "1734360"
+  },
+  {
+    "text": "State machine uh so what I mean is that basically uh the idea is to for each note to have",
+    "start": "1734360",
+    "end": "1742399"
+  },
+  {
+    "text": "a state and the roller collects the information from various sources and",
+    "start": "1742399",
+    "end": "1747840"
+  },
+  {
+    "text": "transition nodes State based on that information and then it takes a specific",
+    "start": "1747840",
+    "end": "1754159"
+  },
+  {
+    "text": "actions based on the observed State and these actions call subsequent observations and then leading to State",
+    "start": "1754159",
+    "end": "1761679"
+  },
+  {
+    "text": "Transitions and this is iterative process uh ensuring alignment of each",
+    "start": "1761679",
+    "end": "1766840"
+  },
+  {
+    "text": "nodes with the desired state so it's just from high level um there's more details in the proposal for",
+    "start": "1766840",
+    "end": "1774679"
+  },
+  {
+    "text": "this so let's take a look at the main new features that kafa roller Point 2.0",
+    "start": "1774679",
+    "end": "1780039"
+  },
+  {
+    "text": "is bringing so one is being able to restart brokers in parallel when the safety conditions are not",
+    "start": "1780039",
+    "end": "1786559"
+  },
+  {
+    "text": "violated so on top of the availability check that we already do uh um we also",
+    "start": "1786559",
+    "end": "1792440"
+  },
+  {
+    "text": "will make sure the Brokers we restarting together do not share partitions in common so we you know uh make sure the",
+    "start": "1792440",
+    "end": "1800039"
+  },
+  {
+    "text": "topic availability is not impacted and user can Define how many",
+    "start": "1800039",
+    "end": "1806399"
+  },
+  {
+    "text": "Brokers they want to restart in parallel and this will be set to one by default meaning by default you have the original",
+    "start": "1806399",
+    "end": "1813440"
+  },
+  {
+    "text": "behavior of restarting one broker at a time and this only applies to broker",
+    "start": "1813440",
+    "end": "1819240"
+  },
+  {
+    "text": "nodes um so controller and the mix nodes will be restarted one restarted at one",
+    "start": "1819240",
+    "end": "1825840"
+  },
+  {
+    "text": "at a time um because typically wouldn't have as many controller nodes as the",
+    "start": "1825840",
+    "end": "1831000"
+  },
+  {
+    "text": "Brokers also it's safer to restart One controller at a time uh to have minimal",
+    "start": "1831000",
+    "end": "1837159"
+  },
+  {
+    "text": "impact on the Quorum and the overall cluster",
+    "start": "1837159",
+    "end": "1842559"
+  },
+  {
+    "text": "stability and then it's going to wait for the partitions to be assigned back to the preferred leaders uh before we do",
+    "start": "1842559",
+    "end": "1849480"
+  },
+  {
+    "text": "more restarts and that way we cost less partition leader elections and then because it's more",
+    "start": "1849480",
+    "end": "1857440"
+  },
+  {
+    "text": "simplified uh we'll be able to solve those edge cases I mentioned for craft uh much",
+    "start": "1857440",
+    "end": "1864440"
+  },
+  {
+    "text": "easier with the new component and uh the aim is also to make this component much",
+    "start": "1864440",
+    "end": "1870720"
+  },
+  {
+    "text": "more testable so that we can increase the test coverage um the last two is really",
+    "start": "1870720",
+    "end": "1876159"
+  },
+  {
+    "text": "development details uh as a user you wouldn't need to worry about these changes introduced to the code level the",
+    "start": "1876159",
+    "end": "1883600"
+  },
+  {
+    "text": "main difference is really the ability to restart Brokers at the same time and uh",
+    "start": "1883600",
+    "end": "1888840"
+  },
+  {
+    "text": "triggering less preferred leader elections um everything else Remains the",
+    "start": "1888840",
+    "end": "1894679"
+  },
+  {
+    "text": "Same so don't worry we what we just learned in this session is still going to be useful",
+    "start": "1894679",
+    "end": "1900480"
+  },
+  {
+    "text": "um what we just covered um for the Cent rollers still apply to the new roller",
+    "start": "1900480",
+    "end": "1906799"
+  },
+  {
+    "text": "and this actually nicely summarizes what we learned in this session and yeah that",
+    "start": "1906799",
+    "end": "1912519"
+  },
+  {
+    "text": "brings me to the end um thank you so much for listening and yeah I'll",
+    "start": "1912519",
+    "end": "1918799"
+  },
+  {
+    "text": "open up for questions thank you so much Tina that's",
+    "start": "1918799",
+    "end": "1924679"
+  },
+  {
+    "text": "yeah very interesting definitely and we have quite a few different q&as so um",
+    "start": "1924679",
+    "end": "1931159"
+  },
+  {
+    "text": "the top one that's been voted is is this process completely separate from the",
+    "start": "1931159",
+    "end": "1937159"
+  },
+  {
+    "text": "drain cleaner or is there any crossover between CF Carolla and drain",
+    "start": "1937159",
+    "end": "1942480"
+  },
+  {
+    "text": "cleaner I believe it's completely separate yeah I haven't worked on dra",
+    "start": "1942480",
+    "end": "1948279"
+  },
+  {
+    "text": "cleaner myself too much so I haven't come across it that means I think it's",
+    "start": "1948279",
+    "end": "1953320"
+  },
+  {
+    "text": "completely separate yet yeah I I can actually add to that because I have played around with drain cleaner so",
+    "start": "1953320",
+    "end": "1959120"
+  },
+  {
+    "text": "drain cleaner is focused on um removing pods from nodes and and making sure that",
+    "start": "1959120",
+    "end": "1966519"
+  },
+  {
+    "text": "it's safe to do that um but yeah although I guess they potentially could have had some Ling in common they are",
+    "start": "1966519",
+    "end": "1973080"
+  },
+  {
+    "text": "completely separate components um within stry so the next one we've got is um why",
+    "start": "1973080",
+    "end": "1980720"
+  },
+  {
+    "text": "do you restart controller pods first wouldn't the old controllers work with",
+    "start": "1980720",
+    "end": "1985799"
+  },
+  {
+    "text": "the newer regular Brokers and it would be safer to do things like",
+    "start": "1985799",
+    "end": "1991360"
+  },
+  {
+    "text": "that um yeah so the reason for that was um as we saw like we try to recover the",
+    "start": "1991360",
+    "end": "1999519"
+  },
+  {
+    "text": "unhealthy nodes first and if there was something wrong with the controller do",
+    "start": "1999519",
+    "end": "2005840"
+  },
+  {
+    "text": "it's important that we go and fix the controll noes first because then we don't want to restart broker nodes in",
+    "start": "2005840",
+    "end": "2012320"
+  },
+  {
+    "text": "that and then cause more chaos and from my experience if the Quorum is broken or",
+    "start": "2012320",
+    "end": "2019279"
+  },
+  {
+    "text": "something is not right with the controller nodes Brokers go into really strange State and yeah so that was the",
+    "start": "2019279",
+    "end": "2027000"
+  },
+  {
+    "text": "main reason uh and then the next one we've got is um could you make the waiting",
+    "start": "2027000",
+    "end": "2034039"
+  },
+  {
+    "text": "time between rolling different pods configurable so that I could roduce artificially longer delays like for",
+    "start": "2034039",
+    "end": "2040159"
+  },
+  {
+    "text": "example only rolling one pod every 10",
+    "start": "2040159",
+    "end": "2044399"
+  },
+  {
+    "text": "minutes um I guess you can play around with the operation time out and",
+    "start": "2045519",
+    "end": "2050839"
+  },
+  {
+    "text": "reconcillation interval so those are the two configurable values you can play around",
+    "start": "2050839",
+    "end": "2057720"
+  },
+  {
+    "text": "to make that happen I",
+    "start": "2057720",
+    "end": "2063078"
+  },
+  {
+    "text": "think um it looks like somebody's commented who I guess is has looked at DRL says apparently drink cleaner does",
+    "start": "2064280",
+    "end": "2071000"
+  },
+  {
+    "text": "invol invoke the manual rolling update via The annotation so that will then",
+    "start": "2071000",
+    "end": "2076520"
+  },
+  {
+    "text": "hand off to the CF Corolla yeah there are different",
+    "start": "2076520",
+    "end": "2081679"
+  },
+  {
+    "text": "reconcilers um not just the CFA reconcil there are different reconcilers within stream that might go and do the um use",
+    "start": "2081679",
+    "end": "2089839"
+  },
+  {
+    "text": "the manual rolling annotation to kick off the rolling update they will be the",
+    "start": "2089839",
+    "end": "2096040"
+  },
+  {
+    "text": "crossover and then I I think those are all the questions there was one that was asked about wouldn't it be better to",
+    "start": "2096040",
+    "end": "2103320"
+  },
+  {
+    "text": "wait for the preferred leader election um but obviously that's something that isn't done currently but is coming in CF",
+    "start": "2103320",
+    "end": "2109000"
+  },
+  {
+    "text": "carola version 2 but yeah if anyone has any other",
+    "start": "2109000",
+    "end": "2114560"
+  },
+  {
+    "text": "questions that you can think of then um feel free to post them there but for now",
+    "start": "2114560",
+    "end": "2119680"
+  },
+  {
+    "text": "I I'll stop the broadcast and the recording so yeah thank you again Tina for a lovely session and we'll be back",
+    "start": "2119680",
+    "end": "2127280"
+  },
+  {
+    "text": "at can I just mention one more thing yeah yeah go ahead and if you came across any",
+    "start": "2127280",
+    "end": "2133520"
+  },
+  {
+    "text": "other pain points with the current roller um it can be part of the the new",
+    "start": "2133520",
+    "end": "2139359"
+  },
+  {
+    "text": "roller and improve that situation and you know you can bring that up in the proposed discussion as well so that'd be",
+    "start": "2139359",
+    "end": "2146480"
+  },
+  {
+    "text": "really useful for us as well yeah definitely oh the other thing I was gonna um ask actually was I",
+    "start": "2146480",
+    "end": "2153400"
+  },
+  {
+    "text": "believe there's a proof of concept for the new cfar Rolla right so people could go and have a look at what the code",
+    "start": "2153400",
+    "end": "2159400"
+  },
+  {
+    "text": "might look like if they were interested yes that's right yeah we have the proof of concept already written so once the",
+    "start": "2159400",
+    "end": "2166280"
+  },
+  {
+    "text": "proposal is um accepted um that was that would be the code that you used for the",
+    "start": "2166280",
+    "end": "2174160"
+  },
+  {
+    "text": "realation awesome okay just check we haven't had any more questions come",
+    "start": "2174160",
+    "end": "2180400"
+  },
+  {
+    "text": "in can't see any cool so uh yeah we'll be back um so",
+    "start": "2180400",
+    "end": "2187680"
+  },
+  {
+    "text": "the next session is going to start at 3:50 um in GMT plus 2 um and that's",
+    "start": "2187680",
+    "end": "2196280"
+  },
+  {
+    "text": "going to be modernizing new bank's Kafka platform for the next 10 years starting at 1 trillion messages per month so",
+    "start": "2196280",
+    "end": "2202960"
+  },
+  {
+    "text": "we'll see thanks everyone bye",
+    "start": "2202960",
+    "end": "2209078"
+  }
+]

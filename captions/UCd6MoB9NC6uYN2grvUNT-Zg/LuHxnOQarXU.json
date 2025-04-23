@@ -1,0 +1,2321 @@
+[
+  {
+    "start": "0",
+    "end": "119000"
+  },
+  {
+    "text": "hello I'm Nate Sammons a principal architect with NASDAQ and today I'm going to talk about our data warehousing",
+    "start": "840",
+    "end": "6680"
+  },
+  {
+    "text": "and analytics system which we originally built on red shift and have now extended to use uh EMR and S3 uh throughout this",
+    "start": "6680",
+    "end": "13920"
+  },
+  {
+    "text": "talk I'm going to focus particularly on security so first a quick introduction",
+    "start": "13920",
+    "end": "20119"
+  },
+  {
+    "text": "to NASDAQ if you haven't heard of us um we invented electronic trading more than 40 years ago and are now the world's",
+    "start": "20119",
+    "end": "26080"
+  },
+  {
+    "text": "largest exchange company we own and operate 26 markets glob GL and our software Powers not only our own",
+    "start": "26080",
+    "end": "32640"
+  },
+  {
+    "text": "exchanges but over 100 customer marketplaces in 50 countries around the world by operating our own markets and",
+    "start": "32640",
+    "end": "39680"
+  },
+  {
+    "text": "powering customer markets we're making the world's Capital markets more transparent more efficient and uh better",
+    "start": "39680",
+    "end": "47480"
+  },
+  {
+    "text": "essentially um we're a public company listed on NASDAQ and are part of the S&P",
+    "start": "47480",
+    "end": "52600"
+  },
+  {
+    "text": "500 Index in this session I'll discuss our",
+    "start": "52600",
+    "end": "58440"
+  },
+  {
+    "text": "motivations for extending that shift Warehouse with EMR and S3 I'll talk about how our data injest system works",
+    "start": "58440",
+    "end": "65360"
+  },
+  {
+    "text": "I'll talk about how we query encrypted data in uh stored in S3 using Presto and other Hadoop ecosystem applications I'll",
+    "start": "65360",
+    "end": "73040"
+  },
+  {
+    "text": "talk about how we manage schemas and how we do data migrations and finally I'll discuss fut future directions for our",
+    "start": "73040",
+    "end": "79680"
+  },
+  {
+    "text": "data warehousing efforts first let's take a look at the",
+    "start": "79680",
+    "end": "85240"
+  },
+  {
+    "text": "current state of our system in red shift so we've discussed our red shift",
+    "start": "85240",
+    "end": "90600"
+  },
+  {
+    "text": "efforts at previous reinvent conferences but just as a review several years ago we transitioned from an on-premise data",
+    "start": "90600",
+    "end": "97000"
+  },
+  {
+    "text": "warehouse to redshift and we haven't looked back since there's now over a thousand tables that we manage in that",
+    "start": "97000",
+    "end": "102680"
+  },
+  {
+    "text": "system consisting of data from hundreds of different sources inside our company we're adding new sources all the time",
+    "start": "102680",
+    "end": "109119"
+  },
+  {
+    "text": "and this database stores nearly two years of data at this point we add around 7 billion rows a day sometimes",
+    "start": "109119",
+    "end": "115320"
+  },
+  {
+    "text": "considerably more depending on Market volumes so we never want to throw",
+    "start": "115320",
+    "end": "120960"
+  },
+  {
+    "start": "119000",
+    "end": "119000"
+  },
+  {
+    "text": "anything away to that end we've recently expanded into a 23 node DS2 adx large",
+    "start": "120960",
+    "end": "127920"
+  },
+  {
+    "text": "cluster and I can uh definitely say that the DS2 is a very welcome change from the DS1 it's not often that you can",
+    "start": "127920",
+    "end": "134280"
+  },
+  {
+    "text": "double your CPU in memory without additional cost we're now at 828 virtual",
+    "start": "134280",
+    "end": "139879"
+  },
+  {
+    "text": "CPUs almost 5 a half terabytes of memory over a pyte of local disc spread across",
+    "start": "139879",
+    "end": "145599"
+  },
+  {
+    "text": "that cluster yielding some 368 terabytes of database capacity",
+    "start": "145599",
+    "end": "150760"
+  },
+  {
+    "text": "and 92 GB a second of aggregate disc bandwidth we've been resizing this",
+    "start": "150760",
+    "end": "156040"
+  },
+  {
+    "text": "cluster roughly once a quarter since we started and it now stores just over 2.7 trillion rows that's made up of",
+    "start": "156040",
+    "end": "162800"
+  },
+  {
+    "text": "approximately 1.8 trillion rows from external sources and an additional 900 billion rows of Aggregates and otherwise",
+    "start": "162800",
+    "end": "169440"
+  },
+  {
+    "text": "derived data we have 90 tables with over a billion rows each and eight tables with",
+    "start": "169440",
+    "end": "174920"
+  },
+  {
+    "text": "over a 100 billion rows and our largest single table by row count contains more than 370 billion records and and",
+    "start": "174920",
+    "end": "182400"
+  },
+  {
+    "text": "consumes just over 20 terabytes of dis space so if you do the math that's actually just 59 bytes per row which is",
+    "start": "182400",
+    "end": "189599"
+  },
+  {
+    "text": "a good reminder that you should get your uh column encodings correct in red shift because it can help drastically with storage",
+    "start": "189599",
+    "end": "196760"
+  },
+  {
+    "start": "197000",
+    "end": "197000"
+  },
+  {
+    "text": "space so what makes up all of this data we pull data from hundreds of different sources inside NASDAQ some are databases",
+    "start": "197000",
+    "end": "204519"
+  },
+  {
+    "text": "that we scrape daily others are just CSV files produced from um stream captures off of our exchange",
+    "start": "204519",
+    "end": "210799"
+  },
+  {
+    "text": "software this this Warehouse grew out of a rewrite of our Billing System and contains data from all seven equities",
+    "start": "210799",
+    "end": "217280"
+  },
+  {
+    "text": "options and Futures exchanges that NASDAQ operates in the United States this data includes mainly orders quotes",
+    "start": "217280",
+    "end": "223920"
+  },
+  {
+    "text": "trade executions and other so-called Market tick data but it also contains security Master information which is",
+    "start": "223920",
+    "end": "229879"
+  },
+  {
+    "text": "basically metadata about each symbol and instrument traded on those exchanges as well as membership information about the",
+    "start": "229879",
+    "end": "236159"
+  },
+  {
+    "text": "firms making those trades this data is used to drive a socks compliant Billing System which",
+    "start": "236159",
+    "end": "243120"
+  },
+  {
+    "text": "charges for every trade on our main equities and options exchanges and we're rolling that Billing System out to the",
+    "start": "243120",
+    "end": "248400"
+  },
+  {
+    "text": "rest of the exchanges operated by NASDAQ we also support surveillance workloads for policing activity on our",
+    "start": "248400",
+    "end": "254840"
+  },
+  {
+    "text": "exchanges as well as economic research work and other activities around billing models and other research activities all",
+    "start": "254840",
+    "end": "262000"
+  },
+  {
+    "text": "of this data is highly structured and consistent derived mainly from actual trading messages sent to and processed",
+    "start": "262000",
+    "end": "268160"
+  },
+  {
+    "text": "by our exchange software so I've long maintained that data",
+    "start": "268160",
+    "end": "274080"
+  },
+  {
+    "text": "actually obeys many of the same laws as gases specifically that data has a tendency to grow to fill any container",
+    "start": "274080",
+    "end": "279960"
+  },
+  {
+    "text": "that you attempt to place it in this graph shows uh rows ingested each day over the last year in billions",
+    "start": "279960",
+    "end": "288680"
+  },
+  {
+    "text": "uh you can see that we had a peak of 14 billion rows in early October 2014 because of Market activity uh this was",
+    "start": "288680",
+    "end": "294960"
+  },
+  {
+    "text": "actually our Peak injust day for all of 2014 you can see that Thanksgiving is a fairly quiet period followed by a",
+    "start": "294960",
+    "end": "301800"
+  },
+  {
+    "text": "spiking activity leading up to another quiet period over the Christmas holiday most of 2015 was hovering in the",
+    "start": "301800",
+    "end": "308960"
+  },
+  {
+    "text": "6 to 8 billion rows per day range and then on August 24th 2015 we hit a new",
+    "start": "308960",
+    "end": "314039"
+  },
+  {
+    "text": "high water mark by a pretty wide margin Chinese markets dropped sharply that day and led to a very volatile week",
+    "start": "314039",
+    "end": "320720"
+  },
+  {
+    "text": "in US markets driving a lot of traffic into our exchanges and thus into this Warehouse our daily average is right at",
+    "start": "320720",
+    "end": "327479"
+  },
+  {
+    "text": "7 billion rows and that day we processed nearly 20 billion",
+    "start": "327479",
+    "end": "332440"
+  },
+  {
+    "text": "rows so this brings us to why I want to extend this Warehouse into EMR and S3 in the first place red shift is great but",
+    "start": "333199",
+    "end": "340560"
+  },
+  {
+    "text": "resizing a 300 terab Warehouse is not instantaneous the new DS2 nodes are much",
+    "start": "340560",
+    "end": "345800"
+  },
+  {
+    "text": "faster it resizes but it's still an over- the weekend type of activity and it has to be planned and uh managed by",
+    "start": "345800",
+    "end": "351440"
+  },
+  {
+    "text": "our operations group a lot of this data is also that that's stored in this Warehouse is also",
+    "start": "351440",
+    "end": "356960"
+  },
+  {
+    "text": "accessed very infrequently so it doesn't make sense to pay for always on CPU and disk to support data that you're not",
+    "start": "356960",
+    "end": "362880"
+  },
+  {
+    "text": "using every day and particularly since no one wants to delete any data just in case data is going to fill any container",
+    "start": "362880",
+    "end": "369720"
+  },
+  {
+    "text": "that you place it in so why not place it in a container that automatically grows on its",
+    "start": "369720",
+    "end": "375360"
+  },
+  {
+    "text": "own so here's how we're extending that warehouse the main goals for this",
+    "start": "375840",
+    "end": "382280"
+  },
+  {
+    "start": "380000",
+    "end": "380000"
+  },
+  {
+    "text": "project were to create a secure costeffective long-term data store we don't want to have to throw anything",
+    "start": "382280",
+    "end": "388000"
+  },
+  {
+    "text": "away while at the same time we don't want to spend a ton of money to keep that data around especially if it's not",
+    "start": "388000",
+    "end": "393039"
+  },
+  {
+    "text": "being used every day SQL is really King at NASDAQ so whatever solution we come up with must",
+    "start": "393039",
+    "end": "399400"
+  },
+  {
+    "text": "at least support a SQL interface for everything and in addition to SQL we want to support new and fancier analytic",
+    "start": "399400",
+    "end": "406120"
+  },
+  {
+    "text": "systems and uh query mechanisms we'd like to be able to use spark apply machine learning and and use any other",
+    "start": "406120",
+    "end": "412880"
+  },
+  {
+    "text": "Hadoop application all on top of a common storage layer we'd also like to cap the size of our red shift cluster so",
+    "start": "412880",
+    "end": "419360"
+  },
+  {
+    "text": "that we don't have to keep resizing it every quarter and finally we want to be able to manage our storage and compute",
+    "start": "419360",
+    "end": "425120"
+  },
+  {
+    "text": "resources separately this is partly because we want a good way to um to charge internal departments for their",
+    "start": "425120",
+    "end": "431160"
+  },
+  {
+    "text": "CPU time and partly because we want to be able to isolate compute workloads even though they're working on the same",
+    "start": "431160",
+    "end": "436360"
+  },
+  {
+    "text": "data sets we also want to be able to allow anyone to order up as much CPU as they",
+    "start": "436360",
+    "end": "441960"
+  },
+  {
+    "text": "like or at least as much as they can pay for and uh not have any one group able to monopolize the entire system from a",
+    "start": "441960",
+    "end": "448440"
+  },
+  {
+    "text": "compute uh perspective Ive so here's a highle overview of the",
+    "start": "448440",
+    "end": "454639"
+  },
+  {
+    "start": "452000",
+    "end": "452000"
+  },
+  {
+    "text": "solution that we came up with these diagrams can all be generally read left to right top to bottom and anything",
+    "start": "454639",
+    "end": "461039"
+  },
+  {
+    "text": "contained within the dashed blue lines are systems running inside NASDAQ uh data centers everything else is assumed",
+    "start": "461039",
+    "end": "466560"
+  },
+  {
+    "text": "to be in Amazon so we have systems inside NASDAQ which which write data into a temporary",
+    "start": "466560",
+    "end": "472120"
+  },
+  {
+    "text": "bucket in S3 which is then loaded into red shift using copy SQL commands for",
+    "start": "472120",
+    "end": "477319"
+  },
+  {
+    "text": "some data we perform Transformations and ation inside red shift and then unload those results back to that temporary",
+    "start": "477319",
+    "end": "483479"
+  },
+  {
+    "text": "bucket in S3 in all cases original data and Aggregates we process that CSV data from",
+    "start": "483479",
+    "end": "489960"
+  },
+  {
+    "text": "the temporary bucket to produce parquet files which are stored in a separate S3 bucket for long-term",
+    "start": "489960",
+    "end": "495680"
+  },
+  {
+    "text": "storage Presto running in an ER cluster is then used to query data stored in",
+    "start": "495680",
+    "end": "500840"
+  },
+  {
+    "text": "those files in S3 this transformation into paret is currently being performed on in a NASDAQ",
+    "start": "500840",
+    "end": "507280"
+  },
+  {
+    "text": "data center however this is a stop Gap until we move this data injest system into ec2 which we're planning to do in",
+    "start": "507280",
+    "end": "513399"
+  },
+  {
+    "text": "early 2016 and in both cases SQL clients access these databases directly through",
+    "start": "513399",
+    "end": "520919"
+  },
+  {
+    "text": "jdbc so red shift continues to have an integral role in this new system for us everything lands in red shift first",
+    "start": "520919",
+    "end": "528040"
+  },
+  {
+    "start": "521000",
+    "end": "521000"
+  },
+  {
+    "text": "we're a very SQL Centric shop and this entire system evolved out of several previous generations of on- premise SQL",
+    "start": "528040",
+    "end": "534560"
+  },
+  {
+    "text": "warehouses as a result or we also have um many groups that have tight slas on",
+    "start": "534560",
+    "end": "541000"
+  },
+  {
+    "text": "reports and other activities that are all dependent on redshift so it's our first priority and it gets uh all the",
+    "start": "541000",
+    "end": "546600"
+  },
+  {
+    "text": "data first additionally we don't want to have those data loading activities for red",
+    "start": "546600",
+    "end": "552040"
+  },
+  {
+    "text": "shift run into the next business day because uh data loading and query activity can compete for compute",
+    "start": "552040",
+    "end": "557720"
+  },
+  {
+    "text": "resources and it'll slow down queries in that red shift cluster we perform those Transformations and aggregations in SQL",
+    "start": "557720",
+    "end": "564600"
+  },
+  {
+    "text": "because like I said we're a SQL Centric shop and it's very easy that transformed data is then uh loaded back into S3",
+    "start": "564600",
+    "end": "571120"
+  },
+  {
+    "text": "where it's processed and converted into par so earlier I'd mentioned that one of",
+    "start": "571120",
+    "end": "577600"
+  },
+  {
+    "start": "576000",
+    "end": "576000"
+  },
+  {
+    "text": "the goals for this project was to decouple storage and compute resources this is a major design tenant for us and",
+    "start": "577600",
+    "end": "583279"
+  },
+  {
+    "text": "allows us to manage those resources independently at the same time we can experiment with new apps without",
+    "start": "583279",
+    "end": "589040"
+  },
+  {
+    "text": "worrying about um you know incompatibilities or compute contention or anything like that and given that",
+    "start": "589040",
+    "end": "596519"
+  },
+  {
+    "text": "this is primarily a long-term historical archive almost by definition of a huge amount of that data is going to be not",
+    "start": "596519",
+    "end": "603200"
+  },
+  {
+    "text": "accessed frequently and in practice access drops off very",
+    "start": "603200",
+    "end": "610040"
+  },
+  {
+    "text": "dramatically yesterday's data is used extensively as is month-to-date data for billing and other purposes we do get uh",
+    "start": "610800",
+    "end": "618079"
+  },
+  {
+    "text": "occasional requests for data dating back months or even years usually as a result of a regulatory inquiry but these are by",
+    "start": "618079",
+    "end": "624120"
+  },
+  {
+    "text": "far the outliers that being said all this historical data needs to be online and",
+    "start": "624120",
+    "end": "629440"
+  },
+  {
+    "text": "accessible at all times so offline backup systems like tapes and that sort of thing are just not",
+    "start": "629440",
+    "end": "635320"
+  },
+  {
+    "text": "applicable we also have a number of historical databases inside our company with data dating back to the late 1990s",
+    "start": "635320",
+    "end": "641639"
+  },
+  {
+    "text": "and all of that data is in the process of being loaded into this system ultimately we'd like to to provide",
+    "start": "641639",
+    "end": "647680"
+  },
+  {
+    "text": "One-Stop shopping for all historical needs of for data inside our",
+    "start": "647680",
+    "end": "653160"
+  },
+  {
+    "text": "organization another benefit of decoupling storage and compute resources for this Warehouse is that we're able to",
+    "start": "653480",
+    "end": "658760"
+  },
+  {
+    "text": "provide transparent cost allocations to our clients each client or department will get their own AWS account for their",
+    "start": "658760",
+    "end": "664959"
+  },
+  {
+    "text": "own use those departments can run as much or as little compute as they like and they can balance speed of execution",
+    "start": "664959",
+    "end": "671399"
+  },
+  {
+    "text": "with cost on their own heavy compute users can run a large cluster and throw a lot of CPU at a problem while uh",
+    "start": "671399",
+    "end": "678760"
+  },
+  {
+    "text": "lighter customers can still get their work done and the two won't trample on each other those clients don't even need",
+    "start": "678760",
+    "end": "683959"
+  },
+  {
+    "text": "to be running the same query mechanism so one could be running spark another could be running presto the S3 storage",
+    "start": "683959",
+    "end": "690120"
+  },
+  {
+    "text": "costs are shared and the variable costs of running those compute clusters are passed directly through to each Department's cost",
+    "start": "690120",
+    "end": "697800"
+  },
+  {
+    "text": "center so let's take a closer look at the data inest system which makes all of this data available each",
+    "start": "697800",
+    "end": "704600"
+  },
+  {
+    "text": "day here's an overview which focuses on the left hand side of the previous diagram and again this diagram can be",
+    "start": "704600",
+    "end": "710600"
+  },
+  {
+    "start": "705000",
+    "end": "705000"
+  },
+  {
+    "text": "read left to right top to bottom inside NASDAQ our data injest system reaches",
+    "start": "710600",
+    "end": "715720"
+  },
+  {
+    "text": "into other systems and retrieves data that data is staged locally on the injest server where it's compressed and",
+    "start": "715720",
+    "end": "722120"
+  },
+  {
+    "text": "and validated we have our own key management system which I'll talk about later it's used to generate and store",
+    "start": "722120",
+    "end": "728000"
+  },
+  {
+    "text": "all of the encryption Keys used throughout this system compressed encrypted data is uploaded S3 where it's processed by",
+    "start": "728000",
+    "end": "735120"
+  },
+  {
+    "text": "redshift this diagram also shows the addition of a hive metast store which obviously isn't part of a redshift",
+    "start": "735120",
+    "end": "740399"
+  },
+  {
+    "text": "deployment but is integral to various Hadoop applications once data is loaded into",
+    "start": "740399",
+    "end": "745519"
+  },
+  {
+    "text": "red shift and subsequently encoded for long-term storage we alter the Hive schema in that metast store to declare",
+    "start": "745519",
+    "end": "751320"
+  },
+  {
+    "text": "new tables and new data partitions for each day's data for this data inest system we've",
+    "start": "751320",
+    "end": "759079"
+  },
+  {
+    "start": "756000",
+    "end": "756000"
+  },
+  {
+    "text": "built an in-house workflow engine to orchestrate all of these activities this system is backed by a",
+    "start": "759079",
+    "end": "764199"
+  },
+  {
+    "text": "mySQL database where we maintain the current state of over 40,000 workflows that are executed each day to maintain",
+    "start": "764199",
+    "end": "770480"
+  },
+  {
+    "text": "data and loaded into this system that workflow engine maintains all the scheduling and dependencies",
+    "start": "770480",
+    "end": "776240"
+  },
+  {
+    "text": "between workflows so and ensures that everything runs smoothly every day care and feeding is performed through a",
+    "start": "776240",
+    "end": "781839"
+  },
+  {
+    "text": "management guey where we can perform root cause analysis to figure out what happened with failed items whether that",
+    "start": "781839",
+    "end": "786880"
+  },
+  {
+    "text": "be bad data that we data that we received or some other kind of issue this system is currently running",
+    "start": "786880",
+    "end": "793120"
+  },
+  {
+    "text": "on premise and like I said we'll be moving to Aurora and ec2 in 2016 where we'll be able to use S3 as temporary",
+    "start": "793120",
+    "end": "799120"
+  },
+  {
+    "text": "storage space moving that system to AWS should allow us to more easily handle volatile",
+    "start": "799120",
+    "end": "804959"
+  },
+  {
+    "text": "Market periods like we saw in August without needing to provision excess compute and uh storage resources on",
+    "start": "804959",
+    "end": "810639"
+  },
+  {
+    "text": "premise so elastic Computing really is great uh separate instances of this workflow engine also orchestrate daily",
+    "start": "810639",
+    "end": "817360"
+  },
+  {
+    "text": "billing runs produce reports and perform all sorts of other activities on data loaded or drived from this",
+    "start": "817360",
+    "end": "825320"
+  },
+  {
+    "start": "826000",
+    "end": "826000"
+  },
+  {
+    "text": "system most of those 40,000 uh workflows that we perform each day consist of some",
+    "start": "826079",
+    "end": "831120"
+  },
+  {
+    "text": "combination of these steps we retrieve data from various other sources these sources might be a database table that",
+    "start": "831120",
+    "end": "837519"
+  },
+  {
+    "text": "we query or a set of colle or a collection of files that we're expecting to find on a file server somewhere or a",
+    "start": "837519",
+    "end": "843320"
+  },
+  {
+    "text": "web Ser service that we need to call the vast majority of this data is in the form of simple CSV files which are",
+    "start": "843320",
+    "end": "849600"
+  },
+  {
+    "text": "generated off of data streams coming from our exchanges that data is validated mostly",
+    "start": "849600",
+    "end": "855079"
+  },
+  {
+    "text": "for completeness and then converted into CSV files and manifests suitable to be loaded into red",
+    "start": "855079",
+    "end": "860959"
+  },
+  {
+    "text": "shift data is compressed and encrypted before it's uploaded to a temporary location in S3 and then we copy it into",
+    "start": "860959",
+    "end": "867160"
+  },
+  {
+    "text": "redshift in our large table cases we stage a number of these copy operations throughout the day into S3 and then we",
+    "start": "867160",
+    "end": "874120"
+  },
+  {
+    "text": "merge a set of manifest files at the end of the day so that we can issue a single copy command once our nightly processing",
+    "start": "874120",
+    "end": "879560"
+  },
+  {
+    "text": "window opens this allows us to do some processing throughout the day and get ready for our nightly loads without",
+    "start": "879560",
+    "end": "885759"
+  },
+  {
+    "text": "affecting anything in red shift once that data is actually loaded into red shift transformation and aggregation",
+    "start": "885759",
+    "end": "892160"
+  },
+  {
+    "text": "operations kick off automatically I usually think of these workflows as a very large tree where the",
+    "start": "892160",
+    "end": "897880"
+  },
+  {
+    "text": "leaf nodes are individual ual file retrieval operations and then the branches and Trunks are progressively",
+    "start": "897880",
+    "end": "903079"
+  },
+  {
+    "text": "more and more aggregated data once the redshift load and",
+    "start": "903079",
+    "end": "909199"
+  },
+  {
+    "start": "907000",
+    "end": "907000"
+  },
+  {
+    "text": "transform operations complete corresponding S3 ingest workflows are also automatically triggered these",
+    "start": "909199",
+    "end": "915399"
+  },
+  {
+    "text": "workflows are driven off of the ddl retrieved from redshift for each table being processed this is an easy way for",
+    "start": "915399",
+    "end": "921800"
+  },
+  {
+    "text": "us to detect schema changes since we're not always notified by Upstream systems of those changes we manage a local",
+    "start": "921800",
+    "end": "928519"
+  },
+  {
+    "text": "database where we track Hive schema definitions and I'll talk about that more in a few minutes if a schema change",
+    "start": "928519",
+    "end": "934120"
+  },
+  {
+    "text": "is detected we increment a version number for the table defined in that uh metast store and then we automatically",
+    "start": "934120",
+    "end": "939920"
+  },
+  {
+    "text": "ingest new data with a new schema into a new location in S3 now under normal circumstances we're",
+    "start": "939920",
+    "end": "946360"
+  },
+  {
+    "text": "actually just adding new data partitions to existing tables since we don't actually do migrations all that often so",
+    "start": "946360",
+    "end": "952199"
+  },
+  {
+    "text": "we just modify that Hive metastore and we're done so now that we've had an overview",
+    "start": "952199",
+    "end": "959160"
+  },
+  {
+    "text": "of how that injust system works let's talk a little bit in more depth about how about data security and",
+    "start": "959160",
+    "end": "966319"
+  },
+  {
+    "text": "encryption security is our number one priority at all times everything we run",
+    "start": "966399",
+    "end": "971720"
+  },
+  {
+    "text": "in AWS is inside of VC with lock down security groups Network akles Etc each",
+    "start": "971720",
+    "end": "977800"
+  },
+  {
+    "text": "system should only be allowed to talk to specific other systems and we don't have any blanket policies that that allow",
+    "start": "977800",
+    "end": "983440"
+  },
+  {
+    "text": "traffic from the Internet or the rest of the universe at all we run our apps using credentials",
+    "start": "983440",
+    "end": "989079"
+  },
+  {
+    "text": "tied to least privilege I IM roles and that applies to both applications using apis and humans interacting with the",
+    "start": "989079",
+    "end": "995160"
+  },
+  {
+    "text": "console we use MFA tokens at least for root credentials on each account if not for all of the humans involved and you",
+    "start": "995160",
+    "end": "1002079"
+  },
+  {
+    "text": "should see uh SEC 302 for more pointers on I it's a really good talk we use ec2",
+    "start": "1002079",
+    "end": "1008199"
+  },
+  {
+    "text": "instance roles for our EMR clusters this greatly simplifies uh delivery of API credentials into those systems and",
+    "start": "1008199",
+    "end": "1014639"
+  },
+  {
+    "text": "allows us to cleanly manage security policies for each it also makes it a lot less likely that someone will check in",
+    "start": "1014639",
+    "end": "1020880"
+  },
+  {
+    "text": "production API credentials to Source control the new VPC endpoints for S3 are",
+    "start": "1020880",
+    "end": "1026160"
+  },
+  {
+    "text": "also very welcome this allows us to further restrict the access to the internet from inside our VPC and it",
+    "start": "1026160",
+    "end": "1032640"
+  },
+  {
+    "text": "allows us to lock down those buckets such that they're not accessible to the rest of the world at all and in addition",
+    "start": "1032640",
+    "end": "1038480"
+  },
+  {
+    "text": "to all of these layers we're also using private 10 gabit Direct Connect circuits into Amazon so that none of our traffic",
+    "start": "1038480",
+    "end": "1044918"
+  },
+  {
+    "text": "traverses the public internet at any time",
+    "start": "1044919",
+    "end": "1049720"
+  },
+  {
+    "start": "1050000",
+    "end": "1050000"
+  },
+  {
+    "text": "so encryption is actually pretty easy in this day and age but managing the encryption Keys is where all of the",
+    "start": "1050520",
+    "end": "1056880"
+  },
+  {
+    "text": "complexity lies we use a cluster of on- premise safet Luna HSM devices to store",
+    "start": "1056880",
+    "end": "1062640"
+  },
+  {
+    "text": "our master keys and those uh hsms are located in multiple geographically diverse",
+    "start": "1062640",
+    "end": "1068600"
+  },
+  {
+    "text": "locations hsms are specially hardened storage appliances designed only to store encryption keys and we use the",
+    "start": "1068600",
+    "end": "1074799"
+  },
+  {
+    "text": "same model as the Amazon Cloud HSM service our red shift clusters are directly integrated with our hsms such",
+    "start": "1074799",
+    "end": "1082039"
+  },
+  {
+    "text": "that when a red shift cluster boots it has to reach back to our HSM to decrypt its master key before it's able to read",
+    "start": "1082039",
+    "end": "1087559"
+  },
+  {
+    "text": "any data whether that's from a regular uh table or a snapshot or anything else",
+    "start": "1087559",
+    "end": "1093240"
+  },
+  {
+    "text": "we intentionally have these devices in our physical custody so that if there's ever a breach we can sever the",
+    "start": "1093240",
+    "end": "1098480"
+  },
+  {
+    "text": "connections to our hsms and terminate our red shift clusters thus making all of the data stored",
+    "start": "1098480",
+    "end": "1104799"
+  },
+  {
+    "text": "unreadable in practice we've never had to take such drastic measures but it's an integral part of our security",
+    "start": "1104799",
+    "end": "1110240"
+  },
+  {
+    "text": "mechanism so that uh you know we we have good data storage security uh for all of",
+    "start": "1110240",
+    "end": "1115960"
+  },
+  {
+    "text": "the data stored in S3 keys are stored in an internally developed KMS which we've named vins clortho after the key master",
+    "start": "1115960",
+    "end": "1122480"
+  },
+  {
+    "text": "of goer from Ghostbusters we publicly describe that system as usually just the am or the na",
+    "start": "1122480",
+    "end": "1129120"
+  },
+  {
+    "text": "the NASDAQ KMS and it's very broadly similar in functionality to the Amazon KMS and anywhere throughout this talk",
+    "start": "1129120",
+    "end": "1136400"
+  },
+  {
+    "text": "where I talk about its use the Amazon KMS could be substituted instead uh we keep that KMS ourselves",
+    "start": "1136400",
+    "end": "1143440"
+  },
+  {
+    "text": "again so that we have tight control over all of those encryption keys and so that uh you know we can cut off access",
+    "start": "1143440",
+    "end": "1149520"
+  },
+  {
+    "text": "physically in the event of a breach so transparent encryption is",
+    "start": "1149520",
+    "end": "1154840"
+  },
+  {
+    "start": "1153000",
+    "end": "1153000"
+  },
+  {
+    "text": "possible uh with objects stored in S3 through What's called the encryption materials provider interface in the S3",
+    "start": "1154840",
+    "end": "1161400"
+  },
+  {
+    "text": "SDK this class is used directly by the S3 client making it very easy to adapt systems that we're already talking to S3",
+    "start": "1161400",
+    "end": "1168440"
+  },
+  {
+    "text": "to use encrypted encrypted objects instead this interface is also used as a",
+    "start": "1168440",
+    "end": "1173480"
+  },
+  {
+    "text": "plug-in by emrfs which is an hdfs implementation on top of S3 developed",
+    "start": "1173480",
+    "end": "1178559"
+  },
+  {
+    "text": "for use in EMR clusters because that same mechanism is used by the S3 client and by uh emrfs",
+    "start": "1178559",
+    "end": "1185840"
+  },
+  {
+    "text": "it's easy to inter to interact with encrypted objects in S3 whether or not you're going through",
+    "start": "1185840",
+    "end": "1191679"
+  },
+  {
+    "text": "hdfs whenever an object is accessed in S3 your encryption materials provider will be called on to produce an",
+    "start": "1191679",
+    "end": "1197919"
+  },
+  {
+    "text": "encryption key for that object a material's description from an S3 object's user metadata is passed in and",
+    "start": "1197919",
+    "end": "1204120"
+  },
+  {
+    "text": "can be used to determine what corre what the correct key is to retrieve and similarly when you write a new object",
+    "start": "1204120",
+    "end": "1210159"
+  },
+  {
+    "text": "into S3 that provider interface will be called on to produce both an encryption key and a materials description which is",
+    "start": "1210159",
+    "end": "1216039"
+  },
+  {
+    "text": "stamped onto that object in metadata in our case we store a token representing the encryption key in that materials",
+    "start": "1216039",
+    "end": "1222600"
+  },
+  {
+    "text": "description and that token is not considered sensitive information since without API credentials and network",
+    "start": "1222600",
+    "end": "1228320"
+  },
+  {
+    "text": "access to our KMS it's just random",
+    "start": "1228320",
+    "end": "1232480"
+  },
+  {
+    "text": "data so this is great but what about performance if we spend all of our time encrypting and decrypting data when does",
+    "start": "1233679",
+    "end": "1240480"
+  },
+  {
+    "start": "1234000",
+    "end": "1234000"
+  },
+  {
+    "text": "actual work get done there's always a penalty for using encryption and this case is no different we've seen a",
+    "start": "1240480",
+    "end": "1247559"
+  },
+  {
+    "text": "roughly 25% performance penalty when encryption is enabled on S3 and this is well within acceptable bounds and",
+    "start": "1247559",
+    "end": "1253640"
+  },
+  {
+    "text": "similar to the Penalty that we've seen in red shift with encryption CPUs are actually very good",
+    "start": "1253640",
+    "end": "1258760"
+  },
+  {
+    "text": "at performing AES operations these days and in any case the choice would be for us to either not use S3 or use",
+    "start": "1258760",
+    "end": "1264880"
+  },
+  {
+    "text": "encryption and that's a pretty easy choice to make most importantly seeking within an",
+    "start": "1264880",
+    "end": "1271320"
+  },
+  {
+    "text": "encrypted object in S3 actually works um this is critical per for performance",
+    "start": "1271320",
+    "end": "1276440"
+  },
+  {
+    "text": "because a lot of modern file formats have an internal block structure and the readers will decode some metadata from",
+    "start": "1276440",
+    "end": "1281559"
+  },
+  {
+    "text": "the beginning or end of a file and then seek around within that file to actually read the",
+    "start": "1281559",
+    "end": "1286720"
+  },
+  {
+    "text": "data the the thing to remember here is that this actually just works and you mostly don't have to take any uh care to",
+    "start": "1286720",
+    "end": "1292960"
+  },
+  {
+    "text": "do it but for it to work you do need to encode the unencrypted file size on user",
+    "start": "1292960",
+    "end": "1298080"
+  },
+  {
+    "text": "metadata on each object and that unencrypted file size is what must be reported back to any layers on top of",
+    "start": "1298080",
+    "end": "1303880"
+  },
+  {
+    "text": "the storage system all of the details for uh seeking within an encrypted object are handled",
+    "start": "1303880",
+    "end": "1309960"
+  },
+  {
+    "text": "by the SDK itself and in practice it will actually read a little bit more data than you're asking it to when you",
+    "start": "1309960",
+    "end": "1316240"
+  },
+  {
+    "text": "seek uh into an object in S3 a new HTTP request is created with a",
+    "start": "1316240",
+    "end": "1321360"
+  },
+  {
+    "text": "bite range starting at the position that you want to seek to and ending at the end of the file what actually happens in",
+    "start": "1321360",
+    "end": "1327440"
+  },
+  {
+    "text": "practice is that if I'm requesting data starting at the blue arrow the SDK will actually start reading data from the",
+    "start": "1327440",
+    "end": "1333360"
+  },
+  {
+    "text": "white Arrow which is the beginning of the previous AES block that's because the uh AES Cipher that's used needs a",
+    "start": "1333360",
+    "end": "1339559"
+  },
+  {
+    "text": "little bit of information from the previous block to decode the current block but in practice it's a very small amount of extra information that needs",
+    "start": "1339559",
+    "end": "1345919"
+  },
+  {
+    "text": "to be read you can test this s by enabling wire level debugging in the SDK",
+    "start": "1345919",
+    "end": "1351880"
+  },
+  {
+    "text": "and then making some requests and you can see that the bite range that you request is different than the bite range that the SDK is actually requesting from",
+    "start": "1351880",
+    "end": "1360679"
+  },
+  {
+    "text": "S3 moving lower into the software stack onto each individual ec2 instance we needed to encrypt some of the local",
+    "start": "1361279",
+    "end": "1367880"
+  },
+  {
+    "start": "1362000",
+    "end": "1362000"
+  },
+  {
+    "text": "discs on each node this is specifically because Presto like many other systems",
+    "start": "1367880",
+    "end": "1373080"
+  },
+  {
+    "text": "uses uh local disc as scratch space to satisfy this need we developed an EMR",
+    "start": "1373080",
+    "end": "1378480"
+  },
+  {
+    "text": "bootstrap action or ba which encrypts a block device under Presto temp space",
+    "start": "1378480",
+    "end": "1384159"
+  },
+  {
+    "text": "this is a fairly straightforward setup using the standard Linux Lux tools and use encrypt setup to create an encrypted",
+    "start": "1384159",
+    "end": "1389520"
+  },
+  {
+    "text": "block device there's a few gotas here to make sure that when you reboot the node it doesn't hang forever waiting for",
+    "start": "1389520",
+    "end": "1395720"
+  },
+  {
+    "text": "someone to type in an encryption key to the console but otherwise it's pretty straightforward uh similar similar to",
+    "start": "1395720",
+    "end": "1402559"
+  },
+  {
+    "text": "how the S3 encryption provider stores a a key token in metadata we store a key",
+    "start": "1402559",
+    "end": "1407960"
+  },
+  {
+    "text": "in or key token in a local configuration file and then on reboot and init script",
+    "start": "1407960",
+    "end": "1413039"
+  },
+  {
+    "text": "we'll use that token to look up the encryption key to decrypt the block device and mount it so that Presto can",
+    "start": "1413039",
+    "end": "1418679"
+  },
+  {
+    "text": "use it as temporary space and finally moving all the way",
+    "start": "1418679",
+    "end": "1424880"
+  },
+  {
+    "start": "1422000",
+    "end": "1422000"
+  },
+  {
+    "text": "down the stack into the Linux kernel itself we had to find a way to get SE Linux working on EMR this was certainly more complicated",
+    "start": "1424880",
+    "end": "1432159"
+  },
+  {
+    "text": "than the encryption uh the dis encryption ba but it's still fairly straightforward basically this script",
+    "start": "1432159",
+    "end": "1438440"
+  },
+  {
+    "text": "installs the various SE Linux packages needed and then tweaks the command line the command line for the kernel in the",
+    "start": "1438440",
+    "end": "1443559"
+  },
+  {
+    "text": "grub config it then rebuilds the initrd system image uh marks the root file",
+    "start": "1443559",
+    "end": "1448720"
+  },
+  {
+    "text": "system for SE Linux relabeling and then reboots the node rebooting a node from a bootstrap action is not as easy as it",
+    "start": "1448720",
+    "end": "1455279"
+  },
+  {
+    "text": "sounds since you can't just call reboot from that from that uh script if you do you'll you'll either get your cluster",
+    "start": "1455279",
+    "end": "1461640"
+  },
+  {
+    "text": "marked as terminated because your bootstrap action failed or you'll get a whole new node because EMR thinks your",
+    "start": "1461640",
+    "end": "1467120"
+  },
+  {
+    "text": "your node is failed and you'll get this process starting all over again so to get around this we create a simple",
+    "start": "1467120",
+    "end": "1473159"
+  },
+  {
+    "text": "script in sltm that just sleeps for a few seconds and then reboots the node so our ba does all of its work and then",
+    "start": "1473159",
+    "end": "1479720"
+  },
+  {
+    "text": "executes that script in the background as its last step the result is that our ba complet successfully the instance",
+    "start": "1479720",
+    "end": "1486520"
+  },
+  {
+    "text": "controller reports that everything is fine and then the node spontaneously reboots a few seconds later this mechanism only works on EMR",
+    "start": "1486520",
+    "end": "1494080"
+  },
+  {
+    "text": "3.8 and we're working with the EMR team to get it working in 4.0 as part of effort to generally Harden the base OS",
+    "start": "1494080",
+    "end": "1500399"
+  },
+  {
+    "text": "in EMR we're also working on an SE Linux policy for Presto and we'll hopefully be",
+    "start": "1500399",
+    "end": "1505840"
+  },
+  {
+    "text": "able to share that with the community once we've got it into a good",
+    "start": "1505840",
+    "end": "1510640"
+  },
+  {
+    "text": "state so now that I've discussed uh what we've done to run app securely on EMR it's time to discuss Presto because we",
+    "start": "1511360",
+    "end": "1517919"
+  },
+  {
+    "text": "do actually want to get access to all of this data so first what is Presto Netflix and",
+    "start": "1517919",
+    "end": "1523960"
+  },
+  {
+    "start": "1521000",
+    "end": "1521000"
+  },
+  {
+    "text": "others have discussed it at this and previous reinvent conferences but just as a recap app Presto is an open source",
+    "start": "1523960",
+    "end": "1530080"
+  },
+  {
+    "text": "MPP SQL database released by Facebook it's able to query a variety of different data sources through what",
+    "start": "1530080",
+    "end": "1536320"
+  },
+  {
+    "text": "Presto calls their connector API clients connect to the system through either jdbc or obbc drivers and",
+    "start": "1536320",
+    "end": "1542919"
+  },
+  {
+    "text": "Airbnb has released a nice web goey called airpal specifically for our needs we're",
+    "start": "1542919",
+    "end": "1548520"
+  },
+  {
+    "text": "using what Presto calls the The Hive connector in this setup tables are defined in a hive meta store as external",
+    "start": "1548520",
+    "end": "1555440"
+  },
+  {
+    "text": "tables with their locations as uh directories in ns3 bucket Hive isn't",
+    "start": "1555440",
+    "end": "1561000"
+  },
+  {
+    "text": "actually used as part of query execution it's just a way to define the tables their locations and how they're",
+    "start": "1561000",
+    "end": "1566480"
+  },
+  {
+    "text": "partitioned Presto actually does all of the work of reading data from uh S3 and processing all of that data",
+    "start": "1566480",
+    "end": "1574120"
+  },
+  {
+    "start": "1574000",
+    "end": "1574000"
+  },
+  {
+    "text": "itself so here's a deployment diagram for Presto you can see on the left we have SQL clients and our KMS located in",
+    "start": "1574120",
+    "end": "1581559"
+  },
+  {
+    "text": "a NASDAQ data center we have Presto and and those clients um issue queries to",
+    "start": "1581559",
+    "end": "1587399"
+  },
+  {
+    "text": "presto using either um direct SQL interfaces or through the air palgi",
+    "start": "1587399",
+    "end": "1592720"
+  },
+  {
+    "text": "Presto reads schema definitions from The Hive metast store and then it reads data from S3 to decrypt that data Presto has",
+    "start": "1592720",
+    "end": "1599799"
+  },
+  {
+    "text": "to reach back to our data center to retrieve encryption keys for each object that it reads out of S3 and then within",
+    "start": "1599799",
+    "end": "1605799"
+  },
+  {
+    "text": "Presto that data is decrypted and processed and then query results are returned to clients just like a normal",
+    "start": "1605799",
+    "end": "1612720"
+  },
+  {
+    "text": "database so that sounds easy how does uh Presto work on EMR we're currently using",
+    "start": "1612720",
+    "end": "1617919"
+  },
+  {
+    "start": "1613000",
+    "end": "1613000"
+  },
+  {
+    "text": "a boo Bo strap action to download and install Java 8 which is required by Presto and then to download and install",
+    "start": "1617919",
+    "end": "1624039"
+  },
+  {
+    "text": "the Presto server itself this ba is based on the EMR teams Presto ba and and",
+    "start": "1624039",
+    "end": "1629679"
+  },
+  {
+    "text": "adds support for custom encryption materials provider jars so that the hive connector is able to decrypt data we",
+    "start": "1629679",
+    "end": "1636320"
+  },
+  {
+    "text": "also configure Presto to use an external Hive metastore uh instead of the one on a local um EMR cluster this is done",
+    "start": "1636320",
+    "end": "1643360"
+  },
+  {
+    "text": "since we centrally manage our Hive metastore in a long running EMR cluster that runs only the metastore and no",
+    "start": "1643360",
+    "end": "1648799"
+  },
+  {
+    "text": "actual Hadoop jobs currently we're using EMR 3.8 for these Presto clusters and",
+    "start": "1648799",
+    "end": "1654120"
+  },
+  {
+    "text": "again this is just because we haven't got the SE Linux system working on Ford auto yet we're really excited for the",
+    "start": "1654120",
+    "end": "1659880"
+  },
+  {
+    "text": "EMR team's new Presto uh sandbox deployment and we'll be deploying our security efforts to that system very",
+    "start": "1659880",
+    "end": "1667799"
+  },
+  {
+    "text": "soon so I said that Presto ba was modified to use an encryption materials provider this leads me to how we get",
+    "start": "1667799",
+    "end": "1674480"
+  },
+  {
+    "start": "1668000",
+    "end": "1668000"
+  },
+  {
+    "text": "Presto to interact with encrypted data Presto doesn't use em RFS for its access to S3 and instead implements its own",
+    "start": "1674480",
+    "end": "1681440"
+  },
+  {
+    "text": "simple S3 inter uh file system on top of S3 we added support for encryption",
+    "start": "1681440",
+    "end": "1686960"
+  },
+  {
+    "text": "materials providers to the Presto S3 file system class and these changes were actually fairly trivial to make and",
+    "start": "1686960",
+    "end": "1692760"
+  },
+  {
+    "text": "limited mostly to that single class we're in the process of contributing these changes back to our new GitHub",
+    "start": "1692760",
+    "end": "1699120"
+  },
+  {
+    "text": "account uh github.com NASDAQ and those changes should be up there in the very near future we actually just got a",
+    "start": "1699120",
+    "end": "1705640"
+  },
+  {
+    "text": "clearance to do this yesterday so we'll be working with Facebook to get these changes integrated into the main line of",
+    "start": "1705640",
+    "end": "1711480"
+  },
+  {
+    "text": "presto and that should eventually make its way into the the EMR sandbox deployment so that everybody can benefit",
+    "start": "1711480",
+    "end": "1717200"
+  },
+  {
+    "text": "from our work this is actually the first time that NASDAQ has contributed back to an open source project on GitHub and",
+    "start": "1717200",
+    "end": "1723200"
+  },
+  {
+    "text": "should not be the last time we've had a really good relationship with our office of general counsel and this effort has",
+    "start": "1723200",
+    "end": "1729080"
+  },
+  {
+    "text": "uh support from the executive level within NASDAQ and similar to our changes that we made to presto we're also making",
+    "start": "1729080",
+    "end": "1735000"
+  },
+  {
+    "text": "changes to airpal to support encryption and compression on day that it unloads to",
+    "start": "1735000",
+    "end": "1741279"
+  },
+  {
+    "text": "S3 so now that I've discussed how we get data into S3 how we get it back out using Presto it's time to talk about the",
+    "start": "1741760",
+    "end": "1748600"
+  },
+  {
+    "text": "actual data formats in use there's only two popular file",
+    "start": "1748600",
+    "end": "1753799"
+  },
+  {
+    "start": "1752000",
+    "end": "1752000"
+  },
+  {
+    "text": "formats for row oriented data in Hadoop Park and orc both are compressed column",
+    "start": "1753799",
+    "end": "1759320"
+  },
+  {
+    "text": "or storage formats meaning that column values are adjacent to each other within the file instead of rows being packed",
+    "start": "1759320",
+    "end": "1764640"
+  },
+  {
+    "text": "next to each other there's a variety of reasons why column or formats are good and that's beyond the scope of this",
+    "start": "1764640",
+    "end": "1770120"
+  },
+  {
+    "text": "discussion both formats store highly structured schema validated data and both support are supported by a variety",
+    "start": "1770120",
+    "end": "1776120"
+  },
+  {
+    "text": "of Hadoop applications and there's user uh arbitrary user metadata that can be encoded on each",
+    "start": "1776120",
+    "end": "1783320"
+  },
+  {
+    "text": "file so orc has some advantages for us mainly that date and time stamp types are fully supported in Hive and Presto",
+    "start": "1783360",
+    "end": "1790799"
+  },
+  {
+    "text": "since we're on a daily Cadence driven by the exchanges that we support and since most of our data are time series this is",
+    "start": "1790799",
+    "end": "1796200"
+  },
+  {
+    "text": "a big Advantage for us the downside is that there's rigid schema ordering requirements for the",
+    "start": "1796200",
+    "end": "1802039"
+  },
+  {
+    "text": "columns in an orc file specifically columns in that orc file are addressed by position instead of by name so the",
+    "start": "1802039",
+    "end": "1808640"
+  },
+  {
+    "text": "columns defined in your hive table need to match exactly the order that they're defined in your actual orc files so this",
+    "start": "1808640",
+    "end": "1815320"
+  },
+  {
+    "text": "is this issue is compounded for us since we partition our data and since partition columns end up logically at",
+    "start": "1815320",
+    "end": "1820640"
+  },
+  {
+    "text": "the end of a file or end of a a a schema this became a real issue for us the Java",
+    "start": "1820640",
+    "end": "1827080"
+  },
+  {
+    "text": "API for encoding orc files is also a bit clunky but the thing that really killed it for us is that we were we experienced",
+    "start": "1827080",
+    "end": "1833200"
+  },
+  {
+    "text": "terrible uh performance on orc once encryption was enabled we didn't dig into this too deeply but in all of our",
+    "start": "1833200",
+    "end": "1839600"
+  },
+  {
+    "text": "tests we saw between 15 and 18x uh slowdown and went from around a gigabyte",
+    "start": "1839600",
+    "end": "1845120"
+  },
+  {
+    "text": "a second scanned in our two node cluster to less than 70 megabytes a second scanned so unfortunately that was really",
+    "start": "1845120",
+    "end": "1851120"
+  },
+  {
+    "text": "a deal breaker for us for us the winner is parquet it",
+    "start": "1851120",
+    "end": "1856760"
+  },
+  {
+    "start": "1854000",
+    "end": "1854000"
+  },
+  {
+    "text": "enjoys wide support from a number of different projects Presto spark and drill just to name a few it's actively",
+    "start": "1856760",
+    "end": "1863120"
+  },
+  {
+    "text": "being developed and adoption is increasing schemas are more flexible columns are addressed by their name",
+    "start": "1863120",
+    "end": "1869279"
+  },
+  {
+    "text": "instead of by position which doesn't sound like much but it actually makes managing schemas on top of these files a lot cleaner and easier for Presto you do",
+    "start": "1869279",
+    "end": "1877240"
+  },
+  {
+    "text": "have to set uh hive. par. use column names to true in your hive config but that's pretty easy our testing also",
+    "start": "1877240",
+    "end": "1884760"
+  },
+  {
+    "text": "revealed acceptable performance when encrypted right in line with the the encrypt the the Slowdown that we've seen",
+    "start": "1884760",
+    "end": "1889960"
+  },
+  {
+    "text": "just with using S3 and thankfully the Java API is nice and clean it was fairly easy for us to",
+    "start": "1889960",
+    "end": "1897000"
+  },
+  {
+    "text": "adapt our generic data flow framework to translate our schema definitions into parquet type definitions allowing us to",
+    "start": "1897000",
+    "end": "1903039"
+  },
+  {
+    "text": "easily encode all of our data as Park however Park is a new file format",
+    "start": "1903039",
+    "end": "1909799"
+  },
+  {
+    "start": "1907000",
+    "end": "1907000"
+  },
+  {
+    "text": "and it still has some rough edges all of these issues are being actively addressed by the community but uh right",
+    "start": "1909799",
+    "end": "1915919"
+  },
+  {
+    "text": "now date types are not supported by Hive or Presto parkk itself has a date type",
+    "start": "1915919",
+    "end": "1921480"
+  },
+  {
+    "text": "but Hive and Presto won't deal with them specifically in paret files so dealing with all these",
+    "start": "1921480",
+    "end": "1926880"
+  },
+  {
+    "text": "different projects you end up with with a sort of vend diagram of file formats Hive schema types and query tools and we",
+    "start": "1926880",
+    "end": "1933720"
+  },
+  {
+    "text": "have to learn how to operate within the intersection of that diagram so it's a little annoying but it's easy enough to",
+    "start": "1933720",
+    "end": "1938960"
+  },
+  {
+    "text": "deal with we transparently encode dates as integers and basically do a transformation where we remove the",
+    "start": "1938960",
+    "end": "1945039"
+  },
+  {
+    "text": "dashes from a date and interpret the result as a as an integer this allows us to still order by those",
+    "start": "1945039",
+    "end": "1950159"
+  },
+  {
+    "text": "columns and easily trans uh translate them timestamp columns are converted to Big integers which is the hive",
+    "start": "1950159",
+    "end": "1957080"
+  },
+  {
+    "text": "equivalent of a 64-bit long the time stamp type in par is actually only um",
+    "start": "1957080",
+    "end": "1962559"
+  },
+  {
+    "text": "accurate to a resolution of millisecs anyway and since in practice when we have higher resolution time stamps what",
+    "start": "1962559",
+    "end": "1968440"
+  },
+  {
+    "text": "we end up doing is encoding a date column and then a separate nanc since midnight column which is then used for",
+    "start": "1968440",
+    "end": "1973760"
+  },
+  {
+    "text": "high resolution ordering so this brings me to schema and",
+    "start": "1973760",
+    "end": "1979559"
+  },
+  {
+    "text": "data management The Hive metast stor is the",
+    "start": "1979559",
+    "end": "1984840"
+  },
+  {
+    "start": "1983000",
+    "end": "1983000"
+  },
+  {
+    "text": "system of record for Presto as far as what tables exist their locations and",
+    "start": "1984840",
+    "end": "1989960"
+  },
+  {
+    "text": "how they're partitioned we deploy an EMR four cluster for our metastore 4.0 makes it a",
+    "start": "1989960",
+    "end": "1996600"
+  },
+  {
+    "text": "lot easier to talk to the meta store through Thrift which is how Presto communicates with the metastore this cluster is run in our",
+    "start": "1996600",
+    "end": "2002840"
+  },
+  {
+    "text": "Central warehousing account the same account with the S3 bucket containing all of our data",
+    "start": "2002840",
+    "end": "2009120"
+  },
+  {
+    "text": "that cluster is reachable by client accounts through VPC peering so that client accounts don't have to manage",
+    "start": "2009120",
+    "end": "2014399"
+  },
+  {
+    "text": "their own metast store though they're free to do so if they have testing requirements or if they want to experiment with data that's only",
+    "start": "2014399",
+    "end": "2020279"
+  },
+  {
+    "text": "available in their in their account we're backing that metast store with a RDS for mySQL database which",
+    "start": "2020279",
+    "end": "2026519"
+  },
+  {
+    "text": "makes for easy backups and management and we also are using encrypted storage there now in this case",
+    "start": "2026519",
+    "end": "2032080"
+  },
+  {
+    "text": "encrypted storage isn't as critical since we're just storing schema definitions and Table locations in S3",
+    "start": "2032080",
+    "end": "2037880"
+  },
+  {
+    "text": "and that's not exactly a trade secret the other reason that this meta store is deployed centrally is that",
+    "start": "2037880",
+    "end": "2044039"
+  },
+  {
+    "text": "we're uh our injest system actively is managing um schemas in that in that uh Hive metast store and will automatically",
+    "start": "2044039",
+    "end": "2051079"
+  },
+  {
+    "text": "create new tables as we see new uh data coming through new partitions are",
+    "start": "2051079",
+    "end": "2056118"
+  },
+  {
+    "text": "created each day and that Hive metastore is modified to add those new partitions additionally since we're able",
+    "start": "2056119",
+    "end": "2062280"
+  },
+  {
+    "text": "to detect schema changes from Upstream systems we can automatically create new tables as we see uh new versions of",
+    "start": "2062280",
+    "end": "2069240"
+  },
+  {
+    "text": "those tables so I mentioned that we version our table schemas so what exactly does",
+    "start": "2069240",
+    "end": "2075679"
+  },
+  {
+    "text": "that mean we store data in an S3 uh bucket in a pretty straightforward layout basically there's a directory",
+    "start": "2075679",
+    "end": "2082118"
+  },
+  {
+    "text": "structure with schemas at the top and then with tables underneath those schemas within each table directory",
+    "start": "2082119",
+    "end": "2088280"
+  },
+  {
+    "text": "there's a there's a directory for each logical version of that table and then within each version there's a directory",
+    "start": "2088280",
+    "end": "2093878"
+  },
+  {
+    "text": "for each data partition those data directories are named using the the standard Hive naming",
+    "start": "2093879",
+    "end": "2099400"
+  },
+  {
+    "text": "convention and this lets us uh recover partitions using the the mck repair table command in Hive now we don't",
+    "start": "2099400",
+    "end": "2106920"
+  },
+  {
+    "text": "normally use this to recover partitions since we're actively managing them throughout the day but it's use useful",
+    "start": "2106920",
+    "end": "2112839"
+  },
+  {
+    "text": "if we're creating a new metastore for testing or if we need to recreate it from scratch when we when we detect a",
+    "start": "2112839",
+    "end": "2119119"
+  },
+  {
+    "text": "schema change we increment that version number and new data is written into a new location in S3 and the old location",
+    "start": "2119119",
+    "end": "2125320"
+  },
+  {
+    "text": "is essentially abandoned from a data inest perspective we raise alerts so that humans can intervene and figure out what to do",
+    "start": "2125320",
+    "end": "2131640"
+  },
+  {
+    "text": "about a migration and in practice we usually get notified about these changes ahead of time and can plan accordingly",
+    "start": "2131640",
+    "end": "2137560"
+  },
+  {
+    "text": "but that doesn't always happen we're also not in such a dynamic",
+    "start": "2137560",
+    "end": "2142920"
+  },
+  {
+    "text": "environment that we're doing migrations every day so in practice this happens fairly infrequently but when those changes do",
+    "start": "2142920",
+    "end": "2149480"
+  },
+  {
+    "text": "occur we have a number of tools to migrate the old version of a table into the new version of a",
+    "start": "2149480",
+    "end": "2155560"
+  },
+  {
+    "text": "table so one lesson that we've learned from operating in that intersection of the ven diagram on the previous slide is",
+    "start": "2155560",
+    "end": "2161760"
+  },
+  {
+    "start": "2156000",
+    "end": "2156000"
+  },
+  {
+    "text": "that we need to manage a logical and a physical schema for each table given the data type Transformations such as date",
+    "start": "2161760",
+    "end": "2168400"
+  },
+  {
+    "text": "to integer Etc we can't directly compare our Hive schemas to redshift or other source databases to determine if there's",
+    "start": "2168400",
+    "end": "2174760"
+  },
+  {
+    "text": "been changes so we use the logical version of a schema to compare to the source data",
+    "start": "2174760",
+    "end": "2180560"
+  },
+  {
+    "text": "and we use the physical schema to produce Hive ddl for tools like Presto to interpret those schema definitions are",
+    "start": "2180560",
+    "end": "2187040"
+  },
+  {
+    "text": "stored in local mySQL database where we perform all version management and where we track the locations of those tables",
+    "start": "2187040",
+    "end": "2192440"
+  },
+  {
+    "text": "in S3 we have a few simple uh tools to export these uh schemas as Hive ddl",
+    "start": "2192440",
+    "end": "2198599"
+  },
+  {
+    "text": "scripts and normally again that's not used because we we uh actively manage that Hive metastore but it's useful if",
+    "start": "2198599",
+    "end": "2204720"
+  },
+  {
+    "text": "we had to for instance recreate our entire metastore from scratch in",
+    "start": "2204720",
+    "end": "2210480"
+  },
+  {
+    "start": "2211000",
+    "end": "2211000"
+  },
+  {
+    "text": "production so orc and par par both support file level metadata and we use",
+    "start": "2211079",
+    "end": "2216359"
+  },
+  {
+    "text": "this to encode a variety of information about the data contained in each of those files we encode the definition of",
+    "start": "2216359",
+    "end": "2222560"
+  },
+  {
+    "text": "the partition columns there the time zone the file was originally produced in we encode the name of the table and the",
+    "start": "2222560",
+    "end": "2229160"
+  },
+  {
+    "text": "current and original schema version of that table we also uh encode uh a",
+    "start": "2229160",
+    "end": "2235119"
+  },
+  {
+    "text": "representation of all the data type Transformations that were performed on data in that file all of this is so that",
+    "start": "2235119",
+    "end": "2240680"
+  },
+  {
+    "text": "we can re recreate The Logical versions of the schema and the data in that file uh undoing any of the transformation",
+    "start": "2240680",
+    "end": "2248000"
+  },
+  {
+    "text": "performed while writing it this allows us to go back and reprocess data which may have been corrupted because of a",
+    "start": "2248000",
+    "end": "2253760"
+  },
+  {
+    "text": "problem in migrations and it also lets us just figure out what happened all along the way by looking at the current",
+    "start": "2253760",
+    "end": "2260680"
+  },
+  {
+    "text": "and original schema version we can know if a file was migrated or not and from which versions so some of this borders",
+    "start": "2260680",
+    "end": "2267119"
+  },
+  {
+    "text": "on paranoia but uh we wanted to make sure that we had multiple overlapping mechanisms to prevent us from losing",
+    "start": "2267119",
+    "end": "2273200"
+  },
+  {
+    "text": "data or losing meaning or resolution of that data after all this is meant to be a very long-term store for all of our",
+    "start": "2273200",
+    "end": "2279000"
+  },
+  {
+    "text": "data and we can't lose anything so I've mentioned table",
+    "start": "2279000",
+    "end": "2284920"
+  },
+  {
+    "start": "2283000",
+    "end": "2283000"
+  },
+  {
+    "text": "partitioning a few times and it plays into our methodology for data management we partition basically all of our Tables",
+    "start": "2284920",
+    "end": "2291040"
+  },
+  {
+    "text": "by date this is going to be different for different use cases but since we're driven by exchanges that are on a daily",
+    "start": "2291040",
+    "end": "2296720"
+  },
+  {
+    "text": "uh Cadence and since all of our records have a have a reference date stamped on them it makes sense for us all of our",
+    "start": "2296720",
+    "end": "2303880"
+  },
+  {
+    "text": "data aside from reference information is also a Time series so this all fits together partition definitions really",
+    "start": "2303880",
+    "end": "2310680"
+  },
+  {
+    "text": "help query performance drastically since it cuts down very much on the the amount of data that you need to scan out of S3",
+    "start": "2310680",
+    "end": "2317200"
+  },
+  {
+    "text": "to satisfy any given query if you've got years of data stored there's no reason to scan all of it if you know that what",
+    "start": "2317200",
+    "end": "2323480"
+  },
+  {
+    "text": "you're looking for occurred on a particular date or within a particular range of",
+    "start": "2323480",
+    "end": "2328960"
+  },
+  {
+    "text": "dates another pointer is to use backticks in your hive schema ddl this will let you use reserved words or",
+    "start": "2329800",
+    "end": "2335640"
+  },
+  {
+    "text": "really any uh Unicode string as as a column name we've also noticed that Presto will",
+    "start": "2335640",
+    "end": "2341560"
+  },
+  {
+    "text": "will return nulls for values if the column name isn't lowercase in your actual parquet files so that's something",
+    "start": "2341560",
+    "end": "2347359"
+  },
+  {
+    "text": "else to look out for and in cases where we do have to go back and correct data what we've chosen",
+    "start": "2347359",
+    "end": "2353839"
+  },
+  {
+    "text": "to do is correct it in redshift using SQL again because we're a SQL Centric shop and it's easy we then unload that",
+    "start": "2353839",
+    "end": "2360240"
+  },
+  {
+    "text": "data from redshift into S3 and then reprocess it into parquet files to replace the existing apparently corrupt",
+    "start": "2360240",
+    "end": "2366480"
+  },
+  {
+    "text": "files we've developed a number of command line tools that make it easy for us to deal with large blocks of data coming out of",
+    "start": "2366480",
+    "end": "2372800"
+  },
+  {
+    "text": "red shift and being retranslated into parquet files into into S3 and those tools manage the schemas all along the",
+    "start": "2372800",
+    "end": "2381599"
+  },
+  {
+    "start": "2383000",
+    "end": "2383000"
+  },
+  {
+    "text": "way we've also developed a number of tools for dealing with data in S3 and redshift uh we've got tools that can",
+    "start": "2383319",
+    "end": "2389920"
+  },
+  {
+    "text": "extract some or all data out of various Legacy databases to produce CSV files suitable for inest into this system for",
+    "start": "2389920",
+    "end": "2397520"
+  },
+  {
+    "text": "legacy databases it basically just executes a series of SQL commands to uh extract data for each partition that we",
+    "start": "2397520",
+    "end": "2403640"
+  },
+  {
+    "text": "want to move and for red shift it'll issue unload commands to move that data into S3 once we've extracted schema",
+    "start": "2403640",
+    "end": "2410560"
+  },
+  {
+    "text": "information and CSV data from those databases we use those command line tools to bulk convert data into",
+    "start": "2410560",
+    "end": "2416720"
+  },
+  {
+    "text": "parquet those tools can write directly into the encrypted S3 buckets placing the data in the correct directory",
+    "start": "2416720",
+    "end": "2422599"
+  },
+  {
+    "text": "structure based on the schema table version and partitioning information",
+    "start": "2422599",
+    "end": "2428119"
+  },
+  {
+    "text": "this allows us to easily move data in and out of this S3 warehouse and we're able to do it billions of rows at a",
+    "start": "2428119",
+    "end": "2434359"
+  },
+  {
+    "text": "time we developed these tools basically because we want to encode all of that uh extra metadata on each file and because",
+    "start": "2434359",
+    "end": "2441119"
+  },
+  {
+    "text": "we wanted to have tight control over how every field is converted into each of these formats we had initially",
+    "start": "2441119",
+    "end": "2447160"
+  },
+  {
+    "text": "experimented with using Hive or other mechanisms to select out of a CSV back table and into a parket back table but",
+    "start": "2447160",
+    "end": "2453720"
+  },
+  {
+    "text": "that didn't really give us the level of control that we were looking for",
+    "start": "2453720",
+    "end": "2459119"
+  },
+  {
+    "start": "2459000",
+    "end": "2459000"
+  },
+  {
+    "text": "and finally we developed some custom tools to migrate paret files these tools basically read in version n of a table",
+    "start": "2460119",
+    "end": "2467440"
+  },
+  {
+    "text": "and write out version n plus one uh most of these uh migrations are pretty trivial and just scripted up such",
+    "start": "2467440",
+    "end": "2474240"
+  },
+  {
+    "text": "as adding a new column with with or without a default value or renaming and moving columns around these had to be",
+    "start": "2474240",
+    "end": "2480599"
+  },
+  {
+    "text": "developed again because we're using all that custom metadata and because we didn't want to take the chance of of",
+    "start": "2480599",
+    "end": "2485839"
+  },
+  {
+    "text": "losing data because of an errant in in place migration most of our Mig migrations are",
+    "start": "2485839",
+    "end": "2491960"
+  },
+  {
+    "text": "trivial and just scripted like I said but in some cases we have to write Java code if we're splitting an existing",
+    "start": "2491960",
+    "end": "2497160"
+  },
+  {
+    "text": "column into multiple other columns or performing some more complicated migration this is again why we track the",
+    "start": "2497160",
+    "end": "2503760"
+  },
+  {
+    "text": "current and original schema version on each file so that we can know exactly what happened to it every step of the",
+    "start": "2503760",
+    "end": "2509359"
+  },
+  {
+    "text": "way and we don't have to track any of that information in some external database or anything like that it's it's",
+    "start": "2509359",
+    "end": "2514720"
+  },
+  {
+    "text": "contained directly on each file so this actually brings me to the end of",
+    "start": "2514720",
+    "end": "2519760"
+  },
+  {
+    "text": "this presentation and I'll take a few moments to review and then discuss future directions for our",
+    "start": "2519760",
+    "end": "2524920"
+  },
+  {
+    "text": "efforts today I discussed our motivations for extending our red shift Warehouse using EMR and",
+    "start": "2524920",
+    "end": "2530240"
+  },
+  {
+    "start": "2526000",
+    "end": "2526000"
+  },
+  {
+    "text": "S3 I talked about how our data injest system works how we're able to query encrypted data stored in S3 using Presto",
+    "start": "2530240",
+    "end": "2537560"
+  },
+  {
+    "text": "and other uh Hadoop applications and how we perform schema uh or how we manage",
+    "start": "2537560",
+    "end": "2542599"
+  },
+  {
+    "text": "our schemas and perform migrations on those schemas and a few lessons to to take away from",
+    "start": "2542599",
+    "end": "2549359"
+  },
+  {
+    "text": "this this is the tldr version of the presentation you should manage your storage and compute resources separately",
+    "start": "2549359",
+    "end": "2556119"
+  },
+  {
+    "text": "especially if you're dealing with a long-term data store where much of your data is either cold or warm it's okay to",
+    "start": "2556119",
+    "end": "2562480"
+  },
+  {
+    "text": "be paranoid about data loss and you should Implement as many overlapping policies and procedures as you think is",
+    "start": "2562480",
+    "end": "2567960"
+  },
+  {
+    "text": "suitable for your needs S3 encryption is pretty easy and seeking within an encrypted object",
+    "start": "2567960",
+    "end": "2574559"
+  },
+  {
+    "text": "actually works we chose park over orc as our storage format mostly because of the",
+    "start": "2574559",
+    "end": "2580720"
+  },
+  {
+    "text": "encryption performance but also because of uh of growing industry support for parque you should partition the data in",
+    "start": "2580720",
+    "end": "2587960"
+  },
+  {
+    "text": "your tables and track versions of those those tables both from a performance perspective and a paranoia of losing",
+    "start": "2587960",
+    "end": "2593960"
+  },
+  {
+    "text": "data perspective you should manage logical and physical schemas of those tables because you might have to do um uh data",
+    "start": "2593960",
+    "end": "2601440"
+  },
+  {
+    "text": "type translations and because it'll make uh it easier to compare with Source systems to see if there's been changes",
+    "start": "2601440",
+    "end": "2607920"
+  },
+  {
+    "text": "and finally you should do some thinking about data management and automation tools because you'll be moving a lot of",
+    "start": "2607920",
+    "end": "2613119"
+  },
+  {
+    "text": "data around so finally let's talk about some enhancements that we'll be making to the",
+    "start": "2613119",
+    "end": "2619079"
+  },
+  {
+    "start": "2616000",
+    "end": "2616000"
+  },
+  {
+    "text": "system over the next year we'll be archiving original Source data in this system for sec7 A4 compliance this is",
+    "start": "2619079",
+    "end": "2626359"
+  },
+  {
+    "text": "the so-called books and Records requirement that'll be using the new Glacier Vault lock feature which is",
+    "start": "2626359",
+    "end": "2632160"
+  },
+  {
+    "text": "basically worm storage on top of Glacier and this is driven directly out of the fact that we're in a very uh highly",
+    "start": "2632160",
+    "end": "2638440"
+  },
+  {
+    "text": "regulated environment we'll also be de decoupling our data retrieval and data",
+    "start": "2638440",
+    "end": "2643559"
+  },
+  {
+    "text": "processing systems over the next year I'd mentioned that we want to move a lot of this processing into ec2 and that's",
+    "start": "2643559",
+    "end": "2649400"
+  },
+  {
+    "text": "going to be our way of doing it currently that injest system sits on premise because it has to have elevated",
+    "start": "2649400",
+    "end": "2655040"
+  },
+  {
+    "text": "access rights and network connectivity into a wide array of different systems inside NASDAQ if we split that system in",
+    "start": "2655040",
+    "end": "2661480"
+  },
+  {
+    "text": "two we'll leave part of it behind so that it can still have elevated access rights into those other systems and",
+    "start": "2661480",
+    "end": "2667280"
+  },
+  {
+    "text": "it'll just park encrypted data in S3 the rest of the systems can then operate entirely in Amazon and only deal with",
+    "start": "2667280",
+    "end": "2673520"
+  },
+  {
+    "text": "files in S3 and they don't have to deal with internal routing or any other issues another part of that move will be",
+    "start": "2673520",
+    "end": "2680079"
+  },
+  {
+    "text": "to migrate our workflow engines database to Amazon Aurora where we'll have a more resilient and more durable store for all",
+    "start": "2680079",
+    "end": "2686000"
+  },
+  {
+    "text": "of that information we'll also be leveraging more non-sql Frameworks such as spark and machine",
+    "start": "2686000",
+    "end": "2692359"
+  },
+  {
+    "text": "learning and finally we'll be adding near realtime streaming injest more and more data sources including some truly",
+    "start": "2692359",
+    "end": "2699400"
+  },
+  {
+    "text": "high volume data feeds remember to complete your",
+    "start": "2699400",
+    "end": "2705720"
+  },
+  {
+    "text": "evaluations and have a great time at the party tonight thank you all for your time",
+    "start": "2705720",
+    "end": "2711799"
+  }
+]

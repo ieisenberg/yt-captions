@@ -1,0 +1,2562 @@
+[
+  {
+    "start": "0",
+    "end": "64000"
+  },
+  {
+    "text": "my name is silesh mukel i'm a senior software engineer at netflix and today i want to talk to you",
+    "start": "4400",
+    "end": "9519"
+  },
+  {
+    "text": "about how we achieve anti-entropy using crdts or conflict-free replicated data types",
+    "start": "9519",
+    "end": "15920"
+  },
+  {
+    "text": "on a highly available data store called dynamite which we built in-house so the purpose of this talk really is to",
+    "start": "15920",
+    "end": "22560"
+  },
+  {
+    "text": "show how crdts can allow a highly available data store like ours to provide",
+    "start": "22560",
+    "end": "28000"
+  },
+  {
+    "text": "some stronger guarantees i want to point out while crdts are not something",
+    "start": "28000",
+    "end": "33120"
+  },
+  {
+    "text": "brand new uh this talk i'd like to talk about how we went about implementing it",
+    "start": "33120",
+    "end": "38320"
+  },
+  {
+    "text": "uh what are some of the practical challenges we face faced along the way and some optimizations that we made",
+    "start": "38320",
+    "end": "45280"
+  },
+  {
+    "text": "so uh i hope after this talk maybe the audience can leave with a better understanding of crdts",
+    "start": "45280",
+    "end": "51280"
+  },
+  {
+    "text": "and if you're new to it hopefully identify some use cases that you think crdts would be a good fit for",
+    "start": "51280",
+    "end": "59840"
+  },
+  {
+    "text": "okay right so before we begin i want to start with",
+    "start": "63760",
+    "end": "69360"
+  },
+  {
+    "start": "64000",
+    "end": "148000"
+  },
+  {
+    "text": "a rough timeline so in 2011 uh netflix began its adoption of cassandra there",
+    "start": "69360",
+    "end": "76320"
+  },
+  {
+    "text": "was a heroic uh migration from the traditional oracle data database",
+    "start": "76320",
+    "end": "81920"
+  },
+  {
+    "text": "to cassandra because we like the highly available nature of it in 2013 netflix as a business was",
+    "start": "81920",
+    "end": "89439"
+  },
+  {
+    "text": "gearing up to go global and in 2013 we started our first multi-region deployments",
+    "start": "89439",
+    "end": "94880"
+  },
+  {
+    "text": "and there was an incident in 2012 which definitely helped as well",
+    "start": "94880",
+    "end": "100000"
+  },
+  {
+    "text": "in 2012 when we were a single region deployment we had aws go down for about 24 hours",
+    "start": "100000",
+    "end": "105840"
+  },
+  {
+    "text": "and netflix was unaccessible so this definitely helped us push our multi-region story",
+    "start": "105840",
+    "end": "112240"
+  },
+  {
+    "text": "so as we started going to our multi-region story a lot of a lot of our app developers",
+    "start": "112240",
+    "end": "119360"
+  },
+  {
+    "text": "started using cassandra as a primary database and they understood the trade-offs that a system like cassandra",
+    "start": "119360",
+    "end": "124719"
+  },
+  {
+    "text": "would could provide but uh for us for a lot of use cases a",
+    "start": "124719",
+    "end": "131840"
+  },
+  {
+    "text": "system like cassandra was still quite heavy and it a lot of use cases could use with",
+    "start": "131840",
+    "end": "138239"
+  },
+  {
+    "text": "some lower latency so this was the thinking that brought about the",
+    "start": "138239",
+    "end": "143360"
+  },
+  {
+    "text": "system dynamite in 2016 and",
+    "start": "143360",
+    "end": "148560"
+  },
+  {
+    "start": "148000",
+    "end": "253000"
+  },
+  {
+    "text": "so what is dynamite so dynamite in a nutshell it takes non-distributed",
+    "start": "149440",
+    "end": "154800"
+  },
+  {
+    "text": "data stores and makes them distributed so it's inspired by the dynamodb",
+    "start": "154800",
+    "end": "160400"
+  },
+  {
+    "text": "whitepaper just like cassandra was it follows the token ring architecture",
+    "start": "160400",
+    "end": "167040"
+  },
+  {
+    "text": "which is basically to say if you have a single data store instance dynamite can take multiple of them and",
+    "start": "167040",
+    "end": "174800"
+  },
+  {
+    "text": "share your data across them so the way you would shorter data across",
+    "start": "174800",
+    "end": "179840"
+  },
+  {
+    "text": "these nodes are you would pass your keys to through a hash function your hash functions would spit out tokens your tokens would",
+    "start": "179840",
+    "end": "186720"
+  },
+  {
+    "text": "fall somewhere in the ring and the node that falls in the ring owns the data so in this case we can see a three node",
+    "start": "186720",
+    "end": "194480"
+  },
+  {
+    "text": "ring which means that the data is roughly divided by a third in each node",
+    "start": "194480",
+    "end": "202000"
+  },
+  {
+    "text": "so each ring is basically a full copy of the data the way we deployed is each ring is",
+    "start": "204799",
+    "end": "210159"
+  },
+  {
+    "text": "contained within one rack or amazon availability zone so we replicate this ring across racks",
+    "start": "210159",
+    "end": "218159"
+  },
+  {
+    "text": "within the same region or even across regions",
+    "start": "218159",
+    "end": "222560"
+  },
+  {
+    "text": "so a client can connect to any node in the cluster each node can act as a coordinator for any query",
+    "start": "223519",
+    "end": "231040"
+  },
+  {
+    "text": "if the node is the owner for that key is the token owner for that key it",
+    "start": "231920",
+    "end": "237360"
+  },
+  {
+    "text": "applies the right locally and it replicates it to its other replicas",
+    "start": "237360",
+    "end": "242959"
+  },
+  {
+    "text": "if the node is not the token owner for a key it forwards it to the token owner which",
+    "start": "243200",
+    "end": "248959"
+  },
+  {
+    "text": "then takes the responsibility of replicating it across the cluster",
+    "start": "248959",
+    "end": "254799"
+  },
+  {
+    "start": "253000",
+    "end": "379000"
+  },
+  {
+    "text": "so what else what are the features that dynamite provides it provides global replication it's a",
+    "start": "254799",
+    "end": "262160"
+  },
+  {
+    "text": "highly available data store it's a shared nothing which means that each node can operate independently",
+    "start": "262160",
+    "end": "268400"
+  },
+  {
+    "text": "it does auto sharding of your keys across the cluster it scales linearly with the size of data",
+    "start": "268400",
+    "end": "275120"
+  },
+  {
+    "text": "uh it allows you to plug data strokes underneath we can run with memcache redis or roxdb",
+    "start": "275120",
+    "end": "282400"
+  },
+  {
+    "text": "but i want to point out that we primarily run with reticent production today and this talk is geared towards how",
+    "start": "282400",
+    "end": "288800"
+  },
+  {
+    "text": "we use crdts within redis it offers multiple quorum levels so we",
+    "start": "288800",
+    "end": "294880"
+  },
+  {
+    "text": "can have no courage quorums within a single region quotums across regions and lastly it supports the same data",
+    "start": "294880",
+    "end": "302400"
+  },
+  {
+    "text": "store api of the underlying data store so if we are uh if if you're being backed by redis then any",
+    "start": "302400",
+    "end": "309120"
+  },
+  {
+    "text": "redis client can talk to dynamite and automatic dynamite would automatically understand those commands",
+    "start": "309120",
+    "end": "314400"
+  },
+  {
+    "text": "and just offer a distributed redis so what is the dynamite footprint at",
+    "start": "314400",
+    "end": "320240"
+  },
+  {
+    "text": "netflix currently today we have about a thousand customer facing nodes",
+    "start": "320240",
+    "end": "326479"
+  },
+  {
+    "text": "we collectively handle about a million operations per second and our largest cluster today holds",
+    "start": "326479",
+    "end": "332000"
+  },
+  {
+    "text": "about six terabytes so dynamite when it began was typically",
+    "start": "332000",
+    "end": "338240"
+  },
+  {
+    "text": "used as a distributed cache in front of data stores like a sandra and elasticsearch for faster access",
+    "start": "338240",
+    "end": "344400"
+  },
+  {
+    "text": "but over the years we've had a growing number of use cases and it's about time we made the system more resilient",
+    "start": "344400",
+    "end": "349840"
+  },
+  {
+    "text": "to onboard newer use cases today we have use cases ranging from",
+    "start": "349840",
+    "end": "356160"
+  },
+  {
+    "text": "maintaining session information for devices dynamite is used as part of a b testing as well",
+    "start": "356160",
+    "end": "362479"
+  },
+  {
+    "text": "determining when to send notifications to to to customers through devices",
+    "start": "362479",
+    "end": "369199"
+  },
+  {
+    "text": "uh and also we started onboarding more critical use cases like uh connecting customers to support",
+    "start": "369199",
+    "end": "375840"
+  },
+  {
+    "text": "agents for 150 million subscriber base so let's get into what the problem is so",
+    "start": "375840",
+    "end": "383759"
+  },
+  {
+    "start": "379000",
+    "end": "674000"
+  },
+  {
+    "text": "the problem simply is entropy in the system what do i mean by entropy entropy in this context simply",
+    "start": "383759",
+    "end": "389600"
+  },
+  {
+    "text": "means replica is going out of sync so let's look at a simple example of how that can happen",
+    "start": "389600",
+    "end": "396720"
+  },
+  {
+    "text": "so here we have a three replica system and now i'm just running a redis command",
+    "start": "396720",
+    "end": "402800"
+  },
+  {
+    "text": "which says set the value of k a key k to one to three how it typically",
+    "start": "402800",
+    "end": "409280"
+  },
+  {
+    "text": "works is we apply the right locally and replicate it to the other replicas",
+    "start": "409280",
+    "end": "415039"
+  },
+  {
+    "text": "and if this is a quorum right we would respond to the client after a quorum number of nodes have applied",
+    "start": "415199",
+    "end": "420560"
+  },
+  {
+    "text": "the write so now let's assume we have a network",
+    "start": "420560",
+    "end": "426720"
+  },
+  {
+    "text": "partition which isolates one of our replicas in the system so replica 3 is isolated",
+    "start": "426720",
+    "end": "433199"
+  },
+  {
+    "text": "and cannot talk to any of the other replicas now we get a command uh to update the",
+    "start": "433199",
+    "end": "438479"
+  },
+  {
+    "text": "value of key k to four five six we uh this replica can apply the",
+    "start": "438479",
+    "end": "443680"
+  },
+  {
+    "text": "write locally but it fails to replicate the data because of the network partition so",
+    "start": "443680",
+    "end": "450160"
+  },
+  {
+    "text": "if this is a quorum right we respond with an error back to the client now let's say there's yet another",
+    "start": "450160",
+    "end": "456240"
+  },
+  {
+    "text": "partition which isolates all replicas from each other we have yet anoth other update to the",
+    "start": "456240",
+    "end": "461360"
+  },
+  {
+    "text": "same key at a different replica that replica applies right locally but again fails to replicate",
+    "start": "461360",
+    "end": "469360"
+  },
+  {
+    "text": "so at this point you see that for the same key k we have three different values across replicas",
+    "start": "470080",
+    "end": "475680"
+  },
+  {
+    "text": "in the cluster so if different clients were to ask different replicas get me the value for",
+    "start": "475680",
+    "end": "481680"
+  },
+  {
+    "text": "the key k you would get back different answers if this is if you're doing a non-quorum read",
+    "start": "481680",
+    "end": "489199"
+  },
+  {
+    "text": "if you were to do a quorum read which means that a majority of the replicas have to agree on the value",
+    "start": "489759",
+    "end": "496160"
+  },
+  {
+    "text": "the coordinating node would ask the other replicas give me a value for k they would respond with their values but",
+    "start": "496160",
+    "end": "502879"
+  },
+  {
+    "text": "we can see that since everybody has a different value we cannot achieve a quorum so the only thing we can do at this point is reply to the",
+    "start": "502879",
+    "end": "509919"
+  },
+  {
+    "text": "client saying that we were not able to achieve a quorum so at this point this key is basically",
+    "start": "509919",
+    "end": "516800"
+  },
+  {
+    "text": "unreadable if you want to use a quorum read this key is unreadable the only way to unblock this key would be to do a",
+    "start": "516800",
+    "end": "523440"
+  },
+  {
+    "text": "non-quorum read on the key or to overwrite it at which point we can read it again",
+    "start": "523440",
+    "end": "529680"
+  },
+  {
+    "text": "this is obviously not desirable so what can we see uh from this we can see that replicas",
+    "start": "529680",
+    "end": "535519"
+  },
+  {
+    "text": "will go out of sync they can and they will go out of sync so systems must be built uh to be resilient to entropy",
+    "start": "535519",
+    "end": "543279"
+  },
+  {
+    "text": "uh we can do things like have consensus on every operation but this is an ap system so we",
+    "start": "543279",
+    "end": "550959"
+  },
+  {
+    "text": "compromise on strong consistency to maintain availability",
+    "start": "550959",
+    "end": "556320"
+  },
+  {
+    "text": "so this is this is the sort of problem that brought about implementing crdts within dynamite",
+    "start": "558800",
+    "end": "565839"
+  },
+  {
+    "text": "so before i dive into crdts let's look at how some of the other systems generally",
+    "start": "566800",
+    "end": "571839"
+  },
+  {
+    "text": "deal with anti-entropy so the most common one is the last writer wins",
+    "start": "571839",
+    "end": "577760"
+  },
+  {
+    "text": "the way last writer wins is each replica maintains a time stamp for the latest update for",
+    "start": "577760",
+    "end": "584080"
+  },
+  {
+    "text": "every key in its that it that it maintains when entropy is detected across replicas",
+    "start": "584080",
+    "end": "591279"
+  },
+  {
+    "text": "these timestamps are used to find the latest value for the key so the timestamp that wins is the the",
+    "start": "591279",
+    "end": "598320"
+  },
+  {
+    "text": "greatest timestamp so this is not always 100 correct",
+    "start": "598320",
+    "end": "603760"
+  },
+  {
+    "text": "because of clock skew uh you you generally know that uh different",
+    "start": "603760",
+    "end": "609680"
+  },
+  {
+    "text": "servers uh clocks can go out of sync and they don't always agree on the time",
+    "start": "609680",
+    "end": "615519"
+  },
+  {
+    "text": "doing periodic ntp syncs which is to sync your clock with a remote time server always helps we are quite aggressive",
+    "start": "615519",
+    "end": "622160"
+  },
+  {
+    "text": "with ntp syncs at netflix but it still doesn't mean it's 100 correct",
+    "start": "622160",
+    "end": "627760"
+  },
+  {
+    "text": "the next is vector clocks vector clocks could use its own presentation so i'll just talk about the guarantees that it",
+    "start": "628000",
+    "end": "634800"
+  },
+  {
+    "text": "offers so it allows you to create causal relationships between updates to find out which updates are truly the",
+    "start": "634800",
+    "end": "641200"
+  },
+  {
+    "text": "latest and which uh which are not but it doesn't allow uh it doesn't allow",
+    "start": "641200",
+    "end": "647600"
+  },
+  {
+    "text": "you to find causative relationship between concurrent updates so for concurrent rights while using vector clocks we",
+    "start": "647600",
+    "end": "653279"
+  },
+  {
+    "text": "still have to fall back to either using a last rider wins mechanism or what some systems do which is pass back all the conflicting",
+    "start": "653279",
+    "end": "659920"
+  },
+  {
+    "text": "values for the key back up to the application and let the application decide so as we",
+    "start": "659920",
+    "end": "665360"
+  },
+  {
+    "text": "go through the stock we'll see that for some cases we still need to rely on last rider wins the goal is to avoid it when possible",
+    "start": "665360",
+    "end": "675839"
+  },
+  {
+    "start": "674000",
+    "end": "775000"
+  },
+  {
+    "text": "so what is the solution that we implemented we ended up using crdts to achieve anti-entropy so what is a",
+    "start": "676160",
+    "end": "684240"
+  },
+  {
+    "text": "crdt it's basically a data structure that's that can be replicated across a network",
+    "start": "684240",
+    "end": "691440"
+  },
+  {
+    "text": "and each each replica can update its local state independently without",
+    "start": "691440",
+    "end": "697760"
+  },
+  {
+    "text": "having to coordinate with the other replicas and it's always crdt state that is always mathematically possible to",
+    "start": "697760",
+    "end": "703839"
+  },
+  {
+    "text": "resolve any inconsistencies across replicas uh today we're going to talk about",
+    "start": "703839",
+    "end": "709360"
+  },
+  {
+    "text": "state-based crdts or convergent replicated data types it was formerly defined in 2011 by",
+    "start": "709360",
+    "end": "716320"
+  },
+  {
+    "text": "mark shapiro carlos marquero and a few others so crdt's operations on crdts must obey",
+    "start": "716320",
+    "end": "724000"
+  },
+  {
+    "text": "three properties so what are these three properties the first is they need to be associative which means that",
+    "start": "724000",
+    "end": "729760"
+  },
+  {
+    "text": "the grouping of operations should not matter then they need to be commutative which",
+    "start": "729760",
+    "end": "735200"
+  },
+  {
+    "text": "means that the order of the operation should not matter and lastly they need to be added important which means that duplication",
+    "start": "735200",
+    "end": "741839"
+  },
+  {
+    "text": "of the operations should not matter so we can see that not all data can be represented as crdts",
+    "start": "741839",
+    "end": "749600"
+  },
+  {
+    "text": "but fortunately most redis native data types can be",
+    "start": "749600",
+    "end": "754959"
+  },
+  {
+    "text": "so there are two basic types of operations on crdts one it's an update where it updates its",
+    "start": "755200",
+    "end": "760399"
+  },
+  {
+    "text": "local state in its local replica and the second is a merge where all the",
+    "start": "760399",
+    "end": "765519"
+  },
+  {
+    "text": "replicas share their local states with each other and we and we reach a consistent state",
+    "start": "765519",
+    "end": "773360"
+  },
+  {
+    "text": "where they converge so in the context of dynamite when we do",
+    "start": "773360",
+    "end": "780079"
+  },
+  {
+    "text": "a write we basically do an update operation we update the local replica when we're doing a repair that we're",
+    "start": "780079",
+    "end": "786560"
+  },
+  {
+    "text": "basically doing a merge operation and a merge operation on the read path",
+    "start": "786560",
+    "end": "791839"
+  },
+  {
+    "text": "is basically a read repair so most of today's talk will focus on",
+    "start": "791839",
+    "end": "797279"
+  },
+  {
+    "text": "read repairs uh i will also talk about asynchronous repairs uh",
+    "start": "797279",
+    "end": "802800"
+  },
+  {
+    "text": "towards the end but uh i have to mention that it's still some ongoing work",
+    "start": "802800",
+    "end": "808639"
+  },
+  {
+    "text": "so crdts provide this notion of strong eventual consistency what is strong eventual consistency it's",
+    "start": "809360",
+    "end": "815760"
+  },
+  {
+    "text": "basically eventual consistency with the added property of safety eventual consistency basically tells us",
+    "start": "815760",
+    "end": "821120"
+  },
+  {
+    "text": "that we have a liveness property which means that something good will eventually happen that basically means",
+    "start": "821120",
+    "end": "826320"
+  },
+  {
+    "text": "your system will not hit a deadlock and will continue to function a safety property tells us that",
+    "start": "826320",
+    "end": "832399"
+  },
+  {
+    "text": "something bad will never happen what this means is that the value that",
+    "start": "832399",
+    "end": "837680"
+  },
+  {
+    "text": "you end up with will always be the correct value so let's look at uh an example to sort of understand",
+    "start": "837680",
+    "end": "845839"
+  },
+  {
+    "text": "the difference between strong eventual consistency and eventual consistency this is uh this is unfortunately a real",
+    "start": "845839",
+    "end": "852560"
+  },
+  {
+    "text": "world example where someone tried to use a system like dynamite for a distributed counter use case",
+    "start": "852560",
+    "end": "859120"
+  },
+  {
+    "text": "so in the interest of time as i go along crdts i'm going to explain only two types one which is the counter",
+    "start": "859120",
+    "end": "865760"
+  },
+  {
+    "text": "which is the simplest to help you understand the guarantees that crdts can provide and the same guarantees will apply to",
+    "start": "865760",
+    "end": "873279"
+  },
+  {
+    "text": "other crdts as well",
+    "start": "873279",
+    "end": "876399"
+  },
+  {
+    "text": "so let's take a naive distributed account to use case we have a command called increment in",
+    "start": "879360",
+    "end": "885360"
+  },
+  {
+    "text": "incr in redis which basically increments a counter by one so all counters start with the base",
+    "start": "885360",
+    "end": "891040"
+  },
+  {
+    "text": "value of zero and red is so when we get this command we update our local state",
+    "start": "891040",
+    "end": "896560"
+  },
+  {
+    "text": "we replicate it to the other replicas so now everyone has a counter value as one now we have our network partitions come",
+    "start": "896560",
+    "end": "903120"
+  },
+  {
+    "text": "in which isolate all replicas from each other and we have two commands to two different replicas",
+    "start": "903120",
+    "end": "909199"
+  },
+  {
+    "text": "for the same counter one is decrementing the same counter and one is incrementing it",
+    "start": "909199",
+    "end": "915920"
+  },
+  {
+    "text": "so they update the local states but they're not able to replicate across the cluster",
+    "start": "916560",
+    "end": "922320"
+  },
+  {
+    "text": "now let we are at the state where we have three different values for the same counter",
+    "start": "922639",
+    "end": "927680"
+  },
+  {
+    "text": "and now if we now let's say we want to repair the system we want to reach an eventually uh consistent state so how do we reach",
+    "start": "927680",
+    "end": "934800"
+  },
+  {
+    "text": "that let's say we use last rider wins and let's say that replica 3",
+    "start": "934800",
+    "end": "940000"
+  },
+  {
+    "text": "has the latest value for the counter because it got an increment uh it got the last increment so replica",
+    "start": "940000",
+    "end": "946959"
+  },
+  {
+    "text": "3 states that the value of the counter is 2 which is actually incorrect if you if you remember we had two",
+    "start": "946959",
+    "end": "954160"
+  },
+  {
+    "text": "increments and one decrement which means that the value of the counter has to be one so if we do a last round of wins in this",
+    "start": "954160",
+    "end": "960000"
+  },
+  {
+    "text": "case we will end up with an incorrect value so how can we represent counters as a",
+    "start": "960000",
+    "end": "965839"
+  },
+  {
+    "text": "crdt to avoid this so this this crdt is called pn counters which is",
+    "start": "965839",
+    "end": "972000"
+  },
+  {
+    "start": "968000",
+    "end": "1179000"
+  },
+  {
+    "text": "which are positive negative counters how it basically works is each replica",
+    "start": "972000",
+    "end": "977120"
+  },
+  {
+    "text": "splits the logical counter into two physical counters one is a positive counter which tracks",
+    "start": "977120",
+    "end": "984399"
+  },
+  {
+    "text": "the number of increments that that replica has seen and one is the negative counter which",
+    "start": "984399",
+    "end": "990480"
+  },
+  {
+    "text": "tracks the number of decrements that that counter has seen so the final counter value",
+    "start": "990480",
+    "end": "996240"
+  },
+  {
+    "text": "the final logical counter value is basically the sum of all positive counters minus the sum of all negative",
+    "start": "996240",
+    "end": "1001600"
+  },
+  {
+    "text": "counters so you can see that each physical counter will only grow in one direction",
+    "start": "1001600",
+    "end": "1007839"
+  },
+  {
+    "text": "it'll always grow upwards the more increments you get your positive counter grows up the more",
+    "start": "1007839",
+    "end": "1013839"
+  },
+  {
+    "text": "decrement you get your negative counter grows up so you'll never have a case where any",
+    "start": "1013839",
+    "end": "1019680"
+  },
+  {
+    "text": "physical counter falls in value so implementing this in a",
+    "start": "1019680",
+    "end": "1025199"
+  },
+  {
+    "text": "system would have some memory overhead and the memory overhead is bounded by the number of replicas in the system",
+    "start": "1025199",
+    "end": "1031678"
+  },
+  {
+    "text": "so as each replica maintains two local counters it also maintains",
+    "start": "1031679",
+    "end": "1037360"
+  },
+  {
+    "text": "copies of the other replicas counters so let's look at how this looks uh let's try to visualize it",
+    "start": "1037360",
+    "end": "1044000"
+  },
+  {
+    "text": "so here we have the same scenario three replicas and we have a counter across replicas",
+    "start": "1044000",
+    "end": "1051280"
+  },
+  {
+    "text": "so now each of the replicas has a local positive and negative counter and it also has",
+    "start": "1051280",
+    "end": "1056960"
+  },
+  {
+    "text": "copies of the other replicas counters so let's let's walk through the same scenario again we get an",
+    "start": "1056960",
+    "end": "1062880"
+  },
+  {
+    "text": "increment command for the increment counter the value the value of the local positive counter",
+    "start": "1062880",
+    "end": "1068880"
+  },
+  {
+    "text": "is updated to one and it replicates the state of its",
+    "start": "1068880",
+    "end": "1074240"
+  },
+  {
+    "text": "counter across the system and the other replicas applied the updates locally as well",
+    "start": "1074240",
+    "end": "1081679"
+  },
+  {
+    "text": "now we have the same network partitions where replicas isolated we and then we have the same commands",
+    "start": "1081679",
+    "end": "1088080"
+  },
+  {
+    "text": "where one of them gets a decrement and one of them gets an increment so if you notice replicas 2 negative",
+    "start": "1088080",
+    "end": "1095039"
+  },
+  {
+    "text": "counter has increased by 1 and replicas replica 3's positive counter has increased by 1.",
+    "start": "1095039",
+    "end": "1101360"
+  },
+  {
+    "text": "and they still fail to replicate across the system due to the network partition",
+    "start": "1101360",
+    "end": "1108720"
+  },
+  {
+    "text": "so since this since we've not reached an eventually consistent state yet all the replicas have a different",
+    "start": "1108720",
+    "end": "1115120"
+  },
+  {
+    "text": "value for the same counter and that's okay we would want to converge to a consistent value",
+    "start": "1115120",
+    "end": "1121440"
+  },
+  {
+    "text": "and since dynamite is we've implemented it as a read repair we need something to trigger the merge",
+    "start": "1121440",
+    "end": "1126960"
+  },
+  {
+    "text": "operation so the way to trigger a merge operation in this case would be to read that key",
+    "start": "1126960",
+    "end": "1132559"
+  },
+  {
+    "text": "so when we say get me the value of this counter it automatically triggers a merge operation where the coordinating node",
+    "start": "1132559",
+    "end": "1138160"
+  },
+  {
+    "text": "asks the state of the same counter from the other replicas they respond with their with what the",
+    "start": "1138160",
+    "end": "1145200"
+  },
+  {
+    "text": "counter looks like to them and",
+    "start": "1145200",
+    "end": "1150559"
+  },
+  {
+    "text": "the the coordinating node applies the changes locally so it repairs itself",
+    "start": "1150559",
+    "end": "1156400"
+  },
+  {
+    "text": "and it also sends a repair message to the other replicas to make sure that everybody is on the same page",
+    "start": "1156400",
+    "end": "1162799"
+  },
+  {
+    "text": "so now we can see that it's the same scenario but because we represented the counter as a",
+    "start": "1162799",
+    "end": "1168720"
+  },
+  {
+    "text": "crdt we were able to reach a safe eventually consistent state we have the",
+    "start": "1168720",
+    "end": "1176080"
+  },
+  {
+    "text": "final value of the counter which is one which is correct in this case so let's move on to the next crdt which",
+    "start": "1176080",
+    "end": "1183360"
+  },
+  {
+    "start": "1179000",
+    "end": "1568000"
+  },
+  {
+    "text": "i want to talk about is called the last rider wins element set",
+    "start": "1183360",
+    "end": "1188320"
+  },
+  {
+    "text": "so we use this crdt for registers which in redis we just called strings for hash",
+    "start": "1188880",
+    "end": "1194799"
+  },
+  {
+    "text": "maps and sorted sets so we use the crdt to maintain key",
+    "start": "1194799",
+    "end": "1201440"
+  },
+  {
+    "text": "metadata so the last rider wins element set basically has two things",
+    "start": "1201440",
+    "end": "1208240"
+  },
+  {
+    "text": "it has an ad set and we use the ad set to maintain the latest timestamps for",
+    "start": "1208240",
+    "end": "1213840"
+  },
+  {
+    "text": "keys seen on that replica and the remove set which is to maintain the timestamps for",
+    "start": "1213840",
+    "end": "1220240"
+  },
+  {
+    "text": "keys uh which were deleted so it maintains the metadata for the key and at what time it was deleted",
+    "start": "1220240",
+    "end": "1227520"
+  },
+  {
+    "text": "so a counter's value to contrast with the counter account as value can only grow in two directions it grows up or it goes down",
+    "start": "1229600",
+    "end": "1236559"
+  },
+  {
+    "text": "and representing it as two physical counters allows us to make uh allows us to",
+    "start": "1236559",
+    "end": "1244000"
+  },
+  {
+    "text": "mathematically converge to a safe value but registers",
+    "start": "1244000",
+    "end": "1249600"
+  },
+  {
+    "text": "have this property of being able to take arbitrary values at any given time you can set a key to abc now and you can set it to",
+    "start": "1249600",
+    "end": "1256559"
+  },
+  {
+    "text": "something completely different a second from now so there is no mathematical way to arrive at which one is truly the latest",
+    "start": "1256559",
+    "end": "1264000"
+  },
+  {
+    "text": "so in these cases we still fall back to last arguments",
+    "start": "1264000",
+    "end": "1268399"
+  },
+  {
+    "text": "so let's look at how the last rider wins element set looks like to dynamite so each replica has an ad",
+    "start": "1270559",
+    "end": "1276640"
+  },
+  {
+    "text": "set and it removes it and i'll be talking only about regular key values or red strings for this example",
+    "start": "1276640",
+    "end": "1285760"
+  },
+  {
+    "text": "so we get a command saying set the key k1 to the value one to three and",
+    "start": "1285760",
+    "end": "1292000"
+  },
+  {
+    "text": "it's stacked with the timestamp t1 so we add this information to our ad set",
+    "start": "1292000",
+    "end": "1298400"
+  },
+  {
+    "text": "saying that hey i saw a key k1 and it was updated at the timestamp t1 and we also apply the write locally",
+    "start": "1298400",
+    "end": "1306880"
+  },
+  {
+    "text": "this gets replicated across cluster so everybody adds this information to the ad set and also applies the right locally",
+    "start": "1306880",
+    "end": "1315039"
+  },
+  {
+    "text": "so now we have a network partition that isolates replica 3 from the system",
+    "start": "1316640",
+    "end": "1322400"
+  },
+  {
+    "text": "and we get an update for the same key uh we are we're updating the value from one two three to four five six",
+    "start": "1322400",
+    "end": "1328960"
+  },
+  {
+    "text": "at a future times time t2 so this right is applied locally",
+    "start": "1328960",
+    "end": "1334240"
+  },
+  {
+    "text": "but it fails to replicate because of the network partition",
+    "start": "1334240",
+    "end": "1339360"
+  },
+  {
+    "text": "now we get a new key written to replica 2 called k2 with a value of triple nine",
+    "start": "1339360",
+    "end": "1346400"
+  },
+  {
+    "text": "at a times time t3 we apply that right locally add the information to the ad",
+    "start": "1346400",
+    "end": "1352080"
+  },
+  {
+    "text": "set try to replicate it across the cluster and it can only make it to replica one so",
+    "start": "1352080",
+    "end": "1360320"
+  },
+  {
+    "text": "at this point we have replicas one and two agreeing on the values of key one key k1 and key k2 but replica 3",
+    "start": "1360320",
+    "end": "1369360"
+  },
+  {
+    "text": "not having the key k2 and having a completely different value for the key k1 so let's try to repair this and",
+    "start": "1369360",
+    "end": "1376480"
+  },
+  {
+    "text": "to repair it like i mentioned before we have to trigger a read we have to do a read to trigger the",
+    "start": "1376480",
+    "end": "1381679"
+  },
+  {
+    "text": "merge operation so when we try to get the value of key k1 the coordinating node asks the other replicas what are your",
+    "start": "1381679",
+    "end": "1387919"
+  },
+  {
+    "text": "values for k1 they send back their respective values one of them says minus one to three",
+    "start": "1387919",
+    "end": "1393760"
+  },
+  {
+    "text": "with the timestamp t1 the other says uh my value is four five six with the timestamp t2",
+    "start": "1393760",
+    "end": "1399520"
+  },
+  {
+    "text": "so the coordinating node can make a decision here it looks at the timestamp t2 is greater than t1 and that means that",
+    "start": "1399520",
+    "end": "1405760"
+  },
+  {
+    "text": "456 has to be the latest value so it repairs itself by applying this",
+    "start": "1405760",
+    "end": "1411039"
+  },
+  {
+    "text": "right locally and it also sends a repair message to",
+    "start": "1411039",
+    "end": "1416559"
+  },
+  {
+    "text": "the replica that is out of date which is r2",
+    "start": "1416559",
+    "end": "1421520"
+  },
+  {
+    "text": "and it also responds to the client with the latest value of the key which is",
+    "start": "1422559",
+    "end": "1428159"
+  },
+  {
+    "text": "456. now we can still see that replica 3 does not have the key k2",
+    "start": "1428840",
+    "end": "1434480"
+  },
+  {
+    "text": "uh that was not repaired because we had not triggered a merge operation for that key so let's do",
+    "start": "1434480",
+    "end": "1440240"
+  },
+  {
+    "text": "that now we try to get the value of key k2 the coordinating node asks the values of",
+    "start": "1440240",
+    "end": "1445279"
+  },
+  {
+    "text": "k2 from the other replicas r3 says i do not have this value at all",
+    "start": "1445279",
+    "end": "1451919"
+  },
+  {
+    "text": "so the coordinating node repairs r3 with the value of k2 and it sends the value back to the",
+    "start": "1452720",
+    "end": "1459360"
+  },
+  {
+    "text": "client with the value triple line now let's look at how a delete would work so let's say we have",
+    "start": "1459360",
+    "end": "1466000"
+  },
+  {
+    "text": "a new network partition which isolates the replica r2 from the rest of the system and we get a delete for the key k2 at a",
+    "start": "1466000",
+    "end": "1473440"
+  },
+  {
+    "text": "timestamp t4 which is greater than all the timestamps we've seen so far so what this would do is it would take",
+    "start": "1473440",
+    "end": "1480400"
+  },
+  {
+    "text": "the key k2 from the ad set add it to the remove set uh with the new timestamp t4",
+    "start": "1480400",
+    "end": "1486240"
+  },
+  {
+    "text": "and get rid of the the key completely but because of the network partition we are unable to replicate this information",
+    "start": "1486240",
+    "end": "1493440"
+  },
+  {
+    "text": "across the cluster now while this network partition is",
+    "start": "1493440",
+    "end": "1499679"
+  },
+  {
+    "text": "still in effect someone can try to read the key k2 from one of the other replicas and they would still get",
+    "start": "1499679",
+    "end": "1507679"
+  },
+  {
+    "text": "back the value that is contained in those replicas if this is a quorum read we have two out of three",
+    "start": "1507679",
+    "end": "1514559"
+  },
+  {
+    "text": "replicas in the system agreeing that the value is triple nine so we they would get back the value triple n",
+    "start": "1514559",
+    "end": "1520480"
+  },
+  {
+    "text": "and because of the network partition they are unable to see that k2 was deleted so let's say the partition is healed and",
+    "start": "1520480",
+    "end": "1527919"
+  },
+  {
+    "text": "we try to get the value of k2 again at this point r3 which is a coordinating node tries to get the values of k2 from",
+    "start": "1527919",
+    "end": "1534320"
+  },
+  {
+    "text": "the other replicas r1 says okay my value is triple 9 at t3",
+    "start": "1534320",
+    "end": "1539679"
+  },
+  {
+    "text": "and replica 2 says hey i've deleted it at timestamp t4 so the coordinating node knows that okay",
+    "start": "1539679",
+    "end": "1546400"
+  },
+  {
+    "text": "the key was deleted the latest value for the key is that it's gone it's deleted so it updates the state locally adds the",
+    "start": "1546400",
+    "end": "1554159"
+  },
+  {
+    "text": "key to its remove set repairs the replica that it knows does not have this value",
+    "start": "1554159",
+    "end": "1560559"
+  },
+  {
+    "text": "and responds back to the client with the value of nil",
+    "start": "1560880",
+    "end": "1565360"
+  },
+  {
+    "start": "1568000",
+    "end": "1836000"
+  },
+  {
+    "text": "so before i move on to the implementation challenges i showed you this example of how it works for",
+    "start": "1569039",
+    "end": "1574159"
+  },
+  {
+    "text": "registers which are basic key values we can extend the same implementation of hash maps and sorted sets simply by having a",
+    "start": "1574159",
+    "end": "1581440"
+  },
+  {
+    "text": "separate ad set and a separate remove set for each hash map or each sorted set so what that means is basically each",
+    "start": "1581440",
+    "end": "1586880"
+  },
+  {
+    "text": "field within the hashmap would have its own metadata or each field within the sorted set would have its own metadata",
+    "start": "1586880",
+    "end": "1593919"
+  },
+  {
+    "text": "so the crux of that is you would treat each secondary key or each field as you would",
+    "start": "1594480",
+    "end": "1600960"
+  },
+  {
+    "text": "treat a register so now let's move on to the implementation challenges so let's start",
+    "start": "1600960",
+    "end": "1606159"
+  },
+  {
+    "text": "with the easiest one uh radius doesn't maintain timestamps right so this is easy to fix because dynamite can",
+    "start": "1606159",
+    "end": "1612400"
+  },
+  {
+    "text": "track timestamps of client requests",
+    "start": "1612400",
+    "end": "1616159"
+  },
+  {
+    "text": "so secondly we'd like dynamite to remain stateless and what i mean by this is the dynamite",
+    "start": "1617760",
+    "end": "1624240"
+  },
+  {
+    "text": "process currently does not hold any state if the dynamite process itself crashes the only thing only action you",
+    "start": "1624240",
+    "end": "1631520"
+  },
+  {
+    "text": "need to take is spin the process back up connect it to the local redis and it should be good to go we don't want to add state to the",
+    "start": "1631520",
+    "end": "1638559"
+  },
+  {
+    "text": "dynamite process which would basically uh uncover a whole new set of failure scenarios to cover so",
+    "start": "1638559",
+    "end": "1644720"
+  },
+  {
+    "text": "we'd still like dynamite to remain stateless so we need to find a place to put this metadata so the best place to put this",
+    "start": "1644720",
+    "end": "1650799"
+  },
+  {
+    "text": "metadata is put it back into redis",
+    "start": "1650799",
+    "end": "1655840"
+  },
+  {
+    "text": "so the next challenge is we need to make sure that all data and metadata are updated atomically we don't want to have a case",
+    "start": "1658320",
+    "end": "1665200"
+  },
+  {
+    "text": "where we updated the metadata but failed to write the data so we want to make sure that we update both of them atomically",
+    "start": "1665200",
+    "end": "1672880"
+  },
+  {
+    "text": "so redis provides us lua scripts provides it",
+    "start": "1673200",
+    "end": "1679360"
+  },
+  {
+    "text": "allows us to write lower scripts and it guarantees that all lua scripts will be executed atomically",
+    "start": "1679360",
+    "end": "1685360"
+  },
+  {
+    "text": "so this is possible because redis io is done on a single thread and we can basically capture all write",
+    "start": "1685360",
+    "end": "1692240"
+  },
+  {
+    "text": "commands as dynamite rewrite them into lua scripts and send them down to redis",
+    "start": "1692240",
+    "end": "1698320"
+  },
+  {
+    "text": "and lastly if you the remove set contains the metadata for",
+    "start": "1702880",
+    "end": "1708640"
+  },
+  {
+    "text": "all keys that were removed does that mean it grows forever if you keep deleting keys the remove set can just",
+    "start": "1708640",
+    "end": "1714320"
+  },
+  {
+    "text": "hog up all the memory in the cluster and we wouldn't have any space for the remaining",
+    "start": "1714320",
+    "end": "1719600"
+  },
+  {
+    "text": "keys and values so there are some things we can do here to maintain to make sure that the remove set doesn't",
+    "start": "1719600",
+    "end": "1724960"
+  },
+  {
+    "text": "grow too large so the first thing is if the coordinators if the coordinating",
+    "start": "1724960",
+    "end": "1730559"
+  },
+  {
+    "text": "node hears back from all replicas that a delete operation was successfully processed",
+    "start": "1730559",
+    "end": "1736480"
+  },
+  {
+    "text": "that basically means if all replicas have removed the key and added to their remove set that",
+    "start": "1736480",
+    "end": "1742880"
+  },
+  {
+    "text": "this key was deleted at a certain time if the coordinating nodes here node hears back from all replicas this",
+    "start": "1742880",
+    "end": "1749440"
+  },
+  {
+    "text": "means that we know that all replicas agree that this key was deleted and therefore we can queue up a remove",
+    "start": "1749440",
+    "end": "1755200"
+  },
+  {
+    "text": "of the element from the remove set so this way we can keep cleaning up the remove set as we know that all replicas",
+    "start": "1755200",
+    "end": "1761360"
+  },
+  {
+    "text": "agree that a key has been deleted for the remaining cases we need to keep",
+    "start": "1761360",
+    "end": "1766880"
+  },
+  {
+    "text": "the information around in the remove set because we don't know if some replicas have processed the delete or if they have not",
+    "start": "1766880",
+    "end": "1773360"
+  },
+  {
+    "text": "yet so for these cases we can have uh",
+    "start": "1773360",
+    "end": "1778399"
+  },
+  {
+    "text": "background threads on the dynamite processes which constantly look into the remove set",
+    "start": "1778399",
+    "end": "1783840"
+  },
+  {
+    "text": "to keep sure to keep making sure that all replicas agree that that they're in sync if they're not",
+    "start": "1783840",
+    "end": "1790240"
+  },
+  {
+    "text": "repair them and subsequently remove the information from the remove set",
+    "start": "1790240",
+    "end": "1796240"
+  },
+  {
+    "text": "so we can to make sure that to make it easier for the background threads we can make sure we can",
+    "start": "1797679",
+    "end": "1804000"
+  },
+  {
+    "text": "maintain the remove set as a sorted set so that all the oldest keys would be in",
+    "start": "1804000",
+    "end": "1809840"
+  },
+  {
+    "text": "the back of the sorted set and the background thread can start looking from the back to make sure it deletes the oldest",
+    "start": "1809840",
+    "end": "1815120"
+  },
+  {
+    "text": "metadata first and the ad set should go without saying",
+    "start": "1815120",
+    "end": "1820960"
+  },
+  {
+    "text": "is maintained as a hash map because as we add keys we want to make sure that all metadata update",
+    "start": "1820960",
+    "end": "1826320"
+  },
+  {
+    "text": "operations are just of one we don't want to sift through complicated data structures",
+    "start": "1826320",
+    "end": "1833600"
+  },
+  {
+    "text": "on the right path",
+    "start": "1833600",
+    "end": "1837840"
+  },
+  {
+    "start": "1836000",
+    "end": "1874000"
+  },
+  {
+    "text": "so quickly what would this lure script look like",
+    "start": "1838720",
+    "end": "1844000"
+  },
+  {
+    "text": "so the first thing it does is it's very simple it just takes the timestamp checks if the timestamp of",
+    "start": "1844000",
+    "end": "1850720"
+  },
+  {
+    "text": "this operation on this key is old or not so what it does it takes the time of operation",
+    "start": "1850720",
+    "end": "1856320"
+  },
+  {
+    "text": "checks against the timestamp for the same key within its add and remove sets if it's an old",
+    "start": "1856320",
+    "end": "1862880"
+  },
+  {
+    "text": "update it discards it if it's a new update it basically updates the data and the",
+    "start": "1862880",
+    "end": "1868399"
+  },
+  {
+    "text": "metadata it does all of this atomically per replica",
+    "start": "1868399",
+    "end": "1874158"
+  },
+  {
+    "start": "1874000",
+    "end": "1897000"
+  },
+  {
+    "text": "so currently repairs are implemented for point reads uh which are basically get this key get",
+    "start": "1876840",
+    "end": "1883279"
+  },
+  {
+    "text": "me this field from this hash map uh what is the score of this member in the sorted set and so on",
+    "start": "1883279",
+    "end": "1890080"
+  },
+  {
+    "text": "for the remaining we would rely on asynchronous repairs or background repairs",
+    "start": "1890080",
+    "end": "1896320"
+  },
+  {
+    "start": "1897000",
+    "end": "1910000"
+  },
+  {
+    "text": "so let's talk about background repairs and i want to point out that this is still some ongoing work",
+    "start": "1898320",
+    "end": "1903919"
+  },
+  {
+    "text": "it's basically the same as read repairs but instead of doing it on the read path we do it in the background so why do we",
+    "start": "1903919",
+    "end": "1909440"
+  },
+  {
+    "text": "want to do this so repairing on range reads is quite expensive",
+    "start": "1909440",
+    "end": "1914559"
+  },
+  {
+    "start": "1910000",
+    "end": "1933000"
+  },
+  {
+    "text": "when you have operations that basically say give me all the members of the set or show me everything in this hash map",
+    "start": "1914559",
+    "end": "1921200"
+  },
+  {
+    "text": "or return me a subset from the sorted set if you have millions of items in a set or a hash map trying to repair",
+    "start": "1921200",
+    "end": "1928399"
+  },
+  {
+    "text": "all of them on a read path would be prohibitively expensive so we we try to do them asynchronously",
+    "start": "1928399",
+    "end": "1934720"
+  },
+  {
+    "start": "1933000",
+    "end": "2045000"
+  },
+  {
+    "text": "so the next problem is when we want to do asynchronous repairs how do we know what keys need repairing and what keys don't need repairing",
+    "start": "1934720",
+    "end": "1940960"
+  },
+  {
+    "text": "so let's look at what another system cassandra does it basically does a full key walk which",
+    "start": "1940960",
+    "end": "1946880"
+  },
+  {
+    "text": "is manually triggered so how that basically works is it it maintains merkle trees to",
+    "start": "1946880",
+    "end": "1954799"
+  },
+  {
+    "text": "maintain hashes of keys and using merkle trees it detects inconsistencies across",
+    "start": "1954799",
+    "end": "1960399"
+  },
+  {
+    "text": "replicas and if it detects any inconsistencies it goes into person",
+    "start": "1960399",
+    "end": "1965919"
+  },
+  {
+    "text": "so this is quite slow and expensive uh always in the system it's only a subset of your keys that would need repairing",
+    "start": "1965919",
+    "end": "1971679"
+  },
+  {
+    "text": "and not and the rest of them do not need repairing so doing a full key walk is quite slow and complicated",
+    "start": "1971679",
+    "end": "1978000"
+  },
+  {
+    "text": "also trying to follow the same thing in our scenario would be quite complicated because representing things like merkle trees",
+    "start": "1978000",
+    "end": "1984399"
+  },
+  {
+    "text": "and redis could get quite complicated so and lastly this needs to be manually kicked off so can we do something better",
+    "start": "1984399",
+    "end": "1990880"
+  },
+  {
+    "text": "where we don't need manual intervention so the next thing we can do is",
+    "start": "1990880",
+    "end": "1997840"
+  },
+  {
+    "text": "maintain a list of recently updated keys so we keep maintaining this list we have",
+    "start": "1997840",
+    "end": "2003600"
+  },
+  {
+    "text": "a background thread that's constantly going running merge operations on them in the background",
+    "start": "2003600",
+    "end": "2009440"
+  },
+  {
+    "text": "this way we don't need to have a manual repair process the the repair is always happening in",
+    "start": "2009440",
+    "end": "2016080"
+  },
+  {
+    "text": "the background without any human intervention",
+    "start": "2016080",
+    "end": "2019840"
+  },
+  {
+    "text": "but we know that merge operations on large structures are expensive so if if we have a few elements of a set",
+    "start": "2024559",
+    "end": "2032320"
+  },
+  {
+    "text": "or maybe one element of set that's updated we don't want to run a merge operation on the entire set",
+    "start": "2032320",
+    "end": "2037360"
+  },
+  {
+    "text": "or the entire hash map we just want to make sure that those few mutations have made it across the",
+    "start": "2037360",
+    "end": "2042559"
+  },
+  {
+    "text": "system so can we do something even better so here we enter delta state crdts so this",
+    "start": "2042559",
+    "end": "2050720"
+  },
+  {
+    "start": "2045000",
+    "end": "2113000"
+  },
+  {
+    "text": "is inspired by a paper of the same name basically what it states is we can maintain",
+    "start": "2050720",
+    "end": "2057280"
+  },
+  {
+    "text": "a list of mutations done to keys instead of just the names of the keys so we have",
+    "start": "2057280",
+    "end": "2062320"
+  },
+  {
+    "text": "we maintain a list uh talking about okay this operation was done on this key and this was the result of that operation",
+    "start": "2062320",
+    "end": "2070079"
+  },
+  {
+    "text": "so applying these mutations have to follow the same three properties that i mentioned before they have to be associative",
+    "start": "2070079",
+    "end": "2075599"
+  },
+  {
+    "text": "they have to be commutative and they have to be ad important",
+    "start": "2075599",
+    "end": "2079838"
+  },
+  {
+    "text": "so instead of shipping the entire crdt uh entire local crdt state across for a",
+    "start": "2081359",
+    "end": "2087760"
+  },
+  {
+    "text": "merge operation we only ship the delta state",
+    "start": "2087760",
+    "end": "2092560"
+  },
+  {
+    "text": "we can keep confirming which replicas have applied our mutations that we've shipped and we can move on and we don't need to",
+    "start": "2093119",
+    "end": "2100400"
+  },
+  {
+    "text": "send each mutation one by one we can send them in batches so what do i mean by ship only the delta",
+    "start": "2100400",
+    "end": "2106640"
+  },
+  {
+    "text": "state again i'm going to use the pn counter as an example because that's the easiest to understand",
+    "start": "2106640",
+    "end": "2113520"
+  },
+  {
+    "text": "so let's say we have a two replica system with with the value of the counter as zero currently it has",
+    "start": "2115040",
+    "end": "2121520"
+  },
+  {
+    "text": "one in the positive counter and one in the negative counters so we try to increment it we increment",
+    "start": "2121520",
+    "end": "2127520"
+  },
+  {
+    "text": "it to two locally and while it replicates we send the entire state of the counter so this is basically sending the full",
+    "start": "2127520",
+    "end": "2133839"
+  },
+  {
+    "text": "state of the counter to the other replica but this is not necessary we don't need to send the full state",
+    "start": "2133839",
+    "end": "2139920"
+  },
+  {
+    "text": "we can only we can only send the delta state which is saying hey i received an operation and it made",
+    "start": "2139920",
+    "end": "2145680"
+  },
+  {
+    "text": "my positive counter in from i changed my possible counter from one to two and that is all the",
+    "start": "2145680",
+    "end": "2151200"
+  },
+  {
+    "text": "state we need to make sure that the point gets across to the other replicas",
+    "start": "2151200",
+    "end": "2156800"
+  },
+  {
+    "text": "so this is a very simplified example to show you what shipping the full state versus shipping only a delta state is",
+    "start": "2156800",
+    "end": "2164320"
+  },
+  {
+    "text": "so how would this work in the background so each coordinating node would maintain",
+    "start": "2164320",
+    "end": "2169680"
+  },
+  {
+    "text": "a list of recently done mutations and this list keeps growing as rights",
+    "start": "2169680",
+    "end": "2175280"
+  },
+  {
+    "text": "happen and like i said we can batch multiple mutations together to",
+    "start": "2175280",
+    "end": "2181440"
+  },
+  {
+    "text": "to send them across replicas so now we're bashing two mutations we send them to replicas r2 and r3",
+    "start": "2181440",
+    "end": "2190640"
+  },
+  {
+    "text": "they both applied locally but only one of the acknowledgments make it back",
+    "start": "2190800",
+    "end": "2196320"
+  },
+  {
+    "text": "so the coordinating replica marks its local state saying okay r2 has seen",
+    "start": "2196720",
+    "end": "2202079"
+  },
+  {
+    "text": "these mutations but not r3 yet so even though r3 may have seen it",
+    "start": "2202079",
+    "end": "2207119"
+  },
+  {
+    "text": "it needs to send it again to make sure that it's applied the state",
+    "start": "2207119",
+    "end": "2212320"
+  },
+  {
+    "text": "and because of the item potency property it doesn't matter if we send the same states again it",
+    "start": "2212720",
+    "end": "2219200"
+  },
+  {
+    "text": "the end result is going to be the same so now we we can see that both replicas",
+    "start": "2219200",
+    "end": "2225440"
+  },
+  {
+    "text": "have in the system have acknowledges rights so we can garbage collect the those items from the list and move on to",
+    "start": "2225440",
+    "end": "2231440"
+  },
+  {
+    "text": "the next so so what are some challenges with uh",
+    "start": "2231440",
+    "end": "2238640"
+  },
+  {
+    "start": "2234000",
+    "end": "2347000"
+  },
+  {
+    "text": "getting the delta state crdts to work so the first thing is to make sure not to lose rights we have",
+    "start": "2238640",
+    "end": "2245119"
+  },
+  {
+    "text": "to make the list of mutations durable which means that we have to make sure that we have some",
+    "start": "2245119",
+    "end": "2252480"
+  },
+  {
+    "text": "way of recovering these rights in case something goes wrong so what are the challenge with making it durable redis",
+    "start": "2252480",
+    "end": "2259440"
+  },
+  {
+    "text": "is an in-memory data store the the primary advantage of using a system like redis is the low latency offered by having",
+    "start": "2259440",
+    "end": "2267040"
+  },
+  {
+    "text": "data in memory so if we were to persist a list like this for every write it completely negates the benefits",
+    "start": "2267040",
+    "end": "2273440"
+  },
+  {
+    "text": "provided by redis so since this is still some ongoing work",
+    "start": "2273440",
+    "end": "2280880"
+  },
+  {
+    "text": "the current thinking is uh for use cases that are okay with losing a few seconds",
+    "start": "2280880",
+    "end": "2286160"
+  },
+  {
+    "text": "of right they would use the non-corum uh way of uh they would use non-quorum connections to dynamite",
+    "start": "2286160",
+    "end": "2292720"
+  },
+  {
+    "text": "and in the worst case they would lose a few seconds worth of writes for all other use cases they have to use",
+    "start": "2292720",
+    "end": "2298800"
+  },
+  {
+    "text": "quorum connections which means that if a client receives an acknowledgement for a write",
+    "start": "2298800",
+    "end": "2304240"
+  },
+  {
+    "text": "that means it has been applied across a quorum number of replicas in the cluster",
+    "start": "2304240",
+    "end": "2310560"
+  },
+  {
+    "text": "so another challenge is what is the practical overhead of maintaining a large list of mutations what if one replica is down for an",
+    "start": "2311599",
+    "end": "2318079"
+  },
+  {
+    "text": "extended period of time uh every coordinating node would have to maintain a very large list",
+    "start": "2318079",
+    "end": "2323119"
+  },
+  {
+    "text": "so these are the kind of challenges that we are still thinking through uh and other challenges when we",
+    "start": "2323119",
+    "end": "2329760"
+  },
+  {
+    "text": "introduce gossip into the system which means the cluster can scale or shrink uh without any downtime",
+    "start": "2329760",
+    "end": "2335839"
+  },
+  {
+    "text": "how that affect how this looks like because we have new replicas coming to the system old replicas leaving",
+    "start": "2335839",
+    "end": "2341200"
+  },
+  {
+    "text": "so these are the kind of problems that we're trying to work on and try to solve in the coming months",
+    "start": "2341200",
+    "end": "2347599"
+  },
+  {
+    "start": "2347000",
+    "end": "2364000"
+  },
+  {
+    "text": "so with that i'd like to close out the presentation uh thanks for your time and i'm here to take any questions",
+    "start": "2348320",
+    "end": "2354480"
+  },
+  {
+    "text": "[Applause]",
+    "start": "2354480",
+    "end": "2361579"
+  },
+  {
+    "start": "2364000",
+    "end": "2471000"
+  },
+  {
+    "text": "um thank you so much for the talk am i correct in my understanding that this is essentially",
+    "start": "2364000",
+    "end": "2369040"
+  },
+  {
+    "text": "a way to clusterize your radius without necessarily clusterizing it and by simply running",
+    "start": "2369040",
+    "end": "2376720"
+  },
+  {
+    "text": "um this thing on next to it um and with redis running in essentially",
+    "start": "2376720",
+    "end": "2382000"
+  },
+  {
+    "text": "standalone mode basically yes so dynamite just takes uh non-distributed data key value stores",
+    "start": "2382000",
+    "end": "2387760"
+  },
+  {
+    "text": "like redis and it can make them distributed uh so in this case it makes them distributed in a highly",
+    "start": "2387760",
+    "end": "2394400"
+  },
+  {
+    "text": "available fashion um second question if you don't mind um what about the the performance right um redis is",
+    "start": "2394400",
+    "end": "2401680"
+  },
+  {
+    "text": "very well known for being super super fast um what's the performance hit",
+    "start": "2401680",
+    "end": "2407280"
+  },
+  {
+    "text": "that uh you are imposing on it by um using crdtc's sure so",
+    "start": "2407280",
+    "end": "2414480"
+  },
+  {
+    "text": "that's a good question i have not included benchmarks in this because this work is kind of brand new and i didn't",
+    "start": "2414480",
+    "end": "2420800"
+  },
+  {
+    "text": "want to add uh numbers without having tested it properly uh but this we will follow with the blog",
+    "start": "2420800",
+    "end": "2427200"
+  },
+  {
+    "text": "post with uh extensive numbers uh to give you a basic understanding",
+    "start": "2427200",
+    "end": "2432960"
+  },
+  {
+    "text": "so without crdts and without quorums we get the same performance as you would with redis",
+    "start": "2432960",
+    "end": "2438400"
+  },
+  {
+    "text": "uh with quorums we typically get uh our 99th percentile is about one",
+    "start": "2438400",
+    "end": "2444160"
+  },
+  {
+    "text": "millisecond if you have quorums within a single region so within uh if we if we add crdts",
+    "start": "2444160",
+    "end": "2450400"
+  },
+  {
+    "text": "there's definitely uh some overhead to it uh i don't i don't have specific numbers",
+    "start": "2450400",
+    "end": "2458160"
+  },
+  {
+    "text": "but uh from preliminary testing we see that it's about 20 to 30 percent overhead and so",
+    "start": "2458160",
+    "end": "2465280"
+  },
+  {
+    "text": "but but i i'll be releasing benchmarks in a blog post soon yeah",
+    "start": "2465280",
+    "end": "2470880"
+  },
+  {
+    "start": "2471000",
+    "end": "2564000"
+  },
+  {
+    "text": "i did not really understand the reasoning behind the process of removing",
+    "start": "2472560",
+    "end": "2479040"
+  },
+  {
+    "text": "the when you remove k why was it that it was removed from the ad set as opposed to waiting",
+    "start": "2479040",
+    "end": "2486880"
+  },
+  {
+    "text": "for garbage collection given that the timestamp is also stored for this operation",
+    "start": "2486880",
+    "end": "2491920"
+  },
+  {
+    "text": "right so basically the remove set is uh we could also think of it as a",
+    "start": "2491920",
+    "end": "2496960"
+  },
+  {
+    "text": "tombstone set it's a way to denote that this key has been deleted on this replica",
+    "start": "2496960",
+    "end": "2502800"
+  },
+  {
+    "text": "at this time right and the reason we want to maintain this tombstone set is because when a delete operation is",
+    "start": "2502800",
+    "end": "2511040"
+  },
+  {
+    "text": "received by replica we don't know if all replicas have seen it yet so this replica is the only thing it's",
+    "start": "2511040",
+    "end": "2517839"
+  },
+  {
+    "text": "doing it's saying is i've deleted this key at this time so if anybody asks me like when i'm running a merge",
+    "start": "2517839",
+    "end": "2524079"
+  },
+  {
+    "text": "operation i need to give them this information saying that this key was deleted at this time",
+    "start": "2524079",
+    "end": "2529200"
+  },
+  {
+    "text": "so while running a merge operation we can decide if this delete was the latest operation or not",
+    "start": "2529200",
+    "end": "2534319"
+  },
+  {
+    "text": "and that's primarily why we need to maintain this metadata around yeah uh but i didn't follow why the ad",
+    "start": "2534319",
+    "end": "2540720"
+  },
+  {
+    "text": "part portion was removed from the set as well because at that point the the key no longer exists so the ad set",
+    "start": "2540720",
+    "end": "2547440"
+  },
+  {
+    "text": "is only there to maintain the latest updates the latest timestamps",
+    "start": "2547440",
+    "end": "2552720"
+  },
+  {
+    "text": "for updates of keys that are present in that replica yeah okay thank you yeah you're welcome",
+    "start": "2552720",
+    "end": "2559920"
+  },
+  {
+    "text": "hi hi um so how frequently do you get into an inconsistent state",
+    "start": "2563599",
+    "end": "2570720"
+  },
+  {
+    "start": "2564000",
+    "end": "2650000"
+  },
+  {
+    "text": "because it seems like there are some situations where you have to use i forget the",
+    "start": "2570720",
+    "end": "2575839"
+  },
+  {
+    "text": "terminology but the latest the last updated time and you said that there was clock skew",
+    "start": "2575839",
+    "end": "2582480"
+  },
+  {
+    "text": "even if you try to keep the clocks in sync right so if you have clock skew and you use last latest you must have",
+    "start": "2582480",
+    "end": "2589200"
+  },
+  {
+    "text": "inconsistent state so that that's a good question so that basically boils down to the point",
+    "start": "2589200",
+    "end": "2595520"
+  },
+  {
+    "text": "of are we okay with using inconsistent clocks right so and",
+    "start": "2595520",
+    "end": "2602720"
+  },
+  {
+    "text": "at netflix we have multiple data stores and many of them use this notion of last rider wins so we",
+    "start": "2602720",
+    "end": "2608960"
+  },
+  {
+    "text": "currently support use cases that are okay with having",
+    "start": "2608960",
+    "end": "2614079"
+  },
+  {
+    "text": "some level of clock skew so since we're aggressive with our ntp time syncs the clock skus won't be",
+    "start": "2614079",
+    "end": "2621280"
+  },
+  {
+    "text": "very large for example i think many years back we had a situation where clocks were skewed by four or five hours",
+    "start": "2621280",
+    "end": "2628000"
+  },
+  {
+    "text": "which is really bad but in our situations we probably would get into clock skews of",
+    "start": "2628000",
+    "end": "2633280"
+  },
+  {
+    "text": "in the worst case a few seconds so currently these systems support use cases that are okay with that level",
+    "start": "2633280",
+    "end": "2639599"
+  },
+  {
+    "text": "of clock skew and if they need some stronger guarantees then they have to go to systems that support those things like spanner and so",
+    "start": "2639599",
+    "end": "2647520"
+  },
+  {
+    "text": "on yeah yeah great talk so you talked a lot",
+    "start": "2647520",
+    "end": "2653280"
+  },
+  {
+    "start": "2650000",
+    "end": "2713000"
+  },
+  {
+    "text": "about replicating data sets across multiple regions have you explored using crdts to create",
+    "start": "2653280",
+    "end": "2659200"
+  },
+  {
+    "text": "consistent objects from say multiple event streams with different partition keys",
+    "start": "2659200",
+    "end": "2664240"
+  },
+  {
+    "text": "uh multiple event streams can you elaborate on that uh so if you had say an event stream of",
+    "start": "2664240",
+    "end": "2671520"
+  },
+  {
+    "text": "taxis and riders the orders guaranteed on those two streams but it's not guaranteed when you",
+    "start": "2671520",
+    "end": "2677359"
+  },
+  {
+    "text": "combine them okay uh if you use a crtt maybe that's one way of creating a object state that's consistent",
+    "start": "2677359",
+    "end": "2683280"
+  },
+  {
+    "text": "regardless of the order in which you right so we've not done that yet so we've initially started with uh",
+    "start": "2683280",
+    "end": "2689920"
+  },
+  {
+    "text": "supporting like things like registers sets sorted sets hash maps but we've not gotten to other data types",
+    "start": "2689920",
+    "end": "2696319"
+  },
+  {
+    "text": "lists included and i know redis has a recent implementation for streams so we've not added that into our support",
+    "start": "2696319",
+    "end": "2703280"
+  },
+  {
+    "text": "we've not started supporting those yet but that's some of the future work that will happen okay yeah thank you sure",
+    "start": "2703280",
+    "end": "2710240"
+  },
+  {
+    "start": "2713000",
+    "end": "2761000"
+  },
+  {
+    "text": "um at the start of the talk you spoke on sharding with dynamite does dynamite with crdt support",
+    "start": "2713680",
+    "end": "2720079"
+  },
+  {
+    "text": "sharding will are there additional concerns there with sharding so the sharding is decoupled from the crdt story the",
+    "start": "2720079",
+    "end": "2727200"
+  },
+  {
+    "text": "sharding basically all it does is it takes the name of a key runs it through a hash function",
+    "start": "2727200",
+    "end": "2732560"
+  },
+  {
+    "text": "and sends it to the node that should own that key basically so uh you can assume if your",
+    "start": "2732560",
+    "end": "2738480"
+  },
+  {
+    "text": "tokens range from 0 to 100 so and you have three node ring all the talk",
+    "start": "2738480",
+    "end": "2743599"
+  },
+  {
+    "text": "all the keys that hashed to the token 0 to 33 would follow node 1 and 34 to so and so on right so the",
+    "start": "2743599",
+    "end": "2750160"
+  },
+  {
+    "text": "crdts are sort of a lower level implementation so they sort of decoupled",
+    "start": "2750160",
+    "end": "2757119"
+  },
+  {
+    "text": "kind of curious from your work it sounds like um a lot of the work that the react",
+    "start": "2761599",
+    "end": "2766640"
+  },
+  {
+    "text": "community has also done on crdt's and i was just curious how that had influenced your choice to build a novel",
+    "start": "2766640",
+    "end": "2772480"
+  },
+  {
+    "text": "database layer right so uh for for us it was more about we have a",
+    "start": "2772480",
+    "end": "2778800"
+  },
+  {
+    "text": "system like dynamite we have hundreds of use cases on it uh so",
+    "start": "2778800",
+    "end": "2784079"
+  },
+  {
+    "text": "when we need to make it more resilient uh how do we go about doing it and we looked at multiple systems uh",
+    "start": "2784079",
+    "end": "2790880"
+  },
+  {
+    "text": "like cassandra riak included and obviously some of the inspiration has come from how react has",
+    "start": "2790880",
+    "end": "2796560"
+  },
+  {
+    "text": "implemented things inside but this was not to sort of create a new data store which does something",
+    "start": "2796560",
+    "end": "2802960"
+  },
+  {
+    "text": "different there's more to support our existing use cases and make sure we can onboard more to our system yeah",
+    "start": "2802960",
+    "end": "2808079"
+  },
+  {
+    "text": "thank you you're welcome i just have a question at what point do you want to bring crdt's like if you stay",
+    "start": "2808079",
+    "end": "2815599"
+  },
+  {
+    "start": "2810000",
+    "end": "2903000"
+  },
+  {
+    "text": "with the same availability zone like the partition like very rare right so it's obviously if you want to maintain",
+    "start": "2815599",
+    "end": "2822240"
+  },
+  {
+    "text": "state globally across the globe you have to have them but like at what point would you have them like a few in the same region but",
+    "start": "2822240",
+    "end": "2829040"
+  },
+  {
+    "text": "different zones so it depends on the deployment we can we can have",
+    "start": "2829040",
+    "end": "2834400"
+  },
+  {
+    "text": "multiple replicas within the same region or across regions so crdts would only look at how many",
+    "start": "2834400",
+    "end": "2841040"
+  },
+  {
+    "text": "replicas do you have in your system like at what point they become necessary",
+    "start": "2841040",
+    "end": "2846400"
+  },
+  {
+    "text": "like because if you're within the same like availability zone you can just use like",
+    "start": "2846400",
+    "end": "2851440"
+  },
+  {
+    "text": "old-school methods to maintain consistency right but we would still like to be uh like to be as fast as",
+    "start": "2851440",
+    "end": "2858640"
+  },
+  {
+    "text": "possible right so uh within the same region and so when you say the old school",
+    "start": "2858640",
+    "end": "2864640"
+  },
+  {
+    "text": "methods like last friday wins and so on yeah we're still kind of using that but in a crdt setting",
+    "start": "2864640",
+    "end": "2870960"
+  },
+  {
+    "text": "and the way the redis data types are laid out it's just sort of natural to use crdts",
+    "start": "2870960",
+    "end": "2876800"
+  },
+  {
+    "text": "it's it's not like we're going out of our way to do this uh it's we have to do some work to do",
+    "start": "2876800",
+    "end": "2883040"
+  },
+  {
+    "text": "anti-entropy and using crdt is just felt more natural in the system okay",
+    "start": "2883040",
+    "end": "2888960"
+  },
+  {
+    "text": "cool yeah oh sure uh a couple other questions for you so",
+    "start": "2898800",
+    "end": "2906240"
+  },
+  {
+    "start": "2903000",
+    "end": "3083000"
+  },
+  {
+    "text": "do you pre-compute the answer within redis to enable reading directly from radius or do you have to go through dynamite so",
+    "start": "2906240",
+    "end": "2913119"
+  },
+  {
+    "text": "when you say pre-compute yeah so you showed like the you know the counter has a more complex metadata data object but",
+    "start": "2913119",
+    "end": "2919760"
+  },
+  {
+    "text": "the answer itself is like two so yeah exactly so that's what i meant",
+    "start": "2919760",
+    "end": "2925200"
+  },
+  {
+    "text": "by using lua scripts we can sort of push down the logic to redis by having dynamite",
+    "start": "2925200",
+    "end": "2931040"
+  },
+  {
+    "text": "just take lower scripts pass in certain parameters from the query and have redis do the operations for us",
+    "start": "2931040",
+    "end": "2936960"
+  },
+  {
+    "text": "so all the state is actually within redis and the logic is being run within redis all dynamite is doing is providing",
+    "start": "2936960",
+    "end": "2943359"
+  },
+  {
+    "text": "the right scripts to radius to make sure it does the right operations okay so there's no like resiliency or",
+    "start": "2943359",
+    "end": "2948480"
+  },
+  {
+    "text": "high availability reason to be able to read the answer directly from red a safe dynamite failed",
+    "start": "2948480",
+    "end": "2954000"
+  },
+  {
+    "text": "you're expecting that dynamite is always working in order exactly so okay yeah so you you could always",
+    "start": "2954000",
+    "end": "2959839"
+  },
+  {
+    "text": "connect to the redis instance on the same uh sorry the redis process on the same instance uh",
+    "start": "2959839",
+    "end": "2966319"
+  },
+  {
+    "text": "but so if you do that like you you can read the same data that is on that instance right uh so the reason you would go",
+    "start": "2966319",
+    "end": "2972319"
+  },
+  {
+    "text": "through dynamite is because dynamite would shard the key and like i said if it's not the owner for that key it would send it to the",
+    "start": "2972319",
+    "end": "2978000"
+  },
+  {
+    "text": "right node and so on uh so in the worst case yes we can read directly from redis",
+    "start": "2978000",
+    "end": "2983760"
+  },
+  {
+    "text": "but typically everything just goes through dynamite okay and then my second question was around the developer experience",
+    "start": "2983760",
+    "end": "2989520"
+  },
+  {
+    "text": "in a situation where you have concurrent values with siblings have you found that developers using the",
+    "start": "2989520",
+    "end": "2994880"
+  },
+  {
+    "text": "system find this understandable or are there other challenges that come from reading",
+    "start": "2994880",
+    "end": "3000079"
+  },
+  {
+    "text": "concurrent results so uh so like i mean so when you say concurrent you mean conflicting results",
+    "start": "3000079",
+    "end": "3005680"
+  },
+  {
+    "text": "for yeah so we so we sort of solve those cases ourselves using last rider wins",
+    "start": "3005680",
+    "end": "3010839"
+  },
+  {
+    "text": "because when when when clients talk to dynamite they expect to talk to it as though they are talking",
+    "start": "3010839",
+    "end": "3017200"
+  },
+  {
+    "text": "to redis right so when we have conflicting values for a key",
+    "start": "3017200",
+    "end": "3022240"
+  },
+  {
+    "text": "and when when a client says get me the value for this key it's it's not natural to send back two",
+    "start": "3022240",
+    "end": "3027680"
+  },
+  {
+    "text": "values and say hey you choose since we want any redis client to be able to talk to us so we sort of use last admins to resolve it",
+    "start": "3027680",
+    "end": "3034160"
+  },
+  {
+    "text": "ourselves before passing up the value got it my understanding is in react they had some challenges with",
+    "start": "3034160",
+    "end": "3040079"
+  },
+  {
+    "text": "developer experience where it's possible to read a value write your new value and then read the old value and so they included the",
+    "start": "3040079",
+    "end": "3046480"
+  },
+  {
+    "text": "option of returning a sibling as well to make it more understandable i didn't know if that was a cause for confusion or so for",
+    "start": "3046480",
+    "end": "3054000"
+  },
+  {
+    "text": "us the kind of guarantees we say is like if you are within the same session you will be able to read your rights so",
+    "start": "3054000",
+    "end": "3061040"
+  },
+  {
+    "text": "within the same session but if a client does a right to one node breaks a session connects to a different",
+    "start": "3061040",
+    "end": "3067040"
+  },
+  {
+    "text": "node and tries to read it we don't guarantee that you will read the write that you just made so yeah so while so developers basically",
+    "start": "3067040",
+    "end": "3075040"
+  },
+  {
+    "text": "use the system knowing these sort of trade-offs and guarantees okay great thank you you're",
+    "start": "3075040",
+    "end": "3080839"
+  },
+  {
+    "text": "welcome so i have a question how do you compare um",
+    "start": "3080839",
+    "end": "3086319"
+  },
+  {
+    "start": "3083000",
+    "end": "3156000"
+  },
+  {
+    "text": "a system with uh like crdts like a multimaster with a with overhead to a single master system",
+    "start": "3086319",
+    "end": "3093280"
+  },
+  {
+    "text": "which is like you know read two like one write to one master but read from other replicas",
+    "start": "3093280",
+    "end": "3099599"
+  },
+  {
+    "text": "right so uh the challenge with that typically becomes availability like what if the master goes down",
+    "start": "3099599",
+    "end": "3105680"
+  },
+  {
+    "text": "uh then we can have some process to elect a new master but with a highly available system like",
+    "start": "3105680",
+    "end": "3112640"
+  },
+  {
+    "text": "ours the reason we sort of went with this model is most of our uh our micro services uh act as",
+    "start": "3112640",
+    "end": "3119359"
+  },
+  {
+    "text": "distributed microservices so they have instances running all over the world and they want to",
+    "start": "3119359",
+    "end": "3124640"
+  },
+  {
+    "text": "consistently have access to data so if in this world if we have a master slave model",
+    "start": "3124640",
+    "end": "3129839"
+  },
+  {
+    "text": "then uh we would have services in europe try to talk to the master in u.s east which could be like very slow",
+    "start": "3129839",
+    "end": "3137200"
+  },
+  {
+    "text": "so for our use cases having a highly available uh setup like this seem more natural and",
+    "start": "3137200",
+    "end": "3144079"
+  },
+  {
+    "text": "it's it's more useful for the developers that way yeah thank you you're welcome",
+    "start": "3144079",
+    "end": "3149839"
+  },
+  {
+    "text": "cool let's thanks again",
+    "start": "3150839",
+    "end": "3158559"
+  }
+]

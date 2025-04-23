@@ -1,0 +1,2387 @@
+[
+  {
+    "start": "0",
+    "end": "38000"
+  },
+  {
+    "text": "hi everybody thank you very much for coming uh my name is Rahul Pathak I'm the principal product manager for Amazon",
+    "start": "1640",
+    "end": "8519"
+  },
+  {
+    "text": "red shift and I'm here with anra Gupta who's the GM for the service uh so today we're going to dive fairly deep into",
+    "start": "8519",
+    "end": "15200"
+  },
+  {
+    "text": "some best practices around red shift we'll get into a little bit of the internals and then you'll also hear about a couple of new features that",
+    "start": "15200",
+    "end": "21400"
+  },
+  {
+    "text": "we've been working on that I think you'll be pretty excited about and uh just a quick show of hands I'm assuming",
+    "start": "21400",
+    "end": "27000"
+  },
+  {
+    "text": "everyone here is uh using or has used or familiar with red shift all right all",
+    "start": "27000",
+    "end": "33280"
+  },
+  {
+    "text": "right so that is awesome and um so let's get",
+    "start": "33280",
+    "end": "39200"
+  },
+  {
+    "start": "38000",
+    "end": "112000"
+  },
+  {
+    "text": "started so the architecture of red shift will be familiar to you I just want to put it up there briefly so we can just",
+    "start": "39200",
+    "end": "45440"
+  },
+  {
+    "text": "level set and then we'll drill in from here um essentially you're familiar it's a clustered system we've got a leader",
+    "start": "45440",
+    "end": "51640"
+  },
+  {
+    "text": "node which is your SQL endpoint compute nodes where your data is stored um it's",
+    "start": "51640",
+    "end": "57199"
+  },
+  {
+    "text": "columnar data uh query processing takes place on the compute nodes we can ingest in parallel from S3 from Dynamo DB or",
+    "start": "57199",
+    "end": "65198"
+  },
+  {
+    "text": "from EMR uh as well as from any arbitary SSH connection so if you want to copy in",
+    "start": "65199",
+    "end": "71159"
+  },
+  {
+    "text": "parallel from a database that's on premise you can set it up to accept inbound SSH from the compute nodes and",
+    "start": "71159",
+    "end": "76960"
+  },
+  {
+    "text": "we will copy that data over uh in parallel it saves you a round trip to S3 on the inest side uh and as you all know",
+    "start": "76960",
+    "end": "84200"
+  },
+  {
+    "text": "we have two Hardware platforms there's the dw1 which is our hard disk drive platform and uh we've got the dw2 which",
+    "start": "84200",
+    "end": "92200"
+  },
+  {
+    "text": "are the ssds and we made a recent uh expansion in maximum cluster size so you",
+    "start": "92200",
+    "end": "97680"
+  },
+  {
+    "text": "can now have 128 compute nodes in a cluster and that takes you up to two pedabytes of compressed data in a single",
+    "start": "97680",
+    "end": "104479"
+  },
+  {
+    "text": "cluster on the dw1 platform and 326 terabytes on the",
+    "start": "104479",
+    "end": "111159"
+  },
+  {
+    "text": "ssds and so let's dive a little bit deeper into the architecture and look at what's actually happening on the compute",
+    "start": "111159",
+    "end": "117240"
+  },
+  {
+    "start": "112000",
+    "end": "166000"
+  },
+  {
+    "text": "nodes so on the compute nodes you've got multiple slices per node now a slice",
+    "start": "117240",
+    "end": "122960"
+  },
+  {
+    "text": "maps to the number of to a core so on the dw1 the XL platform has two cores",
+    "start": "122960",
+    "end": "128879"
+  },
+  {
+    "text": "there's two slices on it the 8xl instance has 16 cores 16 slices",
+    "start": "128879",
+    "end": "134599"
+  },
+  {
+    "text": "similarly on the dw2 there's two slices on the large and 32 slices on the eight",
+    "start": "134599",
+    "end": "140680"
+  },
+  {
+    "text": "extra large now a slice is significant each one of them is dedicated certain",
+    "start": "140680",
+    "end": "146360"
+  },
+  {
+    "text": "amount of CPU power a core it's got RAM and it's got disc allocated to it and",
+    "start": "146360",
+    "end": "151400"
+  },
+  {
+    "text": "it's a thread of execution so each of the slices processes queries in parallel if we have to move data between slic to",
+    "start": "151400",
+    "end": "158319"
+  },
+  {
+    "text": "do a join we will ship that data between the slices automatically and transparently but this has an",
+    "start": "158319",
+    "end": "163599"
+  },
+  {
+    "text": "implication on ingestion so uh a copy command in red shift is just a query and",
+    "start": "163599",
+    "end": "170319"
+  },
+  {
+    "text": "so we recommend as a best practice you all know this uh in just using copy it's parallel by default you can always do",
+    "start": "170319",
+    "end": "177680"
+  },
+  {
+    "text": "inserts and updates over jdbc but it is is slow especially if you go single row red shift has a relatively High fixed",
+    "start": "177680",
+    "end": "184480"
+  },
+  {
+    "text": "commit cost overhead so if you're only inserting a single row that commit is going to feel expensive and so if you do",
+    "start": "184480",
+    "end": "190440"
+  },
+  {
+    "text": "use jdbc or odbc uh batch your insert so you can amortize that commit cost but",
+    "start": "190440",
+    "end": "196599"
+  },
+  {
+    "text": "when you're using copy each slice will ingest a file at a time and so if you",
+    "start": "196599",
+    "end": "202120"
+  },
+  {
+    "text": "only have a single input file on S3 only one slice will be ingesting data and so",
+    "start": "202120",
+    "end": "207959"
+  },
+  {
+    "text": "if you think about a 16 slice dw18 EXL this can ingest data from S3 at 100",
+    "start": "207959",
+    "end": "213519"
+  },
+  {
+    "text": "megabytes a second but if you only have a single input file you'll just get 1/16th of that capacity so just over 6",
+    "start": "213519",
+    "end": "220000"
+  },
+  {
+    "text": "megabytes per second on ingest and that will not scale as you add nodes so input file splitting is a big part of driving",
+    "start": "220000",
+    "end": "228280"
+  },
+  {
+    "start": "228000",
+    "end": "284000"
+  },
+  {
+    "text": "performance and so when you want to maximize your load throughput we recommend having at least as many input",
+    "start": "228280",
+    "end": "234200"
+  },
+  {
+    "text": "files as you have slices and so uh with a single dw18 XL you need 16 input files",
+    "start": "234200",
+    "end": "240959"
+  },
+  {
+    "text": "on S3 each slice will then load a file simultaneously and you'll get the full",
+    "start": "240959",
+    "end": "246000"
+  },
+  {
+    "text": "100 megabytes per second load through put that's possible and this scales linearly so we've actually done tests on",
+    "start": "246000",
+    "end": "252280"
+  },
+  {
+    "text": "100 node systems and we can reliably ingest a terabyte of data in about 129 seconds and that's not even running as",
+    "start": "252280",
+    "end": "259239"
+  },
+  {
+    "text": "fast as it's possible so you can get uh tremendous load throughput provided you parallelized correctly uh one other",
+    "start": "259239",
+    "end": "265800"
+  },
+  {
+    "text": "pointer here is make sure your individual input files are IND individually compressed uh basically if",
+    "start": "265800",
+    "end": "271800"
+  },
+  {
+    "text": "you're loading at 100 megabytes per second at 4 to1 compression you'll be able to load 400 megabytes of your own",
+    "start": "271800",
+    "end": "277720"
+  },
+  {
+    "text": "data every second so uh compression is a best practice and that's how you'll maximize the throughput of the",
+    "start": "277720",
+    "end": "284720"
+  },
+  {
+    "start": "284000",
+    "end": "378000"
+  },
+  {
+    "text": "system so a couple of things um when you're ingesting this sometimes bites",
+    "start": "284720",
+    "end": "289800"
+  },
+  {
+    "text": "customers red shift does not enforce constraints on primary key columns so you can Define them but it will expect",
+    "start": "289800",
+    "end": "297240"
+  },
+  {
+    "text": "you to have taken care of uniqueness as you in and so if you in load the same data",
+    "start": "297240",
+    "end": "302440"
+  },
+  {
+    "text": "multiple times red shift will happily load it it won't complain to you but the optimizer will assume because you",
+    "start": "302440",
+    "end": "308440"
+  },
+  {
+    "text": "defined a primary key on that column that the data in there is unique and this can create strange results so if",
+    "start": "308440",
+    "end": "314520"
+  },
+  {
+    "text": "you ever see a pattern where you get a different set of results when you query a table versus querying a view on that table uh check your primary key columns",
+    "start": "314520",
+    "end": "321400"
+  },
+  {
+    "text": "for uniqueness uh very important if you define them to make sure your app takes care of that uh another thing to keep in mind",
+    "start": "321400",
+    "end": "328639"
+  },
+  {
+    "text": "when you're ingesting from three is uh to use manifest files as a best practice this allows you to specify exactly what",
+    "start": "328639",
+    "end": "334800"
+  },
+  {
+    "text": "the cluster will load and um it's a Json manifest file it lives on S3 you provide",
+    "start": "334800",
+    "end": "340400"
+  },
+  {
+    "text": "it as part of the copy syntax and you have the ability to control what the cluster will do if it can't find one of",
+    "start": "340400",
+    "end": "345960"
+  },
+  {
+    "text": "those files so in some cases uh you can choose to stop the entire load or you also have the option to proceed and skip",
+    "start": "345960",
+    "end": "352600"
+  },
+  {
+    "text": "that file so we have customers that might do uh ingest hundreds of thousands of gaming logs and they don't really",
+    "start": "352600",
+    "end": "357880"
+  },
+  {
+    "text": "care if one of them is missing they have the option to skip it but at least they know that it happened and if you're",
+    "start": "357880",
+    "end": "363000"
+  },
+  {
+    "text": "using S3 in the US Standard region this will protect you from eventual consistency which can sometimes create",
+    "start": "363000",
+    "end": "368919"
+  },
+  {
+    "text": "issues where you think you've written a file to S3 but when the cluster goes to ingest it that file isn't seen so",
+    "start": "368919",
+    "end": "374280"
+  },
+  {
+    "text": "manifest files help you deal with that uh one other pointer and we see",
+    "start": "374280",
+    "end": "380960"
+  },
+  {
+    "start": "378000",
+    "end": "437000"
+  },
+  {
+    "text": "customers skip this fairly often uh so it's very important to keep your statistics up to date red shift has a",
+    "start": "380960",
+    "end": "387400"
+  },
+  {
+    "text": "query Optimizer that will uh rely on its estimates of the cardinality of the columns in your cluster to generate",
+    "start": "387400",
+    "end": "393800"
+  },
+  {
+    "text": "efficient query execution plans things like which order to join tables in what data to ship where uh it's all hinges",
+    "start": "393800",
+    "end": "400599"
+  },
+  {
+    "text": "upon having accurate statistics about your data and um typically when you're ingesting with copy uh copy will",
+    "start": "400599",
+    "end": "408080"
+  },
+  {
+    "text": "automatically update stats however it often does more work than it needs to because the columns that matter the most",
+    "start": "408080",
+    "end": "414240"
+  },
+  {
+    "text": "to your statistics are your primary are your sort key columns and your distribution key Colum columns and so",
+    "start": "414240",
+    "end": "420319"
+  },
+  {
+    "text": "one way to squeeze a little bit of extra performance out of inest is to turn off automatic stats updating and just",
+    "start": "420319",
+    "end": "427080"
+  },
+  {
+    "text": "analyze your sort and disc key columns after every load and that can create some perf gains for you uh but",
+    "start": "427080",
+    "end": "433680"
+  },
+  {
+    "text": "statistics it's very important to keep these current and um you know in a similar",
+    "start": "433680",
+    "end": "439759"
+  },
+  {
+    "start": "437000",
+    "end": "504000"
+  },
+  {
+    "text": "vein compression we've talked about it it's a good thing you get more data per read per injest per network transfer and",
+    "start": "439759",
+    "end": "447120"
+  },
+  {
+    "text": "it lowers your costs and so you can run smaller clusters and drive higher performance uh in general it's a good",
+    "start": "447120",
+    "end": "453440"
+  },
+  {
+    "text": "thing and copy Again by default will sample data run it across all of the",
+    "start": "453440",
+    "end": "458840"
+  },
+  {
+    "text": "encryption Al all of the compression algorithms that we know um that are implemented in the cluster and pick the",
+    "start": "458840",
+    "end": "464479"
+  },
+  {
+    "text": "one that saves the most space and it can sample up to 100,000 rows at a time when doing this now this is a good thing and",
+    "start": "464479",
+    "end": "471680"
+  },
+  {
+    "text": "it will only do it on Empty Tables and then subsequently we'll use the encodings that's been generated so",
+    "start": "471680",
+    "end": "477080"
+  },
+  {
+    "text": "that's great uh but if you have automated repeated ETL processes where you might load a staging table or you",
+    "start": "477080",
+    "end": "482800"
+  },
+  {
+    "text": "might drop a temp table recreate it automatic compression is just an overhead especially if your data looks",
+    "start": "482800",
+    "end": "488400"
+  },
+  {
+    "text": "the same hour to hour or day to day so turn it off and just pick the compression Define it as part of your",
+    "start": "488400",
+    "end": "494120"
+  },
+  {
+    "text": "ddl when you create that temp table and you'll save yourself sampling time on repeated loads so another way to squeeze",
+    "start": "494120",
+    "end": "500560"
+  },
+  {
+    "text": "more performance out of inest now compression is generally great",
+    "start": "500560",
+    "end": "507840"
+  },
+  {
+    "start": "504000",
+    "end": "597000"
+  },
+  {
+    "text": "um but one pointer to keep in mind is that uh occasionally it can work against",
+    "start": "507840",
+    "end": "513000"
+  },
+  {
+    "text": "you and so you have to be careful when compressing sort keys so sort keys are great we like them your data is sorted",
+    "start": "513000",
+    "end": "519560"
+  },
+  {
+    "text": "you can use our zone maps to skip ranges that don't matter for your queries but often say you have time-based event data",
+    "start": "519560",
+    "end": "526640"
+  },
+  {
+    "text": "you're an ad Network or a mobile gaming company uh you might use date as your sort key uh which is great it compresses",
+    "start": "526640",
+    "end": "532880"
+  },
+  {
+    "text": "extremely well and say you had a refer string as your one of your data columns that might not compress as well and so",
+    "start": "532880",
+    "end": "539920"
+  },
+  {
+    "text": "in the case of your sort key uh we might have 100,000 rows per sort key block and",
+    "start": "539920",
+    "end": "545160"
+  },
+  {
+    "text": "so if we identify that uh we have to do a minimum of a read of a block at a time and a block is a megabyte in red shift",
+    "start": "545160",
+    "end": "551440"
+  },
+  {
+    "text": "so say we read and we decide that your data exists somewhere in the first block of the sort key that's 100,000 rows",
+    "start": "551440",
+    "end": "557480"
+  },
+  {
+    "text": "potentially in the sort key offset and if you get much better compression than you do on your data columns you'll read",
+    "start": "557480",
+    "end": "563240"
+  },
+  {
+    "text": "way more rows than you have to on the data blocks because you have to read 100,000 offsets and so if you inspect",
+    "start": "563240",
+    "end": "570600"
+  },
+  {
+    "text": "your data and you find that your sortkey columns compress significantly better than your data columns you might want to",
+    "start": "570600",
+    "end": "576279"
+  },
+  {
+    "text": "think about disabling compression on those sortkey columns and look at the performance that you get now if you're",
+    "start": "576279",
+    "end": "581560"
+  },
+  {
+    "text": "running a very compact schema and you've just got a bunch of ins this won't be a problem uh but we often see a",
+    "start": "581560",
+    "end": "586800"
+  },
+  {
+    "text": "combination of uh just sort of more log type data brought in in conjunction with sortkey data and this is an area where",
+    "start": "586800",
+    "end": "592959"
+  },
+  {
+    "text": "you can drive higher performance another big thing in red",
+    "start": "592959",
+    "end": "599040"
+  },
+  {
+    "start": "597000",
+    "end": "643000"
+  },
+  {
+    "text": "shift is yes it's a columnar system and that's great because only the columns that matter for queries participate in",
+    "start": "599040",
+    "end": "605040"
+  },
+  {
+    "text": "those queries but your columns should be as narrow as possible essentially whenever we have to allocate inmemory",
+    "start": "605040",
+    "end": "611360"
+  },
+  {
+    "text": "buffers to deal with queries or ingests uh we dedic we allocate the space that's used in the column definition and so if",
+    "start": "611360",
+    "end": "618640"
+  },
+  {
+    "text": "your columns are varar Max we're going to allocate 64k for that column even though it contains much less data and",
+    "start": "618640",
+    "end": "625519"
+  },
+  {
+    "text": "this leads to inefficiencies because we can only fit we fit fewer rows into memory your queries are more likely to",
+    "start": "625519",
+    "end": "631240"
+  },
+  {
+    "text": "spill to dis and it's just wasted processing power and memory allocation that's not working in your favor so",
+    "start": "631240",
+    "end": "637000"
+  },
+  {
+    "text": "please keep your columns as narrow as possible you'll maximize query performance that",
+    "start": "637000",
+    "end": "643480"
+  },
+  {
+    "start": "643000",
+    "end": "687000"
+  },
+  {
+    "text": "way so uh we've talked about injest squeezing performance out of injest we've talked a lot about red shift and",
+    "start": "643519",
+    "end": "649720"
+  },
+  {
+    "text": "security and we've done a lot in this area and I just want to walk you through the details and how you can run end to",
+    "start": "649720",
+    "end": "655720"
+  },
+  {
+    "text": "end secure in red shift and what I mean by that is starting from your source files on S3 all the way up through the",
+    "start": "655720",
+    "end": "662000"
+  },
+  {
+    "text": "pipeline to your queries uh you can have that be encrypted and secure and auditable and with red shift we've gone",
+    "start": "662000",
+    "end": "669160"
+  },
+  {
+    "text": "through a number of certifications for sock 1 2 3 PCI fedramp which is a",
+    "start": "669160",
+    "end": "675000"
+  },
+  {
+    "text": "federal government standard uh we've got Hippa and Healthcare workloads running on red shift and I just want to dig into",
+    "start": "675000",
+    "end": "680440"
+  },
+  {
+    "text": "all of these pieces uh so you can see how they work and implement the architectures and policies that you need",
+    "start": "680440",
+    "end": "686000"
+  },
+  {
+    "text": "for your organizations so starting with Source data uh you can use S3 client side",
+    "start": "686000",
+    "end": "692360"
+  },
+  {
+    "start": "687000",
+    "end": "744000"
+  },
+  {
+    "text": "encryption to encrypt your data files as you put them onto S3 we have sdks for",
+    "start": "692360",
+    "end": "697920"
+  },
+  {
+    "text": "Java Ruby and.net uh we use an envelope encryption strategy so there's an encryption key that's used to encrypt",
+    "start": "697920",
+    "end": "704279"
+  },
+  {
+    "text": "your data uh this is the envelope key the envelope key is then encrypted with your private key and that encrypted",
+    "start": "704279",
+    "end": "711120"
+  },
+  {
+    "text": "envelope key is stored in the metadata of the object and then when you're ingesting data into red shift we do this",
+    "start": "711120",
+    "end": "716920"
+  },
+  {
+    "text": "process in Reverse so you provide your private key as part of the copy command that's then reads the metadata on the",
+    "start": "716920",
+    "end": "723240"
+  },
+  {
+    "text": "object decrypts the envelope key and then the system uses that envelope key to decrypt the data payload our injest",
+    "start": "723240",
+    "end": "730600"
+  },
+  {
+    "text": "from S3 is done over SSL connections you've got control of your keys at source encrypted data onto S3 over SSL",
+    "start": "730600",
+    "end": "738360"
+  },
+  {
+    "text": "into redshift uh again with you controlling your keys so you've got a secure chain on that",
+    "start": "738360",
+    "end": "744360"
+  },
+  {
+    "start": "744000",
+    "end": "913000"
+  },
+  {
+    "text": "side next step is securing your data at rest so we support Hardware rated AES",
+    "start": "744360",
+    "end": "750519"
+  },
+  {
+    "text": "256 uh there's about a 20% encryption overhead in terms of performance it can Peak higher uh so something to keep in",
+    "start": "750519",
+    "end": "757920"
+  },
+  {
+    "text": "mind when you choose to enable this option and uh red shift is MPP so if you",
+    "start": "757920",
+    "end": "763360"
+  },
+  {
+    "text": "want to run encrypted and not have a performance penalty you can always add 20% more nodes to your cluster and for",
+    "start": "763360",
+    "end": "768920"
+  },
+  {
+    "text": "welld distributed workloads you'll get near linear back to normal performance uh so we use a multi-tier",
+    "start": "768920",
+    "end": "775639"
+  },
+  {
+    "text": "key based encryption model in red shift each block gets its own individual randomly generated aes256 key that's",
+    "start": "775639",
+    "end": "783480"
+  },
+  {
+    "text": "used to encrypt that data in that block this prevents block splicing um and then those uh block keys are encrypted using",
+    "start": "783480",
+    "end": "790839"
+  },
+  {
+    "text": "a database key that's just kept in memory on the cluster and so essentially you have block Keys the block keys are",
+    "start": "790839",
+    "end": "797199"
+  },
+  {
+    "text": "encrypted with a database key that's in memory that database key is persisted off database and that's encrypted using",
+    "start": "797199",
+    "end": "803839"
+  },
+  {
+    "text": "a cluster key so it's only persisted in encrypted form and the cluster key itself is encrypted using a master key",
+    "start": "803839",
+    "end": "810079"
+  },
+  {
+    "text": "if AWS is managing your keys and red shift also integrates with the new Key Management Service that Andy talked",
+    "start": "810079",
+    "end": "816600"
+  },
+  {
+    "text": "about um but you also have the option to use an on-premise Hardware security module or HSM uh we support safet Luna",
+    "start": "816600",
+    "end": "823560"
+  },
+  {
+    "text": "devices and in this case what happens is we use the master key to set up a secure Channel with your HSM and then we will",
+    "start": "823560",
+    "end": "831360"
+  },
+  {
+    "text": "um encrypt the database key using a cluster key that's only kept on the HSM and so when the cluster starts up it",
+    "start": "831360",
+    "end": "837920"
+  },
+  {
+    "text": "passes the encrypted data base key to the HSM HSM decrypts it passes the decrypted key back to the cluster in",
+    "start": "837920",
+    "end": "844680"
+  },
+  {
+    "text": "over a secure Channel and it's only kept in memory at that point and then you have the block keys and proceed as",
+    "start": "844680",
+    "end": "850720"
+  },
+  {
+    "text": "normal uh the other benefit of this multi-tier key approach is key rotation uh is only a matter of changing your",
+    "start": "850720",
+    "end": "857440"
+  },
+  {
+    "text": "database keys and cluster keys and then we can re-encrypt the block keys and so you maintain a secure chain but you",
+    "start": "857440",
+    "end": "863639"
+  },
+  {
+    "text": "don't have to dump and re-encrypt all of your data and so when you're dealing with hundreds of terabytes or pedabytes of data in system um having the ability",
+    "start": "863639",
+    "end": "871199"
+  },
+  {
+    "text": "to rotate without having to do a full dump and reload uh is a big plus and um it's possible to run these",
+    "start": "871199",
+    "end": "878440"
+  },
+  {
+    "text": "hsms in ha Fleet on premise and actually if you go to uh there's a session at",
+    "start": "878440",
+    "end": "884199"
+  },
+  {
+    "text": "4:30 where NASDAQ will talk about how they're using hsms on premise in an ha configuration uh with red shift to",
+    "start": "884199",
+    "end": "890519"
+  },
+  {
+    "text": "encrypt their exchange data and then encryption in red shift is at the database level so it's all on and",
+    "start": "890519",
+    "end": "897800"
+  },
+  {
+    "text": "um for customers that want to restrict access to certain columns the strategy is to take views put only a subset of",
+    "start": "897800",
+    "end": "903639"
+  },
+  {
+    "text": "columns in the views and then assign permissions to the Views but not to the underlying tables and that way you get",
+    "start": "903639",
+    "end": "909279"
+  },
+  {
+    "text": "column level restriction uh within the cluster so security is great but you",
+    "start": "909279",
+    "end": "915320"
+  },
+  {
+    "start": "913000",
+    "end": "1008000"
+  },
+  {
+    "text": "also want to control access and you want auditability and so with red shift you can require SSL so any client",
+    "start": "915320",
+    "end": "922120"
+  },
+  {
+    "text": "applications will connect over SSL we support ephemeral key exchange on the SSL handshakes you get perfect forward",
+    "start": "922120",
+    "end": "928480"
+  },
+  {
+    "text": "security for that session and then we have database permissions so you can create users and assign users",
+    "start": "928480",
+    "end": "934279"
+  },
+  {
+    "text": "permissions to SQL and to database objects and um while object level permissions are great customers also",
+    "start": "934279",
+    "end": "940440"
+  },
+  {
+    "text": "wanted the ability to assign permissions at the schema level and so we recently added the ability to Grant or revoke",
+    "start": "940440",
+    "end": "946600"
+  },
+  {
+    "text": "permission to all the objects in the schema again convenience for customers who are creating objects frequently or",
+    "start": "946600",
+    "end": "952519"
+  },
+  {
+    "text": "who are managing large user populations in the database uh and then we integrate with VPC uh which is I'm I'm sure all of",
+    "start": "952519",
+    "end": "959360"
+  },
+  {
+    "text": "you are familiar with is our virtual private Cloud so you can isolate the cluster and connect it to your on premise resources over VPN and then we",
+    "start": "959360",
+    "end": "967160"
+  },
+  {
+    "text": "integrate with I am at the resource level so you can control who can take what action like provisioning a cluster",
+    "start": "967160",
+    "end": "972880"
+  },
+  {
+    "text": "creating a backup resizing a cluster um and that's all available and auditable through cloud trail which is our API",
+    "start": "972880",
+    "end": "978959"
+  },
+  {
+    "text": "logging uh and auditing service and then red shift also provides database level audit logging and so the idea here is",
+    "start": "978959",
+    "end": "985920"
+  },
+  {
+    "text": "that you create a location on S3 you give us put permissions into that location but not delete and so we will",
+    "start": "985920",
+    "end": "992120"
+  },
+  {
+    "text": "just write database audit logs into that location for you to consume uh in another auditing application and so uh",
+    "start": "992120",
+    "end": "998440"
+  },
+  {
+    "text": "it's connections failed attempts to log in what SQL was executed really full SQL",
+    "start": "998440",
+    "end": "1003600"
+  },
+  {
+    "text": "activity is logged out to S3 for your consumption and so um securing data is",
+    "start": "1003600",
+    "end": "1010959"
+  },
+  {
+    "start": "1008000",
+    "end": "1138000"
+  },
+  {
+    "text": "great we've ingested data now we want to talk about query capabilities in redshift and so we've been iterating",
+    "start": "1010959",
+    "end": "1017040"
+  },
+  {
+    "text": "quickly Andy talked about 95 new features we add SQL functions regularly we want to expand the range of analytics",
+    "start": "1017040",
+    "end": "1023560"
+  },
+  {
+    "text": "that you can do in SQL we've added over 25 since launch uh new Aggregate and window functions Rex capabilities and",
+    "start": "1023560",
+    "end": "1031360"
+  },
+  {
+    "text": "we're going to continue iterating here but we also want to enable you to add your own functionality to redshift and",
+    "start": "1031360",
+    "end": "1037160"
+  },
+  {
+    "text": "so I'm excited to share with you that we'll soon have userdefined functions available these are coming in a couple",
+    "start": "1037160",
+    "end": "1042880"
+  },
+  {
+    "text": "of weeks and um you'll be able to write your own functions in redshift using Python 2.7",
+    "start": "1042880",
+    "end": "1049640"
+  },
+  {
+    "text": "the syntax is largely identical to postgress udfs with PL Python and there's a slight difference in that",
+    "start": "1049640",
+    "end": "1056000"
+  },
+  {
+    "text": "because red shift is a distributed system you have to provide a keyword around whether your function is immutable or stable or volatile which is",
+    "start": "1056000",
+    "end": "1063000"
+  },
+  {
+    "text": "optional in postgress but required in red shift but if you're familiar with postgress udfs uh this will seem like",
+    "start": "1063000",
+    "end": "1069120"
+  },
+  {
+    "text": "old hat and uh we do sandbox these udfs so you can't make file system or network",
+    "start": "1069120",
+    "end": "1074520"
+  },
+  {
+    "text": "calls but otherwise uh the full python interpreter is available to you and it runs as a compiled bite code in parallel",
+    "start": "1074520",
+    "end": "1081520"
+  },
+  {
+    "text": "on all of the compute nodes and we're also going to build in some libraries so pandas numpy and scipi for analytics",
+    "start": "1081520",
+    "end": "1088480"
+  },
+  {
+    "text": "will be built in those functions are available to you for use and you can also bring in your own",
+    "start": "1088480",
+    "end": "1093720"
+  },
+  {
+    "text": "libraries uh so let's talk about uh how this will work so a very common thing that our customers do is uh URL parsing",
+    "start": "1093720",
+    "end": "1100960"
+  },
+  {
+    "text": "so you might have a refer string for your web traffic you want to split it up you want to get domain you want to get",
+    "start": "1100960",
+    "end": "1106200"
+  },
+  {
+    "text": "keywords where people came from now if you're doing this in SQL prior to udfs",
+    "start": "1106200",
+    "end": "1111760"
+  },
+  {
+    "text": "you will be using a fairly complicated set of rexes to extract your domains uh with udfs you'll just create a function",
+    "start": "1111760",
+    "end": "1118520"
+  },
+  {
+    "text": "in that function you can import Python's URL parsing library and you can write a very simple function that will take data",
+    "start": "1118520",
+    "end": "1125600"
+  },
+  {
+    "text": "return the host name and you'll have to write multiple ones to give different aspects of their URL string but it gives",
+    "start": "1125600",
+    "end": "1131280"
+  },
+  {
+    "text": "you a very elegant way to expand the capability of the database and bring bring it into your SQL",
+    "start": "1131280",
+    "end": "1136799"
+  },
+  {
+    "text": "queries and um we also support aggregate functions so list a is a function that",
+    "start": "1136799",
+    "end": "1142039"
+  },
+  {
+    "start": "1138000",
+    "end": "1197000"
+  },
+  {
+    "text": "customers ask for a lot uh the idea here is that you can combine multiple values into a single string and output it uh",
+    "start": "1142039",
+    "end": "1148360"
+  },
+  {
+    "text": "could be useful say for example you're tracking uh visitors to your website and you want to have a list of all the sites",
+    "start": "1148360",
+    "end": "1153840"
+  },
+  {
+    "text": "that they came through in their attribution Pipeline on their way to your site and so with um udfs you can",
+    "start": "1153840",
+    "end": "1159799"
+  },
+  {
+    "text": "create an aggregate function that will allow you to essentially replicate this behavior and so Aggregates in red shift",
+    "start": "1159799",
+    "end": "1166760"
+  },
+  {
+    "text": "udfs and postest udfs have three comp components there's an initialization function which sets it up an aggregate",
+    "start": "1166760",
+    "end": "1173400"
+  },
+  {
+    "text": "function that does the actual aggregation and then a finalized function that combines all the results and returns them to the application so",
+    "start": "1173400",
+    "end": "1180080"
+  },
+  {
+    "text": "here you can see we've got an init list tag uh We've then got the aggregation itself which concatenates the values",
+    "start": "1180080",
+    "end": "1186480"
+  },
+  {
+    "text": "with a comma and then we've got a finalize which just closes the list and then the aggregate function is just",
+    "start": "1186480",
+    "end": "1192760"
+  },
+  {
+    "text": "defined where you provide pointers to these three individual udfs that you've defined and so if you wanted to use in a",
+    "start": "1192760",
+    "end": "1199039"
+  },
+  {
+    "text": "query uh here's a simple table and a create syntax and then you can see that you can very elegantly bring that",
+    "start": "1199039",
+    "end": "1205080"
+  },
+  {
+    "text": "aggregation function into your SQL query and quickly get back uh the list tag",
+    "start": "1205080",
+    "end": "1210520"
+  },
+  {
+    "text": "result summing by column B grouping by column B all of the values that were in column A and so this is a very elegant",
+    "start": "1210520",
+    "end": "1217919"
+  },
+  {
+    "text": "way again to really expand the capabilities that are available within red shift uh you'll have this in a few",
+    "start": "1217919",
+    "end": "1223320"
+  },
+  {
+    "text": "weeks we will continue iterating on built-in aggregate functions uh python bite code will run as fast as possible",
+    "start": "1223320",
+    "end": "1230039"
+  },
+  {
+    "text": "but it's not going to beat native C++ that's running optimized in the system but we're excited to hear what you think",
+    "start": "1230039",
+    "end": "1236559"
+  },
+  {
+    "text": "about this so please let us know and with that I'm going to turn",
+    "start": "1236559",
+    "end": "1241760"
+  },
+  {
+    "start": "1239000",
+    "end": "1613000"
+  },
+  {
+    "text": "over to anog who's going to talk about space filling",
+    "start": "1241760",
+    "end": "1246440"
+  },
+  {
+    "text": "curves hey so how many of you uh know what a space filling curve is a couple but thanks a lot R for",
+    "start": "1247200",
+    "end": "1254799"
+  },
+  {
+    "text": "giving me the section uh so let's talk about this a little bit so let's imagine your small",
+    "start": "1254799",
+    "end": "1262559"
+  },
+  {
+    "text": "internet bookstore and you know you're interested in how you're doing right you've got a bunch of sales you want to",
+    "start": "1262559",
+    "end": "1268000"
+  },
+  {
+    "text": "know your best customers you want to know your total sales you want to know which products are best so that's",
+    "start": "1268000",
+    "end": "1273520"
+  },
+  {
+    "text": "actually a pretty easy problem right you build a star schema and you stuff it into a database you put some indexing on",
+    "start": "1273520",
+    "end": "1279440"
+  },
+  {
+    "text": "it and a way you go you get a little bigger your queries",
+    "start": "1279440",
+    "end": "1285000"
+  },
+  {
+    "text": "start taking a long time so something you start doing is moving to a column",
+    "start": "1285000",
+    "end": "1290679"
+  },
+  {
+    "text": "store and what we do in Red shift what a lot of people do is use zone maps which means that you keep the minimum and",
+    "start": "1290679",
+    "end": "1297080"
+  },
+  {
+    "text": "maximum value per block and we have large data blocks right and it's",
+    "start": "1297080",
+    "end": "1302880"
+  },
+  {
+    "text": "relatively inefficient to index in a zone map and the reason for that is is",
+    "start": "1302880",
+    "end": "1309159"
+  },
+  {
+    "text": "that since you have a large block uh let's say it's a Megabite block as in red shift now each block is per column",
+    "start": "1309159",
+    "end": "1316400"
+  },
+  {
+    "text": "let's say you've got an integer column you're looking at 250,000 values uh per",
+    "start": "1316400",
+    "end": "1322320"
+  },
+  {
+    "text": "block after compression and for an index to be selective you need to be worth doing two",
+    "start": "1322320",
+    "end": "1328400"
+  },
+  {
+    "text": "iOS the index IO plus the data block IO so you need selectivity of one and half a million most of you don't have that",
+    "start": "1328400",
+    "end": "1335159"
+  },
+  {
+    "text": "data so you have to decide which queries you want to be",
+    "start": "1335159",
+    "end": "1340440"
+  },
+  {
+    "text": "fast so the way you do that is you decide what you're going to sort on so let's",
+    "start": "1341480",
+    "end": "1348000"
+  },
+  {
+    "text": "say you trying to figure out products or customers so if you sort on products then the sorted columns is going to be",
+    "start": "1348000",
+    "end": "1355080"
+  },
+  {
+    "text": "log in but the unsorted column customer is going to be um order in you know just",
+    "start": "1355080",
+    "end": "1361840"
+  },
+  {
+    "text": "going to do a full scan that's if you don't specify both right if you even and that's true even if you use a compound",
+    "start": "1361840",
+    "end": "1367720"
+  },
+  {
+    "text": "key because if it's product followed by customer if you don't specify the product there's an enough selectivity to",
+    "start": "1367720",
+    "end": "1373720"
+  },
+  {
+    "text": "go through the customer list okay now what other people have done and is",
+    "start": "1373720",
+    "end": "1379360"
+  },
+  {
+    "text": "what's kind of state-of-the-art nowadays is to use projections and that's just a fancy word for saying we're going to go",
+    "start": "1379360",
+    "end": "1386200"
+  },
+  {
+    "text": "and store your data sorted multiple ways and you know that way you can say Okay",
+    "start": "1386200",
+    "end": "1391559"
+  },
+  {
+    "text": "sort it by product sorted by customer and choose which one you're going to use",
+    "start": "1391559",
+    "end": "1396880"
+  },
+  {
+    "text": "but it gets unwieldy the loads are a lot slower and if you have say eight columns",
+    "start": "1396880",
+    "end": "1404120"
+  },
+  {
+    "text": "that you might want to sort by you've got eight factorial combinations that you would want to create these sorting",
+    "start": "1404120",
+    "end": "1409480"
+  },
+  {
+    "text": "com combinations on because it's not just the one column that you're going to sort on it's the combination",
+    "start": "1409480",
+    "end": "1416919"
+  },
+  {
+    "text": "right so a little math ahead um so one way that you can think about this",
+    "start": "1416919",
+    "end": "1422520"
+  },
+  {
+    "text": "problem is Hilbert spaces or multi-dimensional spaces you can think about each block existing at the",
+    "start": "1422520",
+    "end": "1429080"
+  },
+  {
+    "text": "intersection of um a number of axes which are the things you want to index",
+    "start": "1429080",
+    "end": "1434919"
+  },
+  {
+    "text": "on and so what you see on the right hand side there is is some is something where",
+    "start": "1434919",
+    "end": "1440120"
+  },
+  {
+    "text": "you're basically sorting by customers first then products so for each customer",
+    "start": "1440120",
+    "end": "1445679"
+  },
+  {
+    "text": "you see the list of products and then the one below it is the opposite order now it turns out that that's an over",
+    "start": "1445679",
+    "end": "1452720"
+  },
+  {
+    "text": "specified problem what we're doing there is well let's first introduce what a space filling curve is so what a space",
+    "start": "1452720",
+    "end": "1458720"
+  },
+  {
+    "text": "filling curve is is it's a curve that goes through the multi-dimensional space and touches every",
+    "start": "1458720",
+    "end": "1464600"
+  },
+  {
+    "text": "Point okay and so what you're doing here is a space filling curve going across each time or you're going down each time",
+    "start": "1464600",
+    "end": "1472159"
+  },
+  {
+    "text": "right and um you know that works just fine but what I mean by it being",
+    "start": "1472159",
+    "end": "1478440"
+  },
+  {
+    "text": "overspecified is that uh you don't need every product",
+    "start": "1478440",
+    "end": "1486399"
+  },
+  {
+    "text": "to appear per customer you just need every product you know every product two to appear after every product one so",
+    "start": "1486399",
+    "end": "1493640"
+  },
+  {
+    "text": "that order preserves you need every customer to to appear after every customer one and there's a more",
+    "start": "1493640",
+    "end": "1499520"
+  },
+  {
+    "text": "efficient way of doing it there are ton of space filling curves out there this happens to be the one we're",
+    "start": "1499520",
+    "end": "1505320"
+  },
+  {
+    "text": "using sorry the advantage of the one that we're using here is that you get to in a",
+    "start": "1506440",
+    "end": "1514679"
+  },
+  {
+    "text": "two-dimensional model go to something where if you're doing you're specifying both product and customer you're going",
+    "start": "1514679",
+    "end": "1521200"
+  },
+  {
+    "text": "to be log in if you're specifying either product or customer you're going to be square root of n if you're specifying",
+    "start": "1521200",
+    "end": "1528000"
+  },
+  {
+    "text": "neither producct of customer of course you're going to have to do a scan and that's a big deal because it com what you're getting the ability to do now is",
+    "start": "1528000",
+    "end": "1535520"
+  },
+  {
+    "text": "by specifying a set of columns you know out of the list that you tend to query on you're basically starting to get the",
+    "start": "1535520",
+    "end": "1541960"
+  },
+  {
+    "text": "benefits of indexing without the overhead of indexing so you know with all that math",
+    "start": "1541960",
+    "end": "1549039"
+  },
+  {
+    "text": "let's talk about um how you use the feature so basically you're familiar with how you do a create table and So",
+    "start": "1549039",
+    "end": "1555640"
+  },
+  {
+    "text": "you you're familiar with how you specify a sort key so the and you know you just specify list of columns the default way",
+    "start": "1555640",
+    "end": "1561919"
+  },
+  {
+    "text": "that you do that is what we're introducing a new keyword called compound that's the default you don't have to specify it your tables will work",
+    "start": "1561919",
+    "end": "1569000"
+  },
+  {
+    "text": "just fine there's a new model which is interleafed that's the basic change that you're going to introduce if you want to",
+    "start": "1569000",
+    "end": "1574640"
+  },
+  {
+    "text": "use uh um space filling curves and when you specify that what we're going to do",
+    "start": "1574640",
+    "end": "1579960"
+  },
+  {
+    "text": "is inter leave the bits that are used to specify your U uh zone map No need no",
+    "start": "1579960",
+    "end": "1587080"
+  },
+  {
+    "text": "changes are needed to your query uh we're seeing pretty good uh advantages from",
+    "start": "1587080",
+    "end": "1593840"
+  },
+  {
+    "text": "this on the order of 4 to 8X in our lab um so we think the benefits are",
+    "start": "1593840",
+    "end": "1599840"
+  },
+  {
+    "text": "significant uh right now we're still seeing a load penalty we'll you know be fixing that uh quickly uh as with UDS",
+    "start": "1599840",
+    "end": "1608159"
+  },
+  {
+    "text": "should be available in a few weeks love to see your feedback on it we wanted to leave lots of room here",
+    "start": "1608159",
+    "end": "1615600"
+  },
+  {
+    "start": "1613000",
+    "end": "1638000"
+  },
+  {
+    "text": "for questions uh so uh happy to take any questions that have come up as a result",
+    "start": "1615600",
+    "end": "1620960"
+  },
+  {
+    "text": "of this or any topics that we haven't covered uh since all of you are fairly Advanced users from a red",
+    "start": "1620960",
+    "end": "1627440"
+  },
+  {
+    "text": "perspective and if not you're welcome to have some extra time back in your day yeah go",
+    "start": "1627440",
+    "end": "1634120"
+  },
+  {
+    "text": "ahead um so we um it's unclear it will probably feel significant based on the",
+    "start": "1637720",
+    "end": "1644720"
+  },
+  {
+    "text": "complexity of the of the kind of processing that you're trying to they definitely won't run as fast as native",
+    "start": "1644720",
+    "end": "1651919"
+  },
+  {
+    "text": "um Native udfs um so it'll be an area that we're consist consistently tuning it and if we",
+    "start": "1651919",
+    "end": "1657799"
+  },
+  {
+    "text": "have uh more specifics on that yeah I mean I think I would estimate it being not that different from uh uh postgress",
+    "start": "1657799",
+    "end": "1665200"
+  },
+  {
+    "text": "which I would say that it's on the order of an order of magnitude right because",
+    "start": "1665200",
+    "end": "1670320"
+  },
+  {
+    "text": "if you think about it in red shift we compile down to C++ and you know turn it into machine code every query and so the",
+    "start": "1670320",
+    "end": "1677880"
+  },
+  {
+    "text": "n queries uh Native functions run pretty fast um whereas postris you just can't",
+    "start": "1677880",
+    "end": "1683799"
+  },
+  {
+    "text": "sorry with python you just can't do that go",
+    "start": "1683799",
+    "end": "1690518"
+  },
+  {
+    "text": "ahead sure uh so uh the question just to repeat it is around how we handle crash",
+    "start": "1698039",
+    "end": "1704480"
+  },
+  {
+    "start": "1699000",
+    "end": "1912000"
+  },
+  {
+    "text": "recovery on the compute nodes and what we do for backups so so whenever you load data into a red shift cluster in a",
+    "start": "1704480",
+    "end": "1710640"
+  },
+  {
+    "text": "multi-node system we actually automatically replicate it to other drives on different nodes and then we",
+    "start": "1710640",
+    "end": "1716039"
+  },
+  {
+    "text": "are also continuously backing up all of the compute nodes and the leader node to S3 so anytime there's 5 gabt of new data",
+    "start": "1716039",
+    "end": "1723279"
+  },
+  {
+    "text": "or 8 hours of elapsed we take an incremental S3 snapshot of that compute node uh but we maintain a full chain",
+    "start": "1723279",
+    "end": "1730120"
+  },
+  {
+    "text": "going back uh of the snapshot itself so we can recreate the complete status of that compute node at any point in time",
+    "start": "1730120",
+    "end": "1737279"
+  },
+  {
+    "text": "and you get to pick the retention period of these automatic S3 snapshots uh one day is default you can have up to 35",
+    "start": "1737279",
+    "end": "1744000"
+  },
+  {
+    "text": "days and uh you can also choose to have those S3 snapshots copied to a second region to get Global Dr and so if there",
+    "start": "1744000",
+    "end": "1751799"
+  },
+  {
+    "text": "is a compute node failure uh essentially our systems will detect it we then have the opportunity to try and restart the",
+    "start": "1751799",
+    "end": "1757840"
+  },
+  {
+    "text": "node if that's possible because if you have up to 16 terabytes of compressed data on that node it can be quicker to",
+    "start": "1757840",
+    "end": "1763679"
+  },
+  {
+    "text": "restart it than to replace it um but then if we do need to replace node it's not a problem because we have all the",
+    "start": "1763679",
+    "end": "1769760"
+  },
+  {
+    "text": "blocks on that node saved not just on S3 but also on other drives the secondary copies that are also in the cluster and",
+    "start": "1769760",
+    "end": "1776840"
+  },
+  {
+    "text": "so we can replace the node automatically reconnect it to the cluster and then we will resume allow you to resume querying",
+    "start": "1776840",
+    "end": "1783200"
+  },
+  {
+    "text": "within a few minutes it takes under 3 minutes to provision a node at a minute or so to load metadata back onto it and",
+    "start": "1783200",
+    "end": "1790039"
+  },
+  {
+    "text": "then we will replicate data back onto that node from the other nodes in the cluster and so you can resume querying",
+    "start": "1790039",
+    "end": "1795760"
+  },
+  {
+    "text": "as soon as that's available if the entire cluster needs to be restored uh you can push button and restore from",
+    "start": "1795760",
+    "end": "1801559"
+  },
+  {
+    "text": "snapshot and we will stand up an identical cluster and then we'll begin",
+    "start": "1801559",
+    "end": "1806760"
+  },
+  {
+    "text": "uh streaming data back into that cluster from S3 you can query that cluster as soon as it's available same idea 3",
+    "start": "1806760",
+    "end": "1813200"
+  },
+  {
+    "text": "minutes uh provisioning another minute or so for metadata and then begin querying and then our streaming restore",
+    "start": "1813200",
+    "end": "1819360"
+  },
+  {
+    "text": "feature uh will stream back blocks into the cluster uh as you query and because",
+    "start": "1819360",
+    "end": "1825320"
+  },
+  {
+    "text": "most customers tend to have a locality of reference in time so by that I mean say at Amazon when we're looking at our",
+    "start": "1825320",
+    "end": "1831360"
+  },
+  {
+    "text": "data we tend to focus a lot more on today and yesterday and this week and this month much more so than what",
+    "start": "1831360",
+    "end": "1837320"
+  },
+  {
+    "text": "happened 18 months ago and so because of that locality of reference those blocks come back much more quickly and so",
+    "start": "1837320",
+    "end": "1843720"
+  },
+  {
+    "text": "normal operational performance is achieved much more quickly once just a subset of that data is back on the",
+    "start": "1843720",
+    "end": "1849960"
+  },
+  {
+    "text": "cluster uh if Drive fails we can handle that automatically because we have copies of the data in cluster and we",
+    "start": "1849960",
+    "end": "1856320"
+  },
+  {
+    "text": "have spare space on the nodes we Reserve uh almost 2x the capacity uh as a spare",
+    "start": "1856320",
+    "end": "1862039"
+  },
+  {
+    "text": "space so we can rebuild drives that were lost uh without having really significant impact on the cluster itself",
+    "start": "1862039",
+    "end": "1868200"
+  },
+  {
+    "text": "and queries will automatically get resubmitted if they were impacted by that uh does that answer the question",
+    "start": "1868200",
+    "end": "1874760"
+  },
+  {
+    "text": "yeah a simple way of thinking about it is uh it's basically page faulting we're page fating from",
+    "start": "1874760",
+    "end": "1880679"
+  },
+  {
+    "text": "S3 on if we don't have data",
+    "start": "1880679",
+    "end": "1885600"
+  },
+  {
+    "start": "1912000",
+    "end": "2103000"
+  },
+  {
+    "text": "uh so we have customers that uh so let me just repeat the question so the question is um are there best practices",
+    "start": "1912279",
+    "end": "1918600"
+  },
+  {
+    "text": "from going from a transactional schema into a data warehouse optimized star schema in a column store and um you know",
+    "start": "1918600",
+    "end": "1925639"
+  },
+  {
+    "text": "there are a number of ways you can do it so we've designed red shift to be flexible and performant whether you're running third normal form or Star schema",
+    "start": "1925639",
+    "end": "1932799"
+  },
+  {
+    "text": "or fully denormalized it's really up to you and we have customers that will do um a number of things they might trans",
+    "start": "1932799",
+    "end": "1939679"
+  },
+  {
+    "text": "they might do a traditional El process where they will um extract the data load the data into red shift and then",
+    "start": "1939679",
+    "end": "1945799"
+  },
+  {
+    "text": "transform it in cluster using SQL and then now with udfs you'll have a bit more capability to do some of that",
+    "start": "1945799",
+    "end": "1951639"
+  },
+  {
+    "text": "processing uh but you could also do a traditional ETL process where you will extract from your oltp stores you might",
+    "start": "1951639",
+    "end": "1957159"
+  },
+  {
+    "text": "be able to use uh Technologies from our partners like Informatica or tunity that will do extract and transformation and",
+    "start": "1957159",
+    "end": "1964240"
+  },
+  {
+    "text": "then load into red shift uh it's pretty common to load into a staging table in red shift and then use a series of joint",
+    "start": "1964240",
+    "end": "1971080"
+  },
+  {
+    "text": "operations to essentially merge into your main fact tables and um uh the other approach",
+    "start": "1971080",
+    "end": "1977480"
+  },
+  {
+    "text": "though is also just to bring the data in as you generate it so in the case of log files customers will sometimes just load",
+    "start": "1977480",
+    "end": "1982960"
+  },
+  {
+    "text": "them as they are and then process them once they're in database so it's it's really around adapting to the tool chain",
+    "start": "1982960",
+    "end": "1989679"
+  },
+  {
+    "text": "that you have and making that work I'd say uh you know the vast majority of our",
+    "start": "1989679",
+    "end": "1994799"
+  },
+  {
+    "text": "customers use the copy mechanism because it's the highest and best performant way to bring data into red shift and the",
+    "start": "1994799",
+    "end": "2001200"
+  },
+  {
+    "text": "staging table pattern is also relatively common simply because red shift doesn't support uh a merge directly so you end",
+    "start": "2001200",
+    "end": "2008080"
+  },
+  {
+    "text": "up doing an upsert workflow where you load into staging join into Main and then add in the new",
+    "start": "2008080",
+    "end": "2013480"
+  },
+  {
+    "text": "records uh does that answer your question okay I'll just add a couple of",
+    "start": "2013480",
+    "end": "2018760"
+  },
+  {
+    "text": "thoughts there one is um number of our customers use uh EMR as a way of doing",
+    "start": "2018760",
+    "end": "2025480"
+  },
+  {
+    "text": "Transformations and we think uh Hadoop is a great way of dealing with um",
+    "start": "2025480",
+    "end": "2032399"
+  },
+  {
+    "text": "transient flows not a cluster that you're going to keep up all the time but EMR is a great place to just stand",
+    "start": "2032399",
+    "end": "2037480"
+  },
+  {
+    "text": "something up push data through run some custom Logic on it and then push it over",
+    "start": "2037480",
+    "end": "2042720"
+  },
+  {
+    "text": "so a lot of people do that the other uh hint I might give you is that uh one way",
+    "start": "2042720",
+    "end": "2049480"
+  },
+  {
+    "text": "to think about the a difference in a columnar data warehouse is that there's nowhere near the penalty in having big",
+    "start": "2049480",
+    "end": "2055398"
+  },
+  {
+    "text": "rows right and so a lot of people use that opportunity to do further",
+    "start": "2055399",
+    "end": "2060638"
+  },
+  {
+    "text": "denormalization than they might do otherwise and just say rather than having something be in separate",
+    "start": "2060639",
+    "end": "2066079"
+  },
+  {
+    "text": "Dimension that they have to join to remove that joint and just put those columns directly into the table itself",
+    "start": "2066079",
+    "end": "2072320"
+  },
+  {
+    "text": "uh because you know the io penalty is nowhere near as great makes sense and",
+    "start": "2072320",
+    "end": "2077480"
+  },
+  {
+    "text": "sure that brings up one other point which is um on when you're designing your schemas thinking about what you're",
+    "start": "2077480",
+    "end": "2083040"
+  },
+  {
+    "text": "going to join can also be a big factor and so thinking about distribution keys to collocate joins and the ability to",
+    "start": "2083040",
+    "end": "2089398"
+  },
+  {
+    "text": "distribute Dimension tables to all of the slices using the dis style all that's another way to get um some more",
+    "start": "2089399",
+    "end": "2094878"
+  },
+  {
+    "text": "performance out of that uh final schema",
+    "start": "2094879",
+    "end": "2099480"
+  },
+  {
+    "text": "that's inter favorite cloudwatch metrics um so we publish uh things like disc",
+    "start": "2102960",
+    "end": "2109000"
+  },
+  {
+    "start": "2103000",
+    "end": "2180000"
+  },
+  {
+    "text": "space utilization CPU utilization Network bandwidth uh we definitely recommend having alarms on disk um on",
+    "start": "2109000",
+    "end": "2116839"
+  },
+  {
+    "text": "the amount of dis that's being used and uh you know beyond that I think there's richer metrics actually at the system",
+    "start": "2116839",
+    "end": "2123680"
+  },
+  {
+    "text": "table level in the cluster so you provide a we provide a lot of uh metrics on query execution which step in the",
+    "start": "2123680",
+    "end": "2129800"
+  },
+  {
+    "text": "query you're at um how long each step took is there queuing a lot of that's available um in system tables and design",
+    "start": "2129800",
+    "end": "2137520"
+  },
+  {
+    "text": "there's some neat functionality coming there in the console in a few weeks as well yeah we will provide um some more",
+    "start": "2137520",
+    "end": "2143720"
+  },
+  {
+    "text": "more ways to get at what's actually happening from an execution perspective um at every level of the query",
+    "start": "2143720",
+    "end": "2151760"
+  },
+  {
+    "start": "2180000",
+    "end": "2287000"
+  },
+  {
+    "text": "uh so um so the the thank you for the feedback on udfs we're glad you're excited about it and the question is",
+    "start": "2180880",
+    "end": "2187200"
+  },
+  {
+    "text": "around uh is there a reason we didn't go into detail on server side encryption uh no particular reason other than it's just",
+    "start": "2187200",
+    "end": "2193400"
+  },
+  {
+    "text": "transparent so if you have uh service side encryption enabled buckets or objects on S3 red shift can just copy",
+    "start": "2193400",
+    "end": "2200359"
+  },
+  {
+    "text": "from them since it's transparent to the cluster because S3 handles that encryption and decryption on access of",
+    "start": "2200359",
+    "end": "2205760"
+  },
+  {
+    "text": "the object so I just didn't go into it because um from the perspective of using red shift it doesn't really matter",
+    "start": "2205760",
+    "end": "2212520"
+  },
+  {
+    "text": "because you're just going to copy point to an S3 location and S3 will take care of encryption and D encryption at that",
+    "start": "2212520",
+    "end": "2218400"
+  },
+  {
+    "text": "level uh we did um tweak the unload command recently so you can now unload",
+    "start": "2218400",
+    "end": "2224000"
+  },
+  {
+    "text": "data from Red shift and unload is a essentially the inverse of copy so you can run arbitrary SQL and run a parallel",
+    "start": "2224000",
+    "end": "2230280"
+  },
+  {
+    "text": "extract onto S3 and that can now be done to SS enabled buckets so you can have",
+    "start": "2230280",
+    "end": "2235440"
+  },
+  {
+    "text": "server side encryption enabled by default um or we also built in client side encryption on extract so you can",
+    "start": "2235440",
+    "end": "2241680"
+  },
+  {
+    "text": "provide a private key and we'll then use that to do envelope encryption of the extracted data",
+    "start": "2241680",
+    "end": "2249079"
+  },
+  {
+    "text": "yes um so that uh I will definitely take that requirement you're talking to the right people uh so unload today is a",
+    "start": "2252200",
+    "end": "2258599"
+  },
+  {
+    "text": "flat file uh essentially will come out in a a delimited format you get to pick",
+    "start": "2258599",
+    "end": "2263680"
+  },
+  {
+    "text": "the delimiter that comes out in um but I'd love to um you know please follow up with me and we'll be happy to get into",
+    "start": "2263680",
+    "end": "2269280"
+  },
+  {
+    "text": "the details of the unload with Json use case yes sir",
+    "start": "2269280",
+    "end": "2277720"
+  },
+  {
+    "text": "uh sorry I missed",
+    "start": "2279839",
+    "end": "2282960"
+  },
+  {
+    "text": "that sure uh so the question is is there a plan to include sorting as part of the copy command so actually the sort the",
+    "start": "2285440",
+    "end": "2291920"
+  },
+  {
+    "start": "2287000",
+    "end": "2394000"
+  },
+  {
+    "text": "copy sorts your data automatically the sort key is defined at the table level so when you're setting up DML you would",
+    "start": "2291920",
+    "end": "2298800"
+  },
+  {
+    "text": "actually Define columns as your sort key columns um and in that case the copy will just sort your data as it comes in",
+    "start": "2298800",
+    "end": "2305839"
+  },
+  {
+    "text": "uh so there's no further action you need to take from a sort perspective uh one Nuance there is that we recommend if you",
+    "start": "2305839",
+    "end": "2312599"
+  },
+  {
+    "text": "can uh to load data say you have a sort key based on date uh if you load data",
+    "start": "2312599",
+    "end": "2318240"
+  },
+  {
+    "text": "for Monday and then load data for Tuesday and then for Wednesday essentially your table will load sorted",
+    "start": "2318240",
+    "end": "2324200"
+  },
+  {
+    "text": "and um your vacuum operation uh will be very fast because your data is already sorted whereas if you loaded Monday then",
+    "start": "2324200",
+    "end": "2331079"
+  },
+  {
+    "text": "Wednesday then Tuesday each individual day would be sorted but you'd still have a section of the table that was out of",
+    "start": "2331079",
+    "end": "2336720"
+  },
+  {
+    "text": "order and so your vacuum would have to reshuffle that said we're reducing the penalty on that y you I mean in addition",
+    "start": "2336720",
+    "end": "2343560"
+  },
+  {
+    "text": "to all the features we push out there are you know there's almost twice as much work that's going on on internal",
+    "start": "2343560",
+    "end": "2349359"
+  },
+  {
+    "text": "stuff no that's great that's true",
+    "start": "2349359",
+    "end": "2353960"
+  },
+  {
+    "text": "y uh so we um you know we can't comment on our road map beyond the things that we've talked about but I would say the",
+    "start": "2358160",
+    "end": "2364640"
+  },
+  {
+    "text": "uh you know the notion of uh supporting some form of filtering on copy is one that a lot of our customers have asked",
+    "start": "2364640",
+    "end": "2370240"
+  },
+  {
+    "text": "us about and uh customer feedback is definitely something we take pretty seriously so completely understand uh",
+    "start": "2370240",
+    "end": "2376040"
+  },
+  {
+    "text": "the value and the the utility of that request if there's a specific use case there you know just talk to him we'll",
+    "start": "2376040",
+    "end": "2382760"
+  },
+  {
+    "text": "make sure that you know if and when we do it we cover it uh yes sir in the back",
+    "start": "2382760",
+    "end": "2391519"
+  },
+  {
+    "text": "there yeah so concurrency the question is around uh plan around concurrency so",
+    "start": "2393319",
+    "end": "2398920"
+  },
+  {
+    "start": "2394000",
+    "end": "2477000"
+  },
+  {
+    "text": "um earlier this year we upped from 15 concurrent query slots to 50 concurrent query slots uh you know from a columnar",
+    "start": "2398920",
+    "end": "2406520"
+  },
+  {
+    "text": "database perspective uh there's a fundamental philosophical difference behind a column store and a row store",
+    "start": "2406520",
+    "end": "2412839"
+  },
+  {
+    "text": "with a column store your goal is to apply as many resources as possible as quickly as possible to get answers to",
+    "start": "2412839",
+    "end": "2419280"
+  },
+  {
+    "text": "complex queries quicker uh this different from a ro based database where you're trying to do lots of smaller operations typically so our main",
+    "start": "2419280",
+    "end": "2426920"
+  },
+  {
+    "text": "investment around concurrency and the way customers work with concurrency is good use of workload management cues so",
+    "start": "2426920",
+    "end": "2432680"
+  },
+  {
+    "text": "we have the ability to let you define cues assign slots and memory to those cues and so you can ensure that you have",
+    "start": "2432680",
+    "end": "2439280"
+  },
+  {
+    "text": "resources available for um for basically ensuring that batch and heavy jobs get",
+    "start": "2439280",
+    "end": "2444599"
+  },
+  {
+    "text": "done as well as having space for Point queries but in general uh to an's point I think uh improvements at the subsystem",
+    "start": "2444599",
+    "end": "2452160"
+  },
+  {
+    "text": "level around performance reliability availability those will always be ongoing",
+    "start": "2452160",
+    "end": "2458240"
+  },
+  {
+    "text": "yes",
+    "start": "2458240",
+    "end": "2460400"
+  },
+  {
+    "text": "sir um so I can start and UNR you can um",
+    "start": "2476319",
+    "end": "2481400"
+  },
+  {
+    "text": "also add to this one so you know our fundamental philosophy around database Services is that one size doesn't fit",
+    "start": "2481400",
+    "end": "2487560"
+  },
+  {
+    "text": "and so you know Aurora is a high performance transactional database and onra can definitely talk to that I do",
+    "start": "2487560",
+    "end": "2493440"
+  },
+  {
+    "text": "imagine that there will be some use cases where people ran out of hrum on vanilla MySQL and perhaps moved to Red",
+    "start": "2493440",
+    "end": "2499240"
+  },
+  {
+    "text": "shift for that uh that would be well served with Aurora but I suspect there are also still reporting use cases where",
+    "start": "2499240",
+    "end": "2505520"
+  },
+  {
+    "text": "large scans fundamentally aren't going to be a great fit for an oltp optimized system um but yeah I fully expect",
+    "start": "2505520",
+    "end": "2511560"
+  },
+  {
+    "text": "customers will make the choice that's uh best for their workloads yeah I think that's exactly right I mean we really",
+    "start": "2511560",
+    "end": "2517520"
+  },
+  {
+    "text": "believe one size doesn't fit all Aurora is really oriented towards oltp",
+    "start": "2517520",
+    "end": "2522560"
+  },
+  {
+    "text": "workloads so to the degree that uh you were getting U you would have thought",
+    "start": "2522560",
+    "end": "2527920"
+  },
+  {
+    "text": "about MySQL or postgress uh before thinking about red shift or there was overlap there there",
+    "start": "2527920",
+    "end": "2533920"
+  },
+  {
+    "text": "probably continues to be overlap with Aurora there's probably a little bit more overlap because we're we go up to",
+    "start": "2533920",
+    "end": "2540200"
+  },
+  {
+    "text": "64 terabytes of space which is you know a fair bit bigger than the largest you",
+    "start": "2540200",
+    "end": "2546160"
+  },
+  {
+    "text": "know databases that are ailable in RDS through the traditional systems but uh you that's still small",
+    "start": "2546160",
+    "end": "2553200"
+  },
+  {
+    "text": "from a red shift perspective go ahead sorry just behind you one",
+    "start": "2553200",
+    "end": "2559160"
+  },
+  {
+    "text": "second yes so the um the leader note actually isn't a bottleneck from a concurrency standpoint it's really just",
+    "start": "2568319",
+    "end": "2574040"
+  },
+  {
+    "start": "2569000",
+    "end": "2640000"
+  },
+  {
+    "text": "coordinating the query execution so if you look at your cluster graphs of CPU utilization for example in the console",
+    "start": "2574040",
+    "end": "2580240"
+  },
+  {
+    "text": "you'll find the leader node barely does any work um it's it's really a fundamental process model around uh",
+    "start": "2580240",
+    "end": "2586599"
+  },
+  {
+    "text": "cumar databases and how those operate and so the you know the best strategies for concurrency are good workload",
+    "start": "2586599",
+    "end": "2593359"
+  },
+  {
+    "text": "management um but the other piece is there is no penalty in red shift to having multiple clusters so if you had",
+    "start": "2593359",
+    "end": "2599480"
+  },
+  {
+    "text": "10 nodes in a single cluster or 10 one node clusters that would be a way that some of our customers have um",
+    "start": "2599480",
+    "end": "2605480"
+  },
+  {
+    "text": "essentially been able to scale up concurrency and scale wide when they've needed to uh the other piece is from a",
+    "start": "2605480",
+    "end": "2611280"
+  },
+  {
+    "text": "data warehousing perspective you typically will have some form of analytic layer um or a bi or",
+    "start": "2611280",
+    "end": "2616400"
+  },
+  {
+    "text": "visualization layer uh and that can also help handle the concurrency and scale out if you're running large populations",
+    "start": "2616400",
+    "end": "2622520"
+  },
+  {
+    "text": "accessing that data the only thing I'll under add to that is is that we're aware",
+    "start": "2622520",
+    "end": "2627599"
+  },
+  {
+    "text": "that there's pain that you guys have around concurrency and you know we're thinking about",
+    "start": "2627599",
+    "end": "2635400"
+  },
+  {
+    "start": "2640000",
+    "end": "2708000"
+  },
+  {
+    "text": "uh so um question is around copy and movement of data between two red shift clusters so again I cannot comment on",
+    "start": "2640200",
+    "end": "2646720"
+  },
+  {
+    "text": "specifics um you know I think that use case and in general desire for more flexibility around copy is an area that",
+    "start": "2646720",
+    "end": "2652880"
+  },
+  {
+    "text": "we're aware of um today customers that are moving data between red shift clusters essentially use unload and copy",
+    "start": "2652880",
+    "end": "2659040"
+  },
+  {
+    "text": "semantics uh together in order to do that go ahead",
+    "start": "2659040",
+    "end": "2667280"
+  },
+  {
+    "text": "I",
+    "start": "2669680",
+    "end": "2672680"
+  },
+  {
+    "start": "2708000",
+    "end": "2809000"
+  },
+  {
+    "text": "possibly I guess the my thinking would be I mean I'm not sure I understand uh",
+    "start": "2708640",
+    "end": "2715000"
+  },
+  {
+    "text": "in depth what you're saying but uh you know we can talk offline but my thinking would be that data transformation is one",
+    "start": "2715000",
+    "end": "2723079"
+  },
+  {
+    "text": "of those embarrassingly parallel problems and so therefore it actually lends itself towards a system like",
+    "start": "2723079",
+    "end": "2729599"
+  },
+  {
+    "text": "redshift which can run a large query over a lot of nodes or a system like Hadoop where you can spin up a lot of",
+    "start": "2729599",
+    "end": "2736359"
+  },
+  {
+    "text": "nodes run your operations and so in that case I'd have loaded to a staging table in red shift and done the transformation",
+    "start": "2736359",
+    "end": "2743240"
+  },
+  {
+    "text": "in an El chain or I would have used Hadoop and done more complex Transformations across a large cluster",
+    "start": "2743240",
+    "end": "2750800"
+  },
+  {
+    "text": "that maybe was only up for half an hour but I'd probably do that rather",
+    "start": "2750800",
+    "end": "2756680"
+  },
+  {
+    "text": "than having a you know a singular node kind of system which is acting as a throughput part of the chain I mean",
+    "start": "2756680",
+    "end": "2762960"
+  },
+  {
+    "text": "that's just my bias I don't know whether it's",
+    "start": "2762960",
+    "end": "2767000"
+  },
+  {
+    "text": "appropriate go",
+    "start": "2768640",
+    "end": "2771720"
+  },
+  {
+    "text": "ahe uh so that is different um you know at the moment we support scaler and Aggregates um you can essentially um",
+    "start": "2776920",
+    "end": "2785000"
+  },
+  {
+    "text": "you'd have to run multiple U mulp multiple udfs in SQL to get uh table type",
+    "start": "2785000",
+    "end": "2791400"
+  },
+  {
+    "text": "functionality um so you know today in red shift you can actually store Json",
+    "start": "2808599",
+    "end": "2813920"
+  },
+  {
+    "start": "2809000",
+    "end": "2916000"
+  },
+  {
+    "text": "and there are built-ins that let you access that um but in terms of other data formats the way we think about it",
+    "start": "2813920",
+    "end": "2820079"
+  },
+  {
+    "text": "is AWS as a data platform is actually a really excellent one you've got streaming support you've got no SQL",
+    "start": "2820079",
+    "end": "2826520"
+  },
+  {
+    "text": "support uh you've got EMR and you've got red shift all underpinned with S3 which",
+    "start": "2826520",
+    "end": "2831599"
+  },
+  {
+    "text": "is a common way to move data between all of these services and so uh to date those have been the ways that customers",
+    "start": "2831599",
+    "end": "2837520"
+  },
+  {
+    "text": "have been accessing all of that data and we often see analytic applications that span multiple services for that reason",
+    "start": "2837520",
+    "end": "2844559"
+  },
+  {
+    "text": "uh the other benefit to keeping these things um in sort of a service model that connect together is that you can",
+    "start": "2844559",
+    "end": "2850160"
+  },
+  {
+    "text": "use as little or as much of each one as your use cases dictate uh and so can build pretty sophisticated analytic",
+    "start": "2850160",
+    "end": "2857160"
+  },
+  {
+    "text": "application topologies that way the thing I'd add there is I mean I",
+    "start": "2857160",
+    "end": "2863040"
+  },
+  {
+    "text": "think you're right that it's an emergent use case it's just a question of to me",
+    "start": "2863040",
+    "end": "2868240"
+  },
+  {
+    "text": "whether the right model is to support nested data directly in the data warehouse or to transform it into a",
+    "start": "2868240",
+    "end": "2876240"
+  },
+  {
+    "text": "relational mod model so that uh traditional relational tools have more",
+    "start": "2876240",
+    "end": "2881319"
+  },
+  {
+    "text": "accessibility to it because the sort of Technologies you're talking about aren't really consumable if you want to use",
+    "start": "2881319",
+    "end": "2887559"
+  },
+  {
+    "text": "tools you know they're consumable if you want to use um SQL variants that are customed to that particular uh engine so",
+    "start": "2887559",
+    "end": "2895960"
+  },
+  {
+    "text": "you know that's the debate uh that I think is ongoing in the industry right",
+    "start": "2895960",
+    "end": "2901559"
+  },
+  {
+    "text": "now sir",
+    "start": "2901559",
+    "end": "2905559"
+  },
+  {
+    "text": "uh I'm sorry I couldn't hear that at",
+    "start": "2906920",
+    "end": "2910318"
+  },
+  {
+    "text": "all uh so um again it's we can't comment on specifics I think that the things",
+    "start": "2915000",
+    "end": "2920599"
+  },
+  {
+    "start": "2916000",
+    "end": "2958000"
+  },
+  {
+    "text": "that we can say are with udfs uh you will be able to write and persist really any functions that you can write uh in",
+    "start": "2920599",
+    "end": "2927280"
+  },
+  {
+    "text": "Python in database and then we will continue iterating uh on the SQL functionality side I think if there's",
+    "start": "2927280",
+    "end": "2933440"
+  },
+  {
+    "text": "specific functionality that you're interested in that isn't con um isn't covered by each of those use cases",
+    "start": "2933440",
+    "end": "2939040"
+  },
+  {
+    "text": "I'd love to hear about it and we'd you know appreciate the feedback and input on that",
+    "start": "2939040",
+    "end": "2944838"
+  },
+  {
+    "text": "side oh",
+    "start": "2945359",
+    "end": "2948558"
+  },
+  {
+    "start": "2958000",
+    "end": "2983000"
+  },
+  {
+    "text": "yeah uh so we have um you know Dynamo announced a preview of Dynamo streams",
+    "start": "2958000",
+    "end": "2963359"
+  },
+  {
+    "text": "and we're working on Integrations with Dynamo streams uh into red shift and so that should support more of your uh The",
+    "start": "2963359",
+    "end": "2969799"
+  },
+  {
+    "text": "Continuous update use case in that area I think it was discussed um so we're we're working on that piece of",
+    "start": "2969799",
+    "end": "2977119"
+  },
+  {
+    "text": "it uh so red shift back into Dynamo so you know actually I have heard about this request in a couple of cases and uh",
+    "start": "2982079",
+    "end": "2988240"
+  },
+  {
+    "start": "2983000",
+    "end": "3031000"
+  },
+  {
+    "text": "to date customers are using um custom applications to extract data from redshift uh you know I'd love to learn a",
+    "start": "2988240",
+    "end": "2994960"
+  },
+  {
+    "text": "bit more about your use case on that front um I suspect I have a an inkling of what it's related to but it would be good to",
+    "start": "2994960",
+    "end": "3001079"
+  },
+  {
+    "text": "get some details um and you know in general our the way we like to build products is uh we really want to hear",
+    "start": "3001079",
+    "end": "3007799"
+  },
+  {
+    "text": "from our customers about the things that they want to do but cannot uh because it gives us a real opportunity to work and",
+    "start": "3007799",
+    "end": "3013839"
+  },
+  {
+    "text": "to prioritize our effort so we're building the things that our customers really care",
+    "start": "3013839",
+    "end": "3019119"
+  },
+  {
+    "text": "about and um I think we're that's everything out of time here so thank you very much for coming really appreciate",
+    "start": "3020200",
+    "end": "3026119"
+  },
+  {
+    "text": "it and uh we'll be around",
+    "start": "3026119",
+    "end": "3030880"
+  }
+]

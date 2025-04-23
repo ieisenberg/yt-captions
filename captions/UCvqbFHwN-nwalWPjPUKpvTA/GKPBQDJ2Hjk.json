@@ -1,0 +1,1582 @@
+[
+  {
+    "text": "all right hello everyone welcome I'm John Howard I am a software engineer at",
+    "start": "320",
+    "end": "6120"
+  },
+  {
+    "text": "Google and I'm really excited to be here talking with you guys about some ideas for how we can build kubernetes",
+    "start": "6120",
+    "end": "12559"
+  },
+  {
+    "text": "controllers uh in some better patterns I'm especially excited to be here on a Tuesday talking about something other",
+    "start": "12559",
+    "end": "19160"
+  },
+  {
+    "text": "than service mesh which always is on Friday night so just a quick overview",
+    "start": "19160",
+    "end": "24720"
+  },
+  {
+    "text": "what we're going to be talking about first I'm going to go over what are controllers how many people here know",
+    "start": "24720",
+    "end": "29800"
+  },
+  {
+    "text": "what a kubernetes controller is all right quite a few kind of what I expected how many of you are involved in",
+    "start": "29800",
+    "end": "36680"
+  },
+  {
+    "text": "the development of controllers in in some way like you write the code or even you just read the code wow that's",
+    "start": "36680",
+    "end": "42039"
+  },
+  {
+    "text": "actually more than I expected so that's good um so I'm glad everyone knows what controllers are you might have some",
+    "start": "42039",
+    "end": "48120"
+  },
+  {
+    "text": "different ideas of what a controller is than me so I'm still going to go over it next I'm going to try and convince",
+    "start": "48120",
+    "end": "54280"
+  },
+  {
+    "text": "you that writing controllers is pretty hard to do correctly you might already have this opinion in which case it won't",
+    "start": "54280",
+    "end": "60600"
+  },
+  {
+    "text": "be a hard uh argument but if not uh you know we're going to go over this and specifically I'm going to talk about a",
+    "start": "60600",
+    "end": "66439"
+  },
+  {
+    "text": "lot of the challenges we faced in EO uh I've been working at EO for about five",
+    "start": "66439",
+    "end": "71479"
+  },
+  {
+    "text": "years now uh mostly on you know the control plane which is basically a big controller and we've had a lot of",
+    "start": "71479",
+    "end": "78159"
+  },
+  {
+    "text": "challenges that are somewhat unique to EO compared to other controller projects and so we'll give kind of a deep dive",
+    "start": "78159",
+    "end": "84400"
+  },
+  {
+    "text": "into that and then talk about some ways that we can solve these problems and kind of introduce a different approach",
+    "start": "84400",
+    "end": "90360"
+  },
+  {
+    "text": "to writing controllers so if we if we look at what",
+    "start": "90360",
+    "end": "95920"
+  },
+  {
+    "text": "are controllers kubernetes has this this big blurb it's very useful but quite long I like to think of controller as",
+    "start": "95920",
+    "end": "102119"
+  },
+  {
+    "text": "something that takes in some input and has some output it's a very broad generic thing uh so for an example in",
+    "start": "102119",
+    "end": "109880"
+  },
+  {
+    "text": "kubernetes a user creates a deployment there is a controller that reads the deployment and outputs a replica set",
+    "start": "109880",
+    "end": "116280"
+  },
+  {
+    "text": "right that is a controller some input and some output and kubernetes is not just one controller it consists of a ton",
+    "start": "116280",
+    "end": "122360"
+  },
+  {
+    "text": "of different controllers that all operate together to give us the kubernetes experience that we know and",
+    "start": "122360",
+    "end": "127439"
+  },
+  {
+    "text": "maybe love uh so there's another controller that takes a replica set and outputs a pod there's another one that",
+    "start": "127439",
+    "end": "134200"
+  },
+  {
+    "text": "takes pods and services and outputs endpoints and kubernetes is extremely extensible as I'm sure you you've",
+    "start": "134200",
+    "end": "140640"
+  },
+  {
+    "text": "noticed right you can have custom controllers that are thirdparty ones that maybe operate on third party custom",
+    "start": "140640",
+    "end": "146239"
+  },
+  {
+    "text": "resource definitions so I maybe have a certificate issuer and a and I created a certificate so that's the the general",
+    "start": "146239",
+    "end": "152599"
+  },
+  {
+    "text": "idea what is a controller it's really driving this whole declarative API that kubernetes provides us um the problem",
+    "start": "152599",
+    "end": "160760"
+  },
+  {
+    "text": "though is that it's really hard to write these controllers and more importantly it's hard to write them correctly so",
+    "start": "160760",
+    "end": "166080"
+  },
+  {
+    "text": "that there's no bugs that your users will find when they do some obscure thing that you didn't think of",
+    "start": "166080",
+    "end": "171720"
+  },
+  {
+    "text": "right I find that writing controllers is very lowlevel and that's really the root cause of this if we look at like The",
+    "start": "171720",
+    "end": "178599"
+  },
+  {
+    "text": "Primitives that kubernetes gives us for writing controllers you could operate a bit lower than this but generally we're",
+    "start": "178599",
+    "end": "184239"
+  },
+  {
+    "text": "looking at an Informer which essentially allows you to subscribe to resources so",
+    "start": "184239",
+    "end": "189879"
+  },
+  {
+    "text": "you can say when pods are added updated or deleted call my function and I'll kind of figure it out this sounds",
+    "start": "189879",
+    "end": "197120"
+  },
+  {
+    "text": "probably simple but it ends up being very very very complicated in practice to handle all the cases that are",
+    "start": "197120",
+    "end": "202760"
+  },
+  {
+    "text": "required so if you look at a real world controller that is fairly robust tested",
+    "start": "202760",
+    "end": "208640"
+  },
+  {
+    "text": "handles all these edge cases is even for the simplest business logic it's about 400 lines of code I can't really show a",
+    "start": "208640",
+    "end": "215760"
+  },
+  {
+    "text": "whole 400 lines of code so I show an extremely simplified view of what this looks like but the simplified view",
+    "start": "215760",
+    "end": "221959"
+  },
+  {
+    "text": "doesn't really showcase how complex it is the tricky thing too is that it's not",
+    "start": "221959",
+    "end": "227280"
+  },
+  {
+    "text": "just that there's so much code right boiler plates annoying but it's not the end of the world it's that you have to be so precise and following it in the",
+    "start": "227280",
+    "end": "234519"
+  },
+  {
+    "text": "exact right order in the exact right way I've written I don't know maybe 50 100 control rers of of various types over",
+    "start": "234519",
+    "end": "241040"
+  },
+  {
+    "text": "the years and every time I don't have another one that's written properly side by side and I'm copy and pasting the",
+    "start": "241040",
+    "end": "246680"
+  },
+  {
+    "text": "exact order I'm always introducing some type of bug and it's usually a slightly different one than I did last time so",
+    "start": "246680",
+    "end": "254040"
+  },
+  {
+    "text": "you can find these types of bugs all over the ecosystem I'll mostly pick on myself because it's a bit easier uh",
+    "start": "254040",
+    "end": "259919"
+  },
+  {
+    "text": "here's one we didn't properly use a queue for some instance Handler we handled events out of order this could",
+    "start": "259919",
+    "end": "265440"
+  },
+  {
+    "text": "easily cause an outage for a user right here's another one some Edge case I",
+    "start": "265440",
+    "end": "270560"
+  },
+  {
+    "text": "forget why we caused to miss events and you know now your data is incorrect that",
+    "start": "270560",
+    "end": "276039"
+  },
+  {
+    "text": "could cause really bad things for users kubernetes core is not immune to this right this is not a thing that it's",
+    "start": "276039",
+    "end": "283120"
+  },
+  {
+    "text": "that developers are bad at writing kubernetes controllers because they're not experienced right the people who",
+    "start": "283120",
+    "end": "288320"
+  },
+  {
+    "text": "made kubernetes are also introducing bugs in kubernetes controllers right it's not a developer problem it's a",
+    "start": "288320",
+    "end": "294840"
+  },
+  {
+    "text": "framework and ecosystem problem so here was an example where we were starting up too soon",
+    "start": "294840",
+    "end": "300080"
+  },
+  {
+    "text": "and we were saying that we were ready and had synchronized everything but we weren't and so we could be serving stale data which could lead to unexpected",
+    "start": "300080",
+    "end": "307240"
+  },
+  {
+    "text": "results another example of such a case in the scheduler right so specifically",
+    "start": "307240",
+    "end": "312919"
+  },
+  {
+    "text": "in EO you know you don't need to know what EO really is but if you're not familiar it is a service mesh right and",
+    "start": "312919",
+    "end": "319600"
+  },
+  {
+    "text": "all you need to know for this talk is that we put a Envoy proxy on each pod",
+    "start": "319600",
+    "end": "325280"
+  },
+  {
+    "text": "and that proxy needs to be dynamically configured so we have a control plane that is sending you know the proxy",
+    "start": "325280",
+    "end": "331759"
+  },
+  {
+    "text": "configuration dynamically to it that's all you need to know for service mesh so in EO what this looks like and if I",
+    "start": "331759",
+    "end": "338800"
+  },
+  {
+    "text": "didn't mention EO is the service mesh and the service mesh I work on it's basically one giant controller so you",
+    "start": "338800",
+    "end": "345160"
+  },
+  {
+    "text": "know I showed the other examples ah one input one output quite simple right in easto we read 45 different resource",
+    "start": "345160",
+    "end": "352440"
+  },
+  {
+    "text": "types as inputs and instead of outputting to kubernetes resources we're outputting to",
+    "start": "352440",
+    "end": "358360"
+  },
+  {
+    "text": "Envoy Envoy has a a slightly different API it's called XDS the details don't really matter uh the key Point really is",
+    "start": "358360",
+    "end": "365360"
+  },
+  {
+    "text": "that it's not just about one kubernetes in one kubernetes out right we have tons of kubernetes input and we have an",
+    "start": "365360",
+    "end": "371360"
+  },
+  {
+    "text": "output that's not even in kubernetes so what's tricky about this is the the scope is huge right we have",
+    "start": "371360",
+    "end": "378560"
+  },
+  {
+    "text": "all this information we need to manage right and the size of the state is also",
+    "start": "378560",
+    "end": "383639"
+  },
+  {
+    "text": "huge the green stuff on the end the XDS if you sum it up across a large scale",
+    "start": "383639",
+    "end": "388919"
+  },
+  {
+    "text": "cluster be terabytes of data right we can't store this in cluster like standard",
+    "start": "388919",
+    "end": "394880"
+  },
+  {
+    "text": "kubernetes controllers that we showed earlier do where they're you know deployment to pod we can't even keep 10",
+    "start": "394880",
+    "end": "400919"
+  },
+  {
+    "text": "terabytes of data in memory right we need to be Computing this on demand and so it's a very different problem than a",
+    "start": "400919",
+    "end": "406560"
+  },
+  {
+    "text": "standard controller is is operating on and this problem isn't unique to EO either there's a lot of other uh",
+    "start": "406560",
+    "end": "413440"
+  },
+  {
+    "text": "controllers that are not just kubernetes in kubernetes out that have these problems like in core one example would be Q proxy right right it's reading",
+    "start": "413440",
+    "end": "420879"
+  },
+  {
+    "text": "kubernetes configuration but its output is some IP tables rules in the",
+    "start": "420879",
+    "end": "426360"
+  },
+  {
+    "text": "kernel so of course no one can write a function that takes in 45 inputs and",
+    "start": "426360",
+    "end": "431680"
+  },
+  {
+    "text": "mumbles them all together and produces 10 different outputs right that would be quite crazy so we do split up into many",
+    "start": "431680",
+    "end": "438680"
+  },
+  {
+    "text": "different smaller controllers just like kubernetes does but we have to do it all internal to EO in memory right so what",
+    "start": "438680",
+    "end": "445919"
+  },
+  {
+    "text": "we have is an architecture that looks somewhat like this we have a a bunch of smaller controllers and each controller",
+    "start": "445919",
+    "end": "452520"
+  },
+  {
+    "text": "does a somewhat small amount of work builds up some intermediate State and then some other controller builds up",
+    "start": "452520",
+    "end": "458520"
+  },
+  {
+    "text": "intermediate state from those and so on and so on until finally we can produce our outputs right now the challenge with",
+    "start": "458520",
+    "end": "464879"
+  },
+  {
+    "text": "this is that in the standard kubernetes model you have kubernetes is the intermediate state for these right and",
+    "start": "464879",
+    "end": "471400"
+  },
+  {
+    "text": "it's giving us all these things for free I say free because we don't have to go",
+    "start": "471400",
+    "end": "476560"
+  },
+  {
+    "text": "Implement that in our code but it's absolutely not free right right the cost of reading and writing from etcd is",
+    "start": "476560",
+    "end": "482680"
+  },
+  {
+    "text": "quite large especially that scale and so in EO we simply can't do that it's you know too much data so we do that in our",
+    "start": "482680",
+    "end": "490080"
+  },
+  {
+    "text": "in our own application so what this kind of looks like is we would have some controller it's got some inputs and some",
+    "start": "490080",
+    "end": "496759"
+  },
+  {
+    "text": "outputs we' get an event from the input say a pod is changing we generally the",
+    "start": "496759",
+    "end": "503120"
+  },
+  {
+    "text": "event just says like there's an update it doesn't say what the actual information is so we'll go read that back we'll do a bunch of of business",
+    "start": "503120",
+    "end": "509759"
+  },
+  {
+    "text": "logic to recompute some internal State notify the dependency something's changed and then they in turn will most",
+    "start": "509759",
+    "end": "515680"
+  },
+  {
+    "text": "likely go read from our internal State and we build this over and over again all over the project and we have to",
+    "start": "515680",
+    "end": "521518"
+  },
+  {
+    "text": "maintain this perfect State Management the thing that's tricky about this is that it's very imperative right I got an",
+    "start": "521519",
+    "end": "529959"
+  },
+  {
+    "text": "update now I have to go find what changed and go updated in all these different Maps or indexes or whatnot",
+    "start": "529959",
+    "end": "536920"
+  },
+  {
+    "text": "it's not like the experience you have with kubernetes uh where everything is reconciled for you and it's simple right",
+    "start": "536920",
+    "end": "542079"
+  },
+  {
+    "text": "there's a lot of bugs that are introduced in this process another thing that's super important to EO and I think most",
+    "start": "542079",
+    "end": "548760"
+  },
+  {
+    "text": "controllers that run at scale is event detection so you know a very naive",
+    "start": "548760",
+    "end": "554240"
+  },
+  {
+    "text": "controller would say anytime any input changes I'm going to go recompute the entire world and go process that to",
+    "start": "554240",
+    "end": "560680"
+  },
+  {
+    "text": "wherever my outputs are that would work for a demo but it's not really scalable right we want to have the whatever",
+    "start": "560680",
+    "end": "567720"
+  },
+  {
+    "text": "inputs change we output the minimal amount of information so we do the least amount of work in EO this is absolutely",
+    "start": "567720",
+    "end": "574519"
+  },
+  {
+    "text": "critical the output is extremely expensive from a compute and network",
+    "start": "574519",
+    "end": "580040"
+  },
+  {
+    "text": "bandwidth uh perspective so anywhere we can stop an event from kind of trickling",
+    "start": "580040",
+    "end": "585399"
+  },
+  {
+    "text": "down the chain is a huge win for our users the challenge here is again",
+    "start": "585399",
+    "end": "592920"
+  },
+  {
+    "text": "because we're reimplementing this internally without having kubernetes as an intermediary we have to do this all",
+    "start": "592920",
+    "end": "598240"
+  },
+  {
+    "text": "ourselves so kubernetes to some extent has this on with server side",
+    "start": "598240",
+    "end": "603640"
+  },
+  {
+    "text": "apply it works in a lot of cases but it can still be very deceptively hard to use correctly and you're still sending",
+    "start": "603640",
+    "end": "610560"
+  },
+  {
+    "text": "these right requests to kubernetes every time you want to make a change it made aside there was nothing actually changed",
+    "start": "610560",
+    "end": "616240"
+  },
+  {
+    "text": "so I'm doing nothing with it but you still sent that API call you still sent the full object to the API server and I had to process it um so it can still be",
+    "start": "616240",
+    "end": "623640"
+  },
+  {
+    "text": "quite hard and of course for EO we can't use that as we're not even writing to kubernetes so we have to implement this",
+    "start": "623640",
+    "end": "629880"
+  },
+  {
+    "text": "all ourselves right a lot of the e code base is all about just these random",
+    "start": "629880",
+    "end": "635600"
+  },
+  {
+    "text": "optimizations for some specific thing right like one example we have some annotation that some I think it was",
+    "start": "635600",
+    "end": "641880"
+  },
+  {
+    "text": "autoscaler or something's adding to Services it was adding it a lot so it's pushing a lot of information down the",
+    "start": "641880",
+    "end": "647320"
+  },
+  {
+    "text": "entire chain we add an optimization that says ignore this annotation that's really dangerous",
+    "start": "647320",
+    "end": "654360"
+  },
+  {
+    "text": "right it requires knowledge of the full system did I skip the annotation way at",
+    "start": "654360",
+    "end": "659920"
+  },
+  {
+    "text": "the stack but later on I needed to read it and now I'm serving stale data those types of issues are a",
+    "start": "659920",
+    "end": "666279"
+  },
+  {
+    "text": "numerous source of bugs but the opposite is also just as bad right if we don't skip those events EO is unusable like",
+    "start": "666279",
+    "end": "674360"
+  },
+  {
+    "text": "even a single optimization like that for users at Large Scale can be the difference between EO using half a CPU",
+    "start": "674360",
+    "end": "680880"
+  },
+  {
+    "text": "or 100 CPUs or just not even functioning at all right so getting this right is",
+    "start": "680880",
+    "end": "686240"
+  },
+  {
+    "text": "absolutely critical so I want to go briefly go over some",
+    "start": "686240",
+    "end": "692320"
+  },
+  {
+    "text": "actual examples of of what this actually looks like in practice um I won't go over every line but just a broad strokes",
+    "start": "692320",
+    "end": "699760"
+  },
+  {
+    "text": "this is an example of one of the smaller controllers in EO so you can see we basically just have a bunch of different",
+    "start": "699760",
+    "end": "705240"
+  },
+  {
+    "text": "maps of of things right and every time we get some event of some pod change some service change some node whatever",
+    "start": "705240",
+    "end": "711959"
+  },
+  {
+    "text": "we have to go recompute all these different Maps right and so I need to find like ah this pod changed what were",
+    "start": "711959",
+    "end": "717560"
+  },
+  {
+    "text": "all the addresses and what index was that in and go update all these things was it a delete was it an ad and I'm",
+    "start": "717560",
+    "end": "723240"
+  },
+  {
+    "text": "doing all this manual work it can be even worse too because a lot of the objects are related right you know maybe",
+    "start": "723240",
+    "end": "730079"
+  },
+  {
+    "text": "a service changed I need to go find all the pods in that service and then go recompute all the pods and these are",
+    "start": "730079",
+    "end": "736120"
+  },
+  {
+    "text": "dramatically simplified examples because I can only put so much code on slides right in reality like I said we have 45",
+    "start": "736120",
+    "end": "742760"
+  },
+  {
+    "text": "objects there's all sorts of relationships between these objects and it gets simply unsustainable to manage",
+    "start": "742760",
+    "end": "748399"
+  },
+  {
+    "text": "the relation of these independently so quick overview EO is",
+    "start": "748399",
+    "end": "755880"
+  },
+  {
+    "text": "one giant controller and it's not sustainable to implement one giant controller this way without having",
+    "start": "755880",
+    "end": "762880"
+  },
+  {
+    "text": "proper building blocks to do it so if we take a step back how can we improve this right I think some of the goals that we",
+    "start": "762880",
+    "end": "769880"
+  },
+  {
+    "text": "should be targeting is that a controller is easy to write correctly and efficiently right we want someone to go",
+    "start": "769880",
+    "end": "776639"
+  },
+  {
+    "text": "in and write the obvious thing and should be both bug-free and efficient right that's not the case today I think",
+    "start": "776639",
+    "end": "783160"
+  },
+  {
+    "text": "you can write a correct controller you can do it in efficient manner but it's extremely hard to do",
+    "start": "783160",
+    "end": "789839"
+  },
+  {
+    "text": "so part of this is being high level right we want the controller authors to be writing about business logic right",
+    "start": "789839",
+    "end": "796120"
+  },
+  {
+    "text": "they shouldn't be concerned about all this low-level State Management was it a delete was it an update do I need to update this index or that index and they",
+    "start": "796120",
+    "end": "803320"
+  },
+  {
+    "text": "should be composable so that we can have all these building blocks and just add them together to build a full system",
+    "start": "803320",
+    "end": "808600"
+  },
+  {
+    "text": "right EO is not going to be one giant function it's going to be continue to be many different components that all build up",
+    "start": "808600",
+    "end": "814800"
+  },
+  {
+    "text": "to build EO now after writing all this stuff I realized one simple meme could probably",
+    "start": "814800",
+    "end": "821040"
+  },
+  {
+    "text": "explain this better eal gives users like a declarative API right this is a very",
+    "start": "821040",
+    "end": "827959"
+  },
+  {
+    "text": "you may not say it's easy or great to use but I think it's at least better than the alternative of manually saying",
+    "start": "827959",
+    "end": "833560"
+  },
+  {
+    "text": "I want a cluster IP I want a DNS name right you declare your intent I want a service but this is all possible because",
+    "start": "833560",
+    "end": "841000"
+  },
+  {
+    "text": "under the hood we have these imperative controllers that are doing all the dirty work for us so if you're just a kubernetes user",
+    "start": "841000",
+    "end": "848959"
+  },
+  {
+    "text": "and you're using controllers that are extremely wellmaintained and are you know writing perfect controllers that",
+    "start": "848959",
+    "end": "854240"
+  },
+  {
+    "text": "are bug free maybe that's fine but that's simply not the case right there's no real large scale controller that is",
+    "start": "854240",
+    "end": "861320"
+  },
+  {
+    "text": "bug free I would imagine so we need to push this further down we need to make it so that controllers are in this",
+    "start": "861320",
+    "end": "867519"
+  },
+  {
+    "text": "declarative model of as well and push the imperativeness which is probably",
+    "start": "867519",
+    "end": "873000"
+  },
+  {
+    "text": "required down to an even lower level so that less people need to worry about it right I saw probably half the people",
+    "start": "873000",
+    "end": "879680"
+  },
+  {
+    "text": "here rais their hand saying they were involved in writing controllers you all shouldn't need to be writing all this",
+    "start": "879680",
+    "end": "885360"
+  },
+  {
+    "text": "imperative code a small set of a library or something could manage that for you",
+    "start": "885360",
+    "end": "891040"
+  },
+  {
+    "text": "right so I've been thinking about this problem a lot over past few years of working at EO and have kind of done some",
+    "start": "891040",
+    "end": "897199"
+  },
+  {
+    "text": "prototypes and investigating kind of how can we solve this problem and I think ultimately it is possible right if we",
+    "start": "897199",
+    "end": "904560"
+  },
+  {
+    "text": "consider a simple interface like this you know we have a collection of resources you can get them you can list",
+    "start": "904560",
+    "end": "910880"
+  },
+  {
+    "text": "them and you can watch them it sounds quite trivial right it's almost identical to Informer but we can build",
+    "start": "910880",
+    "end": "916639"
+  },
+  {
+    "text": "an ecosystem around this that makes rid controllers uh much more efficient right",
+    "start": "916639",
+    "end": "923199"
+  },
+  {
+    "text": "so what does this look like first we need a bunch of ways to get data into this uh interface right the obvious one",
+    "start": "923199",
+    "end": "930279"
+  },
+  {
+    "text": "is an Informer right we already have informers the API is very similar in EO we also have a mode where",
+    "start": "930279",
+    "end": "936199"
+  },
+  {
+    "text": "we can read from files this can be useful if you're not running in kubernetes at all or for whatever reason you want to read from files maybe",
+    "start": "936199",
+    "end": "942480"
+  },
+  {
+    "text": "testing right you could read from inmemory objects this could be useful for for tests or other things you maybe",
+    "start": "942480",
+    "end": "949639"
+  },
+  {
+    "text": "read from some external State maybe you want to store objects in a SQL database or S3 or something that's totally fine",
+    "start": "949639",
+    "end": "955560"
+  },
+  {
+    "text": "the interface is agnostic to where we're getting it from right in kubernetes that's not really the case anything",
+    "start": "955560",
+    "end": "961880"
+  },
+  {
+    "text": "that's not reading from kubernetes you don't have an Informer so you have to go make up your own abstractions your own",
+    "start": "961880",
+    "end": "968680"
+  },
+  {
+    "text": "implementation on how to manage these inputs now the most important part",
+    "start": "968680",
+    "end": "974199"
+  },
+  {
+    "text": "really is what we do with those inputs right we don't just take the inputs and read them and call it a day we have to actually produce some output with those",
+    "start": "974199",
+    "end": "980920"
+  },
+  {
+    "text": "so we want to have Transformations like indexes can we look up things efficiently by some value we want to",
+    "start": "980920",
+    "end": "987000"
+  },
+  {
+    "text": "transform them like we talked about deployments turning into replica sets we need to have some way to model that",
+    "start": "987000",
+    "end": "992360"
+  },
+  {
+    "text": "transformation and they need to allow kind of complex compositions like the service case I gave was fairly simple",
+    "start": "992360",
+    "end": "998480"
+  },
+  {
+    "text": "right we read a service in pods we produce end points in EO we're doing a lot more complex compositions where",
+    "start": "998480",
+    "end": "1004160"
+  },
+  {
+    "text": "we're reading five 10 different resources and kind of merging them all together into one state we need to be",
+    "start": "1004160",
+    "end": "1009720"
+  },
+  {
+    "text": "able to efficiently model those and then finally what do we do with those once we have them right we need some outputs of",
+    "start": "1009720",
+    "end": "1016240"
+  },
+  {
+    "text": "course writing back to kubernetes is probably the most common case in EO sending over XDS is is quite common as",
+    "start": "1016240",
+    "end": "1023319"
+  },
+  {
+    "text": "well or maybe you want to write to Some Cloud API right you're maybe the load balance or a controller uh we have all",
+    "start": "1023319",
+    "end": "1029678"
+  },
+  {
+    "text": "these different inputs outputs and transformation steps that are kind of the building blocks for building",
+    "start": "1029679",
+    "end": "1034798"
+  },
+  {
+    "text": "controllers so what this could look like in practice I think is a a well let me just go through actually an example like",
+    "start": "1034799",
+    "end": "1040918"
+  },
+  {
+    "text": "say we want to build a config object in memory that is managing you know various",
+    "start": "1040919",
+    "end": "1047360"
+  },
+  {
+    "text": "config state our our service um in this example I'm going to read from um two",
+    "start": "1047360",
+    "end": "1054480"
+  },
+  {
+    "text": "config Maps kind of merge them together and I want that to be dynamically updated right um so what this looks like",
+    "start": "1054480",
+    "end": "1060400"
+  },
+  {
+    "text": "first we build a collection from a config map Informer right and now what",
+    "start": "1060400",
+    "end": "1066640"
+  },
+  {
+    "text": "we want is to turn these config Maps into this config object so we're going to build a new collection and let's go through some of",
+    "start": "1066640",
+    "end": "1073720"
+  },
+  {
+    "text": "this so first we fetch some config Maps so we have to make this a bit more",
+    "start": "1073720",
+    "end": "1079080"
+  },
+  {
+    "text": "complex I'm saying we have two config maps that we're going to merge together um and then eventually we merge",
+    "start": "1079080",
+    "end": "1085559"
+  },
+  {
+    "text": "them right this code is very simple it's not dealing with any state in kubernetes",
+    "start": "1085559",
+    "end": "1090840"
+  },
+  {
+    "text": "at all right and what's happening here under the hood like I said we have uh",
+    "start": "1090840",
+    "end": "1097000"
+  },
+  {
+    "text": "kubernetes and former we are building a function we just tell the library how to",
+    "start": "1097000",
+    "end": "1102200"
+  },
+  {
+    "text": "build a config we don't tell it to go fetch the data right well we do tell it to fetch but it's a declarative intent",
+    "start": "1102200",
+    "end": "1107880"
+  },
+  {
+    "text": "we're not saying I'm reading this object right now we're saying when you want to build a config you should do it by",
+    "start": "1107880",
+    "end": "1113400"
+  },
+  {
+    "text": "fetching from these config Maps right and what that allows us to do is push all the state management into the",
+    "start": "1113400",
+    "end": "1119080"
+  },
+  {
+    "text": "library the library can detect when the config Maps the inputs change and knows",
+    "start": "1119080",
+    "end": "1124440"
+  },
+  {
+    "text": "to recompute the outputs the config object and it knows that anyone that later on subscribed to the config",
+    "start": "1124440",
+    "end": "1130799"
+  },
+  {
+    "text": "updates it knows to also notify them if it changed it could be that a config map just added some random annotation or",
+    "start": "1130799",
+    "end": "1137559"
+  },
+  {
+    "text": "something we don't care about about and the config output doesn't change and at that point it could automatically know",
+    "start": "1137559",
+    "end": "1142760"
+  },
+  {
+    "text": "not to notify dependencies of config that it",
+    "start": "1142760",
+    "end": "1147880"
+  },
+  {
+    "text": "changed so yeah I just actually covered this but you know we can do the event",
+    "start": "1148559",
+    "end": "1153919"
+  },
+  {
+    "text": "detection that I talked about automatically at the framework level so that each controller isn't needing to do",
+    "start": "1153919",
+    "end": "1158960"
+  },
+  {
+    "text": "this in their own controller code um so just going back to this diagram like if a deployment we're",
+    "start": "1158960",
+    "end": "1165960"
+  },
+  {
+    "text": "reading from didn't change we could short circuit right away and you know all this is done out of the box in the",
+    "start": "1165960",
+    "end": "1172559"
+  },
+  {
+    "text": "framework for you uh just some more examples of things we could do with a framework like this would be something",
+    "start": "1172559",
+    "end": "1178280"
+  },
+  {
+    "text": "like an index right it's it's pretty common in E want to look up things efficiently right we want to find a pod",
+    "start": "1178280",
+    "end": "1183640"
+  },
+  {
+    "text": "object by its IP address uh you can actually do this in kubernetes informance too so this one's perhaps less interesting uh but just to show",
+    "start": "1183640",
+    "end": "1190640"
+  },
+  {
+    "text": "kind of the flexibility of what we can do once we have a common interface with things right even though kubernetes",
+    "start": "1190640",
+    "end": "1196840"
+  },
+  {
+    "text": "informers have indexes you can only have informers on kubernetes objects so it's not Universal",
+    "start": "1196840",
+    "end": "1202480"
+  },
+  {
+    "text": "right so here's just a simple example I'm saying in pods fetch a key that's based on the Pod IP and then later we",
+    "start": "1202480",
+    "end": "1209320"
+  },
+  {
+    "text": "can look up the Pod the Pod by that IP uh now most things want to write to",
+    "start": "1209320",
+    "end": "1215320"
+  },
+  {
+    "text": "kubernetes eventually right that's the end goal is we're reading some inputs and then we're writing them back to kubernetes this could similarly be",
+    "start": "1215320",
+    "end": "1221720"
+  },
+  {
+    "text": "modeled by a framework like this right we may want to re build up a collection of some desired state uh so I admitted",
+    "start": "1221720",
+    "end": "1229440"
+  },
+  {
+    "text": "like the details of how we're doing that but you can imagine you've defined a collection of here's how I the pods that",
+    "start": "1229440",
+    "end": "1234720"
+  },
+  {
+    "text": "I want and then we could actually watch the pods that actually exist in the cluster and then we can simply tell the",
+    "start": "1234720",
+    "end": "1242280"
+  },
+  {
+    "text": "framework to reconcile them make them the same right and it knows how do I",
+    "start": "1242280",
+    "end": "1247520"
+  },
+  {
+    "text": "delete a kubernetes object how do I update it and it knows what it wants and what it has and can do that diff for you",
+    "start": "1247520",
+    "end": "1253480"
+  },
+  {
+    "text": "right it's very similar to using kubernetes as an end user but as a controller",
+    "start": "1253480",
+    "end": "1259679"
+  },
+  {
+    "text": "writer now having this higher level Library also unlocks a lot of potential",
+    "start": "1259679",
+    "end": "1265080"
+  },
+  {
+    "text": "deeper Integrations and tooling for developing controllers so this is an actual diagram that was made by code not",
+    "start": "1265080",
+    "end": "1272760"
+  },
+  {
+    "text": "by myself autogenerated from a collection that I wrote so you can see",
+    "start": "1272760",
+    "end": "1278200"
+  },
+  {
+    "text": "we have this automatic architecture diagram that's just derived from the code can easily help give an overview of",
+    "start": "1278200",
+    "end": "1284440"
+  },
+  {
+    "text": "how the system works where dependencies are I didn't go this far but one could even imagine a cool like animated",
+    "start": "1284440",
+    "end": "1290679"
+  },
+  {
+    "text": "diagram as a change flows through the system or perhaps more useful or realistic we can add tracing right this",
+    "start": "1290679",
+    "end": "1298000"
+  },
+  {
+    "text": "is probably way too small to see but I'm sure you've all seen tracing spans this shows a single event uh propagating",
+    "start": "1298000",
+    "end": "1305279"
+  },
+  {
+    "text": "through a big tree of collections that are building on top of each other so we can see that this event impacted this",
+    "start": "1305279",
+    "end": "1311440"
+  },
+  {
+    "text": "other controller and this other one and in turn impacted this one how long it's taken at each spot you have a strong",
+    "start": "1311440",
+    "end": "1318080"
+  },
+  {
+    "text": "visibility into what's going on in the system and even the performance of it right I don't think that in most",
+    "start": "1318080",
+    "end": "1323559"
+  },
+  {
+    "text": "kubernetes controllers today that there's anything really like this uh out there that gives you this amount of visibility into what a controller is",
+    "start": "1323559",
+    "end": "1331080"
+  },
+  {
+    "text": "doing additionally testing has is one of the biggest parts of riding a controller",
+    "start": "1331080",
+    "end": "1336440"
+  },
+  {
+    "text": "today because you have to deal with all this weird state right like in EO most of our tests of controllers are not",
+    "start": "1336440",
+    "end": "1342360"
+  },
+  {
+    "text": "actually about the business logic at all it's more about like oh if I took this object and updated it was it the same as",
+    "start": "1342360",
+    "end": "1348400"
+  },
+  {
+    "text": "if I just created it to begin with like it's all the State Management it's not actually the business logic but because",
+    "start": "1348400",
+    "end": "1354400"
+  },
+  {
+    "text": "we put all of our business logic in these kind of pure functions that are just some input to some output you can",
+    "start": "1354400",
+    "end": "1360400"
+  },
+  {
+    "text": "just go test that you don't need to test all the state right we also have a bit more potential",
+    "start": "1360400",
+    "end": "1367200"
+  },
+  {
+    "text": "uh future possibilities for things once we have kind of a collection uh of ideas",
+    "start": "1367200",
+    "end": "1372679"
+  },
+  {
+    "text": "right perhaps we could add some sort of automated fuzz testing because we have this higher level thing when when you're",
+    "start": "1372679",
+    "end": "1378120"
+  },
+  {
+    "text": "working with the lower level Primitives like in forer it's harder to build these nice Integrations around testing around",
+    "start": "1378120",
+    "end": "1384440"
+  },
+  {
+    "text": "visibility and whatnot because it's less opinionated right so where is this now and like",
+    "start": "1384440",
+    "end": "1391600"
+  },
+  {
+    "text": "where are we going right everything I talked about does exist in some form I",
+    "start": "1391600",
+    "end": "1397520"
+  },
+  {
+    "text": "would say it's basically demo Weare at this point right it's not just an idea in my head that we can do this I've",
+    "start": "1397520",
+    "end": "1403120"
+  },
+  {
+    "text": "actually gone and you know implemented prototypes and whatnot in fact um",
+    "start": "1403120",
+    "end": "1408480"
+  },
+  {
+    "text": "probably about 50% of EO over time as I was working on this itating it and thinking up ideas I've replaced with",
+    "start": "1408480",
+    "end": "1415480"
+  },
+  {
+    "text": "this model and it seems to work fairly well that being said deploying something",
+    "start": "1415480",
+    "end": "1420799"
+  },
+  {
+    "text": "like this to production is a far different matter than doing so in my own Branch right um so you know where are we",
+    "start": "1420799",
+    "end": "1427799"
+  },
+  {
+    "text": "going it could be a new library it could be something that we start seeing others",
+    "start": "1427799",
+    "end": "1432919"
+  },
+  {
+    "text": "adopt it could just be something that quietly disappears or quietly merges into easto right right uh really depends",
+    "start": "1432919",
+    "end": "1439679"
+  },
+  {
+    "text": "I heard a lot of people saying that there is interest in this so if there's more interest I'd be happy to discuss and bring this more broadly if not uh",
+    "start": "1439679",
+    "end": "1446720"
+  },
+  {
+    "text": "you know I think the ideas are useful if not the library uh for me personally I think a",
+    "start": "1446720",
+    "end": "1452840"
+  },
+  {
+    "text": "lot of you may be looking at this to me and like wow this is way too much magic and I feel the same way which is why I",
+    "start": "1452840",
+    "end": "1458840"
+  },
+  {
+    "text": "haven't been pushing this in EO uh you know for theual merging to production yet I think probably dialing back a",
+    "start": "1458840",
+    "end": "1466039"
+  },
+  {
+    "text": "little bit of the magic would go along way and making this something that's reasonable to use in production but still giving a lot of the",
+    "start": "1466039",
+    "end": "1472520"
+  },
+  {
+    "text": "benefits so yeah that's it I think we have some time for questions I'll be",
+    "start": "1472520",
+    "end": "1477600"
+  },
+  {
+    "text": "around afterwards as well but I do have to run to a panel right after this so if you have more questions uh you can find",
+    "start": "1477600",
+    "end": "1483480"
+  },
+  {
+    "text": "me just downstairs at uh service mesh battlecars so thank you everyone and",
+    "start": "1483480",
+    "end": "1489440"
+  },
+  {
+    "text": "yeah come up to the sides if you have questions there's a",
+    "start": "1489440",
+    "end": "1493840"
+  },
+  {
+    "text": "microphones uh hello uh I'm sh from University Illinois a great talk and",
+    "start": "1495840",
+    "end": "1501080"
+  },
+  {
+    "text": "especially like your messages about testings and I'm here to ask because we",
+    "start": "1501080",
+    "end": "1506559"
+  },
+  {
+    "text": "are actually building some automatic testing tools for controllers and especially you know for fing testing so",
+    "start": "1506559",
+    "end": "1513320"
+  },
+  {
+    "text": "I'm actually uh want to hear your opinions on because fing testing is also very big broad very broad topic and",
+    "start": "1513320",
+    "end": "1519840"
+  },
+  {
+    "text": "there are many ways you can test your controllers uh so I want to know like what kind of like specific testing",
+    "start": "1519840",
+    "end": "1526080"
+  },
+  {
+    "text": "scenarios or testing in tools you would like to you know try to test for example e or some other controllers you think of",
+    "start": "1526080",
+    "end": "1533480"
+  },
+  {
+    "text": "is would be you know super useful yeah in the current state of EO I think one thing I've been thinking a lot about is",
+    "start": "1533480",
+    "end": "1540039"
+  },
+  {
+    "text": "is actually that as well fuzzing the controllers right is like like I said most of the EO code and complexity and",
+    "start": "1540039",
+    "end": "1546360"
+  },
+  {
+    "text": "bugs comes from all this manual State Management so testing things like if I",
+    "start": "1546360",
+    "end": "1551440"
+  },
+  {
+    "text": "add and remove something multiple times is it the same as if I never did anything or you know just updating",
+    "start": "1551440",
+    "end": "1556960"
+  },
+  {
+    "text": "things in different order orders matter things like that seem like could be very well covered in some ways moving to a",
+    "start": "1556960",
+    "end": "1563320"
+  },
+  {
+    "text": "framework like this almost takes away those use cases from the application or the controller developer it would of",
+    "start": "1563320",
+    "end": "1569000"
+  },
+  {
+    "text": "course push those into the controller Library where they would be useful uh but I still think there's possibilities",
+    "start": "1569000",
+    "end": "1574640"
+  },
+  {
+    "text": "like if you have invariance in your even if it's just a function of PODS to Damon sets or whatever or that's backwards but",
+    "start": "1574640",
+    "end": "1581480"
+  },
+  {
+    "text": "um you know there may be invariance who want to test so it still makes sense there I think um but in many ways I",
+    "start": "1581480",
+    "end": "1587279"
+  },
+  {
+    "text": "think probably a lot of the bugs that you would want to test today are around all this manual State Management great",
+    "start": "1587279",
+    "end": "1594080"
+  },
+  {
+    "text": "thanks like I think we can probably talk them all yeah sounds",
+    "start": "1594080",
+    "end": "1599000"
+  },
+  {
+    "text": "good um hello um thank you for the talk um so you talked about there are like 45",
+    "start": "1603840",
+    "end": "1610520"
+  },
+  {
+    "text": "number of different controller talking uh controller talking to the censor controller y um there have been a lot of",
+    "start": "1610520",
+    "end": "1617159"
+  },
+  {
+    "text": "works in um Network layer verification seems like that technique can be useful to",
+    "start": "1617159",
+    "end": "1625039"
+  },
+  {
+    "text": "catch any um un uh undesirable behavior when there",
+    "start": "1625039",
+    "end": "1631120"
+  },
+  {
+    "text": "are U multiple controller interacting with each other for um service layer networking do you think it is useful if",
+    "start": "1631120",
+    "end": "1638480"
+  },
+  {
+    "text": "it is um do you have any concrete example um it sounds like it might be",
+    "start": "1638480",
+    "end": "1644039"
+  },
+  {
+    "text": "useful but I I don't know enough about what you're talking about to to give a a useful answer I think like for example",
+    "start": "1644039",
+    "end": "1650080"
+  },
+  {
+    "text": "um this controller want to do a yeah and there's another controller want to do B",
+    "start": "1650080",
+    "end": "1655960"
+  },
+  {
+    "text": "but this A and B kind of conflicting each other for some way um if we can",
+    "start": "1655960",
+    "end": "1662559"
+  },
+  {
+    "text": "verify this conflicting Behavior with some like Magic model or program will it",
+    "start": "1662559",
+    "end": "1670000"
+  },
+  {
+    "text": "be useful uh it's maybe I'm I'm not sure in EO it's more like they all the",
+    "start": "1670000",
+    "end": "1675840"
+  },
+  {
+    "text": "controllers funnel down to one output really it's not like we have multiple things writing to the same thing and",
+    "start": "1675840",
+    "end": "1681320"
+  },
+  {
+    "text": "there's kind of conflicts uh which is the problem space that I've spent a lot of time in it sounds like it could be",
+    "start": "1681320",
+    "end": "1686519"
+  },
+  {
+    "text": "potentially useful in in other areas but I I haven't thought too much in those those spaces yeah thank you I have a",
+    "start": "1686519",
+    "end": "1693799"
+  },
+  {
+    "text": "question over here about what you just said about uh the they all go to one single Source yes of logging how do you",
+    "start": "1693799",
+    "end": "1700679"
+  },
+  {
+    "text": "track that and because it can get really really messy of like you have a lot of microcontrollers",
+    "start": "1700679",
+    "end": "1706279"
+  },
+  {
+    "text": "um uh to just separate the data do you have any advice on that um yeah I mean",
+    "start": "1706279",
+    "end": "1713399"
+  },
+  {
+    "text": "that's that's something we've we've struggled with a bit um like for logging you said is that the",
+    "start": "1713399",
+    "end": "1719840"
+  },
+  {
+    "text": "the main concern yeah yeah I mean each of our controllers you know we have I don't know about other in our library or",
+    "start": "1719840",
+    "end": "1726200"
+  },
+  {
+    "text": "logging Library we have like a scope label and so each each thing has a scope and we're trying to move towards kind of",
+    "start": "1726200",
+    "end": "1732399"
+  },
+  {
+    "text": "more consistent structured logging as is kubernetes Upstream so that you know you",
+    "start": "1732399",
+    "end": "1737559"
+  },
+  {
+    "text": "can have a consistent way to say x object updated and it's in a structured manner that you could query over um but",
+    "start": "1737559",
+    "end": "1743519"
+  },
+  {
+    "text": "we're not actually super mature in that area either that's something that we're working to improve as well is each controller their own thing or is it uh",
+    "start": "1743519",
+    "end": "1750440"
+  },
+  {
+    "text": "like a lot of controllers within one operator uh so we have one binary but it",
+    "start": "1750440",
+    "end": "1755519"
+  },
+  {
+    "text": "has a bunch of subcontrollers and stuff to just organizationally and to make sure that you know we don't have one giant super function awesome thank you",
+    "start": "1755519",
+    "end": "1762559"
+  },
+  {
+    "text": "yeah no problem hi yeah um thank you very much much for",
+    "start": "1762559",
+    "end": "1767679"
+  },
+  {
+    "text": "this this is really informative I was wondering if you think this would be useful to Upstream to something like the controller runtime Library which I feel",
+    "start": "1767679",
+    "end": "1774559"
+  },
+  {
+    "text": "like has sort of a similar goal of simplifying you know the controller Loop",
+    "start": "1774559",
+    "end": "1780039"
+  },
+  {
+    "text": "uh I mean it's it's possible um you know I didn't really want to go out and push this and be like ah you guys should take",
+    "start": "1780039",
+    "end": "1786000"
+  },
+  {
+    "text": "this like if if if people are interested it sounds like a a possible path forward",
+    "start": "1786000",
+    "end": "1791720"
+  },
+  {
+    "text": "uh but I haven't really talked much with them with them directly yet so but definitely interested if if others are",
+    "start": "1791720",
+    "end": "1797039"
+  },
+  {
+    "text": "so yeah I definitely would be interested in something like this in that Library so thank",
+    "start": "1797039",
+    "end": "1803039"
+  },
+  {
+    "text": "you how do you go about tracing controllers and linked",
+    "start": "1803039",
+    "end": "1808159"
+  },
+  {
+    "text": "resources um yeah the the thing I I may have been slightly misleading on the tracing slide and overselling it the",
+    "start": "1808159",
+    "end": "1814240"
+  },
+  {
+    "text": "thing that enables it to be done in in this manner is because our controller is",
+    "start": "1814240",
+    "end": "1819880"
+  },
+  {
+    "text": "one uh binary right so it's that's how we propagate the context if you're",
+    "start": "1819880",
+    "end": "1824960"
+  },
+  {
+    "text": "actually writing to kubernetes and then a different process is reading it I haven't seen any solution for",
+    "start": "1824960",
+    "end": "1830200"
+  },
+  {
+    "text": "propagating context through that um so in EO you know it's all one process so we we propagate it in memory so it's a",
+    "start": "1830200",
+    "end": "1836320"
+  },
+  {
+    "text": "bit easier okay that makes sense so speaking of interest it's entirely",
+    "start": "1836320",
+    "end": "1841799"
+  },
+  {
+    "text": "possible I missed a link you mentioned having like a branch where you're experimenting with this in the iso code",
+    "start": "1841799",
+    "end": "1847799"
+  },
+  {
+    "text": "base is there somewhere that we can go to like get the code and play around with this uh that would have been a very good thing to add a link to here that",
+    "start": "1847799",
+    "end": "1854679"
+  },
+  {
+    "text": "yes um I I'll try and update on the the skedge I guess if I can add my slides and update it but if not",
+    "start": "1854679",
+    "end": "1863080"
+  },
+  {
+    "text": "uh I don't know you can ask me on on slack maybe I'll post something it's just in my my Fork of you still really",
+    "start": "1863080",
+    "end": "1868960"
+  },
+  {
+    "text": "but it's under probably some obscure Branch name so okay thank you yeah uh yeah so I have a question on",
+    "start": "1868960",
+    "end": "1875360"
+  },
+  {
+    "text": "testing um our we found test dnv to be pretty subpar for what we wanted so we",
+    "start": "1875360",
+    "end": "1881679"
+  },
+  {
+    "text": "went with uh a more end to end uh kind cluster type of testing but as always",
+    "start": "1881679",
+    "end": "1887240"
+  },
+  {
+    "text": "looking at your subcontroller with the data flow um do you find that the",
+    "start": "1887240",
+    "end": "1892279"
+  },
+  {
+    "text": "writing tests for the subcontrollers like kind of as a more unit-based approach negates the need for a complete",
+    "start": "1892279",
+    "end": "1899120"
+  },
+  {
+    "text": "integration test or end to end I think I mean the generic answer is both",
+    "start": "1899120",
+    "end": "1904960"
+  },
+  {
+    "text": "are useful um we we definitely don't in EO exclusively use endtoend test because",
+    "start": "1904960",
+    "end": "1910720"
+  },
+  {
+    "text": "there's so much surface area to cover right and N1 tests of course are quite expensive so we we tackle them at both",
+    "start": "1910720",
+    "end": "1916720"
+  },
+  {
+    "text": "layers I think in EO we tend to use we use the fake uh Informer Library quite a bit I",
+    "start": "1916720",
+    "end": "1924159"
+  },
+  {
+    "text": "think others tend to prefer like the CU stuff uh we we never found much need or",
+    "start": "1924159",
+    "end": "1929440"
+  },
+  {
+    "text": "success with that and we were perfectly fine with the the fake client uh but we're also using a lot less",
+    "start": "1929440",
+    "end": "1934799"
+  },
+  {
+    "text": "functionality like server side apply or other things that aren't in the fake uh library but with the fake Library it's",
+    "start": "1934799",
+    "end": "1940880"
+  },
+  {
+    "text": "it's been fairly seamless to write unit test um now the the problem we've had is that those unit tests are not testing",
+    "start": "1940880",
+    "end": "1947440"
+  },
+  {
+    "text": "the useful thing we actually want right they're not testing the business logic they're testing all this Informer uh",
+    "start": "1947440",
+    "end": "1953519"
+  },
+  {
+    "text": "issues so thank you",
+    "start": "1953519",
+    "end": "1958638"
+  },
+  {
+    "text": "yep all right looks like that's everyone thanks everyone",
+    "start": "1959720",
+    "end": "1966760"
+  }
+]

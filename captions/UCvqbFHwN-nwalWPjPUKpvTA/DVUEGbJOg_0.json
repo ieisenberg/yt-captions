@@ -1,0 +1,1557 @@
+[
+  {
+    "text": "um hello thanks for joining me today I'm Charles software engineer at Netflix and",
+    "start": "2120",
+    "end": "7399"
+  },
+  {
+    "text": "I'm also a tyv maintainer so today I will share our experience of building a",
+    "start": "7399",
+    "end": "12920"
+  },
+  {
+    "text": "scalable and reliable change data capture servers for tyk so today's talk will be cover",
+    "start": "12920",
+    "end": "19119"
+  },
+  {
+    "text": "several topics firstly we will explore why we need to build a new CDC tool for",
+    "start": "19119",
+    "end": "24640"
+  },
+  {
+    "text": "tikv then we will talk about how tkv Works internally um though tkv currently only",
+    "start": "24640",
+    "end": "31359"
+  },
+  {
+    "text": "support day synchronization from tidb buil on tkv the same principle and experience can be used by users wishing",
+    "start": "31359",
+    "end": "38360"
+  },
+  {
+    "text": "to sync data from any system buil on Tai to other systems this is particularly",
+    "start": "38360",
+    "end": "43480"
+  },
+  {
+    "text": "relevant as syncing data from a distributed database like tidb is often more challenging than from other",
+    "start": "43480",
+    "end": "50440"
+  },
+  {
+    "text": "systems once we have a better understanding of tydc internally we will C we will cover the performance scans",
+    "start": "50440",
+    "end": "57000"
+  },
+  {
+    "text": "achieved after tcdc version 6.5 we received a lot of feedback from the",
+    "start": "57000",
+    "end": "62039"
+  },
+  {
+    "text": "community last year like concerns about performers in a system reliability so we",
+    "start": "62039",
+    "end": "67520"
+  },
+  {
+    "text": "put a lot of efforts in time to enhance the reliability and optimize the performance first let's talk about why",
+    "start": "67520",
+    "end": "74840"
+  },
+  {
+    "text": "we need tydc what are a major use case of tydc there are two common scenarios",
+    "start": "74840",
+    "end": "81000"
+  },
+  {
+    "text": "where tydc can be particularly useful the first one is incremental data",
+    "start": "81000",
+    "end": "86560"
+  },
+  {
+    "text": "synchronization for heterogeneous systems this means that if if you have multiple database that need to be",
+    "start": "86560",
+    "end": "93079"
+  },
+  {
+    "text": "synchronized with one another KDC can help ensure that all the data is up toate in real time the second scenario",
+    "start": "93079",
+    "end": "100799"
+  },
+  {
+    "text": "is cross region Disaster Recovery which based on primary and secondary",
+    "start": "100799",
+    "end": "105880"
+  },
+  {
+    "text": "replication this can be critical for business that rely on their data to operate compared to traditional database",
+    "start": "105880",
+    "end": "112920"
+  },
+  {
+    "text": "system pkv can hold much larger volume of data which makes capturing change",
+    "start": "112920",
+    "end": "118640"
+  },
+  {
+    "text": "data for tyv very challenging as we want to ensure not only the high data syncing",
+    "start": "118640",
+    "end": "125840"
+  },
+  {
+    "text": "throughputs for a large volume of change but also different level of data",
+    "start": "125840",
+    "end": "131239"
+  },
+  {
+    "text": "consistency so compared to some other systems what kinds of features do T provide first Tai uh Tai tydc provid so",
+    "start": "131239",
+    "end": "139599"
+  },
+  {
+    "text": "first the Ty CDC supports low latency incremental dat application for various",
+    "start": "139599",
+    "end": "144640"
+  },
+  {
+    "text": "Downstream so that is to say you can use Tai CDC to replicate data from Up stram",
+    "start": "144640",
+    "end": "150080"
+  },
+  {
+    "text": "database to cafka using Cano Json AO or open protocol second tydc support",
+    "start": "150080",
+    "end": "157360"
+  },
+  {
+    "text": "database in a table filtering which enable you to filter specific data based on your requirement this feature helped",
+    "start": "157360",
+    "end": "164920"
+  },
+  {
+    "text": "reduce the amount of data transfer and makes the replication process more efficient third tydc support most",
+    "start": "164920",
+    "end": "172599"
+  },
+  {
+    "text": "operation through open API this means that you can easily integrate tcdc into your existing application without having",
+    "start": "172599",
+    "end": "179920"
+  },
+  {
+    "text": "to worry about compatibility issue last but not least Tai CDC supports by",
+    "start": "179920",
+    "end": "185799"
+  },
+  {
+    "text": "Direction replication between Tai KV cluster this means that you can easily replicate data between two tight cluster",
+    "start": "185799",
+    "end": "192760"
+  },
+  {
+    "text": "making it easier to change your data across multiple clusters now we have understand why we",
+    "start": "192760",
+    "end": "198799"
+  },
+  {
+    "text": "need TI CDC next let's talk about the design goal and challenges of building CDC service for Tai",
+    "start": "198799",
+    "end": "205920"
+  },
+  {
+    "text": "KB our first objective is to ensure High available ability we understand that the",
+    "start": "205920",
+    "end": "212080"
+  },
+  {
+    "text": "critical natural of syncing data to Downstream system for users but accidents and disasters are inevitable",
+    "start": "212080",
+    "end": "220159"
+  },
+  {
+    "text": "therefore we must guarantee that even in the event of system fults the data syncing process will continue",
+    "start": "220159",
+    "end": "226760"
+  },
+  {
+    "text": "uninterrupted and the CDC cluster will remain fully functional the next goal is",
+    "start": "226760",
+    "end": "232280"
+  },
+  {
+    "text": "to achieve high throughputs in a low latency as previously mentioned user typically store vast amount of data in",
+    "start": "232280",
+    "end": "239400"
+  },
+  {
+    "text": "up stream cluster Spread spread across thousands of notes consequently a",
+    "start": "239400",
+    "end": "245480"
+  },
+  {
+    "text": "capable CDC service should be able to concurrently sync data from multiple Tai KV storage regions with original",
+    "start": "245480",
+    "end": "253000"
+  },
+  {
+    "text": "throughputs with optimal throughputs our third goal is to ensure",
+    "start": "253000",
+    "end": "258320"
+  },
+  {
+    "text": "consistency and ordering unlike other systems maintaining the consistency and Order of events operated upon in is",
+    "start": "258320",
+    "end": "266120"
+  },
+  {
+    "text": "crucial for Tai tkv as many users are using IV as the backend storage for",
+    "start": "266120",
+    "end": "271560"
+  },
+  {
+    "text": "distributed system therefore we intend to provide snapshot isolation and",
+    "start": "271560",
+    "end": "277039"
+  },
+  {
+    "text": "eventual consistency eventual consisteny to address this requirement",
+    "start": "277039",
+    "end": "283120"
+  },
+  {
+    "text": "effectively however all this goes are not easy to achieve as we Face many",
+    "start": "283120",
+    "end": "288560"
+  },
+  {
+    "text": "challenges at the same time first we need to capture the change data instanly",
+    "start": "288560",
+    "end": "293919"
+  },
+  {
+    "text": "as any delay can lead to large synchronization lack additionally we must be aware of of and able to catch up",
+    "start": "293919",
+    "end": "301240"
+  },
+  {
+    "text": "with the scheme Revolution as I mentioned before many users using Tai CDC or Tai KV to build layer database",
+    "start": "301240",
+    "end": "308320"
+  },
+  {
+    "text": "system the structure of the database can change over time requiring Tai CDT to",
+    "start": "308320",
+    "end": "313759"
+  },
+  {
+    "text": "adapt accordingly another challenge is striking the right balance between",
+    "start": "313759",
+    "end": "318880"
+  },
+  {
+    "text": "ordering and high throughputs while maintaining the order of events is crucial for date Integrity we also need",
+    "start": "318880",
+    "end": "326080"
+  },
+  {
+    "text": "to handle the large volume of change without compromising the performers similarly we Face trade-off",
+    "start": "326080",
+    "end": "333400"
+  },
+  {
+    "text": "between consistency and low latency guarantee eventual consistency while minimized latency is a delicate task",
+    "start": "333400",
+    "end": "341000"
+  },
+  {
+    "text": "that require careful consideration furthermore Ty CDC needs to efficiently",
+    "start": "341000",
+    "end": "346199"
+  },
+  {
+    "text": "fetch data that is spread across multiple tyv nodes this require",
+    "start": "346199",
+    "end": "351319"
+  },
+  {
+    "text": "effective coordination in communication to ensure the similar retrieval of data",
+    "start": "351319",
+    "end": "356639"
+  },
+  {
+    "text": "from various Source lastly we amim to minimize operational comp complexity as",
+    "start": "356639",
+    "end": "362960"
+  },
+  {
+    "text": "a complex system can introduce challenges in maintenance and",
+    "start": "362960",
+    "end": "368319"
+  },
+  {
+    "text": "troubleshooting now let's talk about let's take a closer look at how KD address this",
+    "start": "368319",
+    "end": "375400"
+  },
+  {
+    "text": "challenges um here is the overall system architecture of tydc Tai CDC take talks",
+    "start": "376400",
+    "end": "382720"
+  },
+  {
+    "text": "directly to Ty KV which allow for more streamlined communication and a faster",
+    "start": "382720",
+    "end": "387800"
+  },
+  {
+    "text": "data transfer CDC capture change data by watching the change log of Tai KV which",
+    "start": "387800",
+    "end": "393639"
+  },
+  {
+    "text": "provides a reliable and upto-date source of information the system is horizontal",
+    "start": "393639",
+    "end": "399120"
+  },
+  {
+    "text": "horizontal scalable using table as the basic scheduling unit which allow for",
+    "start": "399120",
+    "end": "404599"
+  },
+  {
+    "text": "greater flexibility and ease of use additionally tydc provides an extendable",
+    "start": "404599",
+    "end": "410520"
+  },
+  {
+    "text": "Downstream syncing interface which can be easily customized to support different thirdparty Downstream",
+    "start": "410520",
+    "end": "416919"
+  },
+  {
+    "text": "platforms currently we officially support support MySQL CFA and cloud storage servers but our flexible",
+    "start": "416919",
+    "end": "424599"
+  },
+  {
+    "text": "architecture allow for easy integration with other Platforms in the",
+    "start": "424599",
+    "end": "430680"
+  },
+  {
+    "text": "future okay now let's take a closer look at the Tai CDC cluster internally the",
+    "start": "431039",
+    "end": "437360"
+  },
+  {
+    "text": "Tai CDC cluster is composed of multiple capture server Each of which can be",
+    "start": "437360",
+    "end": "443360"
+  },
+  {
+    "text": "either an owner role or a processor role the owner acts as the leader and",
+    "start": "443360",
+    "end": "448440"
+  },
+  {
+    "text": "coordinator of of the Tai CDC cluster responsible for scheduling change feeds",
+    "start": "448440",
+    "end": "453720"
+  },
+  {
+    "text": "to different processor managers each processor manager manage many small",
+    "start": "453720",
+    "end": "459280"
+  },
+  {
+    "text": "subprocessors which serve as the base working unit of the Tai CDC cluster",
+    "start": "459280",
+    "end": "464720"
+  },
+  {
+    "text": "after a change feed is scheduled to a processor manager the manager will initialize and assign One processor to",
+    "start": "464720",
+    "end": "472159"
+  },
+  {
+    "text": "one table of the change feed the processor will then start watching the",
+    "start": "472159",
+    "end": "477240"
+  },
+  {
+    "text": "change log of the table on the Ty KV and begin pushing change data to the downstream when pushing a change Feit",
+    "start": "477240",
+    "end": "484720"
+  },
+  {
+    "text": "the owner will calculate the watermark of the overall change feed Pro process",
+    "start": "484720",
+    "end": "490080"
+  },
+  {
+    "text": "based on the watermark of each individual table managed by each processor the metadata of the change",
+    "start": "490080",
+    "end": "496639"
+  },
+  {
+    "text": "feed and the Tai CDC cluster itself will be stored in the PD cluster of the Tai",
+    "start": "496639",
+    "end": "501840"
+  },
+  {
+    "text": "KV which is and you can treat it as an etcd cluster this process allow for efficient",
+    "start": "501840",
+    "end": "509919"
+  },
+  {
+    "text": "and reliable change data syncing even in complex and large scale",
+    "start": "509919",
+    "end": "515680"
+  },
+  {
+    "text": "environments notice that in a Tai CDC capture server each server will always launch a processor manager to capture",
+    "start": "515680",
+    "end": "522360"
+  },
+  {
+    "text": "change data and push it Downstream however only one server can act as the",
+    "start": "522360",
+    "end": "527440"
+  },
+  {
+    "text": "owner and the coordinator of the cluster at any given time after the owner has",
+    "start": "527440",
+    "end": "533480"
+  },
+  {
+    "text": "been elected we can start scheduling and dispatching tables to processors the",
+    "start": "533480",
+    "end": "539320"
+  },
+  {
+    "text": "owner initialized a scheduler for each newly created change feed the Schuler's",
+    "start": "539320",
+    "end": "545160"
+  },
+  {
+    "text": "primary function is to assign syncing task to different processor managers",
+    "start": "545160",
+    "end": "550279"
+  },
+  {
+    "text": "with each syncing task mapping specific table once a processor manager receive a",
+    "start": "550279",
+    "end": "556120"
+  },
+  {
+    "text": "task it initialize a new processor and begin syncing the corresponding table",
+    "start": "556120",
+    "end": "561800"
+  },
+  {
+    "text": "during the syncing process each processor initialize an agent that communicate with the coordinator to",
+    "start": "561800",
+    "end": "568839"
+  },
+  {
+    "text": "track track and report on the sying progress of the table now we have introduced how high",
+    "start": "568839",
+    "end": "576240"
+  },
+  {
+    "text": "cdcs a cluster work from high level next we can dig into the details and see how",
+    "start": "576240",
+    "end": "582279"
+  },
+  {
+    "text": "each processor work after being assigned task of syncing tables here is the",
+    "start": "582279",
+    "end": "587760"
+  },
+  {
+    "text": "topology of different components the component topology of tcdc involves several key elements that work together",
+    "start": "587760",
+    "end": "594839"
+  },
+  {
+    "text": "to ensure accurate and efficient day syncing firstly one change feed can be",
+    "start": "594839",
+    "end": "600720"
+  },
+  {
+    "text": "spread to multiple capture servers each capture server will initialize a new processor that is dedicated to handling",
+    "start": "600720",
+    "end": "607880"
+  },
+  {
+    "text": "the syncing task for the change feed inside each processor a pipeline is",
+    "start": "607880",
+    "end": "613279"
+  },
+  {
+    "text": "created for each table allowing for efficient syncing of individual te individual day",
+    "start": "613279",
+    "end": "620040"
+  },
+  {
+    "text": "set the owner of the change feed is responsible for syncing the ddl event",
+    "start": "620040",
+    "end": "625360"
+  },
+  {
+    "text": "which is the data definition language event to the downstream such as table scheme update while the processor pulls",
+    "start": "625360",
+    "end": "632600"
+  },
+  {
+    "text": "the DDR events but is not responsible for pushing the DDR uh DDR to the",
+    "start": "632600",
+    "end": "638079"
+  },
+  {
+    "text": "downstream instead the processor applies the DDR schema to the mounter which will",
+    "start": "638079",
+    "end": "644040"
+  },
+  {
+    "text": "deserialize the DML which is the date manipulation language even later this",
+    "start": "644040",
+    "end": "650399"
+  },
+  {
+    "text": "component topology ensure that high CDC can handle large volume of data syncing task and maintain accuracy and efficient",
+    "start": "650399",
+    "end": "658040"
+  },
+  {
+    "text": "through puts throughout the whole process here is what happened inside a",
+    "start": "658040",
+    "end": "664120"
+  },
+  {
+    "text": "table pipeline from the left to right we have firstly the Tai KV CDC subcomponent",
+    "start": "664120",
+    "end": "670079"
+  },
+  {
+    "text": "which is a subcomponent embedded inside a Tai KV allow us to read the change log",
+    "start": "670079",
+    "end": "675880"
+  },
+  {
+    "text": "of the tyv for anying updates tyv provides interface allowing client to",
+    "start": "675880",
+    "end": "681040"
+  },
+  {
+    "text": "watch the change log which can be useful for building change data capture servers for any system build on TYB next the",
+    "start": "681040",
+    "end": "688279"
+  },
+  {
+    "text": "polar component connects to the Tai KB CDC associated with the corresponding regions and watch all change events when",
+    "start": "688279",
+    "end": "696000"
+  },
+  {
+    "text": "a change event occur it is sent to the Pooler the Pooler streams the change event to the sorter which sorts the",
+    "start": "696000",
+    "end": "703000"
+  },
+  {
+    "text": "event based on its time stamp after sorting the sorter push the event to the",
+    "start": "703000",
+    "end": "708240"
+  },
+  {
+    "text": "mounter the mounter decode the key value entries into table format and sends them",
+    "start": "708240",
+    "end": "713959"
+  },
+  {
+    "text": "to the Sinker finally the Sinker syncs the events to the user specified",
+    "start": "713959",
+    "end": "719120"
+  },
+  {
+    "text": "Downstream location we have talked about the tydc syns the ddl events next let's talk",
+    "start": "719120",
+    "end": "726320"
+  },
+  {
+    "text": "about how the Tha CDC synchronize the DML Events first how the Pooler work the",
+    "start": "726320",
+    "end": "732480"
+  },
+  {
+    "text": "Pooler is a critical component in Tai CDC stay syncing process that is responsible for mounting for watching",
+    "start": "732480",
+    "end": "739240"
+  },
+  {
+    "text": "change events of a table and pulling them from the source database s table in",
+    "start": "739240",
+    "end": "745360"
+  },
+  {
+    "text": "Tai KV can be split into multiple date region and the store in multiple Tai KV",
+    "start": "745360",
+    "end": "750440"
+  },
+  {
+    "text": "nodes a poer will connect to multiple TV nodes to watch all the related regions",
+    "start": "750440",
+    "end": "756880"
+  },
+  {
+    "text": "tyv nodes push change events to a Channel Through the grpc string and the",
+    "start": "756880",
+    "end": "762279"
+  },
+  {
+    "text": "Pooler creates a walker for each region which periodically reads the change",
+    "start": "762279",
+    "end": "767600"
+  },
+  {
+    "text": "events from the input Channel and All Region worker share an event channel",
+    "start": "767600",
+    "end": "773519"
+  },
+  {
+    "text": "that connects to the output channel the output Channel dispatch the change events to the DDR job Pooler and the",
+    "start": "773519",
+    "end": "781079"
+  },
+  {
+    "text": "Pooler note based on the event type next next let's talk about the",
+    "start": "781079",
+    "end": "787160"
+  },
+  {
+    "text": "sorter why the sorter is required sorter provides two major functionalities first",
+    "start": "787160",
+    "end": "793800"
+  },
+  {
+    "text": "buffering the incoming events allows the sorder to smooth out the peak and valys",
+    "start": "793800",
+    "end": "798880"
+  },
+  {
+    "text": "of Upstream dat date flow let's ensure that data syncing process is efficient",
+    "start": "798880",
+    "end": "805279"
+  },
+  {
+    "text": "and can handle large volume of data without becoming over overwhelmed second incoming events may",
+    "start": "805279",
+    "end": "812519"
+  },
+  {
+    "text": "not be in time order which can make it difficult to provide snapshot isolation",
+    "start": "812519",
+    "end": "818079"
+  },
+  {
+    "text": "or ensure eventual consistency if the system crash the sortware ensure that",
+    "start": "818079",
+    "end": "823920"
+  },
+  {
+    "text": "the events are SED based on their time stamp allowing the processor to",
+    "start": "823920",
+    "end": "829040"
+  },
+  {
+    "text": "reconstruct the cluster snapshot correctly overall the shorter is an",
+    "start": "829040",
+    "end": "835160"
+  },
+  {
+    "text": "essential component of high CDC ensuring that the dat data syncing process is",
+    "start": "835160",
+    "end": "840199"
+  },
+  {
+    "text": "efficient accurate and consistent so how the sorder work",
+    "start": "840199",
+    "end": "848399"
+  },
+  {
+    "text": "internally we use an external KV store adopting the log structure merge Tree on",
+    "start": "848399",
+    "end": "854199"
+  },
+  {
+    "text": "the top the memory buffer area is called map table the rights from the foreground",
+    "start": "854199",
+    "end": "859720"
+  },
+  {
+    "text": "are initially sorted in the map table when a buffer reach its size limits the",
+    "start": "859720",
+    "end": "865079"
+  },
+  {
+    "text": "data is flushed to the disk forming SS table which is the sorted stream table",
+    "start": "865079",
+    "end": "870720"
+  },
+  {
+    "text": "all M table and the SS table are divided into multiple events",
+    "start": "870720",
+    "end": "875839"
+  },
+  {
+    "text": "levels the layer that includes all M table and the SS table directly flushed",
+    "start": "875839",
+    "end": "882320"
+  },
+  {
+    "text": "from M table to the disk is called level zero as sorted as sorted needed to sort",
+    "start": "882320",
+    "end": "888680"
+  },
+  {
+    "text": "incoming change events based on their time stamp however different disk files may have overlapping time stamp",
+    "start": "888680",
+    "end": "895519"
+  },
+  {
+    "text": "intervals for an Ascent table so and iterator needs to wrap to the merge sort",
+    "start": "895519",
+    "end": "901680"
+  },
+  {
+    "text": "this files when accessing them managing memory and disc files for hundreds of",
+    "start": "901680",
+    "end": "907000"
+  },
+  {
+    "text": "thousands of table can be challenging so multiple tables may share a fixed amount of memory buffer and then flush them out",
+    "start": "907000",
+    "end": "914639"
+  },
+  {
+    "text": "to dis together this can result in file and dis having overlaps not only in time",
+    "start": "914639",
+    "end": "920720"
+  },
+  {
+    "text": "stamp but also in tables to address this the files can be periodically read",
+    "start": "920720",
+    "end": "926320"
+  },
+  {
+    "text": "merged sorted and Rewritten back to to the dis once the events has been sorted the",
+    "start": "926320",
+    "end": "933440"
+  },
+  {
+    "text": "mounter converts event with a time stamp smaller them ddl barrier into table row",
+    "start": "933440",
+    "end": "939160"
+  },
+  {
+    "text": "format to do this accurately the mounter require knowledge of the corresponding",
+    "start": "939160",
+    "end": "944360"
+  },
+  {
+    "text": "table schema although the owner is responsible for pushing the DDR events to the downstream the processor must",
+    "start": "944360",
+    "end": "951440"
+  },
+  {
+    "text": "also store the table schema to achieve the processor ddl puller retriev the",
+    "start": "951440",
+    "end": "957160"
+  },
+  {
+    "text": "table schema from Tai CDC components filter out unnecessary information and",
+    "start": "957160",
+    "end": "963279"
+  },
+  {
+    "text": "store the table schema in the processor schema storage for later",
+    "start": "963279",
+    "end": "969000"
+  },
+  {
+    "text": "use next the sync component in Ty CDC is responsible for transferring change",
+    "start": "969000",
+    "end": "975319"
+  },
+  {
+    "text": "events to the downstream each change feed has a resource manager a res a",
+    "start": "975319",
+    "end": "981240"
+  },
+  {
+    "text": "source manager that connects to the sorder of all tables associated with the",
+    "start": "981240",
+    "end": "986480"
+  },
+  {
+    "text": "feet the sync manager periodically pulls the source manager which retrieves",
+    "start": "986480",
+    "end": "992160"
+  },
+  {
+    "text": "events from all sorters and sends them to the sync manager the sync manager",
+    "start": "992160",
+    "end": "997440"
+  },
+  {
+    "text": "then distribute the events to the corresponding table sync which rides them to the designate",
+    "start": "997440",
+    "end": "1003800"
+  },
+  {
+    "text": "Downstream tydc employs a pool-based sync to ensure efficient and uninterrupted event transfer push based",
+    "start": "1003800",
+    "end": "1011639"
+  },
+  {
+    "text": "sync can resting Block events on the sink leading to performers degradation",
+    "start": "1011639",
+    "end": "1017160"
+  },
+  {
+    "text": "tydc is pool based approach can manage a large volume of data with precision and",
+    "start": "1017160",
+    "end": "1023079"
+  },
+  {
+    "text": "pre with precision and consistency guaranteeing accuracy throughput um",
+    "start": "1023079",
+    "end": "1028839"
+  },
+  {
+    "text": "throughout the date synchronization process so while Ty CDC is theoretically",
+    "start": "1028839",
+    "end": "1035918"
+  },
+  {
+    "text": "horizontal scalable certain performance issues such as high CPU utilization and",
+    "start": "1035919",
+    "end": "1042120"
+  },
+  {
+    "text": "unexpected lack between the upstream and downstream may still occur we received",
+    "start": "1042120",
+    "end": "1048160"
+  },
+  {
+    "text": "Fe Fe back from users last year about the concerns of cdc's performers in",
+    "start": "1048160",
+    "end": "1053840"
+  },
+  {
+    "text": "response we have put significant efforts in a time to optimize the performance of tha CDC so starting with 6.5 the",
+    "start": "1053840",
+    "end": "1062039"
+  },
+  {
+    "text": "throughput of tha CDC has been improved by seven times in the following section we will discuss the approach that has",
+    "start": "1062039",
+    "end": "1068880"
+  },
+  {
+    "text": "been taken to enhance the performance of tydc first let's check out some",
+    "start": "1068880",
+    "end": "1075120"
+  },
+  {
+    "text": "performance Baseline of TDC before 6.5 why I put some old number here because I",
+    "start": "1075120",
+    "end": "1081080"
+  },
+  {
+    "text": "want you to have a more intuitive feeling of how much performance scan we have already achieved the first case we",
+    "start": "1081080",
+    "end": "1088159"
+  },
+  {
+    "text": "consider is using Tai cc to sync data between two tib clusters the hardware",
+    "start": "1088159",
+    "end": "1094240"
+  },
+  {
+    "text": "specification of our tydc node is 16 CPU and 64 GB of RAM which was proven to be",
+    "start": "1094240",
+    "end": "1102120"
+  },
+  {
+    "text": "more than if sufficient for our case single table throughput weighs a big",
+    "start": "1102120",
+    "end": "1107240"
+  },
+  {
+    "text": "table 1,00 200 bytes per row is 80,000 R QPS with a throughput of 120 megabytes",
+    "start": "1107240",
+    "end": "1115640"
+  },
+  {
+    "text": "per second even before 6.5 we found that tcdc is able to handle very large tables",
+    "start": "1115640",
+    "end": "1122280"
+  },
+  {
+    "text": "up to 30 to 40 terabytes in size and TDC was table uh was able to keep up with",
+    "start": "1122280",
+    "end": "1128880"
+  },
+  {
+    "text": "the throughput demands without any problems and there are no limits to the",
+    "start": "1128880",
+    "end": "1134280"
+  },
+  {
+    "text": "amount of Upstream cluster data that tydc can handle this means means that as our data needs continue to grow we can",
+    "start": "1134280",
+    "end": "1142000"
+  },
+  {
+    "text": "rely on P CDC to C to keep up with the increased demand the second case we consider is",
+    "start": "1142000",
+    "end": "1149440"
+  },
+  {
+    "text": "using Tai CDC to sync data from tib to CFA still it is the old date before 6.5",
+    "start": "1149440",
+    "end": "1156679"
+  },
+  {
+    "text": "the hardware specification are same as previous case which is 16 CPU and 64 G",
+    "start": "1156679",
+    "end": "1162000"
+  },
+  {
+    "text": "GB of RAM when testing a single table through put on a large table still 1,200",
+    "start": "1162000",
+    "end": "1167960"
+  },
+  {
+    "text": "bytes per row we have achieved 35,000 R QPS with a throughput of 52.8 megabytes",
+    "start": "1167960",
+    "end": "1175280"
+  },
+  {
+    "text": "per seconds while this is slightly slower than our previous test with only",
+    "start": "1175280",
+    "end": "1181000"
+  },
+  {
+    "text": "two tidb clusters we have also found that tydc is able to handle very large",
+    "start": "1181000",
+    "end": "1186400"
+  },
+  {
+    "text": "tables we have test table up to 30 to 40 terabytes of in size and a tydc was able",
+    "start": "1186400",
+    "end": "1192840"
+  },
+  {
+    "text": "to kick up with the throughputs demand without any issues so the throughputs of High CDC",
+    "start": "1192840",
+    "end": "1199000"
+  },
+  {
+    "text": "table pipeline is an essential performance Matrix that measure the efficiency of each of its four",
+    "start": "1199000",
+    "end": "1205280"
+  },
+  {
+    "text": "consecutive subcomponents the puller Sorter mounter and sink this pipeline",
+    "start": "1205280",
+    "end": "1211400"
+  },
+  {
+    "text": "can be visualized as a water pipe where in a narrowest part determine the overall throughputs so by measuring the",
+    "start": "1211400",
+    "end": "1218960"
+  },
+  {
+    "text": "throughputs of each component separately we have identified that the sink is the",
+    "start": "1218960",
+    "end": "1224360"
+  },
+  {
+    "text": "bottom neck in most the case which has the average throughput",
+    "start": "1224360",
+    "end": "1229400"
+  },
+  {
+    "text": "76,000 while the sorter has the largest throughputs therefore to improve the overall performance of high CDC",
+    "start": "1229400",
+    "end": "1236520"
+  },
+  {
+    "text": "optimization efforts have been found focused on the sink Putter and",
+    "start": "1236520",
+    "end": "1241840"
+  },
+  {
+    "text": "mounter to optimize the performance of the Pooler In tha CDC several measures",
+    "start": "1241840",
+    "end": "1247760"
+  },
+  {
+    "text": "have been taken firstly the processing of resor the time stamp has been",
+    "start": "1247760",
+    "end": "1253120"
+  },
+  {
+    "text": "optimized by processing them in B batch which a resource time stamp you can TR treated as the water mark reducing the",
+    "start": "1253120",
+    "end": "1260640"
+  },
+  {
+    "text": "time taken for the puller to calculate this this me help us to reduce the time taken for the puller to calculate and",
+    "start": "1260640",
+    "end": "1267440"
+  },
+  {
+    "text": "Advance the checkpoint secondly we rewrite log have been implemented",
+    "start": "1267440",
+    "end": "1273520"
+  },
+  {
+    "text": "instead of using just exclusive lock enabling concurrent access to Resource",
+    "start": "1273520",
+    "end": "1279000"
+  },
+  {
+    "text": "and increasing the efficiency lastly the Frontiers inspection of region split",
+    "start": "1279000",
+    "end": "1285080"
+  },
+  {
+    "text": "merge has been optimized to reduce the time taken for the puller to access the",
+    "start": "1285080",
+    "end": "1290279"
+  },
+  {
+    "text": "update data an unnecessary memory allocation has also been removed for the",
+    "start": "1290279",
+    "end": "1295440"
+  },
+  {
+    "text": "which help us to further improve the pooler's efficiency and reducing the",
+    "start": "1295440",
+    "end": "1301159"
+  },
+  {
+    "text": "overheads um so the performers so here is",
+    "start": "1301799",
+    "end": "1307799"
+  },
+  {
+    "text": "the here is what we try how we try to do the mounter Improvement so as you can",
+    "start": "1307799",
+    "end": "1314760"
+  },
+  {
+    "text": "remember that mounter act as the D cizer decoder in our pipeline so once it'll",
+    "start": "1314760",
+    "end": "1321440"
+  },
+  {
+    "text": "receive a DDR event or key value um entry it will try to decode it and make",
+    "start": "1321440",
+    "end": "1327480"
+  },
+  {
+    "text": "it like a table format and Ascend it to the next components so in order to improve the throughput on the mounter we",
+    "start": "1327480",
+    "end": "1334760"
+  },
+  {
+    "text": "try to use a decoder pool instead of just with single thread decoder to decode the key value",
+    "start": "1334760",
+    "end": "1343039"
+  },
+  {
+    "text": "events so the performance of the sync components in tydc has has been significantly improved through the",
+    "start": "1344039",
+    "end": "1349880"
+  },
+  {
+    "text": "implementation of a pool based Sy as I mentioned before in the previous slides",
+    "start": "1349880",
+    "end": "1354960"
+  },
+  {
+    "text": "which helped to improve the management of the event flow reducing the risk of date log on the",
+    "start": "1354960",
+    "end": "1361799"
+  },
+  {
+    "text": "sync so we achieved the significant performance games after applying a form Manion optimization a comparison between",
+    "start": "1361799",
+    "end": "1369200"
+  },
+  {
+    "text": "t CDC 6.3 and a t CDC 6.5 um reviews after uh actually it's",
+    "start": "1369200",
+    "end": "1376200"
+  },
+  {
+    "text": "the version larger than 6.5 reviews a sub substantial increase in performers when a downstream is CFA using different",
+    "start": "1376200",
+    "end": "1384200"
+  },
+  {
+    "text": "protocols when using a Cano Json protocol the performers has improved from 5,000 per seconds to 41,000 per",
+    "start": "1384200",
+    "end": "1392320"
+  },
+  {
+    "text": "seconds when using the open protocol the performers has improved from 8,000 per",
+    "start": "1392320",
+    "end": "1397919"
+  },
+  {
+    "text": "seconds to 58,000 per seconds and finally when using the AAL protocol the",
+    "start": "1397919",
+    "end": "1403559"
+  },
+  {
+    "text": "performers has improved from 9,000 per seconds to 63 ,000 per",
+    "start": "1403559",
+    "end": "1410039"
+  },
+  {
+    "text": "seconds so specifically to address the checkpoint lag when syncing data to mySQL using tcdc we apply a batch",
+    "start": "1410039",
+    "end": "1418159"
+  },
+  {
+    "text": "syncing approach um rather than executing events one by one events are",
+    "start": "1418159",
+    "end": "1424039"
+  },
+  {
+    "text": "now sync in batch and multiple connections has been established between a MySQL sync and a downstream MySQL",
+    "start": "1424039",
+    "end": "1430880"
+  },
+  {
+    "text": "compatible database so to measure the effective effectiveness of this measure",
+    "start": "1430880",
+    "end": "1436200"
+  },
+  {
+    "text": "assist bench workload has ROM with 500,000 rows per",
+    "start": "1436200",
+    "end": "1441400"
+  },
+  {
+    "text": "transaction the results show that this measure have led to a significant",
+    "start": "1441400",
+    "end": "1446880"
+  },
+  {
+    "text": "reduction in update and delete lack by about",
+    "start": "1446880",
+    "end": "1452200"
+  },
+  {
+    "text": "30% and lastly I would like to share some of the valuable lessons we have",
+    "start": "1453039",
+    "end": "1458840"
+  },
+  {
+    "text": "learned throughout the Journey of B building tydc the first lesson we have learned is",
+    "start": "1458840",
+    "end": "1466200"
+  },
+  {
+    "text": "to decide the system architecture Ure in align with the Upstream database this means that when creating the date",
+    "start": "1466200",
+    "end": "1473320"
+  },
+  {
+    "text": "pipeline abstraction we should closely align it with how the database organize",
+    "start": "1473320",
+    "end": "1478559"
+  },
+  {
+    "text": "its data instead of focusing on adapting a system to goand channel we should",
+    "start": "1478559",
+    "end": "1484360"
+  },
+  {
+    "text": "prioritize the table pipeline Appo approach the second lesson is the",
+    "start": "1484360",
+    "end": "1489720"
+  },
+  {
+    "text": "importance of establishing clear boundaries between subcomponents for a",
+    "start": "1489720",
+    "end": "1495039"
+  },
+  {
+    "text": "significant period we lack prec prise regulation and the scope for each",
+    "start": "1495039",
+    "end": "1500320"
+  },
+  {
+    "text": "subcomponent making it challenging to optimize or enhance the system any",
+    "start": "1500320",
+    "end": "1505799"
+  },
+  {
+    "text": "change often require modification in multiple Place throughout the entire pipeline hence defining clear boundaries",
+    "start": "1505799",
+    "end": "1514320"
+  },
+  {
+    "text": "is crucial for scalability and the maintainability careful consideration",
+    "start": "1514320",
+    "end": "1519840"
+  },
+  {
+    "text": "should be also be taken into account when choosing between push model and pool model previously we utilized the",
+    "start": "1519840",
+    "end": "1526720"
+  },
+  {
+    "text": "push model for sending data across the pipeline which made it difficult to isolate each table pipeline however by",
+    "start": "1526720",
+    "end": "1534039"
+  },
+  {
+    "text": "trans uh by transferring to the pool based sync we gain more flexibility in",
+    "start": "1534039",
+    "end": "1540760"
+  },
+  {
+    "text": "supporting different Downstream system and efficiently syncing data from various",
+    "start": "1540760",
+    "end": "1546480"
+  },
+  {
+    "text": "tables the third lessons involves implementing the old value features from",
+    "start": "1546480",
+    "end": "1552000"
+  },
+  {
+    "text": "the early stage of the development in the initial version of high CDC only put",
+    "start": "1552000",
+    "end": "1557679"
+  },
+  {
+    "text": "and delete events were synced due to Performance concerns however we",
+    "start": "1557679",
+    "end": "1562799"
+  },
+  {
+    "text": "discovered the usefulness of the old value features in many scenarios after",
+    "start": "1562799",
+    "end": "1567880"
+  },
+  {
+    "text": "months of struggle we finally decide to implement the old value cache and fetch the old value from tkv using historical",
+    "start": "1567880",
+    "end": "1575919"
+  },
+  {
+    "text": "snapshots and the final lesson Revol resolved around uh implementing an efficient disorder while considering",
+    "start": "1575919",
+    "end": "1583880"
+  },
+  {
+    "text": "scalability initially tydc using an in memory solder which increased the risk",
+    "start": "1583880",
+    "end": "1589200"
+  },
+  {
+    "text": "of O especially when dealing with large volume of changes in Upstream cluster to",
+    "start": "1589200",
+    "end": "1595919"
+  },
+  {
+    "text": "eliminate this risk we engaged in discussion and eventually adopt an rsmg",
+    "start": "1595919",
+    "end": "1602480"
+  },
+  {
+    "text": "based DB sorter this feature took approximately half year to mature and",
+    "start": "1602480",
+    "end": "1607919"
+  },
+  {
+    "text": "was designed with scalability in mind all right so that's all for today's",
+    "start": "1607919",
+    "end": "1614440"
+  },
+  {
+    "text": "talk we are keep adding more features in optimizing assistant you can find details for advanced features like large",
+    "start": "1614440",
+    "end": "1622000"
+  },
+  {
+    "text": "table scale out which will split the large table sying process into multiple table pipeline in our official",
+    "start": "1622000",
+    "end": "1628760"
+  },
+  {
+    "text": "documentation so here is the GitHub repository of TYC feel free to check out if you have any questions or comments",
+    "start": "1628760",
+    "end": "1635679"
+  },
+  {
+    "text": "just show me an email oh okay and also you can scan the QR code and providing",
+    "start": "1635679",
+    "end": "1643000"
+  },
+  {
+    "text": "the feedback for this session thanks",
+    "start": "1643000",
+    "end": "1649520"
+  },
+  {
+    "text": "any questions comments yeah um could you use the",
+    "start": "1654360",
+    "end": "1659919"
+  },
+  {
+    "text": "microphone after",
+    "start": "1659919",
+    "end": "1662720"
+  },
+  {
+    "text": "you I think you mentioned about uh filtering capabilities initially when you're explaining the CD uh Ty CDC",
+    "start": "1670679",
+    "end": "1678159"
+  },
+  {
+    "text": "uh where do you put the filtering part in that architecture the the filtering right",
+    "start": "1678159",
+    "end": "1684679"
+  },
+  {
+    "text": "yeah like if you to selectively get records correct that's a very good question so the filtering part is very",
+    "start": "1684679",
+    "end": "1689880"
+  },
+  {
+    "text": "important because user usually have huge amount of tables so in so to ensure that",
+    "start": "1689880",
+    "end": "1696240"
+  },
+  {
+    "text": "we are now going to transfer on use the data from Tai KV to Tai CD Downstream we put the fter part on the Tai KV side so",
+    "start": "1696240",
+    "end": "1704120"
+  },
+  {
+    "text": "from the very beginning of the pipeline we are going to fter or unnecessary events and the",
+    "start": "1704120",
+    "end": "1711399"
+  },
+  {
+    "text": "tables and just one small followup on the sorter uh is there some kind of a",
+    "start": "1711399",
+    "end": "1717000"
+  },
+  {
+    "text": "configuration as to how long that sorter waits for all the events to arrive from",
+    "start": "1717000",
+    "end": "1722799"
+  },
+  {
+    "text": "the change or how does it know like when to trigger a",
+    "start": "1722799",
+    "end": "1727960"
+  },
+  {
+    "text": "sorting uh so your question is about is layer any configuration we can use to",
+    "start": "1727960",
+    "end": "1733600"
+  },
+  {
+    "text": "configure the trigger of the event pulling is that correct no no you you you had that soter component in the",
+    "start": "1733600",
+    "end": "1740320"
+  },
+  {
+    "text": "middle right you saying that sometimes the events May not uh arrive in the right order and the soter in the middle",
+    "start": "1740320",
+    "end": "1747559"
+  },
+  {
+    "text": "is going to reorder those events before it sends it to the sink uhhuh so my",
+    "start": "1747559",
+    "end": "1753000"
+  },
+  {
+    "text": "question is that that sorter component in the middle how long does it how does",
+    "start": "1753000",
+    "end": "1758320"
+  },
+  {
+    "text": "it know that you know the I see this this is the trigger at which I'll have",
+    "start": "1758320",
+    "end": "1764039"
+  },
+  {
+    "text": "100 records for example and I need to reorder them and send through or is it a Time based threshold or is it a record",
+    "start": "1764039",
+    "end": "1770640"
+  },
+  {
+    "text": "based threshold yeah so I think that is um I",
+    "start": "1770640",
+    "end": "1775919"
+  },
+  {
+    "text": "don't remember the exact number of the frequency we trigger but I believe that is configurable like we can we can",
+    "start": "1775919",
+    "end": "1783360"
+  },
+  {
+    "text": "config um how frequently or how often we wanted to push the sorted events to the",
+    "start": "1783360",
+    "end": "1789799"
+  },
+  {
+    "text": "downstream yeah I think that is configurable I need to go back double check the configuration file but that is",
+    "start": "1789799",
+    "end": "1795559"
+  },
+  {
+    "text": "a very good question thanks hi chok from Google I have a question",
+    "start": "1795559",
+    "end": "1802399"
+  },
+  {
+    "text": "about the consisten consistency guarantee part so it looks like Tai CDC pulls",
+    "start": "1802399",
+    "end": "1808399"
+  },
+  {
+    "text": "um uh single row level changes from Tai KV and you said it ensures eventual",
+    "start": "1808399",
+    "end": "1814799"
+  },
+  {
+    "text": "consistency so doesn't mean that um if there's a transaction that um that",
+    "start": "1814799",
+    "end": "1820320"
+  },
+  {
+    "text": "involves multiple ro road changes um does the asset properties still guaranteed by",
+    "start": "1820320",
+    "end": "1826240"
+  },
+  {
+    "text": "tydc I I don't think so currently we do not support transaction level consistency",
+    "start": "1826240",
+    "end": "1832880"
+  },
+  {
+    "text": "yeah so it's it's it's it's difficult to achieve that right because there is um",
+    "start": "1832880",
+    "end": "1838360"
+  },
+  {
+    "text": "because the row or the data can be across multiple Ty Ty KV nodes so we will we do not recommend user like on a",
+    "start": "1838360",
+    "end": "1845600"
+  },
+  {
+    "text": "downstream database you try to you try to submit a transaction on the Upstream database and then you will receive the",
+    "start": "1845600",
+    "end": "1851919"
+  },
+  {
+    "text": "same kind of like transaction on a downstream database um yeah oh yeah one more quick question so",
+    "start": "1851919",
+    "end": "1858960"
+  },
+  {
+    "text": "just want to clarify the pullers uh working mechanism so the pullers yeah but but I one follow up is like since",
+    "start": "1858960",
+    "end": "1864799"
+  },
+  {
+    "text": "our when we syncing the data to the downstream database we are actually like",
+    "start": "1864799",
+    "end": "1870360"
+  },
+  {
+    "text": "submitting the MySQL um events to the downstream database right so if we really wanted to implement a transaction",
+    "start": "1870360",
+    "end": "1877320"
+  },
+  {
+    "text": "consistency that is achievable so there is some price in the trade of is like okay if you wanted to do that the",
+    "start": "1877320",
+    "end": "1884519"
+  },
+  {
+    "text": "throughputs and a latency the throughputs can be the through can be low and a latency can be large yeah I",
+    "start": "1884519",
+    "end": "1890080"
+  },
+  {
+    "text": "see yeah that makes sense okay just one quick question I had was U about the pullers working mechanism so the the",
+    "start": "1890080",
+    "end": "1896720"
+  },
+  {
+    "text": "pullers pull the changes from the T KV um periodically or I mean not tyv",
+    "start": "1896720",
+    "end": "1903760"
+  },
+  {
+    "text": "pushing changes to the pullers because the diagram look like actually the the lad so it's like a string so TV have a",
+    "start": "1903760",
+    "end": "1910320"
+  },
+  {
+    "text": "change so in inside the Ty we have a subcomponents that is watch the change lock right when it receive events it",
+    "start": "1910320",
+    "end": "1916840"
+  },
+  {
+    "text": "will sort of like uh have a have a have a string like push to the poer even",
+    "start": "1916840",
+    "end": "1922360"
+  },
+  {
+    "text": "though this one is called poer but it is that is for type of Tai CDC itself it",
+    "start": "1922360",
+    "end": "1928159"
+  },
+  {
+    "text": "looks like a puller but it's actually like received the pushing events from the Tai KV internal compon so just T KV",
+    "start": "1928159",
+    "end": "1935120"
+  },
+  {
+    "text": "um pushes those um the changes into into the and then pulls from there okay that",
+    "start": "1935120",
+    "end": "1940720"
+  },
+  {
+    "text": "makes sense thank",
+    "start": "1940720",
+    "end": "1943440"
+  },
+  {
+    "text": "you any more questions great so I guess that's",
+    "start": "1945760",
+    "end": "1952559"
+  },
+  {
+    "text": "all thank you",
+    "start": "1952559",
+    "end": "1959519"
+  }
+]

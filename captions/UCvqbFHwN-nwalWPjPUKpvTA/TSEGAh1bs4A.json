@@ -1,0 +1,1842 @@
+[
+  {
+    "text": "my talk is called optimizing load balancing and auto scaling for llm inference on kubernetes I know that's",
+    "start": "40",
+    "end": "5720"
+  },
+  {
+    "text": "kind of a mouthful U but let's just get right into it um first uh personal",
+    "start": "5720",
+    "end": "11000"
+  },
+  {
+    "text": "introduction I'm David um I work for Red Hat I'm a performance engineer I'm based",
+    "start": "11000",
+    "end": "16358"
+  },
+  {
+    "text": "out of Toronto Canada in the past like a couple years ago I was working mostly on kuber kubernetes operator development um",
+    "start": "16359",
+    "end": "23760"
+  },
+  {
+    "text": "for out of tree kernel driver enablement and node tuning uh but then for the last like almost two years now I've been just",
+    "start": "23760",
+    "end": "29519"
+  },
+  {
+    "text": "focused on on llm inference performance on kubernetes part of the performance and scale for AI platforms team at Red",
+    "start": "29519",
+    "end": "36360"
+  },
+  {
+    "text": "Hat um and our kind of mission is to make AI applications run better and faster on Linux and containers and",
+    "start": "36360",
+    "end": "43000"
+  },
+  {
+    "text": "kubernetes um so in this talk I'm going to start with a little bit of background information about llm inference and llm",
+    "start": "43000",
+    "end": "50160"
+  },
+  {
+    "text": "inference performance Concepts if you're in here for the previous talk there might be a tiny bit of review here um",
+    "start": "50160",
+    "end": "55559"
+  },
+  {
+    "text": "but I'll try to keep it brief um then I'm going to talk about different ways to deploy LM on kubernetes so I'll show",
+    "start": "55559",
+    "end": "62320"
+  },
+  {
+    "text": "sort of the vanilla way um and then I'll introduce the kerve project um then I'm going to show some comparisons of load",
+    "start": "62320",
+    "end": "69159"
+  },
+  {
+    "text": "balancing performance when you're deploying multiple replicas of a model uh the vanilla way versus with kerve um",
+    "start": "69159",
+    "end": "75720"
+  },
+  {
+    "text": "and then I'm also going to show some results with custom load balancing um and then lastly I'll discuss some issues",
+    "start": "75720",
+    "end": "81880"
+  },
+  {
+    "text": "involved in autoscaling and share some techniques to speed up the scaleup process of new model replicas um and I",
+    "start": "81880",
+    "end": "87560"
+  },
+  {
+    "text": "hope to leave some time for Q&A at the end I have lot to get through so we'll see how that goes but please hold your questions till the end um okay so first",
+    "start": "87560",
+    "end": "95240"
+  },
+  {
+    "text": "the background so yeah by now I think most of us are pretty familiar with how llms work at a high level it's been kind of",
+    "start": "95240",
+    "end": "101520"
+  },
+  {
+    "text": "hard to ignore but just looking at this diagram on the left I want to highlight first how llms are de or llms process",
+    "start": "101520",
+    "end": "108240"
+  },
+  {
+    "text": "text as tokens so the incoming text is decomposed into tokens which map to words or subw pieces of text um I also",
+    "start": "108240",
+    "end": "116520"
+  },
+  {
+    "text": "want to note how text generation is an autor regressive process so the next token is based on the previous tokens in",
+    "start": "116520",
+    "end": "122799"
+  },
+  {
+    "text": "the sequence so basically to generate a long string of output the model needs to be run over and over again um each time",
+    "start": "122799",
+    "end": "129800"
+  },
+  {
+    "text": "kind of adding the previous output token into the input sequence to generate the next token um and this occurs until",
+    "start": "129800",
+    "end": "135519"
+  },
+  {
+    "text": "either a max number of tokens is reached or the model predicts the stop token uh which is like The Logical end of that uh",
+    "start": "135519",
+    "end": "142080"
+  },
+  {
+    "text": "statement so this means that compared to other server workloads the llm inference involves really longlived requests",
+    "start": "142080",
+    "end": "148800"
+  },
+  {
+    "text": "sometimes uh the total response time completely depends on the number of tokens that are in the output so it can",
+    "start": "148800",
+    "end": "154319"
+  },
+  {
+    "text": "range from like subc to multiple minutes of generating output for one request um",
+    "start": "154319",
+    "end": "160920"
+  },
+  {
+    "text": "okay so why do we care about optimizing the performance of llms um llms are",
+    "start": "160920",
+    "end": "165959"
+  },
+  {
+    "text": "usually deployed on Hardware accelerators like gpus so any organization that's making the investment into this expensive Hardware",
+    "start": "165959",
+    "end": "172440"
+  },
+  {
+    "text": "wants to get the most out of it uh furthermore accelerators for AI usually",
+    "start": "172440",
+    "end": "177640"
+  },
+  {
+    "text": "consume a lot of energy so in the interest of cost and Energy savings optimizing performance is",
+    "start": "177640",
+    "end": "183200"
+  },
+  {
+    "text": "critical um and lastly I want to mention sort of a recent Trend towards use cases of llms that involve generation with",
+    "start": "183200",
+    "end": "190040"
+  },
+  {
+    "text": "really long sequences of text um longer than say like a chat use case so that includes rag which you've probably",
+    "start": "190040",
+    "end": "196560"
+  },
+  {
+    "text": "already heard about today many times um and also Chain of Thought which is kind of like what open AI is doing with their",
+    "start": "196560",
+    "end": "202560"
+  },
+  {
+    "text": "latest generation of models where basically before they answer a question they generate a really long string of",
+    "start": "202560",
+    "end": "208879"
+  },
+  {
+    "text": "basically a plan of how they're going to answer that um and what this means is basically we're doing more work during",
+    "start": "208879",
+    "end": "214840"
+  },
+  {
+    "text": "the inference step instead of say running a longer or running a bigger model or doing training for longer or",
+    "start": "214840",
+    "end": "221159"
+  },
+  {
+    "text": "training on more data um but what that means is that for user experience the speed of inference is even more",
+    "start": "221159",
+    "end": "229200"
+  },
+  {
+    "text": "critical um so how do we actually run an llm in production llms are usually deployed with a piece of software that's",
+    "start": "229280",
+    "end": "235519"
+  },
+  {
+    "text": "called an inference engine or model server sometimes you'll hear these referred to as runtime",
+    "start": "235519",
+    "end": "240840"
+  },
+  {
+    "text": "um there are several llm focused inference engines like VM text generation inference and there's many",
+    "start": "240840",
+    "end": "247079"
+  },
+  {
+    "text": "more uh in this talk I'm just going to be basically using VM and showing results with VM but I think the load",
+    "start": "247079",
+    "end": "252959"
+  },
+  {
+    "text": "balancing and autoscaling Concepts that all go over are relevant for any of these um so inference engines like these",
+    "start": "252959",
+    "end": "260600"
+  },
+  {
+    "text": "usually contain the dependencies and Logic for loading model weights from standard formats and running them uh",
+    "start": "260600",
+    "end": "265800"
+  },
+  {
+    "text": "they often include like an HTTP or grpc interface to serve request by an API um",
+    "start": "265800",
+    "end": "271479"
+  },
+  {
+    "text": "and they often contain highly optimized kernels for running the model on Hardware accelerators um and then one",
+    "start": "271479",
+    "end": "277000"
+  },
+  {
+    "text": "critical feature that each of these inference engines offer is the ability to process many requests in parallel um",
+    "start": "277000",
+    "end": "283320"
+  },
+  {
+    "text": "for llms this is a little bit tricky because each request needs to run for several iterations and we don't know",
+    "start": "283320",
+    "end": "288639"
+  },
+  {
+    "text": "upfront how long it may need to run um so these run times have implemented a feature called continuous batching or",
+    "start": "288639",
+    "end": "294080"
+  },
+  {
+    "text": "dynamic batching we basically between each token generation step requests which are cued can be added into the",
+    "start": "294080",
+    "end": "299840"
+  },
+  {
+    "text": "batch and completed requests can be removed from the batch and returned um there's a ton of other really",
+    "start": "299840",
+    "end": "305120"
+  },
+  {
+    "text": "interesting uh optimizations that are at this runtime level that are relevant for performance but I'm just going to put",
+    "start": "305120",
+    "end": "310759"
+  },
+  {
+    "text": "those topics aside for this talk um so now just briefly uh how do we",
+    "start": "310759",
+    "end": "316479"
+  },
+  {
+    "text": "measure llm in for its performance like other server workloads performance is usually measured in terms of latency and",
+    "start": "316479",
+    "end": "322280"
+  },
+  {
+    "text": "throughput um but because again the total response time totally depends on the sequence length usually we look at",
+    "start": "322280",
+    "end": "327680"
+  },
+  {
+    "text": "latency in terms of time per output token so in the case of streaming requests we can measure the time to the first token",
+    "start": "327680",
+    "end": "334080"
+  },
+  {
+    "text": "and the inter token latency um so ttft will include any queuing time in the case where the server is too busy to",
+    "start": "334080",
+    "end": "340479"
+  },
+  {
+    "text": "instantly process a requests um and it also includes the pre-fill time when the input prompt is initially processed by",
+    "start": "340479",
+    "end": "346800"
+  },
+  {
+    "text": "the model and then inter token latency or itl this is sometimes also called tpot uh is the time between subsequent",
+    "start": "346800",
+    "end": "353680"
+  },
+  {
+    "text": "tokens not including the first token um and then throughput could be measured in terms of like requests per second",
+    "start": "353680",
+    "end": "360199"
+  },
+  {
+    "text": "um but for the same reason that we measure per token latency it's usually measured in terms of tokens per second",
+    "start": "360199",
+    "end": "365800"
+  },
+  {
+    "text": "and when we talk about the throughput performance of an llm we're usually talking about the total tokens per second across multiple ongoing requests",
+    "start": "365800",
+    "end": "372840"
+  },
+  {
+    "text": "um so you can think of like ttft and itl are basically what a client experiences through put is more a measure of how",
+    "start": "372840",
+    "end": "378599"
+  },
+  {
+    "text": "much output a server can generate in a given amount of time um and then in order to get these measurements we can",
+    "start": "378599",
+    "end": "384599"
+  },
+  {
+    "text": "run load tests there's several open source tools for load testing llms any results in this are gathered with a tool",
+    "start": "384599",
+    "end": "390720"
+  },
+  {
+    "text": "that my team made called llm load tests um but there's others out there and there's also currently an ongoing effort",
+    "start": "390720",
+    "end": "396160"
+  },
+  {
+    "text": "in the serving working group to come together and create basically a standard tool for benchmarking llms on kubernetes",
+    "start": "396160",
+    "end": "402319"
+  },
+  {
+    "text": "um so that's I think a great idea um on the right hand of the slide I just have",
+    "start": "402319",
+    "end": "407360"
+  },
+  {
+    "text": "some example Performance data um on the x- axis we have throughput and then on the y- axis we have average itl um each",
+    "start": "407360",
+    "end": "414840"
+  },
+  {
+    "text": "point is from a load test simulating a certain number of concurrent users this is just for illustra purposes but note",
+    "start": "414840",
+    "end": "420639"
+  },
+  {
+    "text": "like the latency throughput curve how there's a trade-off between throughput and latency uh depending on the level of",
+    "start": "420639",
+    "end": "426479"
+  },
+  {
+    "text": "concurrency that we're running at okay so now let's get into how to",
+    "start": "426479",
+    "end": "432360"
+  },
+  {
+    "text": "deploy llms on kubernetes so the kind of easy answer uh",
+    "start": "432360",
+    "end": "439240"
+  },
+  {
+    "text": "is to deploy an inference engine using a deployment object and then behind a service the service could be exposed to",
+    "start": "439240",
+    "end": "445039"
+  },
+  {
+    "text": "the outside world by like a rout or it could be part of a larger application stack like a chat",
+    "start": "445039",
+    "end": "450440"
+  },
+  {
+    "text": "website um in most production deployments users don't hit the model directly with requests there's usually",
+    "start": "450440",
+    "end": "455919"
+  },
+  {
+    "text": "some like pre- or postprocessing application between the actual users making their request and the model um",
+    "start": "455919",
+    "end": "461560"
+  },
+  {
+    "text": "for instance to validate the inputs and outputs or like uh hate abuse and profanity filtering hap filtering is a",
+    "start": "461560",
+    "end": "468159"
+  },
+  {
+    "text": "common use of pre- or post-processing um but for the purposes of the load balancing discussion I just want to note",
+    "start": "468159",
+    "end": "474120"
+  },
+  {
+    "text": "how when a server is deployed like this with multiple pod replicas behind a service with a cluster IP the way that",
+    "start": "474120",
+    "end": "480840"
+  },
+  {
+    "text": "the service load balances between the Pod replicas depends on how Cube proxy is configured but it's typically random",
+    "start": "480840",
+    "end": "487159"
+  },
+  {
+    "text": "uh with an even probability for each replica um so now I want to introduce",
+    "start": "487159",
+    "end": "493199"
+  },
+  {
+    "text": "another way to deploy llms and kubernetes which is kerve kerve originally came out of the cube flow",
+    "start": "493199",
+    "end": "498280"
+  },
+  {
+    "text": "cncf project um I think like three years ago now it graduated to be its own project under the Linux Foundation um",
+    "start": "498280",
+    "end": "505280"
+  },
+  {
+    "text": "kerve provides a set of kubernetes custom resources for deploying uh machine learning models it offers like a",
+    "start": "505280",
+    "end": "511919"
+  },
+  {
+    "text": "complete story for production ml model serving including prediction um pre- and post-processing which is what the",
+    "start": "511919",
+    "end": "518640"
+  },
+  {
+    "text": "Transformer pods do um explainability and monitoring there's a ton you can do with kerve it would take like a whole",
+    "start": "518640",
+    "end": "524600"
+  },
+  {
+    "text": "talk or multiple talks to go through all the features um so for this session I just want to mention the two custom",
+    "start": "524600",
+    "end": "529800"
+  },
+  {
+    "text": "resources that I use to deploy llms and then walk you through the architecture just a little bit um so there's the",
+    "start": "529800",
+    "end": "535120"
+  },
+  {
+    "text": "serving runtime custom resource it's kind of like a template uh to Define how",
+    "start": "535120",
+    "end": "540320"
+  },
+  {
+    "text": "to deploy an inference engine um and then there's the inference service which includes like model specific Fields like",
+    "start": "540320",
+    "end": "546800"
+  },
+  {
+    "text": "how to load the model whether it's from S3 or in a PVC or in a container um and then which serving runtime to actually",
+    "start": "546800",
+    "end": "552880"
+  },
+  {
+    "text": "use to deploy that model and then also a deployment mode to use um when you deploy a model with kerve there's two",
+    "start": "552880",
+    "end": "559680"
+  },
+  {
+    "text": "deployment modes there's raw deployment which essentially does what I showed on the previous slide like the vanilla way",
+    "start": "559680",
+    "end": "565440"
+  },
+  {
+    "text": "um and then there's K native mode so K native is another cncf project that",
+    "start": "565440",
+    "end": "571040"
+  },
+  {
+    "text": "enables serverless workloads to run on kubernetes again it offers a ton of features that I can't get into but I",
+    "start": "571040",
+    "end": "576120"
+  },
+  {
+    "text": "just want to highlight the load balancing that you get with the K native deployment mode in kerve um which is",
+    "start": "576120",
+    "end": "582040"
+  },
+  {
+    "text": "based on leas requests so the architecture diagram of how it looks when you deploy a model with the K native deployment strategy is on the",
+    "start": "582040",
+    "end": "588360"
+  },
+  {
+    "text": "right hand side so the predictor service in the top right um forwards requests to",
+    "start": "588360",
+    "end": "593680"
+  },
+  {
+    "text": "the Q proxy sidecar container and this is where load balancing happens um so basically the Q proxy make some effort",
+    "start": "593680",
+    "end": "600000"
+  },
+  {
+    "text": "to reroute an incoming request to the replica of the model that has the least currently active",
+    "start": "600000",
+    "end": "607040"
+  },
+  {
+    "text": "requests okay so let's get into some performance results that basically compare these two different",
+    "start": "607160",
+    "end": "612839"
+  },
+  {
+    "text": "schemes so all of the performance results I'll share in this presentation are with the Llama 3.1 8B model running",
+    "start": "612839",
+    "end": "619200"
+  },
+  {
+    "text": "on an AWS instance with a1g gpus with 24 GB of GPU memory um these results are",
+    "start": "619200",
+    "end": "626160"
+  },
+  {
+    "text": "across eight replicas of the model um so each replica of the model model is running on GPU on one GPU um and I'm",
+    "start": "626160",
+    "end": "632640"
+  },
+  {
+    "text": "load testing with inputs from the open Orchid data set with input lengths between 16 and 1600 tokens and then",
+    "start": "632640",
+    "end": "639120"
+  },
+  {
+    "text": "outputs between 16 and 1600 tokens um the input and output lengths will impact the numbers a lot that's why I not it",
+    "start": "639120",
+    "end": "645440"
+  },
+  {
+    "text": "here um I'm using RPS mode in the load test so the requests are being scheduled at a constant rate of 12 requests per",
+    "start": "645440",
+    "end": "652480"
+  },
+  {
+    "text": "second um and this setting was chosen based on some initial experiments to basically figure out uh what level of",
+    "start": "652480",
+    "end": "659040"
+  },
+  {
+    "text": "load can a single replica handle uh without causing any queuing at the runtime level um so I determined that a",
+    "start": "659040",
+    "end": "665240"
+  },
+  {
+    "text": "single replica could handle 1.5 RPS and Achieve inter toen latency below about",
+    "start": "665240",
+    "end": "670320"
+  },
+  {
+    "text": "70 milliseconds uh and without any Q growing in VM so basically it's enough load that it should not quite fully",
+    "start": "670320",
+    "end": "676800"
+  },
+  {
+    "text": "saturate all eight replicas um so on the right I have the throughput numbers comparing the performance of the eight",
+    "start": "676800",
+    "end": "682120"
+  },
+  {
+    "text": "replicas when deployed with K Surf and the K native mode and then the vanilla mode or Rod deployment mode um so",
+    "start": "682120",
+    "end": "688399"
+  },
+  {
+    "text": "obviously these results not look too bad in terms of total throughput across the replicas the difference is pretty minor",
+    "start": "688399",
+    "end": "693519"
+  },
+  {
+    "text": "it's like a few percent um but the more interesting difference is in latency and particular",
+    "start": "693519",
+    "end": "699839"
+  },
+  {
+    "text": "ttft so when we look at ttft for this same experiment we see a much bigger difference in particular a big",
+    "start": "700519",
+    "end": "706320"
+  },
+  {
+    "text": "difference in tail latency 99th percentile ttft um the 99th percentile",
+    "start": "706320",
+    "end": "711399"
+  },
+  {
+    "text": "time to First token is like over 20 seconds in the Raw deployment node uh but only about 3 seconds with K native",
+    "start": "711399",
+    "end": "717800"
+  },
+  {
+    "text": "um and this kind of makes sense so if the requests are being distributed evenly among replicas as they are in the Raw deployment case this doesn't take",
+    "start": "717800",
+    "end": "724800"
+  },
+  {
+    "text": "into account that some requests will last will last uh much longer than others based on the sequence length so",
+    "start": "724800",
+    "end": "731320"
+  },
+  {
+    "text": "think like even at 60 millisecond itl uh a th000 tokens would take a full minute",
+    "start": "731320",
+    "end": "736440"
+  },
+  {
+    "text": "to generate um so if one replica gets unlucky it will end up basically with several requests that last quite a long",
+    "start": "736440",
+    "end": "742959"
+  },
+  {
+    "text": "time but it will continue to get more requests at the same rate as the less busy replicas um and then similarly",
+    "start": "742959",
+    "end": "748680"
+  },
+  {
+    "text": "other replic because might be underutilized um so in summary just by switching from random load balancing that you get with a deployment and",
+    "start": "748680",
+    "end": "754600"
+  },
+  {
+    "text": "service to request base load balancing that you get with K native we bring our 99th percentile ttft uh from 20 seconds",
+    "start": "754600",
+    "end": "761160"
+  },
+  {
+    "text": "to 3 seconds so this is a huge difference um and then on the right I also have the itl graph you can see the",
+    "start": "761160",
+    "end": "767320"
+  },
+  {
+    "text": "difference is more minor um so just to dig into why on this",
+    "start": "767320",
+    "end": "774160"
+  },
+  {
+    "text": "slide I show the VM level metric so reported from the infin engine the number of request waiting which is",
+    "start": "774160",
+    "end": "780040"
+  },
+  {
+    "text": "basically the Q size for each replica um you can see that two or three replicas",
+    "start": "780040",
+    "end": "785120"
+  },
+  {
+    "text": "out of the eight have at times a q over 15 requests and then it Peaks at over uh",
+    "start": "785120",
+    "end": "790720"
+  },
+  {
+    "text": "35 requests for a single replica so for the test with K native load balancing on the other hand the maximum Q size at any",
+    "start": "790720",
+    "end": "797320"
+  },
+  {
+    "text": "point during the test was five for one replica uh I don't even put the graph in my slides because it's pretty boring",
+    "start": "797320",
+    "end": "802480"
+  },
+  {
+    "text": "it's like zero for most of the test um and so in production I just want to note",
+    "start": "802480",
+    "end": "807760"
+  },
+  {
+    "text": "that the impact of this p load balancing will depend uh on the actual user requests coming in so the exact impact",
+    "start": "807760",
+    "end": "814160"
+  },
+  {
+    "text": "will depend on the basically the number of tokens coming in and out um for example if you have like a large text",
+    "start": "814160",
+    "end": "819920"
+  },
+  {
+    "text": "summarization requests that are hitting the same model endpoint as chat users you might have even more variants than",
+    "start": "819920",
+    "end": "825440"
+  },
+  {
+    "text": "like 16 to, 1600 tokens which could make this problem even worse similarly like",
+    "start": "825440",
+    "end": "830560"
+  },
+  {
+    "text": "if you're doing rag um so this is a really significant difference and really highlights the impact on user experience",
+    "start": "830560",
+    "end": "836639"
+  },
+  {
+    "text": "of poor load balancing for llm in um but even with K native there still",
+    "start": "836639",
+    "end": "842720"
+  },
+  {
+    "text": "were a few requests that had over 5sec ttft um and the 99th percenti is almost 3 seconds so that's still quite a long",
+    "start": "842720",
+    "end": "849120"
+  },
+  {
+    "text": "time for a user to wait for their first token back uh so I think there's still room for improvement so I wanted to see",
+    "start": "849120",
+    "end": "854560"
+  },
+  {
+    "text": "if we could do better uh than this with some custom load balancing",
+    "start": "854560",
+    "end": "859480"
+  },
+  {
+    "text": "strategies um so how could we improve on requested spaced load balancing where does it fall short um the issue comes",
+    "start": "859880",
+    "end": "867040"
+  },
+  {
+    "text": "down to the fact that the number of requests which can run in a batch is not constant it depends on the sequence",
+    "start": "867040",
+    "end": "873880"
+  },
+  {
+    "text": "lengths of the requests uh in other words the number of tokens in those requests um so keeping the number of",
+    "start": "873880",
+    "end": "879240"
+  },
+  {
+    "text": "requests per replica equal like we do with K native doesn't mean that each replica is actually equally utilized um",
+    "start": "879240",
+    "end": "886720"
+  },
+  {
+    "text": "the real limiting factor on how many requests can be batched together is the KV cache um you can think of the KV",
+    "start": "886720",
+    "end": "892759"
+  },
+  {
+    "text": "cache as like the model's working memory um more concretely key value pair is derived from the self attention layers",
+    "start": "892759",
+    "end": "898720"
+  },
+  {
+    "text": "of the model model are cached for previous tokens because they're needed to predict future tokens um so this is",
+    "start": "898720",
+    "end": "904199"
+  },
+  {
+    "text": "called the key value cache or KV cache um and this is stored in GPU memory and the size of the KV cache is",
+    "start": "904199",
+    "end": "911440"
+  },
+  {
+    "text": "basically a function of the number of sequences that are being processed in the current batch and the length of those sequences and then also the size",
+    "start": "911440",
+    "end": "917839"
+  },
+  {
+    "text": "of the model um so as a result the maximum batch size and sequence lengths that your model can process will be",
+    "start": "917839",
+    "end": "923800"
+  },
+  {
+    "text": "limited by the KV cache size so taking a look at the KV cache utilization metrics reported by VM you can see a couple of",
+    "start": "923800",
+    "end": "930680"
+  },
+  {
+    "text": "things um first in the Raw deployment case you can see a huge range in KV cache utilization throughout the test",
+    "start": "930680",
+    "end": "937120"
+  },
+  {
+    "text": "where some replicas are at like under 60% at times While others are near 100 and then in the K native case each",
+    "start": "937120",
+    "end": "943560"
+  },
+  {
+    "text": "replica is much more even um but there's still times when some replicas are at 100% for extended periods while others",
+    "start": "943560",
+    "end": "949839"
+  },
+  {
+    "text": "are near 80% um so those replicas that are at 100% utilization won't be able to",
+    "start": "949839",
+    "end": "955360"
+  },
+  {
+    "text": "process a request if it's if it arrives um until some of the current requests",
+    "start": "955360",
+    "end": "960399"
+  },
+  {
+    "text": "are complete so that's why we get a queue growing still um so in order to avoid or reduce the number of requests",
+    "start": "960399",
+    "end": "966199"
+  },
+  {
+    "text": "which end up waiting in a q I wanted to experiment uh with load balancing based on the KV cach utilization reported by",
+    "start": "966199",
+    "end": "973759"
+  },
+  {
+    "text": "VM um so the strategy that I came up with was basically scrape the KV cast usage metrics for each replica and then",
+    "start": "973759",
+    "end": "981440"
+  },
+  {
+    "text": "for each request pick two replicas randomly and then send to the lower of the two in terms of KV cache um note",
+    "start": "981440",
+    "end": "988079"
+  },
+  {
+    "text": "that in case of there there is no built-in solution for custom load balancing like this so this is basically",
+    "start": "988079",
+    "end": "993319"
+  },
+  {
+    "text": "a proof of concept that I implemented on the client side um in this case the load tester is running in a pod on the same",
+    "start": "993319",
+    "end": "999079"
+  },
+  {
+    "text": "node as the model replicas um and the results turned out pretty well so again the throughput and",
+    "start": "999079",
+    "end": "1004600"
+  },
+  {
+    "text": "itl were pretty close not a huge difference but uh on the plot of ttft you can see that we've really brought",
+    "start": "1004600",
+    "end": "1010519"
+  },
+  {
+    "text": "down the tail latency even further from like the 2.84 that we had with K native down to under 1 second um with this",
+    "start": "1010519",
+    "end": "1017560"
+  },
+  {
+    "text": "custom strategy but um there's an issue what if we",
+    "start": "1017560",
+    "end": "1023160"
+  },
+  {
+    "text": "increase the load to slightly beyond what these eight replicas can handle so going from 12 RPS to 13 RPS um in this",
+    "start": "1023160",
+    "end": "1030640"
+  },
+  {
+    "text": "case interestingly K native actually does slightly better than my custom strategy did and the problem is that under this level of load when every",
+    "start": "1030640",
+    "end": "1037079"
+  },
+  {
+    "text": "replica is saturated the KV cache usage is basically at 100% for every single replica um so when every replica is",
+    "start": "1037079",
+    "end": "1044360"
+  },
+  {
+    "text": "saturated it doesn't make sense to look at the KV cache usage percent because none of the replicas have room to add",
+    "start": "1044360",
+    "end": "1049840"
+  },
+  {
+    "text": "another request um it's like they're all between 98 and 100% um so in this case it makes more sense to load balance",
+    "start": "1049840",
+    "end": "1056240"
+  },
+  {
+    "text": "based on the Q size which is closer to what K native is doing um than to look only at the KV cache usage um and this",
+    "start": "1056240",
+    "end": "1063039"
+  },
+  {
+    "text": "is Illustrated Again by The Q size metric from BLM I don't show the graph here but um the maximums for K native",
+    "start": "1063039",
+    "end": "1069360"
+  },
+  {
+    "text": "was 26 requests at any time and then for the custom strategy was 36 um so that brings us to a slightly",
+    "start": "1069360",
+    "end": "1075760"
+  },
+  {
+    "text": "better strategy which is load Balan is based on both the Q L L and also the KV cache um the strategy is just scrape",
+    "start": "1075760",
+    "end": "1083120"
+  },
+  {
+    "text": "both metrics from the VM replicas pick two randomly and then first pick the one with lower number of requests waiting",
+    "start": "1083120",
+    "end": "1089600"
+  },
+  {
+    "text": "but if there's a tie in terms of Q length then send to the one with the lower KV cache usage so in effect we're",
+    "start": "1089600",
+    "end": "1094960"
+  },
+  {
+    "text": "still load balancing by KV cach usage under manageable load when there's no Q's building up but in the case where",
+    "start": "1094960",
+    "end": "1100640"
+  },
+  {
+    "text": "the traffic is so high that every replica is saturated we also take into account the Q length um and on the right",
+    "start": "1100640",
+    "end": "1106760"
+  },
+  {
+    "text": "we can see the performance results of this strategy um so under this 13 RPS load we get",
+    "start": "1106760",
+    "end": "1112919"
+  },
+  {
+    "text": "results on par with K native and then under the previous load of 12 RPS we get better results than K native same as the",
+    "start": "1112919",
+    "end": "1118880"
+  },
+  {
+    "text": "previous strategy um so this concludes the load balancing performance results I have in",
+    "start": "1118880",
+    "end": "1124320"
+  },
+  {
+    "text": "this talk so just to recap we showed that when deploying multiple replicas of a model round robin or random load",
+    "start": "1124320",
+    "end": "1130799"
+  },
+  {
+    "text": "balancing can lead to significant imbalance and really high ttfts due to queuing um and we showed that request",
+    "start": "1130799",
+    "end": "1136840"
+  },
+  {
+    "text": "based load balancing B uh offered by K native does quite a bit better um and",
+    "start": "1136840",
+    "end": "1141960"
+  },
+  {
+    "text": "then we showed that we can improve on that even further by custom load balancing on KV cache and Q size um",
+    "start": "1141960",
+    "end": "1147919"
+  },
+  {
+    "text": "because again the maximum batch size that VM can actually handle is dynamic it's based on the space in the KV",
+    "start": "1147919",
+    "end": "1154720"
+  },
+  {
+    "text": "cache um now before I get into the next part of the talk I want to address some alternatives to running multiple replicas of your model so of course we",
+    "start": "1154720",
+    "end": "1161720"
+  },
+  {
+    "text": "run multiple replicas of an llm in order to get more throughput to support more concurrent users or maybe to bring down",
+    "start": "1161720",
+    "end": "1167919"
+  },
+  {
+    "text": "our latency but this can also be achieved by Distributing a model across multiple accelerators or gpus um so",
+    "start": "1167919",
+    "end": "1174480"
+  },
+  {
+    "text": "there's two common ways to do this there's tensor parallelism and pipeline parallelism um in general pipeline",
+    "start": "1174480",
+    "end": "1180400"
+  },
+  {
+    "text": "parallelism is just being used for running like super large models uh that don't fit in a single nodes accelerators",
+    "start": "1180400",
+    "end": "1185840"
+  },
+  {
+    "text": "across multiple nodes um so I'm going to kind of put that aside and just talk about when to use tensor parallelism so",
+    "start": "1185840",
+    "end": "1191440"
+  },
+  {
+    "text": "it should be used first of all if the model that you want to run doesn't fit within a single gpus memory in that case",
+    "start": "1191440",
+    "end": "1196760"
+  },
+  {
+    "text": "there's basically no other option you just have to distribut it across multiple accelerators um aside from that case",
+    "start": "1196760",
+    "end": "1202919"
+  },
+  {
+    "text": "tensor parallelism can also be used in some cases to improve latency this is not always the case but assuming you",
+    "start": "1202919",
+    "end": "1208960"
+  },
+  {
+    "text": "have like Fast uh inter GPU communication uh in many cases you can get a latency improvement with a model",
+    "start": "1208960",
+    "end": "1215360"
+  },
+  {
+    "text": "distributed across two or more gpus and then lastly the other situation that you might want to use sensor parallelism is",
+    "start": "1215360",
+    "end": "1222559"
+  },
+  {
+    "text": "if your model does fit in your gpus memory but just barely it almost fills your gpus memory uh in that case there's",
+    "start": "1222559",
+    "end": "1228720"
+  },
+  {
+    "text": "not going to be enough space left for the KV cache which will limit your batch size um or sequence length that you can",
+    "start": "1228720",
+    "end": "1234120"
+  },
+  {
+    "text": "handle and then in cases like that you can get a better throughput Improvement by increasing the degree of tensor",
+    "start": "1234120",
+    "end": "1241280"
+  },
+  {
+    "text": "tensor parallelism than you would by scaling up the replicas um so looking at the graph on the right as an example you",
+    "start": "1241280",
+    "end": "1247640"
+  },
+  {
+    "text": "can see that when we go from one GPU to two gpus with tensor parallelism we get slightly better than double the",
+    "start": "1247640",
+    "end": "1252760"
+  },
+  {
+    "text": "throughput at the same latency but then when we go to four replicas we don't get even close to another doubling of",
+    "start": "1252760",
+    "end": "1258240"
+  },
+  {
+    "text": "throughput but um so in this casee it would be better to run two replicas at with two gpus uh than one replica with",
+    "start": "1258240",
+    "end": "1265679"
+  },
+  {
+    "text": "four gpus okay um so this is some overlap",
+    "start": "1265679",
+    "end": "1272840"
+  },
+  {
+    "text": "with the previous talk I'm going to kind of breathe through this and just say you should watch the recording if you missed the previous talk they go into much more",
+    "start": "1272840",
+    "end": "1279440"
+  },
+  {
+    "text": "depth of which triggers to use for autoscaling um I'll just note that um",
+    "start": "1279440",
+    "end": "1287520"
+  },
+  {
+    "text": "with K native native supports concurrency based Auto scaling uh RPS based Auto scaling and then CPU and",
+    "start": "1287520",
+    "end": "1294279"
+  },
+  {
+    "text": "memory utilization when you're deploying an llm on a GPU or other accelerator um",
+    "start": "1294279",
+    "end": "1299799"
+  },
+  {
+    "text": "CPU and memory are not good indicators if they load so I wouldn't recommend these concurrency and RPS are better",
+    "start": "1299799",
+    "end": "1305840"
+  },
+  {
+    "text": "options but they're not perfect because again uh the number of requests that can that a deployment can handle will depend",
+    "start": "1305840",
+    "end": "1311320"
+  },
+  {
+    "text": "on the sequence lengths of those incoming requests so recommendations might be KV cach utilization or Q size",
+    "start": "1311320",
+    "end": "1317640"
+  },
+  {
+    "text": "which is what they said in the prev talk um I think it would also be interesting to experiment with actually load sorry",
+    "start": "1317640",
+    "end": "1322919"
+  },
+  {
+    "text": "auto scaling based on the latency metrics that are reported by VM um so there's many options to consider in",
+    "start": "1322919",
+    "end": "1328760"
+  },
+  {
+    "text": "terms of which triggers to use to scale up the number of replicas um but regardless of how autoscaling is",
+    "start": "1328760",
+    "end": "1334880"
+  },
+  {
+    "text": "triggered the thing that you will need to optimize is how quickly your new model replica is ready after being scaled up um so in the next couple of",
+    "start": "1334880",
+    "end": "1341559"
+  },
+  {
+    "text": "slides I'm going to dig a little bit into that and discuss delays involved in scaling up new",
+    "start": "1341559",
+    "end": "1346760"
+  },
+  {
+    "text": "replicas so the major sources of delay when you're starting up a new replica of your model can include um pulling the",
+    "start": "1346760",
+    "end": "1354000"
+  },
+  {
+    "text": "inference server image for instance VM the container image is like 5 gigabytes when compressed and 10 gbes uncompressed",
+    "start": "1354000",
+    "end": "1361320"
+  },
+  {
+    "text": "um and then downloading the model files is another big source of delay if you're running in the cloud and you're storing",
+    "start": "1361320",
+    "end": "1366840"
+  },
+  {
+    "text": "your models in S3 then depending on the configuration this can add a huge delay also depending on the size of your model",
+    "start": "1366840",
+    "end": "1372279"
+  },
+  {
+    "text": "this could out a huge delay if you're using kerve and using S3 as the storage Source in your inference service then",
+    "start": "1372279",
+    "end": "1379080"
+  },
+  {
+    "text": "every pod will need to download the model once the model files are downloaded they need to be loaded from",
+    "start": "1379080",
+    "end": "1384919"
+  },
+  {
+    "text": "dis into GPU memory before the inference server can start serving requests and this can take anywhere from a few",
+    "start": "1384919",
+    "end": "1390600"
+  },
+  {
+    "text": "seconds to a few minutes depending on how large your model is and how fast your storage is um and then there's",
+    "start": "1390600",
+    "end": "1396559"
+  },
+  {
+    "text": "other steps at the runtime level that can add additional delay uh depending on your accelerator stack you might get a",
+    "start": "1396559",
+    "end": "1402200"
+  },
+  {
+    "text": "big performance Improvement by doing some like warm-up phase before you start serving requests to optimize the um",
+    "start": "1402200",
+    "end": "1408919"
+  },
+  {
+    "text": "kernels for the accelerator um so some of these have kind of obvious Solutions",
+    "start": "1408919",
+    "end": "1413960"
+  },
+  {
+    "text": "like cach the model locally don't download it to uh for each replica when they're running on the same node and use",
+    "start": "1413960",
+    "end": "1419799"
+  },
+  {
+    "text": "fast storage if you can and of course if possible store your container image and model files somewhere where they can be",
+    "start": "1419799",
+    "end": "1424960"
+  },
+  {
+    "text": "downloaded quickly um but on the right I have some performance results kind of illustrating the impact on user",
+    "start": "1424960",
+    "end": "1430880"
+  },
+  {
+    "text": "experience if you don't do any of these things right um so I'm running a load test at a request rate which two pods",
+    "start": "1430880",
+    "end": "1436600"
+  },
+  {
+    "text": "can easily handle but it's too much for one pod to handle um looking at the timeline on the bottom shortly after",
+    "start": "1436600",
+    "end": "1443600"
+  },
+  {
+    "text": "starting the load test um Auto scaling triggers pod one to start up in this",
+    "start": "1443600",
+    "end": "1448960"
+  },
+  {
+    "text": "case I'm running my model on nodes where the OS root volume is pretty slow it was backed by a gp3 EBS volume and I wasn't",
+    "start": "1448960",
+    "end": "1456279"
+  },
+  {
+    "text": "asking for any specified number of iops um so this causes the storage a nit step where the model is downloaded from S3 to",
+    "start": "1456279",
+    "end": "1462440"
+  },
+  {
+    "text": "take like 5 minutes and then once it's downloaded it has to be copied into GPU memory which is again slow because the",
+    "start": "1462440",
+    "end": "1468399"
+  },
+  {
+    "text": "read speeds on this volume um so in total the time between pod one uh when",
+    "start": "1468399",
+    "end": "1473440"
+  },
+  {
+    "text": "pod one is created and then when it's actually serving requests is something like seven to eight minutes um and the",
+    "start": "1473440",
+    "end": "1478720"
+  },
+  {
+    "text": "impact is that pod Zero's batching capability is quickly maxed out so the queue grows and grows um until requests",
+    "start": "1478720",
+    "end": "1485200"
+  },
+  {
+    "text": "are waiting over a minute and then we see requests timing out um so once pod one is finally ready the two replicas",
+    "start": "1485200",
+    "end": "1491880"
+  },
+  {
+    "text": "quickly catch up and then we bring back the ttft down to like under 1 second um and then also on the top graph you can",
+    "start": "1491880",
+    "end": "1498039"
+  },
+  {
+    "text": "see the itl uh stabilizes a bit once both uh replicas are serving",
+    "start": "1498039",
+    "end": "1504840"
+  },
+  {
+    "text": "requests so now I'm showing results of this same experiment uh when we're doing some things right to make the second pod",
+    "start": "1504840",
+    "end": "1511120"
+  },
+  {
+    "text": "load much faster in this case I'm using a caser feature called model cars um and this allows us to load model files",
+    "start": "1511120",
+    "end": "1518240"
+  },
+  {
+    "text": "directly from a container image this helps a lot because it allows us to Cache model files locally so they don't",
+    "start": "1518240",
+    "end": "1523760"
+  },
+  {
+    "text": "need to be pulled twice to the same node um of course we could accomplish this this same thing by using like a PVC uh",
+    "start": "1523760",
+    "end": "1530480"
+  },
+  {
+    "text": "with local storage but model cars is kind of nice in my opinion because it simplifies the orchestration quite a bit",
+    "start": "1530480",
+    "end": "1535919"
+  },
+  {
+    "text": "we don't need to create a PVC and set up local storage it just leverages the existing logic that's built into",
+    "start": "1535919",
+    "end": "1540960"
+  },
+  {
+    "text": "kubernetes to pull and cach uh container images uh one shortcoming I guess that I",
+    "start": "1540960",
+    "end": "1546120"
+  },
+  {
+    "text": "will note for model cars is that for large models which could reasonably be like over 100 gigabytes some",
+    "start": "1546120",
+    "end": "1552000"
+  },
+  {
+    "text": "configuration will be needed to uh allow for container images of this size in general container registries don't",
+    "start": "1552000",
+    "end": "1558480"
+  },
+  {
+    "text": "really support this it's not really what they were designed for but I think this is something the community can maybe come together and and make some",
+    "start": "1558480",
+    "end": "1565200"
+  },
+  {
+    "text": "improvements um so for this experiment I'm also using a faster storage for the",
+    "start": "1565200",
+    "end": "1570360"
+  },
+  {
+    "text": "nodes root volume so I switched from an EBS gp3 volume to io1 and then I'm also",
+    "start": "1570360",
+    "end": "1576520"
+  },
+  {
+    "text": "uh configured it for 64k iops so that also speeds up the model load time um",
+    "start": "1576520",
+    "end": "1582000"
+  },
+  {
+    "text": "and it also speeds up um how fast the model car image is loaded um and you can",
+    "start": "1582000",
+    "end": "1588399"
+  },
+  {
+    "text": "see that when we configure these things correctly we bring the startup time down to from like 7 to 8 minutes down to",
+    "start": "1588399",
+    "end": "1594240"
+  },
+  {
+    "text": "about 40 seconds uh we're not seeing any requests timeout and the peak ttft",
+    "start": "1594240",
+    "end": "1599279"
+  },
+  {
+    "text": "during this time while we're waiting for the second replica to come up uh is about 20 seconds of course 20 seconds is",
+    "start": "1599279",
+    "end": "1604960"
+  },
+  {
+    "text": "still a long time to wait for a request there's definitely further room for improvement here I think in the model load time at the runtime level um okay",
+    "start": "1604960",
+    "end": "1612720"
+  },
+  {
+    "text": "so this concludes the auto scaling part of the talk so I just want to conclude",
+    "start": "1612720",
+    "end": "1617760"
+  },
+  {
+    "text": "by summarizing in what I showed so when comparing again K native request based load balancing to the random load",
+    "start": "1617760",
+    "end": "1624000"
+  },
+  {
+    "text": "balancing that you get with replicas behind a service request based load balancing does way better in terms of",
+    "start": "1624000",
+    "end": "1629279"
+  },
+  {
+    "text": "ttft and a bit better even in terms of throughput and itl um but we can get even further performance Improvement by",
+    "start": "1629279",
+    "end": "1635760"
+  },
+  {
+    "text": "load balancing based on custom metrics like KV cache utilization and Q size um",
+    "start": "1635760",
+    "end": "1641240"
+  },
+  {
+    "text": "and then on the auto scaling side of things I just want to highlight that you need to be careful how you uh configure your deployments cuz if you're not",
+    "start": "1641240",
+    "end": "1647080"
+  },
+  {
+    "text": "careful model loading time can be quite long uh and then I also want to highlight model cars again which is a nice way to do this with kerve uh to",
+    "start": "1647080",
+    "end": "1654159"
+  },
+  {
+    "text": "cach model files locally via containers I have some future ideas or sort of extensions of this work I want",
+    "start": "1654159",
+    "end": "1660200"
+  },
+  {
+    "text": "to note as well first of all doing some more experiments with auto scaling based on custom metrics like itl or KV cache",
+    "start": "1660200",
+    "end": "1668240"
+  },
+  {
+    "text": "um although the results for that you can watch the recording of the previous talk again um and then along these lines I",
+    "start": "1668240",
+    "end": "1673399"
+  },
+  {
+    "text": "also want to call out uh the feature requests for auto auto scaling based on C custom metrics kerve so there's some",
+    "start": "1673399",
+    "end": "1679760"
+  },
+  {
+    "text": "issues open on GitHub uh if anyone from the community wants to take a swing at that I think it would be a great",
+    "start": "1679760",
+    "end": "1685039"
+  },
+  {
+    "text": "contribution um I also wanted to mention the fast safe tensors project this is a python package which aims to speed up",
+    "start": "1685039",
+    "end": "1691919"
+  },
+  {
+    "text": "model loading by leveraging Nvidia GPU direct storage which basically loads model weights directly from nvme into",
+    "start": "1691919",
+    "end": "1698559"
+  },
+  {
+    "text": "GPU memory without going through system memory um so that's something that hopefully will get supported at the",
+    "start": "1698559",
+    "end": "1703720"
+  },
+  {
+    "text": "runtime level soon um and lastly I want to shout out working group serving uh and in particular the effort to create a",
+    "start": "1703720",
+    "end": "1710080"
+  },
+  {
+    "text": "community standard tool for llm load testing uh in this talk I think I really just scratched the surface on some of",
+    "start": "1710080",
+    "end": "1715519"
+  },
+  {
+    "text": "these topics so if this these topics are interesting to you you should definitely get involved in the serving working",
+    "start": "1715519",
+    "end": "1720840"
+  },
+  {
+    "text": "group okay thank you for listening I'd be happy to take any",
+    "start": "1720840",
+    "end": "1726158"
+  },
+  {
+    "text": "questions there is a microphone over there uh if you have any questions",
+    "start": "1729159",
+    "end": "1735760"
+  },
+  {
+    "text": "yeah thanks for the great talk uh you mentioned about VM and case of when I check the documentation it says VM is",
+    "start": "1744960",
+    "end": "1751919"
+  },
+  {
+    "text": "still experimental does Cas of require VM for serving or are the specific use",
+    "start": "1751919",
+    "end": "1756960"
+  },
+  {
+    "text": "cases where it would be required uh yes the kerve definitely doesn't require VM",
+    "start": "1756960",
+    "end": "1762799"
+  },
+  {
+    "text": "um I'm basically using a serving runtime to Define like a custom runtime uh I think surf come like basically has some",
+    "start": "1762799",
+    "end": "1769519"
+  },
+  {
+    "text": "supported runtimes that come with it um but yeah you can basically use any any runtime that you want with kerf there's",
+    "start": "1769519",
+    "end": "1775880"
+  },
+  {
+    "text": "no dependency there and uh when would you recommend using WM with",
+    "start": "1775880",
+    "end": "1781240"
+  },
+  {
+    "text": "kesa um it's an interesting question yeah so I mean I mentioned there's many entrance",
+    "start": "1781240",
+    "end": "1786559"
+  },
+  {
+    "text": "engines out there that you could use for serving llms I think VM has a lot of community support and like a lot of um",
+    "start": "1786559",
+    "end": "1793720"
+  },
+  {
+    "text": "it's moving very quickly getting the latest and greatest performance optimizations in so I guess I'd say if",
+    "start": "1793720",
+    "end": "1798760"
+  },
+  {
+    "text": "you want to deploy an llm VM would be my runtime of choice so um yeah I don't",
+    "start": "1798760",
+    "end": "1805039"
+  },
+  {
+    "text": "know beyond that cool thanks thank",
+    "start": "1805039",
+    "end": "1810519"
+  },
+  {
+    "text": "you Hi Well very very insightful thanks a lot um I had a question around like",
+    "start": "1810519",
+    "end": "1815919"
+  },
+  {
+    "text": "the uh the load balancing part as well as the auto scaling and wondering whether there was any consideration",
+    "start": "1815919",
+    "end": "1821640"
+  },
+  {
+    "text": "about like having some Logic for rate limiting somehow dynamically the request",
+    "start": "1821640",
+    "end": "1827399"
+  },
+  {
+    "text": "to avoid overloading like a one replica for instance when you add only one I would",
+    "start": "1827399",
+    "end": "1833080"
+  },
+  {
+    "text": "help the uh ttf or itl yeah that's an interesting question I mean one thing I",
+    "start": "1833080",
+    "end": "1838840"
+  },
+  {
+    "text": "will note is um with kerve you can set like a Max container concurrency so I",
+    "start": "1838840",
+    "end": "1845200"
+  },
+  {
+    "text": "didn't do that in any of my tests but basically if you wanted to make sure that the que never went over a certain",
+    "start": "1845200",
+    "end": "1850360"
+  },
+  {
+    "text": "value or you just wanted to control the level of concurrency that ever made it uh the Q proxy can do that so basically",
+    "start": "1850360",
+    "end": "1855519"
+  },
+  {
+    "text": "the Q proxy it' basically be moving the Q from the VM level up one level um",
+    "start": "1855519",
+    "end": "1861559"
+  },
+  {
+    "text": "which I think in some scenarios wouldn't make a difference but in the case where like you Auto scale and then add a new",
+    "start": "1861559",
+    "end": "1867279"
+  },
+  {
+    "text": "replica those requests that timed out might not have timed out if you had been queuing uh at the Q proxy level instead",
+    "start": "1867279",
+    "end": "1873320"
+  },
+  {
+    "text": "of at the BLM level so yeah I wasn't using that caser feature but there is a caser feature to do that cool yeah it",
+    "start": "1873320",
+    "end": "1878799"
+  },
+  {
+    "text": "sounds good I was wondering like uh if for instance like having lower priority for larger requests to give further",
+    "start": "1878799",
+    "end": "1886279"
+  },
+  {
+    "text": "throughput would be yeah I think there's a lot of interesting things you could do there I don't think there's any support",
+    "start": "1886279",
+    "end": "1892480"
+  },
+  {
+    "text": "for that in Cas serve but I think yeah there is some interesting things you could do uh because of course you don't know the number of output tokens that",
+    "start": "1892480",
+    "end": "1898320"
+  },
+  {
+    "text": "will be generated but you do know how long the input prompt is um so I think like a custom load balancer could definitely take that into account thanks",
+    "start": "1898320",
+    "end": "1905320"
+  },
+  {
+    "text": "a lot no problem hi so again great talk so one thing uh so do you have any",
+    "start": "1905320",
+    "end": "1911760"
+  },
+  {
+    "text": "recommendation like you know if there's a large model do you recommend to put in an S3 compared to BBC comp compared to",
+    "start": "1911760",
+    "end": "1918799"
+  },
+  {
+    "text": "ml tracking server compared to any other place have you seen which gives better",
+    "start": "1918799",
+    "end": "1924279"
+  },
+  {
+    "text": "you know performance or better lad time uh instead of you know like a standardized process um so just to make",
+    "start": "1924279",
+    "end": "1933039"
+  },
+  {
+    "text": "sure I understood the question you're basically asking if you're trying to run a large model do I have a recommendation of like how you should store it in order",
+    "start": "1933039",
+    "end": "1939279"
+  },
+  {
+    "text": "to load it quickly um yeah I mean in my like experiments running like a 70b",
+    "start": "1939279",
+    "end": "1945080"
+  },
+  {
+    "text": "model uh I'd never store it and three because it just takes too long and since I'm playing with like performance",
+    "start": "1945080",
+    "end": "1951080"
+  },
+  {
+    "text": "settings on VM restarting it takes too long so I always use a PVC with local storage um I think model cars is another",
+    "start": "1951080",
+    "end": "1958000"
+  },
+  {
+    "text": "you know you can also use that it basically accomplishes the same thing of caching it on your node um I think if",
+    "start": "1958000",
+    "end": "1964080"
+  },
+  {
+    "text": "you're doing like Auto scaling especially node AO yeah node Auto scaling is something I didn't even get into in this talk if you're doing node",
+    "start": "1964080",
+    "end": "1970279"
+  },
+  {
+    "text": "Auto scaling with a large model uh you're going to basically have to over provision your cluster so that you have",
+    "start": "1970279",
+    "end": "1976240"
+  },
+  {
+    "text": "time to preo that cuz it's like a 70b model it's it's huge it's 140 gig it's",
+    "start": "1976240",
+    "end": "1981279"
+  },
+  {
+    "text": "going to take a long time to download basically no matter where you put it um but yeah I would definitely recommend like local storage or using model cars",
+    "start": "1981279",
+    "end": "1987720"
+  },
+  {
+    "text": "thank you hi nice talk so I was wondering and",
+    "start": "1987720",
+    "end": "1993559"
+  },
+  {
+    "text": "your custom node balancing you use this and the power of two choices over the",
+    "start": "1993559",
+    "end": "1999159"
+  },
+  {
+    "text": "absolute least noed is because of the performance overhead and the scalability",
+    "start": "1999159",
+    "end": "2004799"
+  },
+  {
+    "text": "or have you compare this yeah thank you for asking that's a good question so I did play with like considering all",
+    "start": "2004799",
+    "end": "2011360"
+  },
+  {
+    "text": "options instead of using just the pick two and pick the better of the two uh and basically the way I implemented it I",
+    "start": "2011360",
+    "end": "2018080"
+  },
+  {
+    "text": "had one thread that was doing like the metric scraping and then communicating it to the like CL uh the the load test",
+    "start": "2018080",
+    "end": "2024720"
+  },
+  {
+    "text": "user threads um and so basically depending on the frequency of how often I scrape the metrics you get better or",
+    "start": "2024720",
+    "end": "2030960"
+  },
+  {
+    "text": "worse performance by considering all options um like if the frequency of scraping the metric is too low then you",
+    "start": "2030960",
+    "end": "2036799"
+  },
+  {
+    "text": "end up with a burst of requests that all end up at that one that did have the lowest KB cach usage but then after that",
+    "start": "2036799",
+    "end": "2042679"
+  },
+  {
+    "text": "burst of requests it is like oversaturated and you have some Q so in general I got kind of better results",
+    "start": "2042679",
+    "end": "2048800"
+  },
+  {
+    "text": "with the power of two um and then yeah there's also like the overhead of if you increase the",
+    "start": "2048800",
+    "end": "2054878"
+  },
+  {
+    "text": "frequency of scraping then you're kind of bombarding your replicas with a bunch of metric scraping requests um I didn't",
+    "start": "2054879",
+    "end": "2062118"
+  },
+  {
+    "text": "completely get down to the bottom of whether that was making a difference in performance but um yeah I I liked what I",
+    "start": "2062119",
+    "end": "2067480"
+  },
+  {
+    "text": "was getting getting with the power of two I guess yeah it makes sense theoretical for N scale system I think",
+    "start": "2067480",
+    "end": "2072878"
+  },
+  {
+    "text": "power of two choices is a bad one thank you thank you hey I know you mentioned that you",
+    "start": "2072879",
+    "end": "2078878"
+  },
+  {
+    "text": "didn't go into Auto scaling for multi-node deployments but I mean any tips on on how to think about this for",
+    "start": "2078879",
+    "end": "2084638"
+  },
+  {
+    "text": "the 405b model deployment across like two nodes you know 8 gpus each inter",
+    "start": "2084639",
+    "end": "2090480"
+  },
+  {
+    "text": "connect is also going to be an issue so okay just to make sure I understood are you talking about Auto scaling 405b when",
+    "start": "2090480",
+    "end": "2097800"
+  },
+  {
+    "text": "you're running it across multiple nodes or just in general deploying the 405b uh like statically yeah so does Cas",
+    "start": "2097800",
+    "end": "2104440"
+  },
+  {
+    "text": "of support that uh I guess VM does support it now so K of as an extension should support that but you tried the",
+    "start": "2104440",
+    "end": "2111000"
+  },
+  {
+    "text": "autoscaling version of that okay so I think as of today kerve does not it's in the master okay it's it's uh it's moving",
+    "start": "2111000",
+    "end": "2120359"
+  },
+  {
+    "text": "rapidly so I guess I don't have the latest information on Multi node uh deployments with caser so yeah I know",
+    "start": "2120359",
+    "end": "2126160"
+  },
+  {
+    "text": "there's a lot of work there in like the serving working group community and in the kve community thanks thank",
+    "start": "2126160",
+    "end": "2134599"
+  },
+  {
+    "text": "you thanks thanks for the great talk um so uh like a lot of what you said about",
+    "start": "2134599",
+    "end": "2139760"
+  },
+  {
+    "text": "load balancing is also um I mean discussed in uh working group serving",
+    "start": "2139760",
+    "end": "2145119"
+  },
+  {
+    "text": "about llm instance Gateway right so do you think um whatever you're doing is almost alike whatever is happening there",
+    "start": "2145119",
+    "end": "2152400"
+  },
+  {
+    "text": "or or like what's the differences mainly um I guess the honest answer is I'm not",
+    "start": "2152400",
+    "end": "2157640"
+  },
+  {
+    "text": "not up to date with everything going on in the llm instance Gateway I know they're doing some really interesting",
+    "start": "2157640",
+    "end": "2162880"
+  },
+  {
+    "text": "things that kind of go beyond what I talked about in terms of like uh load balancing with different Laura adapters",
+    "start": "2162880",
+    "end": "2168720"
+  },
+  {
+    "text": "and um load balancing to different models that are running um so but in",
+    "start": "2168720",
+    "end": "2174000"
+  },
+  {
+    "text": "terms of like load balancing by KB cach I think they are aware of that and have implemented it in the llm instance",
+    "start": "2174000",
+    "end": "2179920"
+  },
+  {
+    "text": "Gateway okay cool and um I mean um I did see a lot of talks about reserve and",
+    "start": "2179920",
+    "end": "2186480"
+  },
+  {
+    "text": "kerve so over here you went with caser so uh what was the notion of your choice",
+    "start": "2186480",
+    "end": "2192319"
+  },
+  {
+    "text": "like what's the thought process that's a good question um I don't know all the present counts",
+    "start": "2192319",
+    "end": "2199160"
+  },
+  {
+    "text": "because I have never used race surf so I guess that's like the short answer so I I don't want to misrepresent anything",
+    "start": "2199160",
+    "end": "2204680"
+  },
+  {
+    "text": "about rayer by trying to give an answer all right and um what's the like um so I",
+    "start": "2204680",
+    "end": "2210560"
+  },
+  {
+    "text": "know that K serve is also going to do like some request routing um I mean if you have multiple LMS hosted right so",
+    "start": "2210560",
+    "end": "2216440"
+  },
+  {
+    "text": "let's say I have like a vanilla vlm and um I'm hosting the same model um I mean",
+    "start": "2216440",
+    "end": "2222040"
+  },
+  {
+    "text": "with case serve as well so by directly hitting the server and by hitting it through K serve uh do you have any",
+    "start": "2222040",
+    "end": "2229280"
+  },
+  {
+    "text": "latency implications over there like uh what do you see in your benchmarks or have you done some yeah no that's a good",
+    "start": "2229280",
+    "end": "2235319"
+  },
+  {
+    "text": "question so I from my benchmarking I've basically seen almost no overhead um I",
+    "start": "2235319",
+    "end": "2241280"
+  },
+  {
+    "text": "think the reality is like any little bit of few millisecond difference uh you",
+    "start": "2241280",
+    "end": "2247200"
+  },
+  {
+    "text": "would bar really notice it because these requests are like so long lived and the time to First token is already going to be like in the hundreds of milliseconds",
+    "start": "2247200",
+    "end": "2253760"
+  },
+  {
+    "text": "um but the short answer is basically no I've never seen any any noticeable difference in latency with caser versus",
+    "start": "2253760",
+    "end": "2260560"
+  },
+  {
+    "text": "with like raw deployment got it okay cool thanks thank you",
+    "start": "2260560",
+    "end": "2266599"
+  }
+]

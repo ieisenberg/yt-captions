@@ -1,0 +1,1777 @@
+[
+  {
+    "text": "hello everyone thank you for coming my name is Daniel Hawkman I'm software",
+    "start": "30",
+    "end": "5220"
+  },
+  {
+    "text": "engineer at lyft I've been at left for about five years and in that time we've grown quite a bit obviously and when I",
+    "start": "5220",
+    "end": "12059"
+  },
+  {
+    "text": "started we had you know a PHP application monolithic application with a single database behind it and so",
+    "start": "12059",
+    "end": "19230"
+  },
+  {
+    "text": "if you fast forward to today we have you know 10 clusters 100 Redis",
+    "start": "19230",
+    "end": "24269"
+  },
+  {
+    "text": "clusters 500 dynamo tables 100 can you see streams the list goes on right there's a lot of state lifts and that",
+    "start": "24269",
+    "end": "30810"
+  },
+  {
+    "text": "all is backing 250 plus micro services so it turns out that on boy was actually",
+    "start": "30810",
+    "end": "35850"
+  },
+  {
+    "text": "instrumental and allowing us to scale up to the current levels that we're at so we're going to go through a little bit",
+    "start": "35850",
+    "end": "41820"
+  },
+  {
+    "text": "about instrumenting envoy databases using envoy in the service mesh and also",
+    "start": "41820",
+    "end": "47430"
+  },
+  {
+    "text": "how we actually used envoy to keep the lights on but also to scale up so I just",
+    "start": "47430",
+    "end": "52649"
+  },
+  {
+    "text": "want to start briefly by talking about a database outage that we used to commonly experience and this happens in a lot of",
+    "start": "52649",
+    "end": "59910"
+  },
+  {
+    "text": "databases is actually so we would have this issue where our database would slow down briefly in our case it was disk i/o",
+    "start": "59910",
+    "end": "67110"
+  },
+  {
+    "text": "weight was spiking a little bit so the client would open more connections there would be some slowdown because the",
+    "start": "67110",
+    "end": "72540"
+  },
+  {
+    "text": "connections aren't free and in 2 6 which we were running at the time you know there's only one request per",
+    "start": "72540",
+    "end": "78210"
+  },
+  {
+    "text": "connection so user requests are continuing to come in we're continuing to open more connections which causes",
+    "start": "78210",
+    "end": "83909"
+  },
+  {
+    "text": "additional slowdown to the authentication and you just kind of spin out of control and cascade until things",
+    "start": "83909",
+    "end": "89729"
+  },
+  {
+    "text": "blow up so yeah this was a real problem for us and we actually weren't running",
+    "start": "89729",
+    "end": "94770"
+  },
+  {
+    "text": " ourselves we were actually relying on a provider to do it for us a vendor and you know we were lucky basically",
+    "start": "94770",
+    "end": "101880"
+  },
+  {
+    "text": "that we even had the disk i/o weights that available in the console because that's the only thing we were able to",
+    "start": "101880",
+    "end": "107130"
+  },
+  {
+    "text": "correlate to the event actually happening so I just want to talk briefly for context like what what does it mean",
+    "start": "107130",
+    "end": "113310"
+  },
+  {
+    "text": "to be running a database you know in a cloud native environment well you're kind of making a trade-off right so you",
+    "start": "113310",
+    "end": "119610"
+  },
+  {
+    "text": "can instantly provision you know really high throughput infrastructure like I said we have 500 dynamo tables it would",
+    "start": "119610",
+    "end": "125939"
+  },
+  {
+    "text": "take a much larger team to run that level of infrastructure than we have today currently on our storage team",
+    "start": "125939",
+    "end": "130979"
+  },
+  {
+    "text": "but the trade-off is that you are you know can be running on share tenancy Hardware and probably in most cases not",
+    "start": "130979",
+    "end": "136830"
+  },
+  {
+    "text": "even have access to the underlying hardware you're gonna have limited access to telemetry so you know if I have a Linux box and I'm running it",
+    "start": "136830",
+    "end": "142890"
+  },
+  {
+    "text": "myself I can collect you know an infinite number of stats basically but the vendor is not going to be able to do that they're only going to provide what they",
+    "start": "142890",
+    "end": "148890"
+  },
+  {
+    "text": "think is valuable you can have limited access to a configuration so you know",
+    "start": "148890",
+    "end": "154500"
+  },
+  {
+    "text": "for security reasons or potentially for scale reasons usually you're only going to access to a subset of features that",
+    "start": "154500",
+    "end": "159750"
+  },
+  {
+    "text": "the database offers and finally you know a lot of times you're dealing with a closed source product like DynamoDB but",
+    "start": "159750",
+    "end": "165930"
+  },
+  {
+    "text": "even if you're not and you're doing something like RDS where you're running my sequel you're not gonna have the ability to just drop in a custom binary",
+    "start": "165930",
+    "end": "172380"
+  },
+  {
+    "text": "or with some patch that you think might fix your problem you're not going to attach a debugger or do print line debugging anything like that so what it",
+    "start": "172380",
+    "end": "178950"
+  },
+  {
+    "text": "really comes down to is that we're making a trade-off right so we're going cloud native and that gives us access to",
+    "start": "178950",
+    "end": "184680"
+  },
+  {
+    "text": "a lot of great things but the flip side of that is that we don't actually have access to anything so when we really",
+    "start": "184680",
+    "end": "189870"
+  },
+  {
+    "text": "want to debug when we really wanted to dive in and look at hard problems we're not gonna have any ability to do",
+    "start": "189870",
+    "end": "195450"
+  },
+  {
+    "text": "that so we're gonna have to look at the Status page raise the ticket wait for it to happen and I'm sure everyone here has",
+    "start": "195450",
+    "end": "200760"
+  },
+  {
+    "text": "kind of gone through through that process so I'd like to take a step back briefly and just talk about how envoy is",
+    "start": "200760",
+    "end": "207720"
+  },
+  {
+    "text": "deployed before we talk about the benefits that it's actually giving us with relation with regards to databases",
+    "start": "207720",
+    "end": "214769"
+  },
+  {
+    "text": "so a service mesh is basically a network topology and it just means that you know",
+    "start": "214769",
+    "end": "221910"
+  },
+  {
+    "text": "loosely that the proxy is deployed at every single hop of the network so in",
+    "start": "221910",
+    "end": "226920"
+  },
+  {
+    "text": "this case we've got our service mesh which is you know different clusters of applications with different runtimes",
+    "start": "226920",
+    "end": "232620"
+  },
+  {
+    "text": "every single host is running envoy as a sidecar on the Box every single host is",
+    "start": "232620",
+    "end": "237810"
+  },
+  {
+    "text": "registering into the discovery service and when services need to communicate to each other they do so via that sidecar",
+    "start": "237810",
+    "end": "244829"
+  },
+  {
+    "text": "envoy which knows how to address the rest of the instances in the in the destination cluster so this is what it",
+    "start": "244829",
+    "end": "252510"
+  },
+  {
+    "text": "would look like on an individual instance the application is going to communicate locally to the sidecar over",
+    "start": "252510",
+    "end": "258510"
+  },
+  {
+    "text": "you know the loopback interface or UNIX domain socket and well proxy all traffic out so but it",
+    "start": "258510",
+    "end": "263760"
+  },
+  {
+    "text": "turns out we don't just use this for for internal services we also use this for third-party services for cloud services",
+    "start": "263760",
+    "end": "270090"
+  },
+  {
+    "text": "and we'll see the benefit of doing that as we kind of look at how Amba can help",
+    "start": "270090",
+    "end": "275400"
+  },
+  {
+    "text": "us at different areas of the the OSI model so we're going to start with layer 3 and layer 4 so basically layer 1 is",
+    "start": "275400",
+    "end": "283020"
+  },
+  {
+    "text": "like electrons moving in wires and as you go up to layer 7 you're talking about the actual application specific",
+    "start": "283020",
+    "end": "288360"
+  },
+  {
+    "text": "protocol so we're gonna start at layer 3 and 4 and work our way up to the application so at layer 3 and 4 the most",
+    "start": "288360",
+    "end": "294060"
+  },
+  {
+    "text": "common thing that envoy does is proxy TCP and so you might think well what what really is the benefit of doing that",
+    "start": "294060",
+    "end": "301170"
+  },
+  {
+    "text": "well the first is that you're going to get some nice stats about you know what's happening like everyone here is",
+    "start": "301170",
+    "end": "306300"
+  },
+  {
+    "text": "probably tuned to connection pool at some point or try to figure out what the application is doing how its optimizing",
+    "start": "306300",
+    "end": "311820"
+  },
+  {
+    "text": "for open connections etc so just with the stats that we're getting from Envoy by proxying through we're gonna be able",
+    "start": "311820",
+    "end": "317010"
+  },
+  {
+    "text": "to see the number of active connections the number of connections that are being created the number of bytes that are flowing over those connections so bytes",
+    "start": "317010",
+    "end": "323310"
+  },
+  {
+    "text": "can be useful for example let's say I have a database or or some endpoint and it's receiving a lot of traffic well I",
+    "start": "323310",
+    "end": "329640"
+  },
+  {
+    "text": "can actually break it down you know by by which clusters are sending the traffic to that and if we look at you",
+    "start": "329640",
+    "end": "336420"
+  },
+  {
+    "text": "know DNS let's say I want to talk to a service in Amazon or really any service",
+    "start": "336420",
+    "end": "341490"
+  },
+  {
+    "text": "how many people here could answer you know what their application is doing when it receives two or more a records",
+    "start": "341490",
+    "end": "347370"
+  },
+  {
+    "text": "in the DNS resolution like probably know about you even if you could for one of your applications you probably don't",
+    "start": "347370",
+    "end": "353040"
+  },
+  {
+    "text": "know how it's going to work in Python how it's going to work and go how it's going to work in JavaScript or any of the different runtimes that you're using",
+    "start": "353040",
+    "end": "358620"
+  },
+  {
+    "text": "so with um boy you're gonna get kind of a known quantity of load balancing between the records that are returned",
+    "start": "358620",
+    "end": "363840"
+  },
+  {
+    "text": "when you're using DNS so you can tell it to just use one record or you can have it load balanced round-robin at least",
+    "start": "363840",
+    "end": "369240"
+  },
+  {
+    "text": "request random between them so this is just great because we don't have to think",
+    "start": "369240",
+    "end": "374820"
+  },
+  {
+    "text": "about how the individual application is optimizing for what's returning DNS furthermore we can do health checking so",
+    "start": "374820",
+    "end": "380640"
+  },
+  {
+    "text": "if I'm boy sees that one of the IPS returned in DNS is not reachable I'll be able to stop sending traffic to that and",
+    "start": "380640",
+    "end": "387720"
+  },
+  {
+    "text": "it will send it to the other a record and we've definitely had problems in the past before we were using envoy where we",
+    "start": "387720",
+    "end": "393510"
+  },
+  {
+    "text": "would have to wait for DNS sorry resolve and some cases for a healthy instance to get picked up and the final thing you're",
+    "start": "393510",
+    "end": "400050"
+  },
+  {
+    "text": "going to get is we can do access logging of connection open and close and that's just going to be great in our other",
+    "start": "400050",
+    "end": "405780"
+  },
+  {
+    "text": "systems for correlating events that are happening so as we move up into layer",
+    "start": "405780",
+    "end": "411210"
+  },
+  {
+    "text": "five and six we're talking really about SSL and the session if you will so again",
+    "start": "411210",
+    "end": "417180"
+  },
+  {
+    "text": "we're gonna get some good stats about what envoy is doing what cipher is being used you know the server may present multiple different ciphers we can",
+    "start": "417180",
+    "end": "424199"
+  },
+  {
+    "text": "actually force envoy to choose specific cipher which we had to do one time with dynamodb because they rolled out a",
+    "start": "424199",
+    "end": "429900"
+  },
+  {
+    "text": "broken certificate to one of their Canaries so but you're just going to get a lot better visibility into what's",
+    "start": "429900",
+    "end": "435090"
+  },
+  {
+    "text": "happening and we've used this with other people besides Amazon as well where they had the you know their certificate had",
+    "start": "435090",
+    "end": "441479"
+  },
+  {
+    "text": "gone bad or they had deployed it incorrectly and we were able to notify them and tell them with our stats you",
+    "start": "441479",
+    "end": "447090"
+  },
+  {
+    "text": "know you need to fix this specific IP and the certificates broken on that node",
+    "start": "447090",
+    "end": "452160"
+  },
+  {
+    "text": "so the other nice benefit is that you know envoy running as a separate process on the host so if we find some kind of",
+    "start": "452160",
+    "end": "458699"
+  },
+  {
+    "text": "bug in the SSL library and we need to upgrade it we don't have to ship 250 applications that lyft we can just ship",
+    "start": "458699",
+    "end": "465090"
+  },
+  {
+    "text": "envoy and with the upgrade and then everyone will be patched it's also going to be more efficient",
+    "start": "465090",
+    "end": "470580"
+  },
+  {
+    "text": "you know then doing it in Python potentially you know negotiating the SSL",
+    "start": "470580",
+    "end": "476099"
+  },
+  {
+    "text": "up session so finally we're at layer 7",
+    "start": "476099",
+    "end": "481110"
+  },
+  {
+    "text": "which is the application layer and the most common thing that envoy does at layer 7 is manage HTTP so again we're",
+    "start": "481110",
+    "end": "487740"
+  },
+  {
+    "text": "getting a nice wealth of stats including a you know nice histogram of the timings of each request and another thing that",
+    "start": "487740",
+    "end": "495300"
+  },
+  {
+    "text": "on boy can do is actually upgrade to from HTTP 1 to HTTP 2 if the backend",
+    "start": "495300",
+    "end": "501870"
+  },
+  {
+    "text": "service supports it so HTTP 1 means that you have one request per connection and",
+    "start": "501870",
+    "end": "507210"
+  },
+  {
+    "text": "you have to wait for that request to finish before you can issue another one but with HTTP 2 you can actually stream",
+    "start": "507210",
+    "end": "512520"
+  },
+  {
+    "text": "multiple requests or multiplex multiple requests over a single connection there's some other benefits which give",
+    "start": "512520",
+    "end": "518700"
+  },
+  {
+    "text": "you a really nice efficiency like header compression but it's just going to be a lot more efficient you know Python could be opening 100 connections and if the",
+    "start": "518700",
+    "end": "525329"
+  },
+  {
+    "text": "upstream supports HTTP 2 then envoy can just open a single action and send all of those other",
+    "start": "525329",
+    "end": "530490"
+  },
+  {
+    "text": "requests over a single connection rather than opening a one-for-one connection we're going to get access logging so as",
+    "start": "530490",
+    "end": "537209"
+  },
+  {
+    "text": "I mentioned it's going to be nice to have basically a standard format for the access log so just like when we're",
+    "start": "537209",
+    "end": "543149"
+  },
+  {
+    "text": "talking to an internal service we'll have an access log when we're talking to stripe we're talking to Twilio and we",
+    "start": "543149",
+    "end": "549029"
+  },
+  {
+    "text": "can use that again to correlate events in our system without having to modify any of the libraries that we're using to",
+    "start": "549029",
+    "end": "554730"
+  },
+  {
+    "text": "talk to those services so these are all the statistics that I kind of talked",
+    "start": "554730",
+    "end": "560130"
+  },
+  {
+    "text": "about and if you just look at them for a moment you can kind of start to appreciate how much data on boy is going",
+    "start": "560130",
+    "end": "565380"
+  },
+  {
+    "text": "to give you about what's happening in your system so we've been if we're not going to you know talk about some of the",
+    "start": "565380",
+    "end": "570450"
+  },
+  {
+    "text": "other database scaling techniques that we're using just to pulling Envoy as kind of a proxy and of itself it's going",
+    "start": "570450",
+    "end": "576630"
+  },
+  {
+    "text": "to let you understand much better what's happening and there's there's a lot more stats than this I think you know most of",
+    "start": "576630",
+    "end": "582660"
+  },
+  {
+    "text": "our hosts are boys I'm adding something like 1,500 stats so if we need to dig into a problem we can easily do it",
+    "start": "582660",
+    "end": "589940"
+  },
+  {
+    "text": "similarly because we have such a nice set of stats around the system we can easily create dashboards like this one",
+    "start": "589940",
+    "end": "596490"
+  },
+  {
+    "text": "so we can let the user select basically any two points in the network in any environment and see the number of",
+    "start": "596490",
+    "end": "602010"
+  },
+  {
+    "text": "connections that are occurring between them we can see the you know the number of bytes that are going between them this is a small sample of the data that",
+    "start": "602010",
+    "end": "608490"
+  },
+  {
+    "text": "we have but because it's all in the same format we can easily create this and similarly we can give other people you",
+    "start": "608490",
+    "end": "615270"
+  },
+  {
+    "text": "know a one-line macro to put in their dashboard and they'll get this on their personal service dashboard as well so",
+    "start": "615270",
+    "end": "621810"
+  },
+  {
+    "text": "these tools are really really invaluable for debugging so kind of the point of",
+    "start": "621810",
+    "end": "626970"
+  },
+  {
+    "text": "this all is that you know having telemetry data be in the same format makes it really easy to correlate",
+    "start": "626970",
+    "end": "633089"
+  },
+  {
+    "text": "behavior in a large system so you can see on the right-hand side of the screen there's a giant blob with a bunch of",
+    "start": "633089",
+    "end": "638399"
+  },
+  {
+    "text": "connections between it that's actually a network graph of what's happening at left at any given time and I believe",
+    "start": "638399",
+    "end": "643589"
+  },
+  {
+    "text": "only a subset of it so trying to debug you know a multi hop request that may go through four or five different systems",
+    "start": "643589",
+    "end": "649620"
+  },
+  {
+    "text": "is going to be difficult but having envoy and then everything a standard format is going to make that a lot",
+    "start": "649620",
+    "end": "655320"
+  },
+  {
+    "text": "easier in tools like you know Kabana we have distributed tracing deployed at lift and",
+    "start": "655320",
+    "end": "661690"
+  },
+  {
+    "text": "of course the dashboarding tools that that we use so what does it actually",
+    "start": "661690",
+    "end": "666970"
+  },
+  {
+    "text": "look like to enable envoy in an application once we've configured it to proxy traffic it's usually as simple as",
+    "start": "666970",
+    "end": "673270"
+  },
+  {
+    "text": "just a one-line configuration change so in this case you know in the NGO library we're talking to dynamo DB and we can",
+    "start": "673270",
+    "end": "681490"
+  },
+  {
+    "text": "just patch it with localhost 8080 and 'red access log stats we create a",
+    "start": "681490",
+    "end": "686980"
+  },
+  {
+    "text": "standard set of alarms for everyone at lift when they're talking to different services so they know if the upstream is",
+    "start": "686980",
+    "end": "692590"
+  },
+  {
+    "text": "having problems whether again it's an internal service or it's a vendored service so we don't have to worry about",
+    "start": "692590",
+    "end": "698170"
+  },
+  {
+    "text": "patching each library making them behave the same debugging individual library specific behavior we can just do",
+    "start": "698170",
+    "end": "704020"
+  },
+  {
+    "text": "everything in envoy and simplify from the application perspective so now I",
+    "start": "704020",
+    "end": "709480"
+  },
+  {
+    "text": "want to get to kind of the heart of the talk right which is how we actually manage to scale the databases so you can already imagine some of the benefits we",
+    "start": "709480",
+    "end": "715690"
+  },
+  {
+    "text": "will get from deploying Envoy and tcp mode in front of or an HTTP mode",
+    "start": "715690",
+    "end": "721060"
+  },
+  {
+    "text": "in front of dynamo but we actually have specific codecs which can understand the",
+    "start": "721060",
+    "end": "726280"
+  },
+  {
+    "text": "wire format of each of these databases and do something a little bit different with it so the first is going to be",
+    "start": "726280",
+    "end": "733390"
+  },
+  {
+    "text": "dynamo DB so dynamo DB is just JSON over HTTP for anyone who's ever used cloud",
+    "start": "733390",
+    "end": "739870"
+  },
+  {
+    "text": "watch it doesn't offer like a high cardinality a wide range of statistics the only thing that you can see about",
+    "start": "739870",
+    "end": "745840"
+  },
+  {
+    "text": "dynamo DB and cloud watch is the minimum average and maximum latency you can also",
+    "start": "745840",
+    "end": "751450"
+  },
+  {
+    "text": "see you know some other stats like the capacity throughput or some permanent stats but at lift where we're obsessed",
+    "start": "751450",
+    "end": "757300"
+  },
+  {
+    "text": "with you know the P 95 and the P 99 behavior of our services in any given",
+    "start": "757300",
+    "end": "762790"
+  },
+  {
+    "text": "session for a user who's taking a ride you know they may make hundreds of different API requests so even if your p",
+    "start": "762790",
+    "end": "769000"
+  },
+  {
+    "text": "99 is pretty good they may actually experience or if your p 95 is good they may hit p 99 in every single session and",
+    "start": "769000",
+    "end": "775930"
+  },
+  {
+    "text": "that's going to be a bad experience for the user so what are the benefits again of just deploying Envoy in HTTP mode",
+    "start": "775930",
+    "end": "781780"
+  },
+  {
+    "text": "directly in front of DynamoDB we're going to get a histogram of latency so beyond just min average of max we can",
+    "start": "781780",
+    "end": "788320"
+  },
+  {
+    "text": "see all the percentiles that we want to capture p 50 median we can do custom windowing of metrics so",
+    "start": "788320",
+    "end": "795100"
+  },
+  {
+    "text": "cloud watch only offers permanent stats which sometime can be you know under sampled if you're trying to debug a",
+    "start": "795100",
+    "end": "801130"
+  },
+  {
+    "text": "particularly hard problem Jose and I my colleague here from lift we had the debug a problem where there",
+    "start": "801130",
+    "end": "807490"
+  },
+  {
+    "text": "was a two-second loop that was occurring in an application and so basically every two seconds there'd be an enormous spike",
+    "start": "807490",
+    "end": "813430"
+  },
+  {
+    "text": "of requests and in between that there would be no requests and only having per minute data you would never be able to",
+    "start": "813430",
+    "end": "818470"
+  },
+  {
+    "text": "really tell what's happening and finally we have per hosts per zone and per cluster statistics so anywhere that",
+    "start": "818470",
+    "end": "825490"
+  },
+  {
+    "text": "envoy is running it's also emitting stats that are tagged with its its location so you know when we look at the",
+    "start": "825490",
+    "end": "832600"
+  },
+  {
+    "text": "the dynamo statistics let's say we're running an online batch box and a batch box for our service we're not gonna be",
+    "start": "832600",
+    "end": "839440"
+  },
+  {
+    "text": "able to break that down in any meaningful way so with envoy running we can actually see you know oh is it batch that's",
+    "start": "839440",
+    "end": "845290"
+  },
+  {
+    "text": "experiencing longer latency or is it just the online service we can go a step",
+    "start": "845290",
+    "end": "850899"
+  },
+  {
+    "text": "further and with one line of code or configuration rather we can enable the dynamo filter and dynamo filter is about",
+    "start": "850899",
+    "end": "857830"
+  },
+  {
+    "text": "300 lines of code or so and what it does is it just interprets the JSON that is",
+    "start": "857830",
+    "end": "864010"
+  },
+  {
+    "text": "being emitted by dynamo or the library that's talking to dynamo so this is a really all that the dynamo DB codec is",
+    "start": "864010",
+    "end": "869620"
+  },
+  {
+    "text": "doing it's taking the incoming request it's parsing the body for the table name",
+    "start": "869620",
+    "end": "874630"
+  },
+  {
+    "text": "and it's parsing the headers to get the operation it's actually occurring against dynamo DB and then submitting a",
+    "start": "874630",
+    "end": "880150"
+  },
+  {
+    "text": "nice stat that tells us exactly what's happening so this is going to get us even better visibility than we had before and and way beyond anything that",
+    "start": "880150",
+    "end": "886959"
+  },
+  {
+    "text": "cloud watch could offer us so if one of our developers wants to ask something like this you know what was the the per",
+    "start": "886959",
+    "end": "893380"
+  },
+  {
+    "text": "30-second p99 for writes from this canary to this table it'd be impossible to determine that with with cloud watch",
+    "start": "893380",
+    "end": "900910"
+  },
+  {
+    "text": "and so maybe you know before on boy you would have gone and you know added some some print statements to the library or",
+    "start": "900910",
+    "end": "906790"
+  },
+  {
+    "text": "it's a metric calls to the libraries but we can do this across any cluster at lift whether they're running and go or",
+    "start": "906790",
+    "end": "913120"
+  },
+  {
+    "text": "JavaScript or Python and so then we can aggregate stats in any manner that we",
+    "start": "913120",
+    "end": "918610"
+  },
+  {
+    "text": "want so not only can we look at you know a specific cluster but we can look across all of our services and see how",
+    "start": "918610",
+    "end": "924640"
+  },
+  {
+    "text": "they're interacting dynamo which is useful when the AWS status page is showing okay but things",
+    "start": "924640",
+    "end": "929890"
+  },
+  {
+    "text": "are not working well at all so let's move on to MongoDB and remember the",
+    "start": "929890",
+    "end": "936279"
+  },
+  {
+    "text": "outages that we talked about earlier we'll get back to that outage so the protocol for MongoDB is binary JSON and",
+    "start": "936279",
+    "end": "942700"
+  },
+  {
+    "text": "again we're going at the benefits of knowing exactly who's doing what network in the cluster when we deploy it from a",
+    "start": "942700",
+    "end": "948070"
+  },
+  {
+    "text": "TCP perspective is it the batch box creating more connections or is it the online cluster creating more connections",
+    "start": "948070",
+    "end": "954430"
+  },
+  {
+    "text": "but if we add in the codec it can do the same thing that we were doing in dynamo DB and we can get per operation",
+    "start": "954430",
+    "end": "961149"
+  },
+  {
+    "text": "latency so we can look at whether it's a query or whether it's a right we can count the size and number of documents",
+    "start": "961149",
+    "end": "966550"
+  },
+  {
+    "text": "that are sent today or tomorrow DB and the number that are returned and we can count scattered gets as well which is",
+    "start": "966550",
+    "end": "972610"
+  },
+  {
+    "text": "really important when you're in a sharded cluster scattered gets are extremely expensive and we had to do a lot of optimization to kind of pay them",
+    "start": "972610",
+    "end": "979060"
+  },
+  {
+    "text": "down so developer can now ask the question how did the number of documents returned by queries change and you know",
+    "start": "979060",
+    "end": "985690"
+  },
+  {
+    "text": "specific availability zone when I deployed my service at a certain time and again this is data that was not",
+    "start": "985690",
+    "end": "991060"
+  },
+  {
+    "text": "possible to really collect before when you have you know just a few stats being kind of sent back to you from your",
+    "start": "991060",
+    "end": "997240"
+  },
+  {
+    "text": "vendors API which you might be scraping so let's revisit the outage and again so",
+    "start": "997240",
+    "end": "1004110"
+  },
+  {
+    "text": "we've got this guy oh the database slows down and we go into this best viral so all we do is take the rate limiting",
+    "start": "1004110",
+    "end": "1010140"
+  },
+  {
+    "text": "capability that envoy has that we apply to the edge when we rate limiting incoming requests you know from users",
+    "start": "1010140",
+    "end": "1015899"
+  },
+  {
+    "text": "with different IPS if they're trying to post different data or attack our API we apply the exact same rate limit or to",
+    "start": "1015899",
+    "end": "1021480"
+  },
+  {
+    "text": "new connection creation against the database and this actually applies the necessary back pressure so that the",
+    "start": "1021480",
+    "end": "1026548"
+  },
+  {
+    "text": "database can recover when there's a slowdown so we may return you know a few errors to our customer we may have a",
+    "start": "1026549",
+    "end": "1031918"
+  },
+  {
+    "text": "one-second outage but that's a lot better than a minute outage or you know a five minute outage which we used to",
+    "start": "1031919",
+    "end": "1037890"
+  },
+  {
+    "text": "experience so in practice we never actually solved the disk Iowa problem we don't actually know what's happening we",
+    "start": "1037890",
+    "end": "1043438"
+  },
+  {
+    "text": "assume it's some noisy neighbor problem it could be you know log archival by the vendor or something we never did get to",
+    "start": "1043439",
+    "end": "1049440"
+  },
+  {
+    "text": "the bottom of it but at this point once a month or maybe even once a week we can go look at the graph and see connection",
+    "start": "1049440",
+    "end": "1055530"
+  },
+  {
+    "text": "rate limiting which the Envoy is saving the service from going down there's a lot of other",
+    "start": "1055530",
+    "end": "1061809"
+  },
+  {
+    "text": "problems that we've had with as well so we had people will try you know to delete indexes and they'll be reading",
+    "start": "1061809",
+    "end": "1068470"
+  },
+  {
+    "text": "the legacy application you know it's a 3,000 line class it's very hard to tell what's actually happening so they delete",
+    "start": "1068470",
+    "end": "1074110"
+  },
+  {
+    "text": "an index and the database would just fall over because the the queries that were being issued were no longer covered",
+    "start": "1074110",
+    "end": "1079240"
+  },
+  {
+    "text": "by a certain index so the you know they would suggest if we try the built-in query profiler",
+    "start": "1079240",
+    "end": "1085029"
+  },
+  {
+    "text": "well that caused another outage because the query profiler is extremely expensive to actually use so what we do",
+    "start": "1085029",
+    "end": "1091120"
+  },
+  {
+    "text": "is actually leverage envoy in this case so again envoy is seeing all the traffic that's coming through it knows it how to",
+    "start": "1091120",
+    "end": "1096850"
+  },
+  {
+    "text": "speak the protocol so when we enable the codec we can actually log every single  query to a JSON file so that we",
+    "start": "1096850",
+    "end": "1103210"
+  },
+  {
+    "text": "can audit logs to see what's going on so you know if you look at six months and",
+    "start": "1103210",
+    "end": "1109059"
+  },
+  {
+    "text": "even more outages later you know we've got the rate-limiting in the logging but now we can also track queries that don't",
+    "start": "1109059",
+    "end": "1114129"
+  },
+  {
+    "text": "have a specific time out field set and we did this a neat thing where we would actually pass some metadata along with",
+    "start": "1114129",
+    "end": "1120070"
+  },
+  {
+    "text": "the query in a common field parse that with envoy and then immense that's with it and we'll see what that looks like in",
+    "start": "1120070",
+    "end": "1126070"
+  },
+  {
+    "text": "a minute but the other thing to note is that at this point we're no longer just running a PHP application with we",
+    "start": "1126070",
+    "end": "1132429"
+  },
+  {
+    "text": "have a go application with we have a Python application with and all",
+    "start": "1132429",
+    "end": "1137889"
+  },
+  {
+    "text": "of them are protected by the work that we did you know in in envoy so this is",
+    "start": "1137889",
+    "end": "1144009"
+  },
+  {
+    "text": "what our envoy log would look like and so yeah we in the application itself",
+    "start": "1144009",
+    "end": "1149470"
+  },
+  {
+    "text": "we insert that data into the comment field and then on Boyd can emit a stat that basically says you know this how",
+    "start": "1149470",
+    "end": "1155710"
+  },
+  {
+    "text": "this is how long this exact function is taking every time it calls so when a user deploys code deploys a change it",
+    "start": "1155710",
+    "end": "1162279"
+  },
+  {
+    "text": "makes it really easy to go and see exactly what's happening or if we get a really expensive query it's easy to find",
+    "start": "1162279",
+    "end": "1167409"
+  },
+  {
+    "text": "in the application exactly what admitted it furthermore this simplifies development by quite a bit it's very",
+    "start": "1167409",
+    "end": "1173590"
+  },
+  {
+    "text": "hard sometimes to understand you know the query that the or it might generate and if you coax it enough usually you can get it to output some kind of",
+    "start": "1173590",
+    "end": "1179500"
+  },
+  {
+    "text": "debugging log but again in every language that we have today when you're in your development environment and you're issuing queries against MongoDB",
+    "start": "1179500",
+    "end": "1185799"
+  },
+  {
+    "text": "from your ORM you don't need to try and read a thousand lines of code to figure out what's happening you don't need to enable some",
+    "start": "1185799",
+    "end": "1191679"
+  },
+  {
+    "text": "kind of debugging mode you're just gonna get a nice stat that's going to tell you what's happening and you're gonna get a log as well so that you can pinpoint in",
+    "start": "1191679",
+    "end": "1198490"
+  },
+  {
+    "text": "the application exactly what's happening with the database so we're gonna move on",
+    "start": "1198490",
+    "end": "1204159"
+  },
+  {
+    "text": "to Redis now so this is gonna be brief because I've talked about this before",
+    "start": "1204159",
+    "end": "1209399"
+  },
+  {
+    "text": "Redis we were using a deprecated tool from Twitter called twin proxy so it's",
+    "start": "1209399",
+    "end": "1215799"
+  },
+  {
+    "text": "very popular in time and similar to Mac router if you use memcache or some of the other partitioning proxies that are",
+    "start": "1215799",
+    "end": "1221710"
+  },
+  {
+    "text": "out there but we had a problem with it which is basically that it required a static config file and when you wanted",
+    "start": "1221710",
+    "end": "1226960"
+  },
+  {
+    "text": "to update something in the config file we would basically take an outage so at that point we were like okay we can do",
+    "start": "1226960",
+    "end": "1233350"
+  },
+  {
+    "text": "some crazy dance where we run two of them and have the applications switched between them when we need to restart one or we can go ahead and just recreate",
+    "start": "1233350",
+    "end": "1239830"
+  },
+  {
+    "text": "this thing so so what really is it at its core well it speaks the rhibs protocol so it's got a codec and it can",
+    "start": "1239830",
+    "end": "1246730"
+  },
+  {
+    "text": "do consistent hashing so it's got a map of where the instances live and what data should be aligned to them so we",
+    "start": "1246730",
+    "end": "1253929"
+  },
+  {
+    "text": "were able to create this in envoy we you know use the katana algorithm similar to what a twin proxy does we take the",
+    "start": "1253929",
+    "end": "1260860"
+  },
+  {
+    "text": "discovery data you know envoy knows about wherever instance is deployed from the discovery service and we can just",
+    "start": "1260860",
+    "end": "1267009"
+  },
+  {
+    "text": "create a logical sharded partitioned horizontally scalable Redis so did the",
+    "start": "1267009",
+    "end": "1272080"
+  },
+  {
+    "text": "application we don't have to make any modifications we can continue doing the same thing that we were doing with Nutcracker but now we've got you know",
+    "start": "1272080",
+    "end": "1278649"
+  },
+  {
+    "text": "clusters with up to 200 Redis nodes in them and globally we're doing about 35 million requests per second through this",
+    "start": "1278649",
+    "end": "1284860"
+  },
+  {
+    "text": "flow to Redis and yeah I've given talks at Redis kampf about this before so if",
+    "start": "1284860",
+    "end": "1290320"
+  },
+  {
+    "text": "you're interested in more of the finer details about how this works you can just search left Redis on YouTube and you can find those talks so really what",
+    "start": "1290320",
+    "end": "1298720"
+  },
+  {
+    "text": "this boils down to is that there's there's two main approaches once we're able to speak the protocol and even",
+    "start": "1298720",
+    "end": "1303879"
+  },
+  {
+    "text": "before we're able to speak the protocol the first is just bumping the wire right I can get some basic observer ability if my application speaks TCP if it speaking",
+    "start": "1303879",
+    "end": "1311649"
+  },
+  {
+    "text": "HTTP to an upstream and if I want to go further I can use the codec to extract features and emit even more stats we can",
+    "start": "1311649",
+    "end": "1318340"
+  },
+  {
+    "text": "add some of the basic capabilities of envoy like connection rate limiting no problem the other side of that is",
+    "start": "1318340",
+    "end": "1324340"
+  },
+  {
+    "text": "fully routing which is basically what the Redis codec or Redis proxy filter rather is doing so we knows how to speak",
+    "start": "1324340",
+    "end": "1331059"
+  },
+  {
+    "text": "to protocol and not only is it you know just observing what's happening but it's actually choosing where to route the traffic so you could take the dynamo",
+    "start": "1331059",
+    "end": "1338320"
+  },
+  {
+    "text": "filter or the dynamo codec rather and actually change it to route to different environments or different PPC use or",
+    "start": "1338320",
+    "end": "1344200"
+  },
+  {
+    "text": "something if they have V PCM points for them or you could take the codec and you know you would issue the name of",
+    "start": "1344200",
+    "end": "1349870"
+  },
+  {
+    "text": "a collection and it would just find the application the database to route to for you rather than having to put a",
+    "start": "1349870",
+    "end": "1355809"
+  },
+  {
+    "text": "lot of that metadata into the applications configuration today so what",
+    "start": "1355809",
+    "end": "1361210"
+  },
+  {
+    "text": "are some of the future codecs that we're seeing development on and that will probably be coming soon and the people have really asked for quite a bit well",
+    "start": "1361210",
+    "end": "1367750"
+  },
+  {
+    "text": "we've got my sequel there was actually a talk from a Sri I believe it was on",
+    "start": "1367750",
+    "end": "1375130"
+  },
+  {
+    "text": "Tuesday about how they're gonna use this VMware how this is gonna be really important to actually their kubernetes",
+    "start": "1375130",
+    "end": "1380620"
+  },
+  {
+    "text": "integration and so he's working on that currently and I believe it's close to merging and it will probably start as",
+    "start": "1380620",
+    "end": "1387700"
+  },
+  {
+    "text": "just an observability codec you know decoding what's happening and outputting some stats but once you have that it's",
+    "start": "1387700",
+    "end": "1393370"
+  },
+  {
+    "text": "not that big of a leap to kind of go to the fully routing type of proxy Kafka",
+    "start": "1393370",
+    "end": "1399960"
+  },
+  {
+    "text": "extremely popular there's a lot of people including lifts that aren't going to be investing in this as we migrate",
+    "start": "1399960",
+    "end": "1406539"
+  },
+  {
+    "text": "over to Kafka and then Postgres as well I think there's only an issue for that",
+    "start": "1406539",
+    "end": "1411549"
+  },
+  {
+    "text": "one but it should be coming down the pipe soon so what's the road map really",
+    "start": "1411549",
+    "end": "1416889"
+  },
+  {
+    "text": "look like we're gonna see more codecs as I just talked about we can expand the capability of existing",
+    "start": "1416889",
+    "end": "1422889"
+  },
+  {
+    "text": "codecs to have full l7 capabilities which can provide some additional benefits we get a better integration of",
+    "start": "1422889",
+    "end": "1429340"
+  },
+  {
+    "text": "distributed tracing so right now you know when you make a call I don't know if you've seen any of the other talks or",
+    "start": "1429340",
+    "end": "1434710"
+  },
+  {
+    "text": "use the distributed tracing tool basically when you have a call from the client you can see every hop of the network you know what service is hit and",
+    "start": "1434710",
+    "end": "1441460"
+  },
+  {
+    "text": "that will let you determine you know what is the cause of latency what exactly is happening there and wouldn't",
+    "start": "1441460",
+    "end": "1447460"
+  },
+  {
+    "text": "it be great if you could actually see down to the database shard you know if that shard caused the latency and debug it that way right now we do emit some",
+    "start": "1447460",
+    "end": "1454720"
+  },
+  {
+    "text": "stats from or some traces from the database side but but not enough there could be a",
+    "start": "1454720",
+    "end": "1461249"
+  },
+  {
+    "text": "lot more another thing that we use frequently at lift is a fault injection so today you can't apply fault injection",
+    "start": "1461249",
+    "end": "1467909"
+  },
+  {
+    "text": "to and you can apply fault injection to dynamo and what this means is that you can basically tell envoy to",
+    "start": "1467909",
+    "end": "1473669"
+  },
+  {
+    "text": "air out some percentage of traffic or to add additional latency to traffic so we're thinking about migrating for",
+    "start": "1473669",
+    "end": "1479669"
+  },
+  {
+    "text": "example to dynamo DB global tables from just single region tables at lift this is a new feature of dynamo that was",
+    "start": "1479669",
+    "end": "1485909"
+  },
+  {
+    "text": "announced at reinvent well we assumed that there will be some additional latency impact doing so right because",
+    "start": "1485909",
+    "end": "1490950"
+  },
+  {
+    "text": "we've got our Traverse multiple regions or dynamos Traverse multiple regions when when doing the right so we can",
+    "start": "1490950",
+    "end": "1497279"
+  },
+  {
+    "text": "actually inject you know 100 milliseconds of latency and seeing our application behaves before just turning on some feature that we know will cause",
+    "start": "1497279",
+    "end": "1503519"
+  },
+  {
+    "text": "a performance in fact we can also inject airs a frequent issue that we would have",
+    "start": "1503519",
+    "end": "1508860"
+  },
+  {
+    "text": "at lyft is you know retry amplification so you inject an air and then you get",
+    "start": "1508860",
+    "end": "1514350"
+  },
+  {
+    "text": "you know two or three more requests in its place and pretty soon when your services in trouble you can you can just",
+    "start": "1514350",
+    "end": "1519990"
+  },
+  {
+    "text": "basically cascade into further failure so you can do this today again in the  DB proxy filter you can do it with",
+    "start": "1519990",
+    "end": "1527549"
+  },
+  {
+    "text": "dynamo DB but it's not possible in Redis and I don't believe it's possible at the generic TCP layer so having that",
+    "start": "1527549",
+    "end": "1533460"
+  },
+  {
+    "text": "capability everywhere will let you test your services to make sure that they get will behave correctly in the event of",
+    "start": "1533460",
+    "end": "1538889"
+  },
+  {
+    "text": "some slowdown or some errors and finally role based access control and this is",
+    "start": "1538889",
+    "end": "1544049"
+  },
+  {
+    "text": "what Shriram talks about extensively he works at VMware you know they're looking at deploying envoy right and",
+    "start": "1544049",
+    "end": "1550350"
+  },
+  {
+    "text": "proxying my sequel through it well you know in a kubernetes environment in particular you may not have just an",
+    "start": "1550350",
+    "end": "1555450"
+  },
+  {
+    "text": "envoy deployed directly alongside the application and you may not have full control over you know what configuration",
+    "start": "1555450",
+    "end": "1562350"
+  },
+  {
+    "text": "is being injected into that if multiple services are running in the same pod so what they actually plan to do is you",
+    "start": "1562350",
+    "end": "1567990"
+  },
+  {
+    "text": "know identify the caller with with mutual TLS or something else and then decide whether or not they're allowed to",
+    "start": "1567990",
+    "end": "1573809"
+  },
+  {
+    "text": "talk to a my sequel database from that that envoy so you can get really advanced again with the the l7",
+    "start": "1573809",
+    "end": "1579149"
+  },
+  {
+    "text": "capabilities you can go beyond just routing and you can actually do a fennec ation and authorization so that's all I",
+    "start": "1579149",
+    "end": "1587009"
+  },
+  {
+    "text": "have I'll be the rest of the time for questions thank you yeah a good question so they asked",
+    "start": "1587009",
+    "end": "1607950"
+  },
+  {
+    "text": "if there was any a latency impacts of running envoy in this path so we haven't done you know specific benchmarks for it",
+    "start": "1607950",
+    "end": "1614190"
+  },
+  {
+    "text": "I mean we have we have benchmarked it but not you know in a scientific way but we see it as a sub-millisecond impact",
+    "start": "1614190",
+    "end": "1619830"
+  },
+  {
+    "text": "basically because we're deploying it locally on the box we're talking over a UNIX domain socket so you know for us",
+    "start": "1619830",
+    "end": "1626070"
+  },
+  {
+    "text": "most of our quests you know we're running like matching algorithms and they take a little bit longer so one",
+    "start": "1626070",
+    "end": "1631470"
+  },
+  {
+    "text": "millisecond is not a big deal but there are other people out there that are you know doing much more fine-grained",
+    "start": "1631470",
+    "end": "1636480"
+  },
+  {
+    "text": "benchmarks trying to understand what the impact would be of inserting this but it is on the order of a millisecond yeah go",
+    "start": "1636480",
+    "end": "1646170"
+  },
+  {
+    "text": "ahead Dmitri yeah so there are certain",
+    "start": "1646170",
+    "end": "1656700"
+  },
+  {
+    "text": "commands like in Redis where you can issue multiple keys and the proxy 'its that know how to route those right so if",
+    "start": "1656700",
+    "end": "1662430"
+  },
+  {
+    "text": "you issue a multiple get with multiple keys envoy will actually in parallel fan-out the requests to the backends",
+    "start": "1662430",
+    "end": "1668720"
+  },
+  {
+    "text": "reconstitute the response and send it back to the application but there are certain commands like S Union where",
+    "start": "1668720",
+    "end": "1675000"
+  },
+  {
+    "text": "Redis is actually computing you know some result for multiple keys on a single instance those commands are not",
+    "start": "1675000",
+    "end": "1680520"
+  },
+  {
+    "text": "supported currently and there is a feature called hash tagging which will allow you to designate a portion of the key and to make sure that it will hash",
+    "start": "1680520",
+    "end": "1687300"
+  },
+  {
+    "text": "to the same back-end but we don't that's the one feature actually from Nutcracker that we we don't have today but it",
+    "start": "1687300",
+    "end": "1692670"
+  },
+  {
+    "text": "wouldn't be be that hard to add honestly",
+    "start": "1692670",
+    "end": "1696920"
+  },
+  {
+    "text": "right yeah so the question was is on boy doing too much or will it maybe be doing",
+    "start": "1716659",
+    "end": "1723419"
+  },
+  {
+    "text": "too much in the future and so I mean the first thing I'll say about envoy is that it's built on top of an extension model",
+    "start": "1723419",
+    "end": "1728970"
+  },
+  {
+    "text": "so you know maybe there are some people out there that are doing things that really want to make sense for the core product but we don't let it actually",
+    "start": "1728970",
+    "end": "1734970"
+  },
+  {
+    "text": "affect you know the design of the API or the design of the core product so we try to keep on boys core you know together",
+    "start": "1734970",
+    "end": "1740820"
+  },
+  {
+    "text": "like as just as high-performance proxy that can transit network traffic but if you look internally at lyft right now",
+    "start": "1740820",
+    "end": "1747390"
+  },
+  {
+    "text": "we're doing something where we're actually abstracting every single database away from the application and",
+    "start": "1747390",
+    "end": "1752789"
+  },
+  {
+    "text": "using G RPC to issue queries to issue rights and you know then we can put a Redis in front of it if we want to do",
+    "start": "1752789",
+    "end": "1758850"
+  },
+  {
+    "text": "some some some like read through a right through caching we can switch between dynamo and other backing stores you know",
+    "start": "1758850",
+    "end": "1765539"
+  },
+  {
+    "text": "depending on the desire of the client there and what consistency requirements",
+    "start": "1765539",
+    "end": "1770669"
+  },
+  {
+    "text": "they have and I mean feasibly right you could build that into envoy but but we built a middleware tier right which you",
+    "start": "1770669",
+    "end": "1777480"
+  },
+  {
+    "text": "know we talked to you RPC to this middle tier and then it translates it into you",
+    "start": "1777480",
+    "end": "1783000"
+  },
+  {
+    "text": "know whatever the database specific protocol is and then returns that so yeah I mean there's there's going to be",
+    "start": "1783000",
+    "end": "1788909"
+  },
+  {
+    "text": "a trade-off and it's just a matter of complexity and whatever people decide to do so you know at this conference we've",
+    "start": "1788909",
+    "end": "1796919"
+  },
+  {
+    "text": "seen people doing a lot of things with envoy that we didn't know about that we didn't expect that are really cool and on a lot of cases makes sense and in",
+    "start": "1796919",
+    "end": "1803700"
+  },
+  {
+    "text": "other cases yeah it's like well this is probably not useful outside of a single person's organization so it really it",
+    "start": "1803700",
+    "end": "1809700"
+  },
+  {
+    "text": "really is a balance and I think that the like community and organization are doing the right thing in this case",
+    "start": "1809700",
+    "end": "1816230"
+  },
+  {
+    "text": "yeah Emily can't so the question was is there any advantage to you know having",
+    "start": "1836429",
+    "end": "1842049"
+  },
+  {
+    "text": "languages beyond C++ available for extensions because I'm boy is written in C++ and so we actually saw a tomboy Khan",
+    "start": "1842049",
+    "end": "1848889"
+  },
+  {
+    "text": "there was a presenter from cilium and they're actually allowing you to basically you know use go directly in",
+    "start": "1848889",
+    "end": "1856179"
+  },
+  {
+    "text": "your application so for example with Postgres we don't have to write an entirely new codec to",
+    "start": "1856179",
+    "end": "1861639"
+  },
+  {
+    "text": "parse the the database language we could just use the existing ones that are out there we could use the one that's most",
+    "start": "1861639",
+    "end": "1867729"
+  },
+  {
+    "text": "commonly used by you know the community and so yeah that will definitely open up some more if that becomes a common thing",
+    "start": "1867729",
+    "end": "1874690"
+  },
+  {
+    "text": "right now I would say I mean most protocols are not that complicated and I think the development of the codec I",
+    "start": "1874690",
+    "end": "1879999"
+  },
+  {
+    "text": "mean with with dynamo right it's just parsing JSON Redis response protocol is pretty simple yeah if you get to more",
+    "start": "1879999",
+    "end": "1886659"
+  },
+  {
+    "text": "advanced protocols and certainly a feature I'm sure we'll see you know more extensions come on that are potentially",
+    "start": "1886659",
+    "end": "1892479"
+  },
+  {
+    "text": "being driven by by other languages but for now and you know I'm not sure how far away that really is or when that",
+    "start": "1892479",
+    "end": "1898809"
+  },
+  {
+    "text": "will come online and and yeah Lua I mean today you could actually do things with blue if you really wanted to and we do",
+    "start": "1898809",
+    "end": "1904749"
+  },
+  {
+    "text": "see a lot of people doing that because it's just easier for them to kind of get started with",
+    "start": "1904749",
+    "end": "1910619"
+  },
+  {
+    "text": "yeah so we run a single binary but the cool thing about our envoy which which I didn't mention is that it can be",
+    "start": "1916070",
+    "end": "1922820"
+  },
+  {
+    "text": "dynamically configured via API so what actually happens is that we give on boy kind of a bootstrap configuration which",
+    "start": "1922820",
+    "end": "1928580"
+  },
+  {
+    "text": "says go to this server and and fetch your configuration so we deploy the same binary everywhere and yes we do",
+    "start": "1928580",
+    "end": "1935239"
+  },
+  {
+    "text": "compile and extensions that may not be needed in every context but the overhead of doing that is not that large or not",
+    "start": "1935239",
+    "end": "1941090"
+  },
+  {
+    "text": "important in our case so when on boy comes up it will say you know I am the user service give me the rest of my",
+    "start": "1941090",
+    "end": "1946879"
+  },
+  {
+    "text": "configuration and that will only include what it needs to talk to so you know maybe just and Redis and not",
+    "start": "1946879",
+    "end": "1953299"
+  },
+  {
+    "text": "dynamo in that case the question was how",
+    "start": "1953299",
+    "end": "1962210"
+  },
+  {
+    "text": "does this overlap with this Co which is the most common question asked anyone who talked to talked about envoy I think",
+    "start": "1962210",
+    "end": "1967519"
+  },
+  {
+    "text": "so so it's do we are building a lot of components in parallel with this do and",
+    "start": "1967519",
+    "end": "1972950"
+  },
+  {
+    "text": "actually working on getting them into kora envoy so the current are back filter the role based access control filter that you can use for HTTP for",
+    "start": "1972950",
+    "end": "1979129"
+  },
+  {
+    "text": "example was a combination of contributions from the sto project and from envoy now at the same time they are",
+    "start": "1979129",
+    "end": "1985849"
+  },
+  {
+    "text": "building their own kind of higher level constructs and routing methods and authentication you know for maybe doing",
+    "start": "1985849",
+    "end": "1992269"
+  },
+  {
+    "text": "identity for example that wouldn't make it into core envoy so I would expect that anything that's related to you know",
+    "start": "1992269",
+    "end": "1998149"
+  },
+  {
+    "text": "for example talking to one of the core databases that would be probably up streamed in the core project no matter",
+    "start": "1998149",
+    "end": "2004149"
+  },
+  {
+    "text": "what or we could convince them to do that without too much difficulty but some of the more things that are specific to sto and how pilot and mixer",
+    "start": "2004149",
+    "end": "2011200"
+  },
+  {
+    "text": "and some of the different api's work there particularly around identity I would imagine will well stay separate",
+    "start": "2011200",
+    "end": "2019049"
+  },
+  {
+    "text": "yeah question was can we compile to arm architecture I believe it's being worked on is it",
+    "start": "2026400",
+    "end": "2033640"
+  },
+  {
+    "text": "working right now I'm looking at Matt who's the maintainer Matt's not in yes so yeah they're there people you know we",
+    "start": "2033640",
+    "end": "2039580"
+  },
+  {
+    "text": "we wrote envoy to run on you know a bunch of Linux and that's what our CI environment what it is was in but people",
+    "start": "2039580",
+    "end": "2046000"
+  },
+  {
+    "text": "are doing CI now and CentOS people are doing it for arm we also have it on",
+    "start": "2046000",
+    "end": "2052500"
+  },
+  {
+    "text": "Windows people reporting it to Windows so we're really suing you know good uptake of olive oil and a lot of people",
+    "start": "2052500",
+    "end": "2057820"
+  },
+  {
+    "text": "porting it to a lot of different platforms and I believe one of the goals of next year is going to get envoy",
+    "start": "2057820",
+    "end": "2063158"
+  },
+  {
+    "text": "running actually on native devices like mobile phones so you can get kind of the same stats visibility you know even",
+    "start": "2063159",
+    "end": "2070600"
+  },
+  {
+    "text": "directly from the phone so in in particular at that point you know will definitely be supporting arm is a compilation target yeah the question was",
+    "start": "2070600",
+    "end": "2089980"
+  },
+  {
+    "text": "which which end of the TLS connection are we inspecting are we inspecting you know what the client is presenting to",
+    "start": "2089980",
+    "end": "2095290"
+  },
+  {
+    "text": "the server or what the server is presenting back to the returning to the client I think most of the metrics are",
+    "start": "2095290",
+    "end": "2100960"
+  },
+  {
+    "text": "around you know what the the server is emitting but some of like the the one that's checking well the the days until",
+    "start": "2100960",
+    "end": "2108580"
+  },
+  {
+    "text": "the cert expires that's coming from the client side for example when we're actually serving a certificate so it",
+    "start": "2108580",
+    "end": "2114550"
+  },
+  {
+    "text": "just buried there's a mix of stats on both ends and it wouldn't be that hard to add you know more",
+    "start": "2114550",
+    "end": "2121350"
+  },
+  {
+    "text": "oh yeah we offload to envoy so um boy it has to be the the the person you know",
+    "start": "2127060",
+    "end": "2133300"
+  },
+  {
+    "text": "doing the negotiation or the the piece doing the negotiation for us to get the stats yeah we're not you know looking at TCP",
+    "start": "2133300",
+    "end": "2140110"
+  },
+  {
+    "text": "flows of SSL and try to figure out our TLS and trying to figure what's happening",
+    "start": "2140110",
+    "end": "2145320"
+  },
+  {
+    "text": "right so the question is whether or not we're running on boy you know on the database side as well so if you were to",
+    "start": "2162390",
+    "end": "2168729"
+  },
+  {
+    "text": "look at something imagine go as a database here you know you can run on boy at that point we're",
+    "start": "2168729",
+    "end": "2173890"
+  },
+  {
+    "text": "not doing that today because there hasn't really been a big benefit for us to do that but for example if we wanted",
+    "start": "2173890",
+    "end": "2179589"
+  },
+  {
+    "text": "to add ssl on top of Redis for compliance reasons you know brightest doesn't support SSL so that's exactly",
+    "start": "2179589",
+    "end": "2186039"
+  },
+  {
+    "text": "what we even do we would run on boy alongside the individual Redis instance",
+    "start": "2186039",
+    "end": "2191079"
+  },
+  {
+    "text": "and then the two on boys would negotiate SSL and the applications would speak unencrypted and we would get that out of",
+    "start": "2191079",
+    "end": "2197380"
+  },
+  {
+    "text": "that so they're definitely use cases we just haven't had a need to to do any of them yet and what time isn't I'll take",
+    "start": "2197380",
+    "end": "2206680"
+  },
+  {
+    "text": "one more question sure",
+    "start": "2206680",
+    "end": "2210328"
+  },
+  {
+    "text": "yeah the question was can you just use the standard database library even if",
+    "start": "2223549",
+    "end": "2228809"
+  },
+  {
+    "text": "there's no codec written and the answer is is yes so it will just it should just",
+    "start": "2228809",
+    "end": "2234059"
+  },
+  {
+    "text": "work like unless there's something in Postgres where you know it's trying to glean information from like an ssl",
+    "start": "2234059",
+    "end": "2239849"
+  },
+  {
+    "text": "certificate or manage identity in that way I have it Ivan run Postgres so I don't know but you you should be able to",
+    "start": "2239849",
+    "end": "2245549"
+  },
+  {
+    "text": "just use it actually and and sometimes I mean there are additional patching there's additional passion that's",
+    "start": "2245549",
+    "end": "2251220"
+  },
+  {
+    "text": "required so like in the Python library for example if you put localhost in there it tries to sign the request",
+    "start": "2251220",
+    "end": "2257940"
+  },
+  {
+    "text": "with localhost and then Amazon rejects it so there's one additional thing that you have to patch where it says you know",
+    "start": "2257940",
+    "end": "2264180"
+  },
+  {
+    "text": "you're talking to DynamoDB US East one as your host even though you're transiting over the local socket thanks",
+    "start": "2264180",
+    "end": "2271289"
+  },
+  {
+    "text": "everyone for coming I'll be available for questions after if you want to come up and check [Applause]",
+    "start": "2271289",
+    "end": "2280659"
+  }
+]

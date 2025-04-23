@@ -1,0 +1,1585 @@
+[
+  {
+    "start": "0",
+    "end": "53000"
+  },
+  {
+    "text": "okay testing we good okay awesome okay welcome everyone and thank you for",
+    "start": "3600",
+    "end": "9440"
+  },
+  {
+    "text": "coming my name is alan felinenko and i'm an engineering team lead at bloomberg and i'm joined here by my colleague",
+    "start": "9440",
+    "end": "14960"
+  },
+  {
+    "text": "um aki sukagawa who's a senior software engineer with me on the enterprise data science infrastructure team",
+    "start": "14960",
+    "end": "20080"
+  },
+  {
+    "text": "so today we'll be talking about managing multi-cloud apache spark on kubernetes",
+    "start": "20080",
+    "end": "26160"
+  },
+  {
+    "text": "so in general starting from the top managing data science infrastructure is in a multi-cloud environment is really hard the variation of behavior between",
+    "start": "26160",
+    "end": "32960"
+  },
+  {
+    "text": "different hardware and cloud providers is vast and rather daunting now kubernetes and its cloud-native",
+    "start": "32960",
+    "end": "38000"
+  },
+  {
+    "text": "design provides an extraordinarily powerful abstraction across all these hardware stacks and enables the building",
+    "start": "38000",
+    "end": "43040"
+  },
+  {
+    "text": "of highly composable and transportable infrastructure substrates this tackle will be primarily focusing",
+    "start": "43040",
+    "end": "48079"
+  },
+  {
+    "text": "on that feature of kubernetes as we're looking to address complicated um looking to address complications that",
+    "start": "48079",
+    "end": "53280"
+  },
+  {
+    "start": "53000",
+    "end": "53000"
+  },
+  {
+    "text": "might arise as specifically that we had when we ran a data science platform both on prem and",
+    "start": "53280",
+    "end": "58480"
+  },
+  {
+    "text": "in various cloud environments like aws eks and azure aks given that kubernetes",
+    "start": "58480",
+    "end": "65600"
+  },
+  {
+    "text": "as a foundational abstraction that we're using we found that when designing various compute runtimes like apache spark each of these runtime components",
+    "start": "65600",
+    "end": "72080"
+  },
+  {
+    "text": "require the same standard managed services like we have here identity management network policies federated",
+    "start": "72080",
+    "end": "77520"
+  },
+  {
+    "text": "job apis and more but in this talk in particular we'll be focusing on the journey that we took to build out the spark compute runtime",
+    "start": "77520",
+    "end": "83520"
+  },
+  {
+    "text": "within our data science platform so what is apache spark um show of hands",
+    "start": "83520",
+    "end": "89040"
+  },
+  {
+    "start": "87000",
+    "end": "87000"
+  },
+  {
+    "text": "who's familiar here with spark and who's not good okay so there's a couple okay",
+    "start": "89040",
+    "end": "94560"
+  },
+  {
+    "text": "there's a couple so we'll do a little bit of a rundown so what is apache spark so the quick background for those who are unfamiliar is that it's an etl",
+    "start": "94560",
+    "end": "100320"
+  },
+  {
+    "text": "application that enables us to provide data science at scale so traditionally etl for files smaller",
+    "start": "100320",
+    "end": "105360"
+  },
+  {
+    "text": "than the gigabyte uses pandas but we start scaling up to 100 gigabytes we rather need to chunk pandas data frames",
+    "start": "105360",
+    "end": "110640"
+  },
+  {
+    "text": "or use das but spark can also be a pretty good candidate but where it really shines is when you start looking at petabytes or more",
+    "start": "110640",
+    "end": "117040"
+  },
+  {
+    "text": "it has a variety of features that make it a powerful general execution engine especially when communicating with cloud",
+    "start": "117040",
+    "end": "122640"
+  },
+  {
+    "text": "cloud object stores but for the purpose of this talk we'll be focusing on its distributed architecture and its relation to kubernetes",
+    "start": "122640",
+    "end": "129840"
+  },
+  {
+    "text": "spark runs as independent processes on a cluster coordinated by the spark context object in your driver program so spark",
+    "start": "129920",
+    "end": "136319"
+  },
+  {
+    "start": "130000",
+    "end": "130000"
+  },
+  {
+    "text": "context can connect to several types of cluster managers like mesos yarn or kubernetes for the and for the purp for",
+    "start": "136319",
+    "end": "142000"
+  },
+  {
+    "text": "the purpose of allocating resources across applications so sparks cluster manager functionally",
+    "start": "142000",
+    "end": "147680"
+  },
+  {
+    "text": "is just purpose to provide ip addresses with which spark uses them to communicate so this enables the cluster",
+    "start": "147680",
+    "end": "153840"
+  },
+  {
+    "text": "managers to be rather flexible or composable for a variety of different scheduler back-ends like yarn or kubernetes now this has benefits for",
+    "start": "153840",
+    "end": "160400"
+  },
+  {
+    "text": "plugability via scheduler interface but this does mean that spark isn't good at looking up or trying to bubble up too",
+    "start": "160400",
+    "end": "166319"
+  },
+  {
+    "text": "much kubernetes information as it won't necessarily fit into the general interface we call this kind of a lack of",
+    "start": "166319",
+    "end": "171360"
+  },
+  {
+    "text": "information flow and this is a lot of drawbacks that we'll talk about throughout this talk so upon receiving the provision",
+    "start": "171360",
+    "end": "177360"
+  },
+  {
+    "text": "executors spark sends the application code to the executors after which then the spark context would send tasks to",
+    "start": "177360",
+    "end": "182560"
+  },
+  {
+    "text": "the executors to run the spark context could could be initialized for example as a jupyter notebook as you can see kind of in the",
+    "start": "182560",
+    "end": "188879"
+  },
+  {
+    "text": "diagram which means that the notebook pod would have a service account for directly creating executor pods",
+    "start": "188879",
+    "end": "195599"
+  },
+  {
+    "text": "so if we were to parallel the kubernetes speak we could kind of think of of the driver here as a controller of sorts",
+    "start": "195599",
+    "end": "201440"
+  },
+  {
+    "text": "it's now tasked with provisioning and managing state however this is all done from within spark are folks familiar with controllers or",
+    "start": "201440",
+    "end": "208400"
+  },
+  {
+    "text": "kubernetes controllers sweet now what does it mean for for a driver to have controller-like",
+    "start": "208400",
+    "end": "214560"
+  },
+  {
+    "text": "privileges so this means that the user's pod will have elevated service account privileges that in some environments",
+    "start": "214560",
+    "end": "219680"
+  },
+  {
+    "text": "like ours at bloomberg is rejected due to security concerns some examples are for example some environments don't",
+    "start": "219680",
+    "end": "225040"
+  },
+  {
+    "text": "allow for users to create pods another potential problem is that the full information flow from kubernetes is",
+    "start": "225040",
+    "end": "230879"
+  },
+  {
+    "text": "expected to reach spark but because of the agnostic nature of the schedule as i said earlier this might not be entirely",
+    "start": "230879",
+    "end": "236000"
+  },
+  {
+    "text": "possible and we'll and as we discussed a little bit earlier so to solve this bloomberg um as i also",
+    "start": "236000",
+    "end": "241360"
+  },
+  {
+    "text": "talked about my previous coupon talk looked to enable a plugable executor creation template that pushed the pod",
+    "start": "241360",
+    "end": "246560"
+  },
+  {
+    "text": "creation to an admin controller so this allowed now for the communication with the admin controller",
+    "start": "246560",
+    "end": "252000"
+  },
+  {
+    "text": "um to kind of push out that surface account requirement now uh to communicate with controls in",
+    "start": "252000",
+    "end": "257359"
+  },
+  {
+    "text": "general this is traditionally done via custom resources so this means that the spark driver now modifies a custom resource instead of creating pods",
+    "start": "257359",
+    "end": "263759"
+  },
+  {
+    "text": "directly so this moves the pod creation to an entity that doesn't share service accounts with the users and that solves",
+    "start": "263759",
+    "end": "270000"
+  },
+  {
+    "text": "the first issue and could potentially fix information flow issues that might come up but we'll get into that later",
+    "start": "270000",
+    "end": "276000"
+  },
+  {
+    "text": "so to help understand this let's work with the visual your driver pod um which in this example is running within the user's namespace from a jupyter note",
+    "start": "276000",
+    "end": "282720"
+  },
+  {
+    "text": "from a jupyter notebook pod would communicate with the api server to create and modify a spark app custom",
+    "start": "282720",
+    "end": "287759"
+  },
+  {
+    "text": "resource with the intention of having the controller and the admin namespace create those executors securely in the",
+    "start": "287759",
+    "end": "293840"
+  },
+  {
+    "text": "user's namespace the admin controller will watch for spark app custom resources where the spec field of these",
+    "start": "293840",
+    "end": "298960"
+  },
+  {
+    "text": "custom resources has some desired state in our case we're specifying uh the expected executor pod templates and the",
+    "start": "298960",
+    "end": "305199"
+  },
+  {
+    "text": "controller will then act um on the contents of that spec field by creating these respective executor pods via its",
+    "start": "305199",
+    "end": "310880"
+  },
+  {
+    "text": "reconciliation loop the drive will then wait for those executor pods asynchronously",
+    "start": "310880",
+    "end": "315919"
+  },
+  {
+    "text": "which is functionally done the same as it would otherwise so therefore the rest of the spark paradigm kind of remains the same even with this plugable design",
+    "start": "315919",
+    "end": "323120"
+  },
+  {
+    "text": "now we've been running our personal fork of spark in a managed data science platform across bare metal and various",
+    "start": "323120",
+    "end": "328240"
+  },
+  {
+    "text": "clouds for some time so let's walk through a couple user studies that address the success stories and complications that arose so let's start",
+    "start": "328240",
+    "end": "334639"
+  },
+  {
+    "text": "with all of our success stories we got a comment that it works",
+    "start": "334639",
+    "end": "340800"
+  },
+  {
+    "text": "okay now for what matters the complications that arose so without spending too much time on each of these issues as you can review",
+    "start": "341120",
+    "end": "347199"
+  },
+  {
+    "start": "342000",
+    "end": "342000"
+  },
+  {
+    "text": "them in their solutions offline i think we posted the slides um what i want to highlight here there are two categories of issues ones relating to the pending",
+    "start": "347199",
+    "end": "354160"
+  },
+  {
+    "text": "status of the executors and the others relating to the failed states now something to note is that these",
+    "start": "354160",
+    "end": "359199"
+  },
+  {
+    "text": "issues when in a bare metal non-auto-scaling environment with a constrained resource quota can vary from",
+    "start": "359199",
+    "end": "364639"
+  },
+  {
+    "text": "the pending issues that arise when running in the cloud with auto scaling and preemptable spot instances so to",
+    "start": "364639",
+    "end": "369680"
+  },
+  {
+    "text": "cater to both is quite challenging now regarding failure scenarios node scale down preemption oms these are",
+    "start": "369680",
+    "end": "376639"
+  },
+  {
+    "text": "quite ubiquitous in spark applications especially in a large scale kubernetes cluster and especially when you're running the cloud and so catering to all",
+    "start": "376639",
+    "end": "383199"
+  },
+  {
+    "text": "these variations of failures is another challenge now kubernetes with its cloud-native resources provides all the necessary",
+    "start": "383199",
+    "end": "389440"
+  },
+  {
+    "start": "387000",
+    "end": "387000"
+  },
+  {
+    "text": "information to cater to these problems across a multi-cloud environment as you can see by the solutions to these complications",
+    "start": "389440",
+    "end": "395199"
+  },
+  {
+    "text": "so we will generalize these problems and their respective solutions into three categories and then show that by solving the information flow from kubernetes to",
+    "start": "395199",
+    "end": "401199"
+  },
+  {
+    "text": "spark we can solve for most of the common user complications that have arisen in our platform",
+    "start": "401199",
+    "end": "407199"
+  },
+  {
+    "text": "so the three generalized limitations that result from missing information flow include auto scaling information the capture of scale down preemption om",
+    "start": "407360",
+    "end": "414319"
+  },
+  {
+    "text": "and failure events and post job introspection where a user might want to triage their spark job after the job",
+    "start": "414319",
+    "end": "420160"
+  },
+  {
+    "text": "completes or fails so this complements their existing monitoring or logging dashboards that might be available in their platform",
+    "start": "420160",
+    "end": "427039"
+  },
+  {
+    "text": "so i'll now pass it over to aki so that he can walk us through our approach and our solutions to addressing these limitations in apache spark",
+    "start": "427039",
+    "end": "435479"
+  },
+  {
+    "text": "so our solution to the lack of information is to collect information ourselves somehow and store high-level",
+    "start": "436639",
+    "end": "442960"
+  },
+  {
+    "text": "statistics into uh sales object i mean status field of the custom",
+    "start": "442960",
+    "end": "449360"
+  },
+  {
+    "text": "resource we described earlier so as you can see in this slide uh",
+    "start": "449360",
+    "end": "454400"
+  },
+  {
+    "text": "missing all scaling information is now stored i mean will be stored in the cluster scaling field on the right hand",
+    "start": "454400",
+    "end": "461199"
+  },
+  {
+    "text": "side and scaled down and oom out of memory failures uh information are stored in a",
+    "start": "461199",
+    "end": "467599"
+  },
+  {
+    "text": "terminal status field and first for process of introspection",
+    "start": "467599",
+    "end": "472720"
+  },
+  {
+    "text": "we can keep the job object for a while and query this object",
+    "start": "472720",
+    "end": "478639"
+  },
+  {
+    "text": "and this is how it will look like so we build controllers to collect necessary",
+    "start": "478639",
+    "end": "484080"
+  },
+  {
+    "text": "information somehow and aggregate it as high-level statistics and make it available in the spark-up customer",
+    "start": "484080",
+    "end": "491280"
+  },
+  {
+    "text": "resource for each spark app or context we can for example build a ui",
+    "start": "491280",
+    "end": "497199"
+  },
+  {
+    "text": "on top of the information we gather from the custom resource or bubble up the information to the",
+    "start": "497199",
+    "end": "503199"
+  },
+  {
+    "text": "jubilee notebook that is running the driver program",
+    "start": "503199",
+    "end": "508400"
+  },
+  {
+    "text": "so we could directly collect the information and provide an endpoint to get the statistics statistics in one",
+    "start": "508560",
+    "end": "515039"
+  },
+  {
+    "text": "service there's nothing wrong with this approach but we prefer having a separate",
+    "start": "515039",
+    "end": "520320"
+  },
+  {
+    "text": "component for just collecting the information inside the kubernetes world so by having a controller to collect",
+    "start": "520320",
+    "end": "527120"
+  },
+  {
+    "text": "information from underlying vanillis layer we have a nice separation of concern and also we can follow a common",
+    "start": "527120",
+    "end": "534800"
+  },
+  {
+    "text": "controller pattern for uh handling kanellis objects so what does it mean so as we saw",
+    "start": "534800",
+    "end": "542080"
+  },
+  {
+    "text": "earlier we use the spark up custom resource for creating executables",
+    "start": "542080",
+    "end": "547760"
+  },
+  {
+    "text": "so in the control pattern the spec field represents the desired desired state of the world and",
+    "start": "547760",
+    "end": "554240"
+  },
+  {
+    "text": "the status field is the represented state of the world so control tries to represent the desired",
+    "start": "554240",
+    "end": "560959"
+  },
+  {
+    "text": "state and if we represent back the actual [Music]",
+    "start": "560959",
+    "end": "567040"
+  },
+  {
+    "text": "realized state so uh we are following the control pattern",
+    "start": "567040",
+    "end": "573200"
+  },
+  {
+    "text": "here when we store the statistics about the executors to the status field back",
+    "start": "573200",
+    "end": "579279"
+  },
+  {
+    "text": "so other considerations about the controller pattern itself is that its reconciliation load",
+    "start": "579279",
+    "end": "585839"
+  },
+  {
+    "text": "needs to be it important meaning that it needs to be stateless it can't rely on",
+    "start": "585839",
+    "end": "591200"
+  },
+  {
+    "text": "the previous results so it works from scratch every time the reconciliation loop is invoked",
+    "start": "591200",
+    "end": "598320"
+  },
+  {
+    "start": "597000",
+    "end": "597000"
+  },
+  {
+    "text": "so another way to think about this approach is that we are effectively using the custom resource as a data data",
+    "start": "598320",
+    "end": "605120"
+  },
+  {
+    "text": "store for the high level statistics we want we are effectively storing information",
+    "start": "605120",
+    "end": "610160"
+  },
+  {
+    "text": "to scd via kubernetes api server so here's the characteristics",
+    "start": "610160",
+    "end": "616240"
+  },
+  {
+    "text": "of this approach as a data store so it it introduces",
+    "start": "616240",
+    "end": "621680"
+  },
+  {
+    "text": "no extra dependency and it provides out of the box publish up a mechanism via",
+    "start": "621680",
+    "end": "627040"
+  },
+  {
+    "text": "watch and we can do basic query and aggregation by uh selectors and controllers",
+    "start": "627040",
+    "end": "633760"
+  },
+  {
+    "text": "and the latency is not ideal but isn't too high as well so we can expect an order of a second latency and not to",
+    "start": "633760",
+    "end": "641680"
+  },
+  {
+    "text": "mention its availability is really excellent since we are providing high-level",
+    "start": "641680",
+    "end": "647600"
+  },
+  {
+    "start": "644000",
+    "end": "644000"
+  },
+  {
+    "text": "statistics in there we want to push updates via long polling",
+    "start": "647600",
+    "end": "653440"
+  },
+  {
+    "text": "or wave socket so we won't publish a mechanism in the data store and the users are not",
+    "start": "653440",
+    "end": "660320"
+  },
+  {
+    "text": "clicking on something and or and actively waiting for the refer response the latency requirement for our",
+    "start": "660320",
+    "end": "667600"
+  },
+  {
+    "text": "ui is not so tight and we only need the basic query mechanism in this case in our use case",
+    "start": "667600",
+    "end": "674959"
+  },
+  {
+    "text": "and since we run it in bare metal and multiple cloud cloud services we really want to",
+    "start": "674959",
+    "end": "681760"
+  },
+  {
+    "text": "minimize extra dependencies in our case because the maintenance cost and the",
+    "start": "681760",
+    "end": "686800"
+  },
+  {
+    "text": "complexity in each environment add up so there are there are two alternatives",
+    "start": "686800",
+    "end": "694240"
+  },
+  {
+    "text": "we considered as a data source one is that uh our external log metric services such",
+    "start": "694240",
+    "end": "700399"
+  },
+  {
+    "text": "as humio splunk which we already use for our debugging purposes",
+    "start": "700399",
+    "end": "705920"
+  },
+  {
+    "text": "they are excellent for retrospective troubleshooting via other hook queries",
+    "start": "705920",
+    "end": "711120"
+  },
+  {
+    "text": "but building real-time ui on top of this is not really trivial and also latencies",
+    "start": "711120",
+    "end": "716639"
+  },
+  {
+    "text": "are of concern as they are they're typically backed by s3 storage",
+    "start": "716639",
+    "end": "721839"
+  },
+  {
+    "text": "to handle a large amount of data so",
+    "start": "721839",
+    "end": "727519"
+  },
+  {
+    "text": "another way we thought about is to use an additional database this is suddenly doable but",
+    "start": "727519",
+    "end": "734320"
+  },
+  {
+    "text": "it introduces extra infrastructure and we also need to choose our solution carefully and design on top of it with",
+    "start": "734320",
+    "end": "741839"
+  },
+  {
+    "text": "care as well so as we saw we are effectively choosing",
+    "start": "741839",
+    "end": "746880"
+  },
+  {
+    "text": "scd for our database for the advantages listed before",
+    "start": "746880",
+    "end": "752720"
+  },
+  {
+    "start": "752000",
+    "end": "752000"
+  },
+  {
+    "text": "now that we have proposed using a custom resource to store execute as high level statistics",
+    "start": "753279",
+    "end": "759680"
+  },
+  {
+    "text": "let's work through each of the limitations in information flow we identified earlier",
+    "start": "759680",
+    "end": "766079"
+  },
+  {
+    "text": "we will start with auto scaling so what is all the scaling up",
+    "start": "766079",
+    "end": "771600"
+  },
+  {
+    "text": "so cluster scale up happens when existing node existing kubernetes nodes",
+    "start": "771600",
+    "end": "776880"
+  },
+  {
+    "text": "cannot fit in newly created ports so if there's not enough nodes already the cluster",
+    "start": "776880",
+    "end": "784079"
+  },
+  {
+    "text": "scalar tries to create more node so when it happens there are actually two problems from the",
+    "start": "784079",
+    "end": "790399"
+  },
+  {
+    "text": "perspective of use spark user experience firstly it takes much longer than usual",
+    "start": "790399",
+    "end": "796480"
+  },
+  {
+    "text": "pod initialization and if and secondly it's not always possible uh",
+    "start": "796480",
+    "end": "801839"
+  },
+  {
+    "text": "for example if the user is not allocated enough quota for aws or azure resources",
+    "start": "801839",
+    "end": "809360"
+  },
+  {
+    "text": "so without knowing this underlying cluster knowing this underlying cluster scale of",
+    "start": "809360",
+    "end": "815040"
+  },
+  {
+    "text": "status spark users will be left wondering why their requested executors",
+    "start": "815040",
+    "end": "820320"
+  },
+  {
+    "text": "don't come up and are they going to ever come up or whether they need to inform cluster adam",
+    "start": "820320",
+    "end": "827199"
+  },
+  {
+    "text": "could have administrators for help or things like that so now that we know",
+    "start": "827199",
+    "end": "833680"
+  },
+  {
+    "start": "832000",
+    "end": "832000"
+  },
+  {
+    "text": "how cluster scale works and why it's useful for our users we are going to actually collect",
+    "start": "833680",
+    "end": "840079"
+  },
+  {
+    "text": "information to detect their status so if we are running standard cluster of",
+    "start": "840079",
+    "end": "845760"
+  },
+  {
+    "text": "scala implementation provided by kubernetes that particular implementation will",
+    "start": "845760",
+    "end": "851440"
+  },
+  {
+    "text": "inform us about cluster scale up via event objects",
+    "start": "851440",
+    "end": "856800"
+  },
+  {
+    "text": "it creates an event object with a reference to the affected pod like shown",
+    "start": "856800",
+    "end": "862480"
+  },
+  {
+    "text": "in the slide and they create so the",
+    "start": "862480",
+    "end": "868240"
+  },
+  {
+    "text": "the references in the involved object field so one reason we chose to run the",
+    "start": "868240",
+    "end": "873519"
+  },
+  {
+    "text": "standard cluster scalar by the way was because of our multi-cloud environment and the desire to keep a single",
+    "start": "873519",
+    "end": "880959"
+  },
+  {
+    "text": "implement implementation across all deployments so this is another example for when a",
+    "start": "880959",
+    "end": "887279"
+  },
+  {
+    "text": "cluster scalar app was impossible so the last one was for scaling up was possible and triggered and we can so we can",
+    "start": "887279",
+    "end": "895120"
+  },
+  {
+    "text": "detect cluster scaling state of each executable by letting these",
+    "start": "895120",
+    "end": "900320"
+  },
+  {
+    "text": "events from cluster autoscaler involving the particular port and pick the latest one",
+    "start": "900320",
+    "end": "908240"
+  },
+  {
+    "start": "908000",
+    "end": "908000"
+  },
+  {
+    "text": "so we can have one controller watching pause and cluster all scalar events and aggregate all the information into",
+    "start": "908399",
+    "end": "915040"
+  },
+  {
+    "text": "sparkup custom resource a minor concern here is that the",
+    "start": "915040",
+    "end": "920079"
+  },
+  {
+    "text": "reconciliation loop is about the spark up spanning all the executors in this",
+    "start": "920079",
+    "end": "925360"
+  },
+  {
+    "text": "spark upper context and the one reconciliation loop will go through the pause of the app and also",
+    "start": "925360",
+    "end": "933120"
+  },
+  {
+    "text": "the events of each pod in the app and on top of this the auto scale event",
+    "start": "933120",
+    "end": "938480"
+  },
+  {
+    "text": "can be repeated and can cause spike of incoming updates and can potentially",
+    "start": "938480",
+    "end": "943759"
+  },
+  {
+    "text": "make the controller less responsible at the time so we can separate the concern by",
+    "start": "943759",
+    "end": "951279"
+  },
+  {
+    "text": "introducing another controller nicely so the additional controller works on",
+    "start": "951279",
+    "end": "956560"
+  },
+  {
+    "text": "cluster auto scalar events exclusively and saw the cluster auto scaling sales information",
+    "start": "956560",
+    "end": "962880"
+  },
+  {
+    "text": "of the affected part i mean the status into the affected part",
+    "start": "962880",
+    "end": "968000"
+  },
+  {
+    "text": "itself and the main controller only watches pause simple and",
+    "start": "968000",
+    "end": "974720"
+  },
+  {
+    "text": "this is possible because we can dynamically store additional information to pull itself",
+    "start": "974720",
+    "end": "980959"
+  },
+  {
+    "text": "so how we do this so one way is to put the custom label or",
+    "start": "980959",
+    "end": "986079"
+  },
+  {
+    "text": "annotation to the pod we define an arbitrary custom level name and the projector information with some",
+    "start": "986079",
+    "end": "992720"
+  },
+  {
+    "text": "constraints and another less known way is to put the custom condition to the pub status field we can define a custom",
+    "start": "992720",
+    "end": "999600"
+  },
+  {
+    "text": "condition type with additional field with more flexible constraint",
+    "start": "999600",
+    "end": "1006079"
+  },
+  {
+    "start": "1006000",
+    "end": "1006000"
+  },
+  {
+    "text": "now that we handle the scale up the next problem that we will work on is",
+    "start": "1006079",
+    "end": "1011839"
+  },
+  {
+    "text": "a cluster of scaling down and out of memory the information source we need",
+    "start": "1011839",
+    "end": "1017279"
+  },
+  {
+    "text": "here is actually the same as before the cluster all scaled down information is provided in the exact same way as",
+    "start": "1017279",
+    "end": "1024400"
+  },
+  {
+    "text": "cluster auto scale up and out of memory information can be already found in the",
+    "start": "1024400",
+    "end": "1029438"
+  },
+  {
+    "text": "pub itself in a terminality studies in the polar status field",
+    "start": "1029439",
+    "end": "1035280"
+  },
+  {
+    "text": "so the same pros and the events are the information sources however the challenge here is that",
+    "start": "1035280",
+    "end": "1043360"
+  },
+  {
+    "text": "since these pods have failed already they can be deleted as we are following the control patterns",
+    "start": "1043360",
+    "end": "1050160"
+  },
+  {
+    "text": "we need all the information also available at the time of reconciliation because uh control is stateless and it",
+    "start": "1050160",
+    "end": "1056799"
+  },
+  {
+    "text": "needs to be important as i covered before",
+    "start": "1056799",
+    "end": "1062080"
+  },
+  {
+    "start": "1060000",
+    "end": "1060000"
+  },
+  {
+    "text": "so one way to deal with this deletion is not to delete pods in the first place so",
+    "start": "1062080",
+    "end": "1068160"
+  },
+  {
+    "text": "there is a relevant option introduced in spark 30 that prevents spark drivers",
+    "start": "1068160",
+    "end": "1073280"
+  },
+  {
+    "text": "from the deleting failed executive ports by default spark",
+    "start": "1073280",
+    "end": "1078320"
+  },
+  {
+    "text": "driver deletes failed bots but by setting this deleted deletion",
+    "start": "1078320",
+    "end": "1083440"
+  },
+  {
+    "text": "termination option to false it leaves the failed pause as they are",
+    "start": "1083440",
+    "end": "1088880"
+  },
+  {
+    "text": "so this solved the majority of the problem and it dissolved the issue for out of memory era",
+    "start": "1088880",
+    "end": "1095200"
+  },
+  {
+    "text": "but this only prevents spark driver from killing pulse and there are others who can kill",
+    "start": "1095200",
+    "end": "1100960"
+  },
+  {
+    "text": "exhibit catapults for example in the case of a cluster auto scale down or eviction",
+    "start": "1100960",
+    "end": "1107280"
+  },
+  {
+    "text": "port will be deleted by kubernetes core components not drivers so it's not",
+    "start": "1107280",
+    "end": "1113520"
+  },
+  {
+    "text": "prevented by the above config it turns out that even for those cases",
+    "start": "1113520",
+    "end": "1120640"
+  },
+  {
+    "text": "we can actually prevent the deletion by using kubernetes finalizers finalizes is a field in the metadata",
+    "start": "1120640",
+    "end": "1129039"
+  },
+  {
+    "text": "and it's just an array of strings and as long as it's not empty the object cannot",
+    "start": "1129039",
+    "end": "1134720"
+  },
+  {
+    "text": "be deleted so we can put a custom arbitrary finalizer there and prevent execute the part from being deleted as",
+    "start": "1134720",
+    "end": "1141760"
+  },
+  {
+    "text": "long as we want we did not choose this approach because the scope of the implication is really",
+    "start": "1141760",
+    "end": "1148720"
+  },
+  {
+    "text": "hard to know how it's such a central component of kubernetes and so many",
+    "start": "1148720",
+    "end": "1153760"
+  },
+  {
+    "text": "types of resources are attached to it that it it's very hard to foresee every",
+    "start": "1153760",
+    "end": "1160320"
+  },
+  {
+    "text": "single edge cases we can face down the road so we decided that we cannot keep the",
+    "start": "1160320",
+    "end": "1167280"
+  },
+  {
+    "start": "1165000",
+    "end": "1165000"
+  },
+  {
+    "text": "pod resource itself we need to store the information somewhere",
+    "start": "1167280",
+    "end": "1172400"
+  },
+  {
+    "text": "so given the previous considerations about the data source another custom resource in scd is a natural fit",
+    "start": "1172400",
+    "end": "1179360"
+  },
+  {
+    "text": "so now the product status controller watches the executables and cluster scale events and the necessary",
+    "start": "1179360",
+    "end": "1184960"
+  },
+  {
+    "text": "information into new product status custom resource so we just created it",
+    "start": "1184960",
+    "end": "1191679"
+  },
+  {
+    "text": "so it's worth note uh in this diagram that some of the executor pause may be deleted and so they won't exist in scd",
+    "start": "1191679",
+    "end": "1199840"
+  },
+  {
+    "text": "anymore which is why this pulse set is custom resource is necessary",
+    "start": "1199840",
+    "end": "1205039"
+  },
+  {
+    "text": "this is uh indicated in the dashed circle so the spark app controller will now",
+    "start": "1205039",
+    "end": "1210880"
+  },
+  {
+    "text": "watch for sales objects in instead of managing aggregated status so the main controller is still watching the",
+    "start": "1210880",
+    "end": "1217840"
+  },
+  {
+    "text": "single uh object so this is what pod stylus custom",
+    "start": "1217840",
+    "end": "1224240"
+  },
+  {
+    "start": "1218000",
+    "end": "1218000"
+  },
+  {
+    "text": "resource actually looks like we follow the common pattern of spec and",
+    "start": "1224240",
+    "end": "1229919"
+  },
+  {
+    "text": "status field here and spec is a desired state and the status is the realized state",
+    "start": "1229919",
+    "end": "1237039"
+  },
+  {
+    "text": "and in this case it's kind of a little bit very it's a variant of that spec field specifies the target part to track",
+    "start": "1237039",
+    "end": "1244559"
+  },
+  {
+    "text": "in the object and the controller replicates the necessary information into the status field meaning that the",
+    "start": "1244559",
+    "end": "1250080"
+  },
+  {
+    "text": "status field itself is the realized state so we can selectively activate this",
+    "start": "1250080",
+    "end": "1256320"
+  },
+  {
+    "text": "functionality for a single port by creating one public service object like this",
+    "start": "1256320",
+    "end": "1262960"
+  },
+  {
+    "text": "so optionally we can have a separate webhook or controller on top of this and",
+    "start": "1262960",
+    "end": "1268480"
+  },
+  {
+    "text": "they automatically create such power source objects for each part that",
+    "start": "1268480",
+    "end": "1273600"
+  },
+  {
+    "text": "matches certain criteria like in spark there are there is a requirement that all executor paws have",
+    "start": "1273600",
+    "end": "1280720"
+  },
+  {
+    "text": "labeled spark role equals executable so in this example in the example",
+    "start": "1280720",
+    "end": "1286960"
+  },
+  {
+    "text": "configuration in the slide if a pod has the spark role equals executor a",
+    "start": "1286960",
+    "end": "1292559"
+  },
+  {
+    "text": "corresponding power status object will be automatically created and then the controller will be watching that and",
+    "start": "1292559",
+    "end": "1299760"
+  },
+  {
+    "text": "keep updating relevant information from event and pod into those public status",
+    "start": "1299760",
+    "end": "1307200"
+  },
+  {
+    "text": "so now it looks like we are copying field values around only from",
+    "start": "1307200",
+    "end": "1312559"
+  },
+  {
+    "text": "one object type to another so we might as well make it more generic and",
+    "start": "1312559",
+    "end": "1317679"
+  },
+  {
+    "text": "describe it it's by degradative field copying specs so this is an alternative design of the",
+    "start": "1317679",
+    "end": "1325440"
+  },
+  {
+    "text": "pulse status controller so in the for this controller we have a",
+    "start": "1325440",
+    "end": "1330720"
+  },
+  {
+    "text": "configuration like this and [Music] in the left hand side we specify the",
+    "start": "1330720",
+    "end": "1337280"
+  },
+  {
+    "text": "source and destination field degradatively and the type of course and the controller will watch the source",
+    "start": "1337280",
+    "end": "1343840"
+  },
+  {
+    "text": "objects and keep replicating specified fields resulting destination object in this",
+    "start": "1343840",
+    "end": "1350320"
+  },
+  {
+    "text": "case is shown in the right hand side and the owner reference field and the container status field is replicated and",
+    "start": "1350320",
+    "end": "1358400"
+  },
+  {
+    "start": "1358000",
+    "end": "1358000"
+  },
+  {
+    "text": "this is another example uh for the cluster scalar event",
+    "start": "1358400",
+    "end": "1363440"
+  },
+  {
+    "text": "we on top on top of the previous one we also let the controller watch events",
+    "start": "1363440",
+    "end": "1369520"
+  },
+  {
+    "text": "with the configuration watch and a cluster replicate",
+    "start": "1369520",
+    "end": "1375919"
+  },
+  {
+    "text": "and and replicate the latest field values from the cluster event to the destination status object",
+    "start": "1375919",
+    "end": "1384720"
+  },
+  {
+    "text": "so our implementation of this approach is powered by an unstructured type",
+    "start": "1385039",
+    "end": "1390880"
+  },
+  {
+    "text": "in a client goal and it's actually quite lightweight uh is let's say like several",
+    "start": "1390880",
+    "end": "1396720"
+  },
+  {
+    "text": "hundredths of a line of code a gold code and it might be even more straightforward in kubernetes clients in",
+    "start": "1396720",
+    "end": "1403919"
+  },
+  {
+    "text": "dynamic languages a downside of this approach is that",
+    "start": "1403919",
+    "end": "1409200"
+  },
+  {
+    "text": "everything becomes a goal map in the implementation and we lose static typing",
+    "start": "1409200",
+    "end": "1416320"
+  },
+  {
+    "text": "you might want to do more than just copying for example define more complicated trigger rule and",
+    "start": "1416320",
+    "end": "1422799"
+  },
+  {
+    "text": "have more versatile actions triggered by those rules not just copying etc and",
+    "start": "1422799",
+    "end": "1428240"
+  },
+  {
+    "text": "it's totally possible and not that hard to do but we would recommend keep",
+    "start": "1428240",
+    "end": "1433679"
+  },
+  {
+    "text": "the configuration like this uh really simple as you don't really want to for example you need to test yam or",
+    "start": "1433679",
+    "end": "1439840"
+  },
+  {
+    "text": "configuration down the road one realization from this experimental",
+    "start": "1439840",
+    "end": "1446320"
+  },
+  {
+    "text": "uh implementation is that this way we can really make sure that the additional",
+    "start": "1446320",
+    "end": "1452480"
+  },
+  {
+    "text": "control additional controller the power status controller only does copying and",
+    "start": "1452480",
+    "end": "1457760"
+  },
+  {
+    "text": "nothing else so it can be good design pattern or discipline to follow in certain use cases",
+    "start": "1457760",
+    "end": "1465278"
+  },
+  {
+    "text": "so in other words you can make sure that all the business logic resides in the main controller and not randomly spread",
+    "start": "1467039",
+    "end": "1474320"
+  },
+  {
+    "text": "across multiple places but in our use cases we actually wanted to encapsulate",
+    "start": "1474320",
+    "end": "1481679"
+  },
+  {
+    "text": "autoscaler related logic into additional controller the polar cells",
+    "start": "1481679",
+    "end": "1487279"
+  },
+  {
+    "text": "controller so we didn't choose this route so as a recap now that we've worked",
+    "start": "1487279",
+    "end": "1494480"
+  },
+  {
+    "text": "through providing all the scaling information and the various failure scenarios by fixing fixing the",
+    "start": "1494480",
+    "end": "1500640"
+  },
+  {
+    "text": "information flow to spark we can look back at the spark up customer resource and know how it was produced",
+    "start": "1500640",
+    "end": "1508080"
+  },
+  {
+    "text": "regarding the persistence of spark of information for the purpose of passage of introspection we went through various",
+    "start": "1508080",
+    "end": "1515600"
+  },
+  {
+    "text": "storage options with the conclusion that the custom resource is the effective candidate for",
+    "start": "1515600",
+    "end": "1521200"
+  },
+  {
+    "text": "our multi-cloud environment the building upon",
+    "start": "1521200",
+    "end": "1526480"
+  },
+  {
+    "start": "1525000",
+    "end": "1525000"
+  },
+  {
+    "text": "what we talked about in this presentation are similar features can be implemented implemented in other",
+    "start": "1526480",
+    "end": "1532799"
+  },
+  {
+    "text": "distributed execution systems such as python or tensorflow that rely on kubernetes as a resource manager",
+    "start": "1532799",
+    "end": "1540640"
+  },
+  {
+    "text": "in that case the power status controller will be reusable as is and the main java",
+    "start": "1540640",
+    "end": "1545760"
+  },
+  {
+    "text": "controller can handle job type specific statistics apart from that",
+    "start": "1545760",
+    "end": "1552960"
+  },
+  {
+    "text": "while the old scalar detection behavior via event objects is specific to the standard cluster",
+    "start": "1554559",
+    "end": "1560880"
+  },
+  {
+    "text": "scalar we can actually switch to alternative auto scalers such as carpenter",
+    "start": "1560880",
+    "end": "1566960"
+  },
+  {
+    "text": "without affecting the main job controller now by only switching detection logic",
+    "start": "1566960",
+    "end": "1573039"
+  },
+  {
+    "text": "inside the public service controller this is especially useful if you we have",
+    "start": "1573039",
+    "end": "1578799"
+  },
+  {
+    "text": "multiple job types and multiple main job controllers",
+    "start": "1578799",
+    "end": "1584679"
+  },
+  {
+    "text": "so that's it so feel free to check out the rest of our talks from bloomberg and",
+    "start": "1584720",
+    "end": "1591679"
+  },
+  {
+    "text": "check out also check out the links below to learn more about us and by the way we are hiring",
+    "start": "1591679",
+    "end": "1599480"
+  },
+  {
+    "text": "thank you for that so do we have any questions for these yeah this question of course",
+    "start": "1603520",
+    "end": "1609760"
+  },
+  {
+    "text": "good job hi thank you for the presentation how do",
+    "start": "1610559",
+    "end": "1616799"
+  },
+  {
+    "text": "you manage the data i mean in the multi-cloud environment how do you manage the different",
+    "start": "1616799",
+    "end": "1623279"
+  },
+  {
+    "text": "aspects of the data isolation security do you share the data",
+    "start": "1623279",
+    "end": "1628799"
+  },
+  {
+    "text": "how do you run spark in multi-cloud with different type of data different type of teams",
+    "start": "1628799",
+    "end": "1636000"
+  },
+  {
+    "text": "got it so it's general data management do you guys hear me sorry general data management questions um",
+    "start": "1636000",
+    "end": "1641520"
+  },
+  {
+    "text": "yeah the context of the talk is mostly about the compute but in terms of data it varies between like the",
+    "start": "1641520",
+    "end": "1647279"
+  },
+  {
+    "text": "restrictions and the security concerns the application like if it's something where um we're taking data that's only",
+    "start": "1647279",
+    "end": "1652640"
+  },
+  {
+    "text": "within a spurt in like say network work we're constricting it to would have like calculated policies locking everything",
+    "start": "1652640",
+    "end": "1658720"
+  },
+  {
+    "text": "down in terms of moving data in and out right and so it varies based on the implementation so the platforms itself",
+    "start": "1658720",
+    "end": "1664720"
+  },
+  {
+    "text": "are composable so they vary with security concerns but if you run the same board in",
+    "start": "1664720",
+    "end": "1670399"
+  },
+  {
+    "text": "different places you have to share the data you have to have only one place or different place",
+    "start": "1670399",
+    "end": "1677520"
+  },
+  {
+    "text": "so when you see when you say the okay um the pods themselves are on the user's name space right and so the data itself",
+    "start": "1677520",
+    "end": "1684399"
+  },
+  {
+    "text": "is either collocates in the name space or you have specific um verification on what data source you're",
+    "start": "1684399",
+    "end": "1690320"
+  },
+  {
+    "text": "communicating to so the pods themselves are the user namespace the admin controllers are just a control plane",
+    "start": "1690320",
+    "end": "1695760"
+  },
+  {
+    "text": "right the paws are not in the control plane it's only in the user's name space for the spark app does that answer the question",
+    "start": "1695760",
+    "end": "1702000"
+  },
+  {
+    "text": "okay so i yeah there was one behind hey i have two questions the first one",
+    "start": "1702000",
+    "end": "1708799"
+  },
+  {
+    "text": "is you had on-prem data center footprint you had aws and gcps i was curious if all the",
+    "start": "1708799",
+    "end": "1715919"
+  },
+  {
+    "text": "cluster compute nodes on all these three footprints across cloud providers are",
+    "start": "1715919",
+    "end": "1721039"
+  },
+  {
+    "text": "are they homogeneous or do you have heterogeneous uh computer environments",
+    "start": "1721039",
+    "end": "1727679"
+  },
+  {
+    "text": "so homogeneous in terms of the hardware types like cpu gpu yes yeah yeah got it got it so um in terms of spark we there",
+    "start": "1727919",
+    "end": "1734880"
+  },
+  {
+    "text": "are nvidia plug-ins value to run gpu um and so it's based on once again the configuration of the cluster the the",
+    "start": "1734880",
+    "end": "1741039"
+  },
+  {
+    "text": "infrastructure itself is portable um so functionally yes it could be yeah thanks",
+    "start": "1741039",
+    "end": "1746240"
+  },
+  {
+    "text": "and the second question is i'm curious to learn uh if you build cluster order scaler",
+    "start": "1746240",
+    "end": "1751760"
+  },
+  {
+    "text": "before carpenter was announced or what were the reasons for for building it in house versus using an",
+    "start": "1751760",
+    "end": "1759279"
+  },
+  {
+    "text": "another open source project do we yeah so",
+    "start": "1759279",
+    "end": "1765120"
+  },
+  {
+    "text": "the we were using the standard cluster auto scaler from kubernetes right the intention um as aki mentioned was that",
+    "start": "1765120",
+    "end": "1771039"
+  },
+  {
+    "text": "because we're in a multi-cloud environment and we need portable infrastructure the built-in standard cluster auto scale",
+    "start": "1771039",
+    "end": "1776640"
+  },
+  {
+    "text": "or something that would run in eks aks and on bare metal because it's all kubernetes abstraction right so we",
+    "start": "1776640",
+    "end": "1782240"
+  },
+  {
+    "text": "just use the base cluster autoscaler so we didn't build our own but the idea is because we have a separation of concerns",
+    "start": "1782240",
+    "end": "1788000"
+  },
+  {
+    "text": "between the job controllers that reconcile however that job operates and the auto scaling information the auto",
+    "start": "1788000",
+    "end": "1793520"
+  },
+  {
+    "text": "scaler and from the auto scaling controller could have either the cluster auto scaler events or it could use",
+    "start": "1793520",
+    "end": "1799200"
+  },
+  {
+    "text": "carpenter's way of doing it yeah thank you",
+    "start": "1799200",
+    "end": "1803759"
+  },
+  {
+    "text": "and the last question",
+    "start": "1804240",
+    "end": "1807880"
+  },
+  {
+    "text": "um so i guess like because you're using fcd like it's kind of a database i'm",
+    "start": "1812559",
+    "end": "1817600"
+  },
+  {
+    "text": "curious if you like it any scaling or performance constraints and if you did any testing on that sort of thing it",
+    "start": "1817600",
+    "end": "1823760"
+  },
+  {
+    "text": "seems kind of like pod statuses are just created and i imagine it'll pile up over time",
+    "start": "1823760",
+    "end": "1831600"
+  },
+  {
+    "text": "so with regards to kind of um considerations so traditionally it's kind of about like what is your spark app clusters like scale to right like",
+    "start": "1833840",
+    "end": "1841679"
+  },
+  {
+    "text": "we had some battle tests i think 400 and 500 uh kind of executor clusters and that's kind of what i've seen mostly",
+    "start": "1841679",
+    "end": "1848159"
+  },
+  {
+    "text": "like sub 1000 i don't really know too many have more than a thousand kind of executor pods obviously again if you're",
+    "start": "1848159",
+    "end": "1853360"
+  },
+  {
+    "text": "talking about very large it talks about numbers but how much you can store in std um we thought that it kind of fit",
+    "start": "1853360",
+    "end": "1858399"
+  },
+  {
+    "text": "within our models of you know 400 500 pod clusters um i mean we can talk offline in terms",
+    "start": "1858399",
+    "end": "1863679"
+  },
+  {
+    "text": "of like other kind of maybe you know strategy tests in terms of actual like sizing itself but it seems to fit for",
+    "start": "1863679",
+    "end": "1869600"
+  },
+  {
+    "text": "most applications that we're running abroad thank you",
+    "start": "1869600",
+    "end": "1876540"
+  },
+  {
+    "text": "[Applause]",
+    "start": "1876540",
+    "end": "1880549"
+  }
+]

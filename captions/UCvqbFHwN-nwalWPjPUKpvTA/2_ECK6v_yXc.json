@@ -1,0 +1,1467 @@
+[
+  {
+    "text": "hello everyone so this talk is about how Spotify outgrew its service discovery",
+    "start": "80",
+    "end": "5879"
+  },
+  {
+    "text": "shoes and how we went about finding a new pair of shoes and instead of 1 million DNS shoes we now have 1 million",
+    "start": "5879",
+    "end": "12480"
+  },
+  {
+    "text": "XDS shoes this will all make sense uh give a minute yes so we'll cover what",
+    "start": "12480",
+    "end": "19920"
+  },
+  {
+    "text": "problems we were facing and why we ended up designing around XDS um design and",
+    "start": "19920",
+    "end": "25600"
+  },
+  {
+    "text": "implementation choices and how we transparently rolled this out without any adverse effects",
+    "start": "25600",
+    "end": "32480"
+  },
+  {
+    "text": "there's an asterisk here after that but I'm sure we'll get to that as well i'm Eric i work as a staff engineer in",
+    "start": "32480",
+    "end": "38640"
+  },
+  {
+    "text": "Spotify's core infrastructure um product area and with me I have Erica who's a",
+    "start": "38640",
+    "end": "44000"
+  },
+  {
+    "text": "senior engineer and subject matter expert in service our service networking team so first off a little technical",
+    "start": "44000",
+    "end": "51680"
+  },
+  {
+    "text": "context about Spotify stack so it's a micros service architecture that runs on GKE we were originally on prem and moved",
+    "start": "51680",
+    "end": "59600"
+  },
+  {
+    "text": "to GCP in I think 2017 uh the first running VM with the custom",
+    "start": "59600",
+    "end": "66119"
+  },
+  {
+    "text": "orchestration and first first we're running on VMs with a custom orchestration uh layer and then sorry",
+    "start": "66119",
+    "end": "73600"
+  },
+  {
+    "text": "yeah um then we move to GKE and and Kubernetes so and yeah the majority of",
+    "start": "73600",
+    "end": "80240"
+  },
+  {
+    "text": "services are written in Java and using an in-house Java framework but there's also a smaller set of services written",
+    "start": "80240",
+    "end": "86880"
+  },
+  {
+    "text": "in other languages like Python and and NodeJS and yeah and yeah we're really big you can see some numbers on the",
+    "start": "86880",
+    "end": "93280"
+  },
+  {
+    "text": "slide here that should give you some kind of sense of scale uh most of the service to service traffic is gRPC I",
+    "start": "93280",
+    "end": "99759"
+  },
+  {
+    "text": "think 75% give or take and then we use proxyless gpc which means then that gc",
+    "start": "99759",
+    "end": "105840"
+  },
+  {
+    "text": "clients connect directly to servers as opposed to traditional service measures where uh that might make use of",
+    "start": "105840",
+    "end": "112640"
+  },
+  {
+    "text": "forwarding proxies and sidecars 25% of uh the traffic that remains after",
+    "start": "112640",
+    "end": "118880"
+  },
+  {
+    "text": "GC is a proprietary protocol which we're migrating off and while most of our internet ingress is in HTTP there's very",
+    "start": "118880",
+    "end": "126399"
+  },
+  {
+    "text": "little HTTP that goes between services um what else we're deployed in five GCP",
+    "start": "126399",
+    "end": "131520"
+  },
+  {
+    "text": "regions and we have a regional regional failure domain uh where each region can provide most of the end user services",
+    "start": "131520",
+    "end": "138360"
+  },
+  {
+    "text": "independently but it's possible for us to make for services to make cross region calls for example when a service",
+    "start": "138360",
+    "end": "143840"
+  },
+  {
+    "text": "has a regional outage or if the service isn't deployed in all regions which happens for our smaller",
+    "start": "143840",
+    "end": "150520"
+  },
+  {
+    "text": "services so here's a basic sketch of Spotify's service discovery system it's called Nameless it was created in 2013",
+    "start": "150520",
+    "end": "158239"
+  },
+  {
+    "text": "to replace a bunch of bash scripts that were managing DNS zone files uh and why",
+    "start": "158239",
+    "end": "163920"
+  },
+  {
+    "text": "it's called nameless we don't remember the same system has been in use since the on-prem days and has been updated",
+    "start": "163920",
+    "end": "170480"
+  },
+  {
+    "text": "over the years as Spotify's uh infrastructure has evolved it has",
+    "start": "170480",
+    "end": "175760"
+  },
+  {
+    "text": "several internal components supporting heartbeat driven service registration which is used by the workloads that we",
+    "start": "175760",
+    "end": "181920"
+  },
+  {
+    "text": "had that are still on VMs uh it controls regional redirects on a uh per service",
+    "start": "181920",
+    "end": "187599"
+  },
+  {
+    "text": "and per protocol level and then it subscribes to endpoint slice changes in our Kubernetes clusters to provide",
+    "start": "187599",
+    "end": "193760"
+  },
+  {
+    "text": "service discovery to services running in Kubernetes the the component that does",
+    "start": "193760",
+    "end": "198879"
+  },
+  {
+    "text": "the this Kubernetes business is is a later addition to nameless and we call it shameless i thought you might enjoy",
+    "start": "198879",
+    "end": "206000"
+  },
+  {
+    "text": "knowing that so uh service discovery data then is exposed as DNS SRV records",
+    "start": "206000",
+    "end": "211519"
+  },
+  {
+    "text": "using core DNS which is queried by services through normal DNS infrastructure in our case cloud DNS and",
+    "start": "211519",
+    "end": "219040"
+  },
+  {
+    "text": "a few custom resolvers since we have a regional failure domain our service discovery system uh has no interreional",
+    "start": "219040",
+    "end": "226400"
+  },
+  {
+    "text": "dependencies and operates independently excuse me all right so",
+    "start": "226400",
+    "end": "232159"
+  },
+  {
+    "text": "we're hitting some limitations with DNS we're running into like DNS response",
+    "start": "232159",
+    "end": "238319"
+  },
+  {
+    "text": "size limits for our largest deployments where DNS a DNS response would um exceed",
+    "start": "238319",
+    "end": "244159"
+  },
+  {
+    "text": "the maximum response size of 65 kilobytes plus DNS adds uncertainty to",
+    "start": "244159",
+    "end": "250080"
+  },
+  {
+    "text": "the system um the time it takes for a service to unregister becomes difficult to reason about when there's DNS caching",
+    "start": "250080",
+    "end": "257120"
+  },
+  {
+    "text": "at multiple layers going on one way communication is quite limiting and combined with the",
+    "start": "257120",
+    "end": "263520"
+  },
+  {
+    "text": "inflexibility of DNS it makes it very difficult for us to build any advanced routing features that we're starting to",
+    "start": "263520",
+    "end": "269000"
+  },
+  {
+    "text": "require but on the other hand our DNSbased system has some benefits it's robust and battle tested it's been",
+    "start": "269000",
+    "end": "275120"
+  },
+  {
+    "text": "around forever it's simple it says relatively simple in parenthesis here",
+    "start": "275120",
+    "end": "280560"
+  },
+  {
+    "text": "but it's well supported by a lot of clients and it took Spotify this far so we're not kicking it out there will",
+    "start": "280560",
+    "end": "286000"
+  },
+  {
+    "text": "always be some legacy and third party services that need basic uh DNS service discovery and uh we're also using DNS as",
+    "start": "286000",
+    "end": "293199"
+  },
+  {
+    "text": "a fallback which Erica will talk more about later right so to pick a successor on",
+    "start": "293199",
+    "end": "300240"
+  },
+  {
+    "text": "how to solve our service discovery problem so we or what kind of shoes to get I think there was some shoe metaphor",
+    "start": "300240",
+    "end": "306160"
+  },
+  {
+    "text": "in the beginning we took a structured three-step approach uh to assess our options and we started with a set of",
+    "start": "306160",
+    "end": "312960"
+  },
+  {
+    "text": "requirement criteria where we assessed our capabilities of with the capabilities of market leading service",
+    "start": "312960",
+    "end": "318880"
+  },
+  {
+    "text": "mesh solutions and also like included in that like the idea of expanding our",
+    "start": "318880",
+    "end": "325680"
+  },
+  {
+    "text": "existing infrastructure then we estimated the effort it would take to bridge any gaps in solutions that didn't",
+    "start": "325680",
+    "end": "331840"
+  },
+  {
+    "text": "meet the requirements um and first up then was to find the set of criteria",
+    "start": "331840",
+    "end": "337120"
+  },
+  {
+    "text": "that we thought was most important and we were considering mainly stuff around reliability scalability and",
+    "start": "337120",
+    "end": "343240"
+  },
+  {
+    "text": "extensibility so for example it needed to support proxyless RPC it we had to be able to configure sonware load balancing",
+    "start": "343240",
+    "end": "350160"
+  },
+  {
+    "text": "uh and uh it needed to fit the hetrogenous service architecture we have at Spotify",
+    "start": "350160",
+    "end": "357280"
+  },
+  {
+    "text": "so after that we picked which candidates to evaluate and we looked at traffic director which is a Google manage",
+    "start": "357280",
+    "end": "363520"
+  },
+  {
+    "text": "control plane and we have extensive experience with the with GCB's traffic director from like experimenting with it",
+    "start": "363520",
+    "end": "369199"
+  },
+  {
+    "text": "at Spotify for for some time uh but this experimentation have surfaced several aspects of the product that were",
+    "start": "369199",
+    "end": "375360"
+  },
+  {
+    "text": "incompatible with our service network and our needs but since we already knew that uh it wasn't a good fit we also",
+    "start": "375360",
+    "end": "381440"
+  },
+  {
+    "text": "evaluated a variant where we would bridge this product gap using a custom proxy layer in between TD and and and",
+    "start": "381440",
+    "end": "387840"
+  },
+  {
+    "text": "our our network we also looked at which is the most popular control plane I hear",
+    "start": "387840",
+    "end": "393520"
+  },
+  {
+    "text": "u we evaluated it both in running it in a self-hosted mode uh or as a managed",
+    "start": "393520",
+    "end": "398880"
+  },
+  {
+    "text": "product like like Solo or Anthos and finally like I said we looked at extending the system we already had in",
+    "start": "398880",
+    "end": "404479"
+  },
+  {
+    "text": "place and yeah and once we had picked our candidates we did an assessment where we evaluated each candidate",
+    "start": "404479",
+    "end": "409680"
+  },
+  {
+    "text": "against the criteria we had laid out and there's a lot in this slide uh I don't expect you to read it all i see you were",
+    "start": "409680",
+    "end": "415120"
+  },
+  {
+    "text": "squinting there in the back but uh to to summarize them for traffic director we had a we had some we already had some",
+    "start": "415120",
+    "end": "421840"
+  },
+  {
+    "text": "experience here we kind of knew that it didn't quite meet our current needs and additionally the fact that it's only",
+    "start": "421840",
+    "end": "427440"
+  },
+  {
+    "text": "available in a managed mode uh and it's a lockdown product we had limited like",
+    "start": "427440",
+    "end": "433039"
+  },
+  {
+    "text": "limited um options to extend its functionality with features that that we needed at Spotify for ETO our main",
+    "start": "433039",
+    "end": "440000"
+  },
+  {
+    "text": "concerns were around scalability u and that certain critical features that that",
+    "start": "440000",
+    "end": "446080"
+  },
+  {
+    "text": "we we needed weren't available for the proxyc mode of running um and then finally like",
+    "start": "446080",
+    "end": "453599"
+  },
+  {
+    "text": "extending our own system yeah I mean we our hunch when when going into this work was that this was going to be the most",
+    "start": "453599",
+    "end": "458720"
+  },
+  {
+    "text": "attractive option and it tends to be for engineers and for all we've all been",
+    "start": "458720",
+    "end": "464000"
+  },
+  {
+    "text": "there uh and we would be build like we would be building on a foundation that was proven to meet our scalability",
+    "start": "464000",
+    "end": "469520"
+  },
+  {
+    "text": "requirements and had been tailored to to our service network from the start so",
+    "start": "469520",
+    "end": "475720"
+  },
+  {
+    "text": "unsurprisingly when we weighed our options we found that our extending our system was the best option yes but even",
+    "start": "475720",
+    "end": "481360"
+  },
+  {
+    "text": "though we suspected that we would end up with this conclusion it was still worth going through this evaluation process uh because it helped us understand which",
+    "start": "481360",
+    "end": "487680"
+  },
+  {
+    "text": "problems that we thought were most important for us to solve and it was very appreciated by by management like",
+    "start": "487680",
+    "end": "494240"
+  },
+  {
+    "text": "Kalir sitting over there um because they are naturally suspicious of engineering teams coming with proposal to spend a",
+    "start": "494240",
+    "end": "501360"
+  },
+  {
+    "text": "lot of time building infrastructure in house and I also wanted to point out",
+    "start": "501360",
+    "end": "506800"
+  },
+  {
+    "text": "that we did this evalation a bit more than a year ago and I know that there have been many relevant improvements in",
+    "start": "506800",
+    "end": "512399"
+  },
+  {
+    "text": "all the products that we evaluated since then so it might be like that this table would look different if we if we did",
+    "start": "512399",
+    "end": "517919"
+  },
+  {
+    "text": "this evaluation today but anyway with that in place uh we were excited to ship some improvements and first fundamental",
+    "start": "517919",
+    "end": "524880"
+  },
+  {
+    "text": "deliverable we had was to introduce a new protocol to manage the data plane",
+    "start": "524880",
+    "end": "530959"
+  },
+  {
+    "text": "and as mentioned a few slides back DNS was too limiting and one of the must-haves in our EV evaluation was the",
+    "start": "530959",
+    "end": "537839"
+  },
+  {
+    "text": "ability to use XDS to configure our proxil gpc fleet so XDS is a universal",
+    "start": "537839",
+    "end": "544800"
+  },
+  {
+    "text": "data plane API at it's spun off from the envoy proxy project and it's supported natively in gRPC and envoy meaning that",
+    "start": "544800",
+    "end": "552880"
+  },
+  {
+    "text": "our if our control plane supports this protocol we can easily integrate envoys and and other gpc services into into the",
+    "start": "552880",
+    "end": "559680"
+  },
+  {
+    "text": "the mesh that we're building and we have prior experience using XDS for uh our",
+    "start": "559680",
+    "end": "565360"
+  },
+  {
+    "text": "envoy based perimeter that we've been operating for five or six years um it",
+    "start": "565360",
+    "end": "570800"
+  },
+  {
+    "text": "has a good feature set that meets our needs and uh using XDS as a foundation",
+    "start": "570800",
+    "end": "576880"
+  },
+  {
+    "text": "would let us then you know build out the prioritized features that we had without much hassle and now just briefly go over",
+    "start": "576880",
+    "end": "583920"
+  },
+  {
+    "text": "three of the features that we have built or are in the process of rolling out first up is um traffic splitting so the",
+    "start": "583920",
+    "end": "592800"
+  },
+  {
+    "text": "we needed the ability to divert traffic based on rules there's a pilot use case at Spotify where a team needed to divert",
+    "start": "592800",
+    "end": "599680"
+  },
+  {
+    "text": "synthetic traffic that was used I think for some ML training or something but",
+    "start": "599680",
+    "end": "605120"
+  },
+  {
+    "text": "they need to separate that from real production traffic at multiple points in the call chain and solving that in the",
+    "start": "605120",
+    "end": "611200"
+  },
+  {
+    "text": "application layer would have meant you know code duplication and shading and then changing these rules and and and",
+    "start": "611200",
+    "end": "616399"
+  },
+  {
+    "text": "working with this would have meant you know changes that would span several systems and and services which would have been very cumbersome to work with",
+    "start": "616399",
+    "end": "623279"
+  },
+  {
+    "text": "so instead we solved this in the network layer by implementing a imperative API that our the pilot team was then able to",
+    "start": "623279",
+    "end": "630720"
+  },
+  {
+    "text": "use to add uh custom uh matching rules and and GPC routes which were then",
+    "start": "630720",
+    "end": "636560"
+  },
+  {
+    "text": "automatically pushed out to the relevant clients using XDS uh next up is uh my favorite",
+    "start": "636560",
+    "end": "644480"
+  },
+  {
+    "text": "zoneware routing so uh in each GCP region that Spotify is running we have like we usually run in three or four",
+    "start": "644480",
+    "end": "650959"
+  },
+  {
+    "text": "availability zones due to our size mostly like but our service network is really not you know zone aware it's a",
+    "start": "650959",
+    "end": "657839"
+  },
+  {
+    "text": "artifact from the on-prem days um but so our failure domain is still regional",
+    "start": "657839",
+    "end": "663440"
+  },
+  {
+    "text": "which means that we're not really taking any advantage of being deployed in multivail availability zones like if one",
+    "start": "663440",
+    "end": "668959"
+  },
+  {
+    "text": "zone were to have troubles we would need to drain the whole region anyway and since sending traffic across the zonal",
+    "start": "668959",
+    "end": "675120"
+  },
+  {
+    "text": "boundary costs money we want it to be routed as much as possible within the same zone and to do this safely the",
+    "start": "675120",
+    "end": "681279"
+  },
+  {
+    "text": "control plane then needs to account for uneven spread of server or client couplings between the zones um and the",
+    "start": "681279",
+    "end": "688640"
+  },
+  {
+    "text": "server locality part of the service locality is already part of the Kubernetes endpoint and when we use XDS",
+    "start": "688640",
+    "end": "695839"
+  },
+  {
+    "text": "in the client we that means that we have a persistent connection to each client which then lets us also know what are",
+    "start": "695839",
+    "end": "701600"
+  },
+  {
+    "text": "the clients that are calling each service and how they are distributed across zones and with this information",
+    "start": "701600",
+    "end": "707279"
+  },
+  {
+    "text": "then we're able to build a sonware load balancer that and we used the envoy proxies locality aware load balance load",
+    "start": "707279",
+    "end": "714880"
+  },
+  {
+    "text": "balancing algorithm as a base and then we factored in data from cluster cluster load reports which is another xs feature",
+    "start": "714880",
+    "end": "721920"
+  },
+  {
+    "text": "to account for differences in throughput between clients and this load balancing policy",
+    "start": "721920",
+    "end": "727839"
+  },
+  {
+    "text": "is uh now replacing a less effective mitigation we have for to keep traffic within the same zone and can talk more",
+    "start": "727839",
+    "end": "735440"
+  },
+  {
+    "text": "about this after the talk it's my favorite topic anyway thirdly uh uh the",
+    "start": "735440",
+    "end": "740720"
+  },
+  {
+    "text": "last or the third feature that we built um or rather got for free was this dependency graph like since the new",
+    "start": "740720",
+    "end": "746880"
+  },
+  {
+    "text": "architecture has a connection to every client and we have every server in our in our uh in our service data set",
+    "start": "746880",
+    "end": "752800"
+  },
+  {
+    "text": "already we can easily dump a data set with a global view of what's connected to what and with a later addition of",
+    "start": "752800",
+    "end": "758880"
+  },
+  {
+    "text": "load report data we're going to also be able to show how traffic flows between services in real time or or dumped into",
+    "start": "758880",
+    "end": "764880"
+  },
+  {
+    "text": "a data set yes and now I'm heading over to Erica to talk a bit about how we",
+    "start": "764880",
+    "end": "770480"
+  },
+  {
+    "text": "built this yep all right so um the first thing we",
+    "start": "770480",
+    "end": "776240"
+  },
+  {
+    "text": "asked ourselves was where in the current uh design of Nameless XDS would fit uh",
+    "start": "776240",
+    "end": "781760"
+  },
+  {
+    "text": "this diagram here shows how endpoints register themselves with nameless so",
+    "start": "781760",
+    "end": "787279"
+  },
+  {
+    "text": "workloads that run on VMs uh send periodic harbit um to a component called",
+    "start": "787279",
+    "end": "792720"
+  },
+  {
+    "text": "nameless registry uh and the corresponding service discovery data is then stored in a spanner data database",
+    "start": "792720",
+    "end": "799920"
+  },
+  {
+    "text": "uh for workloads that run on Kubernetes there's a component called shameless as Eric uh mentioned before that on startup",
+    "start": "799920",
+    "end": "807200"
+  },
+  {
+    "text": "uh will connect to all of the clusters in that region uh and creates watches for endpoint slice resources uh from",
+    "start": "807200",
+    "end": "814959"
+  },
+  {
+    "text": "there it stores any service discovery data in memory and over time it updates it according to the change events that",
+    "start": "814959",
+    "end": "821200"
+  },
+  {
+    "text": "it's notified about uh DNS lookups come in uh from uh",
+    "start": "821200",
+    "end": "828079"
+  },
+  {
+    "text": "uh core DNS uh and this in turn forwards to another component called nameless",
+    "start": "828079",
+    "end": "833959"
+  },
+  {
+    "text": "discovery so a service discovery data um lives in three different places we have",
+    "start": "833959",
+    "end": "839680"
+  },
+  {
+    "text": "a spanner database uh we have shameless uh for kubernetes workloads and we also",
+    "start": "839680",
+    "end": "844800"
+  },
+  {
+    "text": "have cloud data store which holds configuration for redirecting traffic to other regions for um uh services so",
+    "start": "844800",
+    "end": "853920"
+  },
+  {
+    "text": "nameless discovery basically looks in all of these places to put together the correct answer to um um for every DNS",
+    "start": "853920",
+    "end": "861760"
+  },
+  {
+    "text": "lookup that uh it's forwarded by core DNS so again given this setup where would XDS",
+    "start": "861760",
+    "end": "868040"
+  },
+  {
+    "text": "fit so we considered a few options uh each of them optimizing for something different uh and in the end we settled",
+    "start": "868040",
+    "end": "875199"
+  },
+  {
+    "text": "for option number three which combines adding XDS to nameless with a larger",
+    "start": "875199",
+    "end": "880320"
+  },
+  {
+    "text": "initiative to revamp uh its tech stack and its design and we'll see exactly how",
+    "start": "880320",
+    "end": "885920"
+  },
+  {
+    "text": "in the uh next slides an objective of ours was to move fast through",
+    "start": "885920",
+    "end": "891600"
+  },
+  {
+    "text": "development cycles without disrupting the um current production traffic so we",
+    "start": "891600",
+    "end": "897199"
+  },
+  {
+    "text": "uh deployed the revamped nameless as a separate system uh we also built a new",
+    "start": "897199",
+    "end": "902320"
+  },
+  {
+    "text": "deployment pipeline that would allow us um to have deployments that are basically safe quick and handsoff",
+    "start": "902320",
+    "end": "908800"
+  },
+  {
+    "text": "completely uh and this is powered by Argo CD and Argo rollout um and only at",
+    "start": "908800",
+    "end": "914240"
+  },
+  {
+    "text": "this point we then went ahead and built XDS capabilities into Nameless once all",
+    "start": "914240",
+    "end": "920079"
+  },
+  {
+    "text": "of this development work was complete uh we gradually migrated traffic production",
+    "start": "920079",
+    "end": "925360"
+  },
+  {
+    "text": "traffic from um let's say the old system over to the new one uh and note that at",
+    "start": "925360",
+    "end": "930639"
+  },
+  {
+    "text": "this point all of the clients were still using DNS as a protocol for service discovery once the redesign nameless",
+    "start": "930639",
+    "end": "937680"
+  },
+  {
+    "text": "proved to be stable we then started onboarding clients onto XDS but let's",
+    "start": "937680",
+    "end": "943279"
+  },
+  {
+    "text": "now look at the new design all right so first off we changed runtime from VMs to Kubernetes so now we",
+    "start": "943279",
+    "end": "950800"
+  },
+  {
+    "text": "have a nameless pod instead of a nameless VM uh workloads that run in uh",
+    "start": "950800",
+    "end": "956480"
+  },
+  {
+    "text": "Kubernetes register themselves just like before nothing has changed there uh workloads that run on VMs still send",
+    "start": "956480",
+    "end": "963199"
+  },
+  {
+    "text": "periodic harbits to nameless registry but now this calls out to shameless and shameless via the Kubernetes API server",
+    "start": "963199",
+    "end": "971199"
+  },
+  {
+    "text": "writes a bunch of CRDs into CD to store the relevant service discovery data",
+    "start": "971199",
+    "end": "978000"
+  },
+  {
+    "text": "shameless also creates watches for the CRDs uh storing the service discovery data in memory and updating it um as it",
+    "start": "978000",
+    "end": "985680"
+  },
+  {
+    "text": "receives change events over time a similar flow is also in place for the",
+    "start": "985680",
+    "end": "990720"
+  },
+  {
+    "text": "configuration that allows service owners to redirect traffic to another region for their",
+    "start": "990720",
+    "end": "995800"
+  },
+  {
+    "text": "service cord DNS of course is still there but now it forwards to shameless which can answer correctly by just",
+    "start": "995800",
+    "end": "1003120"
+  },
+  {
+    "text": "simply looking into uh uh its in-memory store of service discovery data so we",
+    "start": "1003120",
+    "end": "1008240"
+  },
+  {
+    "text": "have a simplified design uh because the data is no longer scattered across",
+    "start": "1008240",
+    "end": "1013519"
+  },
+  {
+    "text": "different places nameless discovery is completely gone from the picture and so are Spanner and Cloud Data Store and a",
+    "start": "1013519",
+    "end": "1020880"
+  },
+  {
+    "text": "nice effect of all of all this redesign is that latency of DNS queries has gone",
+    "start": "1020880",
+    "end": "1026720"
+  },
+  {
+    "text": "down significantly because of course inmemory lookups are cheap and now with",
+    "start": "1026720",
+    "end": "1031918"
+  },
+  {
+    "text": "this new design the answer to the question where does XDS fit became a bit more obvious uh shameless has the",
+    "start": "1031919",
+    "end": "1038160"
+  },
+  {
+    "text": "complete picture uh of the service discovery data at all times and already answers DNS uh lookups so it seems like",
+    "start": "1038160",
+    "end": "1046160"
+  },
+  {
+    "text": "the most logical place where to add our uh XDS interface all right before we move on uh",
+    "start": "1046160",
+    "end": "1052080"
+  },
+  {
+    "text": "let's just go quickly through a refresher on XDS so XDS stands for X",
+    "start": "1052080",
+    "end": "1057200"
+  },
+  {
+    "text": "discovery service where the X uh indicates an arbitrary resource it's a set of APIs that is used by a data plane",
+    "start": "1057200",
+    "end": "1063760"
+  },
+  {
+    "text": "to understand how it should configure itself and the configuration comes from a control plane in the form of resources",
+    "start": "1063760",
+    "end": "1070000"
+  },
+  {
+    "text": "of different types one possible setup is to have individual APIs implemented on",
+    "start": "1070000",
+    "end": "1076320"
+  },
+  {
+    "text": "the control plane side each providing specific configuration resources the",
+    "start": "1076320",
+    "end": "1081520"
+  },
+  {
+    "text": "client then fetches them over separate uh gRPC streams an alternative setup is",
+    "start": "1081520",
+    "end": "1087039"
+  },
+  {
+    "text": "that the control plane instead implements something called ads which stands for aggregated discovery service",
+    "start": "1087039",
+    "end": "1092720"
+  },
+  {
+    "text": "and the client then fetches configuration of all of the types over one gpc stream but back to our story now",
+    "start": "1092720",
+    "end": "1100919"
+  },
+  {
+    "text": "so initially when we began we thought that we could just simply rely on uh an invoice open source library called Java",
+    "start": "1100919",
+    "end": "1107840"
+  },
+  {
+    "text": "control play so straight away we started building a pock uh they used this library but soon came to a stop uh in",
+    "start": "1107840",
+    "end": "1115520"
+  },
+  {
+    "text": "the case of a proxyless gRPC service mesh each node can have multiple gRPC",
+    "start": "1115520",
+    "end": "1120640"
+  },
+  {
+    "text": "channels to the control plane uh specifically one per service that that node wants to uh talk to uh and each of",
+    "start": "1120640",
+    "end": "1127440"
+  },
+  {
+    "text": "these channels maps in turn to a series of conf configuration resources that the node subscribes to and when one of these",
+    "start": "1127440",
+    "end": "1134480"
+  },
+  {
+    "text": "resources changes the control plane has to be able to push updates to all of the",
+    "start": "1134480",
+    "end": "1139840"
+  },
+  {
+    "text": "nodes in the mesh that have subscribed to it so to do this correctly uh the",
+    "start": "1139840",
+    "end": "1145039"
+  },
+  {
+    "text": "control plane needs to remember every individual gRPC channel from every node",
+    "start": "1145039",
+    "end": "1150720"
+  },
+  {
+    "text": "and the configuration resources relevant to each of those channels the open",
+    "start": "1150720",
+    "end": "1156240"
+  },
+  {
+    "text": "source library simply didn't give us that level of control so again what to do uh we considered a couple of options",
+    "start": "1156240",
+    "end": "1162799"
+  },
+  {
+    "text": "forking the open source library maybe extend it to somehow fit our use case or second option just implement XDS",
+    "start": "1162799",
+    "end": "1170080"
+  },
+  {
+    "text": "ourselves from scratch and it didn't take us very long to decipher option two and for us it's been a good decision",
+    "start": "1170080",
+    "end": "1176559"
+  },
+  {
+    "text": "after all for a couple of reasons uh first of all we could optimize for the most important thing so our focus is to",
+    "start": "1176559",
+    "end": "1183440"
+  },
+  {
+    "text": "build a proxyless gRPC service mesh so we implemented XDS specifically with",
+    "start": "1183440",
+    "end": "1189120"
+  },
+  {
+    "text": "proxyless gRPC client in mind uh effectively that meant implementing um ads state-of-the-art",
+    "start": "1189120",
+    "end": "1197360"
+  },
+  {
+    "text": "variant of the XDS protocol which didn't take us too long to do uh a second u",
+    "start": "1197360",
+    "end": "1203520"
+  },
+  {
+    "text": "benefit of all of this is that we have full control over this implementation so in the future if the need arises we can",
+    "start": "1203520",
+    "end": "1210080"
+  },
+  {
+    "text": "extend it to support other types of XDS clients um we could also instrument it",
+    "start": "1210080",
+    "end": "1216160"
+  },
+  {
+    "text": "to uh fit our u observability require requirements exactly and finally we",
+    "start": "1216160",
+    "end": "1221760"
+  },
+  {
+    "text": "could start simple and just hold off on any premature optimizations um and if",
+    "start": "1221760",
+    "end": "1227000"
+  },
+  {
+    "text": "bottleneck bottlenecks emerged when we scaled this out to um many many services",
+    "start": "1227000",
+    "end": "1232720"
+  },
+  {
+    "text": "uh then we would address them at that point of course implementing XS from",
+    "start": "1232720",
+    "end": "1238000"
+  },
+  {
+    "text": "scratch uh also came with some challenges no formal protocol specification exists even though there",
+    "start": "1238000",
+    "end": "1244799"
+  },
+  {
+    "text": "are some extensive envoy docs on how the protocol works so um many times for the",
+    "start": "1244799",
+    "end": "1250320"
+  },
+  {
+    "text": "finer details or edge cases we refer to other implementations for example the E2 codebase and especially at the beginning",
+    "start": "1250320",
+    "end": "1257840"
+  },
+  {
+    "text": "we assume that we would end up with a ton of like super complicated code to reason about and to maintain but it",
+    "start": "1257840",
+    "end": "1264640"
+  },
+  {
+    "text": "turns out that it's relatively little amount of code and it's also relatively not obscure to to reason",
+    "start": "1264640",
+    "end": "1272600"
+  },
+  {
+    "text": "through um so uh with our XDS implementation in place we then turned",
+    "start": "1272600",
+    "end": "1277760"
+  },
+  {
+    "text": "uh to on boarding services onto XDS and we started by laying out some",
+    "start": "1277760",
+    "end": "1282960"
+  },
+  {
+    "text": "non-negotiable requirements for the roll out so first of all no big bang uh or yolo roll out for this because it's too",
+    "start": "1282960",
+    "end": "1289919"
+  },
+  {
+    "text": "risky uh for such a big change we want to be in control of which and how many",
+    "start": "1289919",
+    "end": "1295039"
+  },
+  {
+    "text": "services switch to XDS through configuration and in particular we want to control groups of services that are",
+    "start": "1295039",
+    "end": "1302320"
+  },
+  {
+    "text": "eligible for XTS based on their metadata uh but also we want to control what",
+    "start": "1302320",
+    "end": "1308320"
+  },
+  {
+    "text": "percentage of any given group will actually switch to using XTS so to give",
+    "start": "1308320",
+    "end": "1313440"
+  },
+  {
+    "text": "you an idea an example configuration would be 10% of services that run in region Europe blah blah whatever and",
+    "start": "1313440",
+    "end": "1320799"
+  },
+  {
+    "text": "have reliability tier four uh meaning they are less critical services",
+    "start": "1320799",
+    "end": "1326240"
+  },
+  {
+    "text": "another requirement of ours was that no intervention from service owners was required also we aim for zero disruption",
+    "start": "1326240",
+    "end": "1333360"
+  },
+  {
+    "text": "or in any case minimal disruption and last but not least we want a nice big",
+    "start": "1333360",
+    "end": "1338559"
+  },
+  {
+    "text": "panic button that takes us back to a known good state quickly so let's see how we actually",
+    "start": "1338559",
+    "end": "1345520"
+  },
+  {
+    "text": "rolled out XDS so all of the gRPC services at Spotify use an in-house",
+    "start": "1345520",
+    "end": "1350960"
+  },
+  {
+    "text": "managed Java framework which is called Apollo apollo provides gRPC specific modules to do um things like start up a",
+    "start": "1350960",
+    "end": "1358960"
+  },
+  {
+    "text": "gRPC server or make outgoing gRPC calls to other services for lower level things",
+    "start": "1358960",
+    "end": "1364480"
+  },
+  {
+    "text": "the framework rely on a library an in-house Java library you can think of this as a wrapper around the open source",
+    "start": "1364480",
+    "end": "1370720"
+  },
+  {
+    "text": "gRPC Java containing some specific uh Spotify logic so to roll at XCS we",
+    "start": "1370720",
+    "end": "1377039"
+  },
+  {
+    "text": "changed both of these pieces first off we created a custom managed channel in the gRPC client module module of Apollo",
+    "start": "1377039",
+    "end": "1384880"
+  },
+  {
+    "text": "uh this behind the scenes maintains two open gRPC channels one for DNS and one",
+    "start": "1384880",
+    "end": "1390080"
+  },
+  {
+    "text": "for XDS it also runs a task in the background periodically that reads the",
+    "start": "1390080",
+    "end": "1396080"
+  },
+  {
+    "text": "value of a global flag indicating whether XDS is currently enabled or not",
+    "start": "1396080",
+    "end": "1402159"
+  },
+  {
+    "text": "uh we use a DNS TXT record for this and depending on the value of this flag then",
+    "start": "1402159",
+    "end": "1407760"
+  },
+  {
+    "text": "either the gRPC channel for DNS is used or the one for XDS and this that I just",
+    "start": "1407760",
+    "end": "1412960"
+  },
+  {
+    "text": "described described is effectively what powers our fallback procedure to to",
+    "start": "1412960",
+    "end": "1419320"
+  },
+  {
+    "text": "DNS also when a gRPC service boots up uh something that we call XDS eligibility",
+    "start": "1419320",
+    "end": "1425679"
+  },
+  {
+    "text": "checker determines if that specific service should use this new managed",
+    "start": "1425679",
+    "end": "1430720"
+  },
+  {
+    "text": "channel or just the standard regular one it does so by comparing the services metadata against the current",
+    "start": "1430720",
+    "end": "1437600"
+  },
+  {
+    "text": "configuration of the XDS rollout if the service is deemed eligible to use XDS",
+    "start": "1437600",
+    "end": "1444320"
+  },
+  {
+    "text": "then we also need to configure the XDS client that runs inside gRPC so that it",
+    "start": "1444320",
+    "end": "1449600"
+  },
+  {
+    "text": "knows which control plane to talk to so it's configured to talk to shameless in our case and to send over metadata to",
+    "start": "1449600",
+    "end": "1456159"
+  },
+  {
+    "text": "identify itself to the server and for this we wrote some XDS bootstrapping logic uh that puts together together the",
+    "start": "1456159",
+    "end": "1464080"
+  },
+  {
+    "text": "right configuration at runtime and dumps it into a system property from there the",
+    "start": "1464080",
+    "end": "1469279"
+  },
+  {
+    "text": "configuration is read by the XDS client so that it knows um who to talk",
+    "start": "1469279",
+    "end": "1474919"
+  },
+  {
+    "text": "to all right so once all the pieces that I just talked about were in place we started on boarding services onto XTS we",
+    "start": "1474919",
+    "end": "1482320"
+  },
+  {
+    "text": "initially just targeted a group of less critical services and went slow especially at the beginning by",
+    "start": "1482320",
+    "end": "1487679"
+  },
+  {
+    "text": "configuring a small percentage of the group in just one region as the next step we went for 100% of that group in",
+    "start": "1487679",
+    "end": "1494880"
+  },
+  {
+    "text": "the same region and then in three different increments we on boarded the same group in all of the other regions",
+    "start": "1494880",
+    "end": "1501120"
+  },
+  {
+    "text": "to give you an idea this initial phase took us uh approximately a month and a half and saw a few hundred distinct",
+    "start": "1501120",
+    "end": "1508240"
+  },
+  {
+    "text": "services using XDS instead of DNS for service discovery we then targeted a new",
+    "start": "1508240",
+    "end": "1513919"
+  },
+  {
+    "text": "group of services uh this time a bit more critical uh and we moved through this group faster on boarding larger",
+    "start": "1513919",
+    "end": "1520039"
+  },
+  {
+    "text": "percentages globally and from there we're just rinsing and repeat basically until we run out of groups of services",
+    "start": "1520039",
+    "end": "1526559"
+  },
+  {
+    "text": "to on board but let's see how it's going",
+    "start": "1526559",
+    "end": "1531600"
+  },
+  {
+    "text": "so definitely rolling out XDS gradually and in a controlled way has been the",
+    "start": "1531600",
+    "end": "1536880"
+  },
+  {
+    "text": "right choice uh going slow at first and targeting only uh less critical services",
+    "start": "1536880",
+    "end": "1542720"
+  },
+  {
+    "text": "allowed for bugs and different types of issues to emerge without causing outages for Spotify users also seeing hundreds",
+    "start": "1542720",
+    "end": "1549919"
+  },
+  {
+    "text": "of services using XDS and working just fine gave us confidence to push through and then on board more critical things",
+    "start": "1549919",
+    "end": "1556960"
+  },
+  {
+    "text": "something else that proved very useful is our beloved panic button because with it comes peace of mind for the engineers",
+    "start": "1556960",
+    "end": "1563520"
+  },
+  {
+    "text": "that uh are doing all of this work uh at any time we can have all of the services which back to FD XDS in a matter of",
+    "start": "1563520",
+    "end": "1570400"
+  },
+  {
+    "text": "three to four minutes and that also means we can troubleshoot issues at leisure free from the pressure that",
+    "start": "1570400",
+    "end": "1576400"
+  },
+  {
+    "text": "comes inevitably during an outage or an incident it's also a very simple procedure easy to operate and to reason",
+    "start": "1576400",
+    "end": "1583919"
+  },
+  {
+    "text": "about and that's greatly appreciated especially when you're on call for this stuff through the night all we need to",
+    "start": "1583919",
+    "end": "1589360"
+  },
+  {
+    "text": "do if we're you know page the 2 a.m is reconfigure the value of a DNS record",
+    "start": "1589360",
+    "end": "1595039"
+  },
+  {
+    "text": "and just then watch some graphs and finally it's also kind of neat that to fall back to DNS we're using",
+    "start": "1595039",
+    "end": "1602720"
+  },
+  {
+    "text": "DNS but of course there were also some challenges so let's talk through some of",
+    "start": "1602840",
+    "end": "1607919"
+  },
+  {
+    "text": "those so lots of moving parts create complexity of course and complexity is a",
+    "start": "1607919",
+    "end": "1614240"
+  },
+  {
+    "text": "pain most of the time uh admittedly some of this pain is self-inflicted because",
+    "start": "1614240",
+    "end": "1619520"
+  },
+  {
+    "text": "our decision to revamp nameless meant that for a while we had to maintain two um separate systems and to operate them",
+    "start": "1619520",
+    "end": "1626640"
+  },
+  {
+    "text": "for service discovery but also complexity comes from big initiatives that are led by other",
+    "start": "1626640",
+    "end": "1632720"
+  },
+  {
+    "text": "infra team as teams at Spotify which can make things tricky to navigate at times",
+    "start": "1632720",
+    "end": "1639200"
+  },
+  {
+    "text": "uh sometimes there had also been difficult to pinpoint um issues uh when",
+    "start": "1639200",
+    "end": "1644400"
+  },
+  {
+    "text": "service services started using XDS so typically a problem would pop up in one or two services while hundreds of others",
+    "start": "1644400",
+    "end": "1651360"
+  },
+  {
+    "text": "were working just fine so from there it would be a bit of a game of spot the difference to understand how the",
+    "start": "1651360",
+    "end": "1657279"
+  },
+  {
+    "text": "affected services were in some way different from the rest and also in some cases it was difficult to reproduce",
+    "start": "1657279",
+    "end": "1663200"
+  },
+  {
+    "text": "issues outside of the impacted services which slowed us down a bit uh obviously",
+    "start": "1663200",
+    "end": "1670080"
+  },
+  {
+    "text": "we had our fair share of bugs in there uh and some of the assumptions we made during development turned out to be",
+    "start": "1670080",
+    "end": "1675440"
+  },
+  {
+    "text": "incorrect uh one issue in particular that I want to mention is that generating the XDS bootstrapping",
+    "start": "1675440",
+    "end": "1682320"
+  },
+  {
+    "text": "configuration at runtime has proven flaky uh and a couple of services run into some XDS initialization problems so",
+    "start": "1682320",
+    "end": "1690159"
+  },
+  {
+    "text": "as a stop gap solution we make sure that we run that logic as early as possible uh in our um managed Java framework",
+    "start": "1690159",
+    "end": "1696720"
+  },
+  {
+    "text": "Apollo but in the long term we want to switch um to have this logic happen ahead of the Java service um running uh",
+    "start": "1696720",
+    "end": "1704799"
+  },
+  {
+    "text": "for example via an an init container and finally rolling out XDS has sometimes",
+    "start": "1704799",
+    "end": "1710240"
+  },
+  {
+    "text": "been about educating service owners they came to us convinced that XDS had broken",
+    "start": "1710240",
+    "end": "1715440"
+  },
+  {
+    "text": "their services their service when in reality it surfaced pre-existing issues",
+    "start": "1715440",
+    "end": "1720960"
+  },
+  {
+    "text": "uh with some services like not having zero downtime deployments",
+    "start": "1720960",
+    "end": "1726080"
+  },
+  {
+    "text": "so what is next for us well we have a bunch of ideas uh about features that we",
+    "start": "1726080",
+    "end": "1731760"
+  },
+  {
+    "text": "could add next to our service mesh and I listed them here but most likely before jumping too deep into any of these",
+    "start": "1731760",
+    "end": "1738640"
+  },
+  {
+    "text": "features uh we'll do some thinking around how we can extend our service mesh to cover more of the Spotify",
+    "start": "1738640",
+    "end": "1744960"
+  },
+  {
+    "text": "service network so our focus so far has been on gRPC Java services specifically",
+    "start": "1744960",
+    "end": "1750880"
+  },
+  {
+    "text": "but definitely moving forward we want to support other protocols and other languages as well all right so now it's",
+    "start": "1750880",
+    "end": "1757520"
+  },
+  {
+    "text": "back to Eric for some concluding thoughts thank you right so to conclude did XTS deliver the",
+    "start": "1757520",
+    "end": "1766000"
+  },
+  {
+    "text": "protocol itself is fairly straightforward that like Erica mentioned the implementation part only",
+    "start": "1766000",
+    "end": "1771120"
+  },
+  {
+    "text": "took us a few weeks uh and then after that we were able to move really fast on on new feature development uh on our new",
+    "start": "1771120",
+    "end": "1778080"
+  },
+  {
+    "text": "XDS powered stack but because running XDS and proxy SGRPC is quite uncommon",
+    "start": "1778080",
+    "end": "1783960"
+  },
+  {
+    "text": "still there's very little publicly available information and guidance which",
+    "start": "1783960",
+    "end": "1789200"
+  },
+  {
+    "text": "did slow us down a bit uh and would we recommend what we did to others then",
+    "start": "1789200",
+    "end": "1794799"
+  },
+  {
+    "text": "yeah the it depends is a classic answer right it's a flexible and pro powerful",
+    "start": "1794799",
+    "end": "1799919"
+  },
+  {
+    "text": "pro protocol XDS but it might take a bit of engineering effort to integrate into existing existing systems but it's been",
+    "start": "1799919",
+    "end": "1805360"
+  },
+  {
+    "text": "a really good fit for us and we hope that this talk will uh inspire some of",
+    "start": "1805360",
+    "end": "1810720"
+  },
+  {
+    "text": "you to try it out and we're very interested in talking more and sharing more learnings about proxyless gRPC or",
+    "start": "1810720",
+    "end": "1817600"
+  },
+  {
+    "text": "XDS with the peer companies so if you work for such a company or you just want to talk about this stuff then please",
+    "start": "1817600",
+    "end": "1824000"
+  },
+  {
+    "text": "Please reach out to us now after the talk or or over an email we're around the conference here until tomorrow uh",
+    "start": "1824000",
+    "end": "1830159"
+  },
+  {
+    "text": "otherwise you're can always send us mail here and yeah thank you",
+    "start": "1830159",
+    "end": "1837158"
+  }
+]

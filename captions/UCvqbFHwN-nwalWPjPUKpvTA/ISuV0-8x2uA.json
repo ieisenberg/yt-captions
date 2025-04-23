@@ -1,0 +1,1432 @@
+[
+  {
+    "text": "hi i'm clem and my pronouns are he he and him and i work",
+    "start": "4960",
+    "end": "11040"
+  },
+  {
+    "text": "at slack as an engineer thanks for joining this session today where i'm going to talk about how it's",
+    "start": "11040",
+    "end": "16320"
+  },
+  {
+    "text": "lag we support long live pods using a simple kubernetes web hook and",
+    "start": "16320",
+    "end": "22240"
+  },
+  {
+    "text": "other bits and pieces so today after quickly introducing my",
+    "start": "22240",
+    "end": "28240"
+  },
+  {
+    "text": "team i'm going to describe what our so-called long lift pods and why we need to",
+    "start": "28240",
+    "end": "34480"
+  },
+  {
+    "text": "support them and then we're going to dive into what the solution that we came up with looks",
+    "start": "34480",
+    "end": "39840"
+  },
+  {
+    "text": "like and the different parts that it's made of finally we'll wrap up with a few of the",
+    "start": "39840",
+    "end": "45120"
+  },
+  {
+    "text": "limitations and possible future improvements",
+    "start": "45120",
+    "end": "49680"
+  },
+  {
+    "text": "so i work in a cloud compute team that's like and i'm based in melbourne",
+    "start": "52320",
+    "end": "57440"
+  },
+  {
+    "text": "we have about half the team in australia and the other half in the united states",
+    "start": "57440",
+    "end": "63600"
+  },
+  {
+    "text": "so let's look at some numbers to give you some context about like what we are dealing with",
+    "start": "63600",
+    "end": "69520"
+  },
+  {
+    "text": "on a good day at slack we get about 16 million concurrent users",
+    "start": "69520",
+    "end": "75200"
+  },
+  {
+    "text": "that load is spread onto some 45 000 ec2 instances so we are on aws",
+    "start": "75200",
+    "end": "82240"
+  },
+  {
+    "text": "we manage about 162 kubernetes clusters onto which some",
+    "start": "82240",
+    "end": "87880"
+  },
+  {
+    "text": "316 services are deployed and we have just above a thousand",
+    "start": "87880",
+    "end": "93759"
+  },
+  {
+    "text": "engineers we also manage 235 chef roles and",
+    "start": "93759",
+    "end": "100799"
+  },
+  {
+    "text": "although my talk today is focused on our kubernetes compute platform we still have important applications",
+    "start": "100799",
+    "end": "107600"
+  },
+  {
+    "text": "running on our original compute stack which is chef on ec2",
+    "start": "107600",
+    "end": "113960"
+  },
+  {
+    "text": "okay so let's look at what the problem is well the problem is that some pods want",
+    "start": "115759",
+    "end": "121920"
+  },
+  {
+    "text": "a long lifespan but the nodes that they're running on are getting killed so first let's look at",
+    "start": "121920",
+    "end": "128879"
+  },
+  {
+    "text": "why some pods want a long lifespan and then we look at what actually is killing our nodes",
+    "start": "128879",
+    "end": "136959"
+  },
+  {
+    "text": "okay so in an ideal world applications are 12-factor they're stateless they",
+    "start": "139760",
+    "end": "145680"
+  },
+  {
+    "text": "boot instantly they scale out infinitely without any drain on infrastructure",
+    "start": "145680",
+    "end": "150720"
+  },
+  {
+    "text": "they're fun to work with but unfortunately we don't live in an ideal world instead we live in a",
+    "start": "150720",
+    "end": "157040"
+  },
+  {
+    "text": "growth-obsessed capitalist society and we have to deal with applications that are stateful that can be slow to",
+    "start": "157040",
+    "end": "164560"
+  },
+  {
+    "text": "warm up that can be intensive on infrastructure when they do scale out",
+    "start": "164560",
+    "end": "170239"
+  },
+  {
+    "text": "maybe they don't like to get terminated early or maybe they hold on to some long-lived web sockets or sticky",
+    "start": "170239",
+    "end": "176560"
+  },
+  {
+    "text": "sessions or things we don't want to lose so while at slack we do have some",
+    "start": "176560",
+    "end": "183120"
+  },
+  {
+    "text": "ideal applications those were the first ones to migrate from our original chef compute",
+    "start": "183120",
+    "end": "188640"
+  },
+  {
+    "text": "platform to our kubernetes platform and so today we are left with a long tail of unruly ducks which are",
+    "start": "188640",
+    "end": "195760"
+  },
+  {
+    "text": "applications that are hard to move from one platform to another so this is peach apricot and plum my ducks",
+    "start": "195760",
+    "end": "202480"
+  },
+  {
+    "text": "and they are very cute friends okay so back to work",
+    "start": "202480",
+    "end": "208720"
+  },
+  {
+    "text": "let's look at some examples of applications that fit in that less than ideal category",
+    "start": "208720",
+    "end": "216319"
+  },
+  {
+    "text": "so first i've got batch jobs so while today you could design a bad job that",
+    "start": "216319",
+    "end": "222159"
+  },
+  {
+    "text": "could gracefully survive a restart without losing any of its work by for example checking checkpointing its work",
+    "start": "222159",
+    "end": "228799"
+  },
+  {
+    "text": "onto an external storage it's like we have some batch jobs that are not as clever as",
+    "start": "228799",
+    "end": "235519"
+  },
+  {
+    "text": "that and that can take a long time to run like talking about a day and um",
+    "start": "235519",
+    "end": "241599"
+  },
+  {
+    "text": "if those badge jobs get killed well we have to restart from scratch and people are waiting for those jobs to",
+    "start": "241599",
+    "end": "247760"
+  },
+  {
+    "text": "finish and that's not something that we want the second example i've got is",
+    "start": "247760",
+    "end": "253200"
+  },
+  {
+    "text": "distributed caches so think about radius memcached",
+    "start": "253200",
+    "end": "258400"
+  },
+  {
+    "text": "when you want new replicas it need they need to pull some existing data from",
+    "start": "258400",
+    "end": "265120"
+  },
+  {
+    "text": "the existing nodes to warm up and get populated and so that can be slow to warm up and that",
+    "start": "265120",
+    "end": "270800"
+  },
+  {
+    "text": "creates a lot of internal network traffic so if you lose if you lost half of your replicas on",
+    "start": "270800",
+    "end": "277199"
+  },
+  {
+    "text": "your on your ring then you might head into a disaster there so you need to thread carefully",
+    "start": "277199",
+    "end": "283120"
+  },
+  {
+    "text": "the third example i've got here is the one of the jenkins controller so given that it's a single tone um you",
+    "start": "283120",
+    "end": "290240"
+  },
+  {
+    "text": "can only run one of those at a time as a pod and so if that bot dies then engineers lose access to",
+    "start": "290240",
+    "end": "297360"
+  },
+  {
+    "text": "jenkins so you don't want that to die during the day when people are doing their work",
+    "start": "297360",
+    "end": "303280"
+  },
+  {
+    "text": "okay so some applications want to not get killed but why are they",
+    "start": "308639",
+    "end": "315039"
+  },
+  {
+    "text": "getting killed well they're getting killed because the pods are running on nodes and the nodes are getting killed",
+    "start": "315039",
+    "end": "320800"
+  },
+  {
+    "text": "and here are the systems at slack that are killing the nodes so i've separated those into two",
+    "start": "320800",
+    "end": "326080"
+  },
+  {
+    "text": "categories on the left side we've got the things that we control and on the right side the things that we don't control",
+    "start": "326080",
+    "end": "333280"
+  },
+  {
+    "text": "so the first thing is auto scaling group um skating in so outside of peak hour",
+    "start": "333280",
+    "end": "340160"
+  },
+  {
+    "text": "we reduce the size of our clusters to save cost in the planet and that kills nodes",
+    "start": "340160",
+    "end": "347440"
+  },
+  {
+    "text": "the second thing we do is chaos engineering we kill some nodes to make sure that everything works continuously",
+    "start": "347440",
+    "end": "355199"
+  },
+  {
+    "text": "and nodes go away when we do that and the third thing is that we have a process that",
+    "start": "355199",
+    "end": "361600"
+  },
+  {
+    "text": "kills every node that gets to two weeks old because that helps us roll out patches",
+    "start": "361600",
+    "end": "367120"
+  },
+  {
+    "text": "and updates talking about patches and updates well if we need to roll out an emergency",
+    "start": "367120",
+    "end": "374639"
+  },
+  {
+    "text": "security patch sometimes you just don't have the luxury to wait for two weeks to do that so we",
+    "start": "374639",
+    "end": "380400"
+  },
+  {
+    "text": "have to go and rotate all the nodes and that's something that we can't do anything about that's",
+    "start": "380400",
+    "end": "386319"
+  },
+  {
+    "text": "something that has to happen and the last one i've got here is aws",
+    "start": "386319",
+    "end": "391680"
+  },
+  {
+    "text": "terminations so aws is usually pretty polite and they send you an update that some of your",
+    "start": "391680",
+    "end": "398720"
+  },
+  {
+    "text": "instances are going to get terminated so you can act on that um but you could also lose a node out of nowhere if",
+    "start": "398720",
+    "end": "404479"
+  },
+  {
+    "text": "you're pretty unlucky",
+    "start": "404479",
+    "end": "408759"
+  },
+  {
+    "text": "okay so let's look at the solution now",
+    "start": "410240",
+    "end": "414960"
+  },
+  {
+    "text": "let's look at the whole picture first and then we'll dive into the different components that makes this solution",
+    "start": "416000",
+    "end": "423360"
+  },
+  {
+    "text": "so we're using taints and tolerations to match pods to nodes and then we're protecting the instances",
+    "start": "423360",
+    "end": "430080"
+  },
+  {
+    "text": "from getting killed so tension tolerations are",
+    "start": "430080",
+    "end": "435280"
+  },
+  {
+    "text": "built-in kubernetes feature that help you match pods to",
+    "start": "435280",
+    "end": "441120"
+  },
+  {
+    "text": "nodes today it's more likely that you would use something like pod affinities and",
+    "start": "441120",
+    "end": "447360"
+  },
+  {
+    "text": "anti-affinities which give you more granular control but for our feature tension tolerations",
+    "start": "447360",
+    "end": "454720"
+  },
+  {
+    "text": "was simple and that's everything that we needed so um",
+    "start": "454720",
+    "end": "461680"
+  },
+  {
+    "text": "it's like we decided that nodes live on for two weeks 14 days and that's what we",
+    "start": "461680",
+    "end": "466800"
+  },
+  {
+    "text": "base our calculations on so in this example we've got a pod that wants to live for seven days so what we do is we",
+    "start": "466800",
+    "end": "472479"
+  },
+  {
+    "text": "apply toleration on this pod the duration is called lifespan remaining and it has the values",
+    "start": "472479",
+    "end": "478400"
+  },
+  {
+    "text": "789 all the way up to 14 which means that it's then happy to get",
+    "start": "478400",
+    "end": "484319"
+  },
+  {
+    "text": "scheduled on a node that has at least seven days of life remaining",
+    "start": "484319",
+    "end": "490479"
+  },
+  {
+    "text": "and so then the nodes we apply tense on and the taints um represent how many",
+    "start": "490479",
+    "end": "496800"
+  },
+  {
+    "text": "days left there is of life and is based on the uptime of the node",
+    "start": "496800",
+    "end": "502400"
+  },
+  {
+    "text": "excuse me so in this example the node is for there is also it has 10 days",
+    "start": "502400",
+    "end": "507680"
+  },
+  {
+    "text": "left to go and then we need to go and teach the systems that kill nodes to not kill",
+    "start": "507680",
+    "end": "514320"
+  },
+  {
+    "text": "nodes when they're not allowed to do to do that and we're going to talk about this in a few slides as well",
+    "start": "514320",
+    "end": "521680"
+  },
+  {
+    "text": "okay so let's zoom into how we get that taint on the nodes so that's pretty",
+    "start": "521680",
+    "end": "528640"
+  },
+  {
+    "text": "simple we've got a small go service that we run in each of our clusters",
+    "start": "528640",
+    "end": "534640"
+  },
+  {
+    "text": "and it loops through all the nodes and updates the contains the nodes updated",
+    "start": "534640",
+    "end": "539920"
+  },
+  {
+    "text": "from with the right value so in the top there the node's got seven days left because",
+    "start": "539920",
+    "end": "546000"
+  },
+  {
+    "text": "it's seven days old the one on the right hand side is got zero days left to leave",
+    "start": "546000",
+    "end": "553040"
+  },
+  {
+    "text": "because it's been up for 14 days and the one at the bottom is a new node so it has a whole 14 days to go",
+    "start": "553040",
+    "end": "562040"
+  },
+  {
+    "text": "right so we applied chains on the nodes but it doesn't really",
+    "start": "564320",
+    "end": "570560"
+  },
+  {
+    "text": "do anything so now we need to go and tell the systems killing our nodes to",
+    "start": "570560",
+    "end": "576800"
+  },
+  {
+    "text": "understand this concept of tent and toleration that we're using and to prevent them from killing the",
+    "start": "576800",
+    "end": "582000"
+  },
+  {
+    "text": "nodes so in the next two slides i'll talk into details about asg scaling and chaos",
+    "start": "582000",
+    "end": "587600"
+  },
+  {
+    "text": "engineering but the third one in that i talked about where we just kill nodes after two weeks we realized",
+    "start": "587600",
+    "end": "594399"
+  },
+  {
+    "text": "that we could just retire that because um thanks to the first two ones nodes actually don't even make it to two",
+    "start": "594399",
+    "end": "600720"
+  },
+  {
+    "text": "weeks already so that's something we could retire but then we're left with the things that",
+    "start": "600720",
+    "end": "605920"
+  },
+  {
+    "text": "we don't control and so if we need to rule out a security patch or if aws gives an instance",
+    "start": "605920",
+    "end": "612399"
+  },
+  {
+    "text": "this is just like too bad so in a way this is part of the contract we have with our",
+    "start": "612399",
+    "end": "619279"
+  },
+  {
+    "text": "users of this feature that the feature isn't perfect and sometimes something like that might",
+    "start": "619279",
+    "end": "625200"
+  },
+  {
+    "text": "happen and",
+    "start": "625200",
+    "end": "628519"
+  },
+  {
+    "text": "okay so let's talk about auto scaling put this aside for a second and and",
+    "start": "635760",
+    "end": "640959"
+  },
+  {
+    "text": "don't think about kubernetes the classic way to scale instances in an autoscaling group in aws is by",
+    "start": "640959",
+    "end": "648079"
+  },
+  {
+    "text": "using auto scaling rules auto scaling rules look at the resource consumptions on your ec2 instances so",
+    "start": "648079",
+    "end": "655440"
+  },
+  {
+    "text": "like how much cpu how much memory is being used and once you reach a given threshold adds or remove nodes",
+    "start": "655440",
+    "end": "662160"
+  },
+  {
+    "text": "but with kubernetes this is not this doesn't work to do that because um",
+    "start": "662160",
+    "end": "667920"
+  },
+  {
+    "text": "workloads in kubernetes like applications running request some resources so request cpu",
+    "start": "667920",
+    "end": "673760"
+  },
+  {
+    "text": "request memory and it doesn't mean that they are using what they're requesting so you can't get into",
+    "start": "673760",
+    "end": "680240"
+  },
+  {
+    "text": "this unfortunate situation where all of the resources on your cluster are being requested are being claimed and you",
+    "start": "680240",
+    "end": "686880"
+  },
+  {
+    "text": "can't do any new pods meanwhile the resource utilization on your instances",
+    "start": "686880",
+    "end": "691920"
+  },
+  {
+    "text": "can still be pretty low this is where cluster auto scaler comes",
+    "start": "691920",
+    "end": "697680"
+  },
+  {
+    "text": "in so cluster autoscaler has this like insider knowledge of the resources that are",
+    "start": "697680",
+    "end": "703920"
+  },
+  {
+    "text": "requested in the cluster and scales your cluster depending on that not depending on",
+    "start": "703920",
+    "end": "709040"
+  },
+  {
+    "text": "the end utilization of your instances and so a cluster to scalar is a kubernetes project that you can find on",
+    "start": "709040",
+    "end": "715519"
+  },
+  {
+    "text": "github and here i've got an extract of our deployment manifest that we use to",
+    "start": "715519",
+    "end": "721680"
+  },
+  {
+    "text": "deploy cluster auto scada there's a bunch of flags which i'm not going to go over but i'm just going to",
+    "start": "721680",
+    "end": "727040"
+  },
+  {
+    "text": "talk about the last two ones because that's the flags we had to add to get this feature working",
+    "start": "727040",
+    "end": "734399"
+  },
+  {
+    "text": "so the first one is ignore taint lifespan remaining",
+    "start": "734399",
+    "end": "739920"
+  },
+  {
+    "text": "because the way like cluster autoscaler tries to create new nodes but if it creates a new node",
+    "start": "739920",
+    "end": "746160"
+  },
+  {
+    "text": "based on node one reusing that old paint the new pods won't be able to get scheduled on this node",
+    "start": "746160",
+    "end": "752320"
+  },
+  {
+    "text": "so we just say hey just ignore the taint and we're tainting the nodes ourselves",
+    "start": "752320",
+    "end": "757519"
+  },
+  {
+    "text": "just don't worry about that however any node that has attained that is being",
+    "start": "757519",
+    "end": "764320"
+  },
+  {
+    "text": "ignored is seen as unready by cluster autoscaler and",
+    "start": "764320",
+    "end": "770160"
+  },
+  {
+    "text": "because like typically tense can be used to call the nodes or make mark them really for deletions or things like that",
+    "start": "770160",
+    "end": "776320"
+  },
+  {
+    "text": "so then when too many nodes are seen as unready cluster autoscaler like freaks",
+    "start": "776320",
+    "end": "783839"
+  },
+  {
+    "text": "out a bit and goes like hey something looks dodgy here i'm not going to touch anything so we have to take hey look like it's",
+    "start": "783839",
+    "end": "789760"
+  },
+  {
+    "text": "okay for a hundred percent of the nodes to be unready and so then it keeps on working",
+    "start": "789760",
+    "end": "797320"
+  },
+  {
+    "text": "so i mentioned that we're doing some chaos engineering we have this service called cubetest cluster",
+    "start": "801680",
+    "end": "807680"
+  },
+  {
+    "text": "and it loops over every cluster we have and for each cluster looks at",
+    "start": "807680",
+    "end": "814720"
+  },
+  {
+    "text": "all the workloads and resources that are deployed there how many there are in which states they're in",
+    "start": "814720",
+    "end": "820160"
+  },
+  {
+    "text": "then find the node that is eligible to get killed kiss the node wait for a new node to",
+    "start": "820160",
+    "end": "826000"
+  },
+  {
+    "text": "come back up and waits for the resources and workloads to stabilize and look the",
+    "start": "826000",
+    "end": "831120"
+  },
+  {
+    "text": "same as before so that we know that we can scale out that we can",
+    "start": "831120",
+    "end": "836399"
+  },
+  {
+    "text": "schedule pods and do all the things that we want to do",
+    "start": "836399",
+    "end": "842079"
+  },
+  {
+    "text": "but how do we know if a node is eligible to get killed well the simple way to go with about",
+    "start": "842079",
+    "end": "848560"
+  },
+  {
+    "text": "that would be to just wait for a node to be two weeks old then we know we're not breaking anything we can kill it",
+    "start": "848560",
+    "end": "854800"
+  },
+  {
+    "text": "but instead what we do is we run this function over our nodes so this function looks at",
+    "start": "854800",
+    "end": "860560"
+  },
+  {
+    "text": "the pods that are running on the given node and unless there is a pod that has",
+    "start": "860560",
+    "end": "866560"
+  },
+  {
+    "text": "a lifespan request that hasn't been reached yet then we're",
+    "start": "866560",
+    "end": "872160"
+  },
+  {
+    "text": "allowed to kill the node so i've got a diagram on the side here to illustrate what i'm talking about",
+    "start": "872160",
+    "end": "877760"
+  },
+  {
+    "text": "let's say we just have one node and one pod and when the node is two days old we",
+    "start": "877760",
+    "end": "882959"
+  },
+  {
+    "text": "scheduled a pod that has a lifespan request of four days",
+    "start": "882959",
+    "end": "888639"
+  },
+  {
+    "text": "for the first four days here that function will return false we're not allowed to kill the nodes because",
+    "start": "889199",
+    "end": "894639"
+  },
+  {
+    "text": "there's a pod there that still needs to live for a few days but after four days so when the node is",
+    "start": "894639",
+    "end": "900880"
+  },
+  {
+    "text": "six days old then the function will return true and we're able to kill the nodes without breaking any contract on",
+    "start": "900880",
+    "end": "906959"
+  },
+  {
+    "text": "the pod and so we can kill the node before it gets to 14 days old",
+    "start": "906959",
+    "end": "913839"
+  },
+  {
+    "text": "okay so we saw how the nodes are getting tainted and then how we protect them from being killed but now let's look at",
+    "start": "916880",
+    "end": "922880"
+  },
+  {
+    "text": "how we get the toleration on the pods",
+    "start": "922880",
+    "end": "927839"
+  },
+  {
+    "text": "so at slack users typically don't deploy kubernetes manifests directly by themselves instead",
+    "start": "932320",
+    "end": "939360"
+  },
+  {
+    "text": "they write a bedrock yaml config file that gets passed by our tooling chain and creates kubernetes resources",
+    "start": "939360",
+    "end": "946560"
+  },
+  {
+    "text": "so in this example there's a service called grumpy service",
+    "start": "946560",
+    "end": "951839"
+  },
+  {
+    "text": "that has one stage to be deployed in dev asking for one replica and for a minimum",
+    "start": "951839",
+    "end": "958079"
+  },
+  {
+    "text": "lifespan of seven days that yamlconfig file gets passed by our",
+    "start": "958079",
+    "end": "964639"
+  },
+  {
+    "text": "bedrock cli and bedrock cli creates a community's",
+    "start": "964639",
+    "end": "971600"
+  },
+  {
+    "text": "deployment on the targeted cluster so it takes that minimum life span",
+    "start": "971600",
+    "end": "977360"
+  },
+  {
+    "text": "fields in the yaml bedrock camel file and turns that into a label on the nodes and the",
+    "start": "977360",
+    "end": "983920"
+  },
+  {
+    "text": "labels called lifespan request requested so we've got a deployment the deployment",
+    "start": "983920",
+    "end": "990480"
+  },
+  {
+    "text": "controller goes and tries to create a pod",
+    "start": "990480",
+    "end": "995600"
+  },
+  {
+    "text": "so the cube server api sends an admission review request to our",
+    "start": "995600",
+    "end": "1001279"
+  },
+  {
+    "text": "admission webhook the admission webhook looks at the potspeg",
+    "start": "1001279",
+    "end": "1007040"
+  },
+  {
+    "text": "mutates it by injecting all the tolerations that we need based on the label that was on it",
+    "start": "1007040",
+    "end": "1013680"
+  },
+  {
+    "text": "and returns the admission review response to the cube server api with that json patch",
+    "start": "1013680",
+    "end": "1021040"
+  },
+  {
+    "text": "and so a pod gets created with the tolerations all the way from 7 up to 14.",
+    "start": "1021040",
+    "end": "1026319"
+  },
+  {
+    "text": "so users never have to type all that by hand instead they just",
+    "start": "1026319",
+    "end": "1031760"
+  },
+  {
+    "text": "punch in the fields in the initial yaml file and the magic happens",
+    "start": "1031760",
+    "end": "1039480"
+  },
+  {
+    "text": "so to do that we need an admission web hook",
+    "start": "1040000",
+    "end": "1044400"
+  },
+  {
+    "text": "so i went online and i tried to find out how like what's the best way",
+    "start": "1046959",
+    "end": "1052240"
+  },
+  {
+    "text": "today to get a an admission webhook of the ground and deployed in communities and i found cubebuilder which i'm sure",
+    "start": "1052240",
+    "end": "1059520"
+  },
+  {
+    "text": "you're familiar with but let's this is like the first line in their readme",
+    "start": "1059520",
+    "end": "1065360"
+  },
+  {
+    "text": "cube builder is a framework for building kubernetes apis using custom resource definitions",
+    "start": "1065360",
+    "end": "1072080"
+  },
+  {
+    "text": "so here already you should start thinking that we might not be on the right track because we're not doing any crds we're not",
+    "start": "1072080",
+    "end": "1078240"
+  },
+  {
+    "text": "controlling any resources like what we're doing is stateless like we just",
+    "start": "1078240",
+    "end": "1083440"
+  },
+  {
+    "text": "want to mutate request on the flight on the right hand side",
+    "start": "1083440",
+    "end": "1088799"
+  },
+  {
+    "text": "i've got the architecture concept diagram from the cube builder documentation and this is probably too small to read",
+    "start": "1088799",
+    "end": "1095280"
+  },
+  {
+    "text": "but i just wanted to put this up to illustrate to show all the capabilities that",
+    "start": "1095280",
+    "end": "1101039"
+  },
+  {
+    "text": "q builder has so we actually don't need most of that",
+    "start": "1101039",
+    "end": "1106160"
+  },
+  {
+    "text": "like all the controller stuff we don't need we don't need to manage anything all we need to do is the right",
+    "start": "1106160",
+    "end": "1111440"
+  },
+  {
+    "text": "hand side box called webhook",
+    "start": "1111440",
+    "end": "1115360"
+  },
+  {
+    "text": "so instead we went and wrote a simple admission web hook in golling and that",
+    "start": "1117520",
+    "end": "1122799"
+  },
+  {
+    "text": "worked pretty well for us so we went and open sourced it so you can find it on the slide slack hq organization on",
+    "start": "1122799",
+    "end": "1129200"
+  },
+  {
+    "text": "github um yeah and like",
+    "start": "1129200",
+    "end": "1134240"
+  },
+  {
+    "text": "look even if it's not something that you need or want in production this report comes with a make file that uses docker",
+    "start": "1134240",
+    "end": "1140799"
+  },
+  {
+    "text": "and kubernetes in docker also known as kind and so you can with a couple commands",
+    "start": "1140799",
+    "end": "1146320"
+  },
+  {
+    "text": "just get a community's clusters running on your laptop deployed your mission webhook deploy",
+    "start": "1146320",
+    "end": "1151679"
+  },
+  {
+    "text": "pods look at the logs i'll change the code change the validations mutation redeploy the webhook and see what's",
+    "start": "1151679",
+    "end": "1157280"
+  },
+  {
+    "text": "going on so what i mean is like i'm hoping that this might have some educational value",
+    "start": "1157280",
+    "end": "1162720"
+  },
+  {
+    "text": "if you are not super familiar with how admission web hooks work in kubernetes well maybe that's something that you",
+    "start": "1162720",
+    "end": "1168480"
+  },
+  {
+    "text": "want to play with it also comes with a blog post that goes",
+    "start": "1168480",
+    "end": "1175280"
+  },
+  {
+    "text": "into a bit more detail on like how the different parts of the codes interact",
+    "start": "1175280",
+    "end": "1181280"
+  },
+  {
+    "text": "if you don't know the slack engineering blog i suggest like you should go have a",
+    "start": "1181280",
+    "end": "1186559"
+  },
+  {
+    "text": "look there's some really good stuff there especially some really solid technical articles after",
+    "start": "1186559",
+    "end": "1192720"
+  },
+  {
+    "text": "we have like serious incidents",
+    "start": "1192720",
+    "end": "1196400"
+  },
+  {
+    "text": "okay so that's all the bits so we've got buds",
+    "start": "1198320",
+    "end": "1204159"
+  },
+  {
+    "text": "getting matched on nodes and the nodes are protected from being killed too early because we told the system how not",
+    "start": "1204159",
+    "end": "1209760"
+  },
+  {
+    "text": "to do that and so this lifespan feature at slack today is used",
+    "start": "1209760",
+    "end": "1214960"
+  },
+  {
+    "text": "by about like half a dozen services and the maximum value we allow is seven",
+    "start": "1214960",
+    "end": "1221360"
+  },
+  {
+    "text": "days and everyone is setting that to seven like initially when we talked to different teams some people said",
+    "start": "1221360",
+    "end": "1227760"
+  },
+  {
+    "text": "well look all we need is um like one day or two days like just",
+    "start": "1227760",
+    "end": "1233360"
+  },
+  {
+    "text": "give me the guarantee that we're not gonna that my body is not gonna kill be killed like every few hours",
+    "start": "1233360",
+    "end": "1239360"
+  },
+  {
+    "text": "but at the end of the day they still set seven days in the config file so my we could just have had that uh field as a",
+    "start": "1239360",
+    "end": "1246720"
+  },
+  {
+    "text": "bullion in the config file and the end result would have been the same make it a bit more simple maybe",
+    "start": "1246720",
+    "end": "1254158"
+  },
+  {
+    "text": "all right so i've got a few more things to talk about before wrapping up",
+    "start": "1255039",
+    "end": "1261559"
+  },
+  {
+    "text": "so the minimum lifespan uh guarantees that your body will live for a given amount",
+    "start": "1262000",
+    "end": "1267919"
+  },
+  {
+    "text": "of time but there's no guarantee that your pod will actually get killed once you reach the end of the lifespan",
+    "start": "1267919",
+    "end": "1274720"
+  },
+  {
+    "text": "but some of our users actually want control over the whole lifespan dynamics of their applications",
+    "start": "1274720",
+    "end": "1280960"
+  },
+  {
+    "text": "if we think back about our jenkins controller well it's not really that we want the",
+    "start": "1280960",
+    "end": "1286240"
+  },
+  {
+    "text": "jenkins controller to leave for a day or seven or whatever it's that we really don't",
+    "start": "1286240",
+    "end": "1291280"
+  },
+  {
+    "text": "want it to get killed during the day but",
+    "start": "1291280",
+    "end": "1296320"
+  },
+  {
+    "text": "with what we've implemented so far we can't really set that so we have our",
+    "start": "1296320",
+    "end": "1302240"
+  },
+  {
+    "text": "users kill the application at night to reset the minimum lifespan counter but so",
+    "start": "1302240",
+    "end": "1309280"
+  },
+  {
+    "text": "hopefully it's just a feature that we can add later on but one of the limitations that we have",
+    "start": "1309280",
+    "end": "1314720"
+  },
+  {
+    "text": "today another thing that i didn't mention is",
+    "start": "1314720",
+    "end": "1320720"
+  },
+  {
+    "text": "that we already had an old admission webhook an admission web hook that was built",
+    "start": "1320720",
+    "end": "1327120"
+  },
+  {
+    "text": "using a queue builder but it's a few years old and it hasn't been upgraded in a while and upgrading",
+    "start": "1327120",
+    "end": "1333600"
+  },
+  {
+    "text": "it today to more recent version of q builder would be a lot of rework rewriting refactoring",
+    "start": "1333600",
+    "end": "1340720"
+  },
+  {
+    "text": "and in the same way like the",
+    "start": "1341760",
+    "end": "1348240"
+  },
+  {
+    "text": "the validations and mutations that this old admission webhook does are stateless too so it doesn't do crds",
+    "start": "1348240",
+    "end": "1355679"
+  },
+  {
+    "text": "either it doesn't do any controlling so it's the same requirements as the simple web hook i presented to you",
+    "start": "1355679",
+    "end": "1362320"
+  },
+  {
+    "text": "so that was one of the reasons why we went and created the simple admission web book because we thought oh this is",
+    "start": "1362320",
+    "end": "1367919"
+  },
+  {
+    "text": "great then we can just migrate the features from the old one to the new one and retire this",
+    "start": "1367919",
+    "end": "1373840"
+  },
+  {
+    "text": "old piece of work but as you might know retiring old systems is hard to",
+    "start": "1373840",
+    "end": "1379840"
+  },
+  {
+    "text": "prioritize and so while some of the features have been migrated to the new one",
+    "start": "1379840",
+    "end": "1385440"
+  },
+  {
+    "text": "so for example we validate that our docker images are coming from our",
+    "start": "1385440",
+    "end": "1391039"
+  },
+  {
+    "text": "trusted registry um we still have a lot everything that is sidecar injection is",
+    "start": "1391039",
+    "end": "1397840"
+  },
+  {
+    "text": "still on the old web hook so we inject side cars to do",
+    "start": "1397840",
+    "end": "1402880"
+  },
+  {
+    "text": "pod to port encryption to deal with secrets and service discovery and so that's still living in",
+    "start": "1402880",
+    "end": "1408880"
+  },
+  {
+    "text": "the old one",
+    "start": "1408880",
+    "end": "1411360"
+  },
+  {
+    "text": "okay and so i didn't build all this by myself it was three of us working on the feature it was me and sean who i would",
+    "start": "1414080",
+    "end": "1421760"
+  },
+  {
+    "text": "like to thank for the things he taught me about software engineering and trisha who has been a great source",
+    "start": "1421760",
+    "end": "1429360"
+  },
+  {
+    "text": "of inspiration and i also want to thank javier for his ongoing support and for how excited he",
+    "start": "1429360",
+    "end": "1434640"
+  },
+  {
+    "text": "was to have me be here today doing this talk",
+    "start": "1434640",
+    "end": "1439679"
+  },
+  {
+    "text": "and those are the images i used and thank you",
+    "start": "1439679",
+    "end": "1445480"
+  },
+  {
+    "text": "perfect uh great session so now time for the q a there was one question online about the",
+    "start": "1450240",
+    "end": "1456799"
+  },
+  {
+    "text": "slides but they're going to be added to the event platform i think yeah the link to the slides was that was",
+    "start": "1456799",
+    "end": "1463360"
+  },
+  {
+    "text": "the question yeah link to the slides yeah also the slides are on uh sched so you can just download them i",
+    "start": "1463360",
+    "end": "1470640"
+  },
+  {
+    "text": "did a few updates today so i'll re-upload a new version after that perfect any questions here okay there",
+    "start": "1470640",
+    "end": "1479440"
+  },
+  {
+    "text": "thank you and why or which is the reasoning behind having two weeks",
+    "start": "1481360",
+    "end": "1487200"
+  },
+  {
+    "text": "life span for all the notes and probably related another question and",
+    "start": "1487200",
+    "end": "1492640"
+  },
+  {
+    "text": "can you guarantee that within that two weeks life span and because of a",
+    "start": "1492640",
+    "end": "1499120"
+  },
+  {
+    "text": "security rollout every node will have a 14 days",
+    "start": "1499120",
+    "end": "1504159"
+  },
+  {
+    "text": "day span so and if eight days and",
+    "start": "1504159",
+    "end": "1509919"
+  },
+  {
+    "text": "goes let's say eight days passes after that if someone asked for seven days",
+    "start": "1509919",
+    "end": "1515360"
+  },
+  {
+    "text": "span and you will then you wouldn't be able to to schedule because there is no node",
+    "start": "1515360",
+    "end": "1521600"
+  },
+  {
+    "text": "available so how do you deal with that yeah right um so like the the two x's is historical to",
+    "start": "1521600",
+    "end": "1529600"
+  },
+  {
+    "text": "start with so this has been um like the currency as to how often we",
+    "start": "1529600",
+    "end": "1536799"
+  },
+  {
+    "text": "rotate nodes and how often we roll out patches and this is why the maximum we set is",
+    "start": "1536799",
+    "end": "1543360"
+  },
+  {
+    "text": "seven days because then it means we have seven days to kill the nodes and get everything done because if we let people",
+    "start": "1543360",
+    "end": "1549039"
+  },
+  {
+    "text": "set two weeks then at the end then we have to rotate all the nodes at once and that's not a position we want to be in",
+    "start": "1549039",
+    "end": "1557840"
+  },
+  {
+    "text": "but most of our applications don't use this feature so from seven days to zero then most of everything we have will",
+    "start": "1558720",
+    "end": "1565039"
+  },
+  {
+    "text": "still run on the nodes is just the few picky ones that want that lifespan",
+    "start": "1565039",
+    "end": "1570320"
+  },
+  {
+    "text": "request that won't be able to run on all their nodes from 7 to 14 days",
+    "start": "1570320",
+    "end": "1576080"
+  },
+  {
+    "text": "great any other questions oh there we have one really quick hand",
+    "start": "1576080",
+    "end": "1583320"
+  },
+  {
+    "text": "thanks thanks for the presentation uh just a question services do do they know",
+    "start": "1584880",
+    "end": "1590080"
+  },
+  {
+    "text": "internally that they have this many days to live for example if i start my",
+    "start": "1590080",
+    "end": "1595200"
+  },
+  {
+    "text": "service at slack do i know that my service has seven days and then",
+    "start": "1595200",
+    "end": "1600799"
+  },
+  {
+    "text": "do your engineers do something about it like the exit gracefully at seven days and then they're just not consuming",
+    "start": "1600799",
+    "end": "1606720"
+  },
+  {
+    "text": "resources or and then you end up with empty nodes or how do you deal with that so you mean",
+    "start": "1606720",
+    "end": "1613039"
+  },
+  {
+    "text": "services that don't use this feature if my if my service is configured to",
+    "start": "1613039",
+    "end": "1618880"
+  },
+  {
+    "text": "request 10 days of minimum lifespan then what i could do with that could i exit in 10 days and then stop",
+    "start": "1618880",
+    "end": "1626480"
+  },
+  {
+    "text": "the product from running and just sleep or do you leverage that in some way",
+    "start": "1626480",
+    "end": "1632720"
+  },
+  {
+    "text": "so if your service is requesting 10 days then after the 10 days then nothing will happen right",
+    "start": "1632720",
+    "end": "1638159"
+  },
+  {
+    "text": "then but it'll likely get killed within 10 and 14 because that's like how",
+    "start": "1638159",
+    "end": "1644399"
+  },
+  {
+    "text": "fast we rotate nodes am i answering a question okay so so developers don't do anything with that",
+    "start": "1644399",
+    "end": "1650240"
+  },
+  {
+    "text": "10 days life span oh no no no no it's just it's uh yeah it's just an extra guarantee they have on",
+    "start": "1650240",
+    "end": "1656320"
+  },
+  {
+    "text": "like the stability of their workloads in our infrastructure they don't yeah they don't have to do anything",
+    "start": "1656320",
+    "end": "1661760"
+  },
+  {
+    "text": "thanks great was there any more yes this one",
+    "start": "1661760",
+    "end": "1669398"
+  },
+  {
+    "text": "quick question so i like the teens and tolerations approach for just making it very easy to",
+    "start": "1672960",
+    "end": "1679039"
+  },
+  {
+    "text": "see what the state of the notice has there been a discussion or",
+    "start": "1679039",
+    "end": "1685840"
+  },
+  {
+    "text": "an idea of using custom scheduling rules or writing a custom scheduler to",
+    "start": "1685840",
+    "end": "1691360"
+  },
+  {
+    "text": "do the same behavior as done right now",
+    "start": "1691360",
+    "end": "1696880"
+  },
+  {
+    "text": "not seriously that could be an option we should talk about after that and that'd be",
+    "start": "1696880",
+    "end": "1702640"
+  },
+  {
+    "text": "interesting to know like how you might go about and and using a custom resource definition or a custom scheduler to do",
+    "start": "1702640",
+    "end": "1708960"
+  },
+  {
+    "text": "that um we had a bit of time pressure to release this and we tried to find like sort of",
+    "start": "1708960",
+    "end": "1715760"
+  },
+  {
+    "text": "like the easiest way to get that feature delivered and that's what we came up with but definitely a custom scheduler would",
+    "start": "1715760",
+    "end": "1722640"
+  },
+  {
+    "text": "work okay great any more",
+    "start": "1722640",
+    "end": "1727679"
+  },
+  {
+    "text": "no immediate hands um but you can obviously go do oh there's one sorry i missed you",
+    "start": "1727679",
+    "end": "1734720"
+  },
+  {
+    "text": "ah that was a really good talk thank you first of all um i've you've got a huge number of nodes to manage i can't hear",
+    "start": "1735039",
+    "end": "1741120"
+  },
+  {
+    "text": "you at all um so the one thing i've noticed from your talk is that you've got a huge number of nodes to manage",
+    "start": "1741120",
+    "end": "1746320"
+  },
+  {
+    "text": "and with the number of long-running pods which you're trying to prevent being killed prematurely",
+    "start": "1746320",
+    "end": "1752480"
+  },
+  {
+    "text": "i'm wondering how you measure the success of that and how many do you know how many long running pods are still",
+    "start": "1752480",
+    "end": "1757760"
+  },
+  {
+    "text": "getting killed prematurely yeah we don't know",
+    "start": "1757760",
+    "end": "1764159"
+  },
+  {
+    "text": "so you have no monitoring tool to sort of see how successful your approach has been it's like so we",
+    "start": "1764159",
+    "end": "1770080"
+  },
+  {
+    "text": "well at first we had um debug logging enabled on the admission web hook and so",
+    "start": "1770080",
+    "end": "1775200"
+  },
+  {
+    "text": "we were getting a lot of uh like energetical data from the logs and we saw how many applications used the",
+    "start": "1775200",
+    "end": "1781279"
+  },
+  {
+    "text": "pods and what how all the pods were and when they were getting killed and from that like little investigation like that",
+    "start": "1781279",
+    "end": "1789039"
+  },
+  {
+    "text": "window of data we had um i don't have a number to give you but it",
+    "start": "1789039",
+    "end": "1794720"
+  },
+  {
+    "text": "looked pretty good but since the logs are not debugging anymore in production and so we've actually lost",
+    "start": "1794720",
+    "end": "1800480"
+  },
+  {
+    "text": "lost track of this and yeah our telemetry story can be improved",
+    "start": "1800480",
+    "end": "1807398"
+  },
+  {
+    "text": "great any final last ones nope uh thank you for a really great session thank you",
+    "start": "1808320",
+    "end": "1816440"
+  }
+]

@@ -1,0 +1,1662 @@
+[
+  {
+    "start": "0",
+    "end": "69000"
+  },
+  {
+    "text": "hello cool so um I work for Oracle and Oracle has a managed kubernetes offering",
+    "start": "2560",
+    "end": "9040"
+  },
+  {
+    "text": "and uh a little while ago I was given the the job of looking at replacing the networking layer which was flannel with",
+    "start": "9040",
+    "end": "15160"
+  },
+  {
+    "text": "some features of the the Oracle cloud and uh that all sounded really good and I started digging into it and I soon",
+    "start": "15160",
+    "end": "21160"
+  },
+  {
+    "text": "realized that I didn't really understand how flannel worked and uh it kind of seemed wrong to replace one thing with",
+    "start": "21160",
+    "end": "26320"
+  },
+  {
+    "text": "another thing if you don't understand the thing you're replacing so uh I I kind of dug into it a bit deeper and",
+    "start": "26320",
+    "end": "32439"
+  },
+  {
+    "text": "after a while it became apparent that I didn't really understand any of this networking stuff at all so um yeah so",
+    "start": "32439",
+    "end": "39480"
+  },
+  {
+    "text": "long story short went out a big rabbit hole learned some stuff but more importantly I kind of realized I really enjoyed this stuff so um I thought I'd",
+    "start": "39480",
+    "end": "46719"
+  },
+  {
+    "text": "write a talk and come and spread the network in love a little bit so yeah my name is Chris in the next uh 30 minutes",
+    "start": "46719",
+    "end": "53399"
+  },
+  {
+    "text": "or so I'm going to try and explain how a container on one machine can get can connect to a container on another",
+    "start": "53399",
+    "end": "59399"
+  },
+  {
+    "text": "machine and what the various mechanisms are to allow you to do that uh yeah so if you already know this stuff now is",
+    "start": "59399",
+    "end": "66080"
+  },
+  {
+    "text": "your time to leave uh cool so first of all we need to",
+    "start": "66080",
+    "end": "71400"
+  },
+  {
+    "start": "69000",
+    "end": "164000"
+  },
+  {
+    "text": "know what we're aiming at so we're going to well go with the kubernetes model because it's Cube con and all so um",
+    "start": "71400",
+    "end": "77759"
+  },
+  {
+    "text": "basically for a network layer and kubernetes to to be compliant it needs to follow these three rules but what",
+    "start": "77759",
+    "end": "82960"
+  },
+  {
+    "text": "that really boils down to is every I every pod in the cluster has its own unique IP address and um each one noes",
+    "start": "82960",
+    "end": "90119"
+  },
+  {
+    "text": "need to be able to talk to each other just using that IP address and there's no address translation in between and",
+    "start": "90119",
+    "end": "95280"
+  },
+  {
+    "text": "also uh pods need to be able to talk to nodes and nodes be able to talk to pods that's it so that's what we're trying to",
+    "start": "95280",
+    "end": "101600"
+  },
+  {
+    "text": "work towards and uh how are we going to do this so we are going to uh get there in kind of four steps and for each of",
+    "start": "101600",
+    "end": "108799"
+  },
+  {
+    "text": "these steps uh I'm going to show a kind of rather badly handdrawn diagram and talk about that a bit and then I'm going",
+    "start": "108799",
+    "end": "115719"
+  },
+  {
+    "text": "to uh show some code in in bash and everybody loves bash so that's good and then I am going to run that code and",
+    "start": "115719",
+    "end": "122880"
+  },
+  {
+    "text": "then we can get in and sort of you know capture some packets and ping some interfaces and things and see how it all",
+    "start": "122880",
+    "end": "128640"
+  },
+  {
+    "text": "hangs together so the four steps are as follows first of all I'm going to look at uh the simplest possible thing just a",
+    "start": "128640",
+    "end": "134680"
+  },
+  {
+    "text": "node with a network names space and look at how that can connect to the node uh The Next Step we're going to stay on the",
+    "start": "134680",
+    "end": "140360"
+  },
+  {
+    "text": "one node but have two Network namespaces and look at how you can connect send packets between them next step move out",
+    "start": "140360",
+    "end": "145920"
+  },
+  {
+    "text": "to two nodes and then look at how the packets go between the two nodes containers but in this case just on the same L2 Network and then finally the",
+    "start": "145920",
+    "end": "153160"
+  },
+  {
+    "text": "kind of more General case is two nodes separated across different networks and we'll see how that",
+    "start": "153160",
+    "end": "158760"
+  },
+  {
+    "text": "works so let's get",
+    "start": "158760",
+    "end": "164519"
+  },
+  {
+    "start": "164000",
+    "end": "495000"
+  },
+  {
+    "text": "going so this is the um the simple case so we've got the big diagram uh the big",
+    "start": "164519",
+    "end": "172000"
+  },
+  {
+    "text": "rectangle on the outside so that represents the node so that could be a bar M machine or it could be a VM kind",
+    "start": "172000",
+    "end": "177560"
+  },
+  {
+    "text": "of doesn't really matter that's got an interface here it's rather confusingly called EMP 0 S8 but it just treat it as",
+    "start": "177560",
+    "end": "184239"
+  },
+  {
+    "text": "e z it's only called that because that's what the virtual box uh called it uh it has an IP address",
+    "start": "184239",
+    "end": "190599"
+  },
+  {
+    "text": "1010 and then the little box in the middle which I've named labeled con while that represents the container so",
+    "start": "190599",
+    "end": "196720"
+  },
+  {
+    "text": "maybe we should just take a step back a bit so a container in Linux is is a process with a bunch of mechanisms Linux",
+    "start": "196720",
+    "end": "202680"
+  },
+  {
+    "text": "mechanisms to kind of isolate that and uh and they include c groups and Nam spaces and various security things but",
+    "start": "202680",
+    "end": "209280"
+  },
+  {
+    "text": "from the point of view of network connectivity the only thing that really matters is the network Nam space so um",
+    "start": "209280",
+    "end": "215840"
+  },
+  {
+    "text": "when I say container from now onwards really what I'm just talking about is Network namespaces here um yes so what",
+    "start": "215840",
+    "end": "224000"
+  },
+  {
+    "text": "we need to do well actually first of all what is a network namespace so the way I see that is it's kind of separate",
+    "start": "224000",
+    "end": "229599"
+  },
+  {
+    "text": "instance of the kernel networking stack well another instance so that would",
+    "start": "229599",
+    "end": "235480"
+  },
+  {
+    "text": "involve three things so you got extra interfaces a separate list of interfaces you've got a separate list of IP uh IP",
+    "start": "235480",
+    "end": "242959"
+  },
+  {
+    "text": "tables rules and a separate list of rooting rules so if you go into a network names space and type if have",
+    "start": "242959",
+    "end": "248640"
+  },
+  {
+    "text": "config you'll see one list of interfaces do that on the host on in the default namespace you'll see a different list so",
+    "start": "248640",
+    "end": "254640"
+  },
+  {
+    "text": "there are the kind of things we got to kind of play with to wire these things together so the first thing is how do we",
+    "start": "254640",
+    "end": "260079"
+  },
+  {
+    "text": "get connectivity between the network namespace and the host and the way we do this is we have a use a thing called a v",
+    "start": "260079",
+    "end": "266759"
+  },
+  {
+    "text": "pair so that is a kind of Linux Network working construct I kind of visualize it",
+    "start": "266759",
+    "end": "272039"
+  },
+  {
+    "text": "as a sort of ethernet cable with a interface card at either end so it's a pointto point thing put packets one end",
+    "start": "272039",
+    "end": "277160"
+  },
+  {
+    "text": "they'll come out the other end and you get one of these ends and you put it inside the network namespace and the other end will leave in the default",
+    "start": "277160",
+    "end": "283440"
+  },
+  {
+    "text": "namespace on the host so uh that way we get connectivity between the two we're",
+    "start": "283440",
+    "end": "288479"
+  },
+  {
+    "text": "given the interface inside the container an IP address 17216 so that's a different network than the host and uh",
+    "start": "288479",
+    "end": "295080"
+  },
+  {
+    "text": "the final piece of the puzzle here is to set up some rooting rules so on the host",
+    "start": "295080",
+    "end": "300240"
+  },
+  {
+    "text": "we have quite a simple rooting rule that's basically saying if you want to go to that IP address 17260 send it straight to that V one",
+    "start": "300240",
+    "end": "308400"
+  },
+  {
+    "text": "interface and then the rooting rule inside the container well there's only really one interface and there's nowhere else it can go so we just need one",
+    "start": "308400",
+    "end": "314840"
+  },
+  {
+    "text": "default rule which just Roots everything back out again and it kind of looks a little bit confusing because we're we're",
+    "start": "314840",
+    "end": "320240"
+  },
+  {
+    "text": "saying the Gateway is well we are the Gateway in this case uh but yeah it works this way so that is the setup so",
+    "start": "320240",
+    "end": "328759"
+  },
+  {
+    "text": "what we're going to do now is try and um have a look at what this looks like in code you see this Okay cool so I'm",
+    "start": "328759",
+    "end": "336440"
+  },
+  {
+    "text": "running in a different uh a new virtual box a new virtual machine here and uh",
+    "start": "336440",
+    "end": "341520"
+  },
+  {
+    "text": "here's some code which will when we run it will set up this this model and uh I",
+    "start": "341520",
+    "end": "347000"
+  },
+  {
+    "text": "say it's bash it's not really it's just lots of calls to the same command so here I'm using the IP Command and that",
+    "start": "347000",
+    "end": "352919"
+  },
+  {
+    "text": "is kind of well it's kind of the only one you really need to know in order to set up any of this networking stuff it",
+    "start": "352919",
+    "end": "358720"
+  },
+  {
+    "text": "kind of subsumes the the older if config and rout and things so I'm not going to",
+    "start": "358720",
+    "end": "364120"
+  },
+  {
+    "text": "go through every line of this um uh this file because that'll take a while but I just wanted to give you a",
+    "start": "364120",
+    "end": "369960"
+  },
+  {
+    "text": "kind of flavor of what it might look like but basically we go through and and set up all the bits in that diagram so",
+    "start": "369960",
+    "end": "375080"
+  },
+  {
+    "text": "we create the namespace we create the V pair we put one end of the V pair into the namespace we enable we bring up the",
+    "start": "375080",
+    "end": "381120"
+  },
+  {
+    "text": "interface bring up the interface of the node set the loop back in there we don't really need to do that but done anyway",
+    "start": "381120",
+    "end": "387520"
+  },
+  {
+    "text": "uh and then we set up the roots both on the Node and in the namespace so let's give it a go see if",
+    "start": "387520",
+    "end": "393960"
+  },
+  {
+    "text": "it works so now I'm going to run that so the first thing we can do",
+    "start": "393960",
+    "end": "399720"
+  },
+  {
+    "text": "is that'ss uh so there we're just listing the network namespaces and that's the",
+    "start": "399720",
+    "end": "405720"
+  },
+  {
+    "text": "one we just created so now let's have a look at the interface inside the",
+    "start": "405720",
+    "end": "413919"
+  },
+  {
+    "text": "namespace so here I'm doing a netns exac so you can kind of think of this as a bit like Docker exec or Cube controlled",
+    "start": "414199",
+    "end": "420080"
+  },
+  {
+    "text": "exact you know kind of going into namespace and running a command in there uh and there you can see the",
+    "start": "420080",
+    "end": "426440"
+  },
+  {
+    "text": "bottom one is the V2 interface that's the one we created and then let's see if we can",
+    "start": "426440",
+    "end": "432520"
+  },
+  {
+    "text": "ping it from the",
+    "start": "432520",
+    "end": "435479"
+  },
+  {
+    "text": "node cool so that kind of seems to work so that means we've got connectivity",
+    "start": "438199",
+    "end": "443840"
+  },
+  {
+    "text": "going both ways uh which is good and uh so yeah one question we could ask is is",
+    "start": "443840",
+    "end": "450000"
+  },
+  {
+    "text": "what is actually responding to this because normally when you think about containers you're thinking about a process which is in a container and",
+    "start": "450000",
+    "end": "455240"
+  },
+  {
+    "text": "that's the thing that's kind of you're talking to but in this case I haven't put any process I've just created a namespace uh so I'm sending ping",
+    "start": "455240",
+    "end": "462440"
+  },
+  {
+    "text": "requests icmp packets in and it's an it's the the kernel stack inside the",
+    "start": "462440",
+    "end": "468080"
+  },
+  {
+    "text": "namespace that is responding with the the response the icmp responses so I guess if we wanted to set up a more kind",
+    "start": "468080",
+    "end": "474639"
+  },
+  {
+    "text": "of realistic example we might uh want to start a process inside there and talk to that but from the point of view of just",
+    "start": "474639",
+    "end": "481000"
+  },
+  {
+    "text": "investigating the connectivity we kind of don't need to so I'm just going to do it this way because it's",
+    "start": "481000",
+    "end": "486759"
+  },
+  {
+    "text": "easier um yeah",
+    "start": "486759",
+    "end": "491599"
+  },
+  {
+    "text": "so next step Oh wrong way is to move on",
+    "start": "492000",
+    "end": "498199"
+  },
+  {
+    "start": "495000",
+    "end": "621000"
+  },
+  {
+    "text": "to uh the case where we have two Nam spaces on a single node so here it kind",
+    "start": "498199",
+    "end": "505000"
+  },
+  {
+    "text": "of looks similar so we got the big node on the outside we've got each container there are separate Network names spaces",
+    "start": "505000",
+    "end": "510479"
+  },
+  {
+    "text": "uh given different IP addresses here so one is 0.2 one is 0.3 con 1 and con 2 uh",
+    "start": "510479",
+    "end": "516959"
+  },
+  {
+    "text": "the V pairs are exactly the same uh the thing that's different in this case is that rectangular box in the middle and",
+    "start": "516959",
+    "end": "524360"
+  },
+  {
+    "text": "that's the way we achieve connectivity between them and this is a a Linux Bridge so again just like the eth pairs",
+    "start": "524360",
+    "end": "530240"
+  },
+  {
+    "text": "this is a kind of Linux networking construct which you can create with the IP Link command and so I've created one",
+    "start": "530240",
+    "end": "536200"
+  },
+  {
+    "text": "here called it br0 and I've given it an IP address so so I guess you don't really need to give it an IP address uh",
+    "start": "536200",
+    "end": "543079"
+  },
+  {
+    "text": "if I didn't then you still be able to root packets between the two containers but there'll be no way off of that",
+    "start": "543079",
+    "end": "548360"
+  },
+  {
+    "text": "bridge onto the host and ultimately out onto other machines so by giving it an IP address here it kind of becomes a",
+    "start": "548360",
+    "end": "555279"
+  },
+  {
+    "text": "gateway to that little Network that little subnet and this is kind of the way that Docker works by default if you",
+    "start": "555279",
+    "end": "560760"
+  },
+  {
+    "text": "just install Docker it creates a Docker zero Bridge which is exactly like this so the final piece of the puzzle here",
+    "start": "560760",
+    "end": "566519"
+  },
+  {
+    "text": "here the the two uh the roots that we have to set up so on the Node we've got",
+    "start": "566519",
+    "end": "573040"
+  },
+  {
+    "text": "a sl24 range so I'm assigning all the IPS in that sl24 range to uh all of the",
+    "start": "573040",
+    "end": "578160"
+  },
+  {
+    "text": "containers that are hanging off the bridge uh that means I can have 254 I guess of them uh so anything in",
+    "start": "578160",
+    "end": "586519"
+  },
+  {
+    "text": "that range will get rooted to the bridge and then from inside the container we have uh so the bottom rule there is",
+    "start": "586519",
+    "end": "592640"
+  },
+  {
+    "text": "saying anything in that range just send it directly out the v21 interface so that's a directly connected Network ly",
+    "start": "592640",
+    "end": "599600"
+  },
+  {
+    "text": "connected route uh and if it's not that then use the default route and the default route is saying use the bridge",
+    "start": "599600",
+    "end": "605720"
+  },
+  {
+    "text": "IP address as the Gateway so that would rout it out to the bridge and then when it gets out to the host well that would have to look at its rooting tables to",
+    "start": "605720",
+    "end": "612200"
+  },
+  {
+    "text": "kind of forward it onto wherever it's going to wherever it's destined for cool",
+    "start": "612200",
+    "end": "620160"
+  },
+  {
+    "start": "621000",
+    "end": "775000"
+  },
+  {
+    "text": "so let's move on so here we got uh rather like before we've got a um a kind",
+    "start": "621640",
+    "end": "627200"
+  },
+  {
+    "text": "of clean virtual machine so let's have a quick look at the code to set this up so",
+    "start": "627200",
+    "end": "634440"
+  },
+  {
+    "text": "as you might expect it's it's kind of similar to uh what it was last time but there's two of everything uh so again",
+    "start": "634440",
+    "end": "641360"
+  },
+  {
+    "text": "I'm not going to go through each step because it's basically the same as before uh the key Point here is the line",
+    "start": "641360",
+    "end": "648240"
+  },
+  {
+    "text": "was that 26 so that's where we're creating the bridge so as I said you can use the IP Link command and you can um",
+    "start": "648240",
+    "end": "655360"
+  },
+  {
+    "text": "uh create a link call it br0 and it's of type Bridge and then we have to we assign a IP address to it a little bit",
+    "start": "655360",
+    "end": "661959"
+  },
+  {
+    "text": "lower on line 33 and then we enable the bridge and",
+    "start": "661959",
+    "end": "667000"
+  },
+  {
+    "text": "we're all good to",
+    "start": "667000",
+    "end": "669680"
+  },
+  {
+    "text": "go so right so what can we do so we can",
+    "start": "672240",
+    "end": "680079"
+  },
+  {
+    "text": "look at the interfaces on the on the Node now and we can see the bridge is the one at the bottom here and it has",
+    "start": "680079",
+    "end": "686920"
+  },
+  {
+    "text": "the IP address 16.1 uh maybe let's get inside of one of the",
+    "start": "686920",
+    "end": "692720"
+  },
+  {
+    "text": "containers and see if we can ping the other",
+    "start": "692720",
+    "end": "696480"
+  },
+  {
+    "text": "container so I am exec into con one which is the container on the left the network names space on the",
+    "start": "699360",
+    "end": "706880"
+  },
+  {
+    "text": "left uh and I'm going to Ping the one on the",
+    "start": "708760",
+    "end": "713880"
+  },
+  {
+    "text": "right so this is looking good it means we got connectivity both ways all good",
+    "start": "713880",
+    "end": "720040"
+  },
+  {
+    "text": "actually one thing worth mentioning here is that value of the the TTL so the the TTL is um time to live of the packet and",
+    "start": "720040",
+    "end": "728519"
+  },
+  {
+    "text": "that gets it's just a number and it gets decremented each time a packet gets rooted uh it starts at 64 so in this",
+    "start": "728519",
+    "end": "734079"
+  },
+  {
+    "text": "case it hasn't been rooted at all because it's just come out one interface onto the bridge straight back in so there's been no routing going on it's",
+    "start": "734079",
+    "end": "739199"
+  },
+  {
+    "text": "just a single ethernet packet going around the bridge I only mention it now because in the next section we'll see this changing and might make more sense",
+    "start": "739199",
+    "end": "746440"
+  },
+  {
+    "text": "then uh also kind of proves that I'm not yeah pulling the wool over your eyes or",
+    "start": "746440",
+    "end": "752279"
+  },
+  {
+    "text": "something uh oh and finally yeah we can just check out so from inside the container let's make sure we",
+    "start": "752279",
+    "end": "758360"
+  },
+  {
+    "text": "can talk to the node itself and again that's good so that means we've got icmp packets going in",
+    "start": "758360",
+    "end": "765279"
+  },
+  {
+    "text": "and out so we got connectivity both ways",
+    "start": "765279",
+    "end": "773240"
+  },
+  {
+    "text": "right so let's move on to the third step oh",
+    "start": "775320",
+    "end": "780800"
+  },
+  {
+    "text": "uh and so now we're getting we're kind of doubling up again almost so this is the ca the key point about this case is",
+    "start": "780800",
+    "end": "786959"
+  },
+  {
+    "text": "both of these nodes are on the same uh layer 2 Network so they're just",
+    "start": "786959",
+    "end": "792000"
+  },
+  {
+    "text": "connected by a switch here so the node on the left has a 10 10 not on right",
+    "start": "792000",
+    "end": "797079"
+  },
+  {
+    "text": "1020 they're in the same subnet um otherwise they're much the",
+    "start": "797079",
+    "end": "802399"
+  },
+  {
+    "text": "same so each one is same as the one before we got two containers in each connected with v pairs got a bridge on",
+    "start": "802399",
+    "end": "807800"
+  },
+  {
+    "text": "each all good so what we need to understand well what I'm aiming to get across here is how you can get packets",
+    "start": "807800",
+    "end": "815040"
+  },
+  {
+    "text": "from one container on one note to a container on a different node and the trick in this point is is really quite",
+    "start": "815040",
+    "end": "821320"
+  },
+  {
+    "text": "simple there's nothing to it it's it's just setting some rooting rules on each of the nodes so as they know where to root the packets for the other node so",
+    "start": "821320",
+    "end": "828639"
+  },
+  {
+    "text": "if you look at say the rooting rules on the left in the bottom left hand corner there we can see uh the key one is the",
+    "start": "828639",
+    "end": "835720"
+  },
+  {
+    "text": "second one down so that's saying each for IP address which is destined for the",
+    "start": "835720",
+    "end": "841240"
+  },
+  {
+    "text": "containers on the right hand node send it as a next hop to the node itself and then the node will know how to rout it",
+    "start": "841240",
+    "end": "848000"
+  },
+  {
+    "text": "up into the bridge uh and likewise we have a corresponding rule on the other node",
+    "start": "848000",
+    "end": "854079"
+  },
+  {
+    "text": "such that any of the containers in the 0.024 range send it the next top to the node on the left and that will know how",
+    "start": "854079",
+    "end": "859839"
+  },
+  {
+    "text": "to rout it up into the bridge so if you just have a your kubernetes cluster on on a single L2 Network then this becomes",
+    "start": "859839",
+    "end": "865920"
+  },
+  {
+    "text": "quite an easy way of getting connectivity that you don't need overlay Networks you don't need any of that magic and this is the way some of the",
+    "start": "865920",
+    "end": "872120"
+  },
+  {
+    "text": "the kubernetes uh plugins do it so there's a flannel has lots of different back ends and one of the back ends is a",
+    "start": "872120",
+    "end": "878519"
+  },
+  {
+    "text": "host Gateway back end and that's exactly what this does it just sets roots on the on the",
+    "start": "878519",
+    "end": "883880"
+  },
+  {
+    "text": "Node uh I think also Calico might behave in a similar manner as well if you're all on the same uh L2 Network so if you",
+    "start": "883880",
+    "end": "891759"
+  },
+  {
+    "text": "have more than one node of course you might have you you'll have an entry per per node so you might end up with big",
+    "start": "891759",
+    "end": "898240"
+  },
+  {
+    "text": "rooting tables and you need some way to manage that so you'll need to some way to somewhere to store the range of ips",
+    "start": "898240",
+    "end": "905079"
+  },
+  {
+    "text": "on one node to the node itself and that could be ETD or it could be somewhere else but we'll get to that a bit",
+    "start": "905079",
+    "end": "913399"
+  },
+  {
+    "text": "later so let's get back into our demo so now we've got two clean virtual machines",
+    "start": "913800",
+    "end": "919759"
+  },
+  {
+    "start": "914000",
+    "end": "1094000"
+  },
+  {
+    "text": "one on the left corresponding to node on the left one on the right the other one so first let's have a quick look at the",
+    "start": "919759",
+    "end": "926199"
+  },
+  {
+    "text": "code to set up this uh all of this stuff is basically the",
+    "start": "926199",
+    "end": "932000"
+  },
+  {
+    "text": "same as what I um went through previously uh the key stuff is underneath the little comment down the",
+    "start": "932000",
+    "end": "937040"
+  },
+  {
+    "text": "bottom here and here we're setting the roots on each node to know how to root",
+    "start": "937040",
+    "end": "942480"
+  },
+  {
+    "text": "to the other node so I'm going to run this setup script on both VMS such that you get the roots going both ways um",
+    "start": "942480",
+    "end": "950079"
+  },
+  {
+    "text": "yeah so it's kind of as simple as that the final thing we need to do is to enable IP forwarding on the Node so if I",
+    "start": "950079",
+    "end": "955480"
+  },
+  {
+    "text": "didn't do that Linux by default wouldn't forward packets out so if it received a packet on its e zero and it wasn't",
+    "start": "955480",
+    "end": "961040"
+  },
+  {
+    "text": "destined for the IP address of that interface it would just Chuck it away and that makes a lot of sense if you just got a laptop or something you're",
+    "start": "961040",
+    "end": "967160"
+  },
+  {
+    "text": "not acting as a router but in our case we are acting as a router because we're going to get packets coming into the E",
+    "start": "967160",
+    "end": "973040"
+  },
+  {
+    "text": "zero destined for one of the containers so the kernel needs to know to rout it onto the bridge so we have to enable IP",
+    "start": "973040",
+    "end": "981959"
+  },
+  {
+    "text": "foring cool so if I run it on that",
+    "start": "984639",
+    "end": "991839"
+  },
+  {
+    "text": "side run it on that side so so first of all let's have a look at the roots on",
+    "start": "994560",
+    "end": "1000880"
+  },
+  {
+    "text": "each side so on the left hand side here you can see the key root is the bottom one so that's saying any of the IPS in",
+    "start": "1000880",
+    "end": "1008880"
+  },
+  {
+    "text": "the range 1.024 send it to the other node and there' be a corresponding route on this",
+    "start": "1008880",
+    "end": "1014399"
+  },
+  {
+    "text": "side sending it back the other way so that was what I saying that's the kind of trick to get connectivity when you're",
+    "start": "1014399",
+    "end": "1019720"
+  },
+  {
+    "text": "on the same L2 network uh let's have a quick look so now let's see if I can ping one of the",
+    "start": "1019720",
+    "end": "1026319"
+  },
+  {
+    "text": "containers on one node to the other",
+    "start": "1026319",
+    "end": "1030520"
+  },
+  {
+    "text": "one so I'm executing into con one on the left hand node and I'm going to Ping con",
+    "start": "1031679",
+    "end": "1037640"
+  },
+  {
+    "text": "one on the right hand node cool so it looks like it's it's",
+    "start": "1037640",
+    "end": "1044678"
+  },
+  {
+    "text": "working we got connectivity both ways um remember I said earlier about the TTL so",
+    "start": "1044679",
+    "end": "1051000"
+  },
+  {
+    "text": "in this case the the time to live has gone time to live has gone down by two which is kind of what you expect because",
+    "start": "1051000",
+    "end": "1056600"
+  },
+  {
+    "text": "it's been rooted twice it's been rooted once when you you can't really see it here so it's been rooted once when you",
+    "start": "1056600",
+    "end": "1063760"
+  },
+  {
+    "text": "come out of the on the Kernel on the left hand node and root it again going back onto the bridge on the right hand node hence the decrement of of of",
+    "start": "1063760",
+    "end": "1071039"
+  },
+  {
+    "text": "two if I were to do the same but instead ping the other node so not going into",
+    "start": "1071039",
+    "end": "1076840"
+  },
+  {
+    "text": "container but going to the node itself what would",
+    "start": "1076840",
+    "end": "1083158"
+  },
+  {
+    "text": "happen well it works but now it's only gone down once which again is you know makes a lot of sense because it's only",
+    "start": "1084080",
+    "end": "1089360"
+  },
+  {
+    "text": "been rooted on the left hand node and not on the right hand node so now we get on to step four which",
+    "start": "1089360",
+    "end": "1097799"
+  },
+  {
+    "start": "1094000",
+    "end": "1287000"
+  },
+  {
+    "text": "is the the kind of the more complicated one and the one I kind of been building up to because it represents the kind of",
+    "start": "1097799",
+    "end": "1104440"
+  },
+  {
+    "text": "uh what I didn't understand in the first place about flannel and overlay networks and things so well I guess before we",
+    "start": "1104440",
+    "end": "1110320"
+  },
+  {
+    "text": "move on to that what what could we do so if we if these two nodes here were on separate L2 networks and that switch in",
+    "start": "1110320",
+    "end": "1116039"
+  },
+  {
+    "text": "the middle wasn't just one switch was the internet or other routers and all the kinds of things then this trick",
+    "start": "1116039",
+    "end": "1121240"
+  },
+  {
+    "text": "wouldn't wouldn't work any longer because it wouldn't the next top wouldn't be on the same network so one",
+    "start": "1121240",
+    "end": "1126840"
+  },
+  {
+    "text": "thing you could do is add those routing rules to all the routers in between and maybe if you control all those router in",
+    "start": "1126840",
+    "end": "1132760"
+  },
+  {
+    "text": "between then well maybe that'd be okay but I suspect that's probably not what most people can do another thing you",
+    "start": "1132760",
+    "end": "1139080"
+  },
+  {
+    "text": "might be able to do is well it depends where you're running if you're running in a cloud environment and and the cloud",
+    "start": "1139080",
+    "end": "1144400"
+  },
+  {
+    "text": "provides some sort of root rule capability so I think Amazon and Google do this you can assign IP ranges to",
+    "start": "1144400",
+    "end": "1151480"
+  },
+  {
+    "text": "nodes and then you just do it in the cloud and that's basically what what it would do for you then so again instead",
+    "start": "1151480",
+    "end": "1157240"
+  },
+  {
+    "text": "of using any kind of more complicated overlay you could just assign these root ranges and allow the cloud to root root it for you but let's assume we can't do",
+    "start": "1157240",
+    "end": "1164799"
+  },
+  {
+    "text": "that either so what are we left with so so we are left with using well",
+    "start": "1164799",
+    "end": "1172240"
+  },
+  {
+    "text": "one option is to use an overlay",
+    "start": "1172240",
+    "end": "1175880"
+  },
+  {
+    "text": "Network so in the um example here we basically got a similar setup two",
+    "start": "1184960",
+    "end": "1190080"
+  },
+  {
+    "text": "different nodes same container same Bridges same everything key Point there's a router in between so we can't pull the same trick that we did in the",
+    "start": "1190080",
+    "end": "1195919"
+  },
+  {
+    "text": "last step the one thing that's different is we got this ton zero interface so this is",
+    "start": "1195919",
+    "end": "1201200"
+  },
+  {
+    "text": "a wow this is another yeah this is a bit that made me understand the kind of how you can set up these kind of virtual",
+    "start": "1201200",
+    "end": "1206840"
+  },
+  {
+    "text": "networks so a ton zero interface is something you can create using the IP tool or a ton interface and if you just",
+    "start": "1206840",
+    "end": "1213000"
+  },
+  {
+    "text": "create one it will show up in if config as an interface but there's nothing behind it so normally when you have a network interface there's some sort of",
+    "start": "1213000",
+    "end": "1218919"
+  },
+  {
+    "text": "Hardware or some virtual Nick or something but in this case there's nothing behind it and uh so it doesn't",
+    "start": "1218919",
+    "end": "1224280"
+  },
+  {
+    "text": "seem very useful but what you can do is put a process behind that and that process when you send a packet to the",
+    "start": "1224280",
+    "end": "1229559"
+  },
+  {
+    "text": "ton device the process will get that packet the raw IP packet and it can do whatever it wants with it so it could uh",
+    "start": "1229559",
+    "end": "1237760"
+  },
+  {
+    "text": "print it a standard out or it could you know send it to the printer and physically print out if it want to um",
+    "start": "1237760",
+    "end": "1244159"
+  },
+  {
+    "text": "but what we could do is have that process behind it uh wrap it in say a",
+    "start": "1244159",
+    "end": "1249720"
+  },
+  {
+    "text": "UDP packet and send it to a node and that's exactly what happens in a in an overlay Network so you don't need so the",
+    "start": "1249720",
+    "end": "1256080"
+  },
+  {
+    "text": "two nodes don't need to know about the separate IP ranges of the containers they just need to be able to connect via their node addresses and um yeah so",
+    "start": "1256080",
+    "end": "1263520"
+  },
+  {
+    "text": "we'll go into this in a bit more detail on the next Slide the last thing we need to do here is explain these rooting rules so on the left hand side we're",
+    "start": "1263520",
+    "end": "1269840"
+  },
+  {
+    "text": "saying everything for the all the containers on my node just send it to the bridge the rule beneath it saying",
+    "start": "1269840",
+    "end": "1276440"
+  },
+  {
+    "text": "everything for the containers on the other node send it to the tund device and likewise we've got corresponding",
+    "start": "1276440",
+    "end": "1282200"
+  },
+  {
+    "text": "roots on the on the other side",
+    "start": "1282200",
+    "end": "1288600"
+  },
+  {
+    "start": "1287000",
+    "end": "1401000"
+  },
+  {
+    "text": "so let's drill in a little bit and have a look at how a packet actually makes it",
+    "start": "1288679",
+    "end": "1294320"
+  },
+  {
+    "text": "from one container in the top left hand corner all the way around to a container in the top right hand",
+    "start": "1294320",
+    "end": "1300120"
+  },
+  {
+    "text": "corner and um yeah so the packet comes out of the container goes onto the",
+    "start": "1300120",
+    "end": "1305320"
+  },
+  {
+    "text": "bridge uh it comes out of the bridge the kernel will then rout it to the ton device and we want to set up a process",
+    "start": "1305320",
+    "end": "1311080"
+  },
+  {
+    "text": "which sits behind that and it knows because it can see the IP address it's got the rule IP packet it knows which",
+    "start": "1311080",
+    "end": "1316840"
+  },
+  {
+    "text": "node to send it to so like I said before it might look up in a database like etcd or something and it looks at that",
+    "start": "1316840",
+    "end": "1322600"
+  },
+  {
+    "text": "mapping and then it knows where to for it on to so in this case we we we're created we wrapping in a UDP packet",
+    "start": "1322600",
+    "end": "1328240"
+  },
+  {
+    "text": "sending it to the other node on Port 9000 so it goes out of e Zer goes through whatever Network there is in",
+    "start": "1328240",
+    "end": "1333440"
+  },
+  {
+    "text": "between comes back in E zero on the the right hand node there's a process sitting there which is listening on 9000",
+    "start": "1333440",
+    "end": "1339880"
+  },
+  {
+    "text": "which gets that unwraps it it's just got the rooll IP address then it sends it back into the tund device and when it",
+    "start": "1339880",
+    "end": "1345720"
+  },
+  {
+    "text": "comes out of that the kernel will then notice that as the original packet and Route it up into the bridge and",
+    "start": "1345720",
+    "end": "1351440"
+  },
+  {
+    "text": "hopefully to its destination yeah ah there's one thing as",
+    "start": "1351440",
+    "end": "1357400"
+  },
+  {
+    "text": "well um this was when I did this talk once before someone asked this question and I thought it was a really good question they basically said but isn't",
+    "start": "1357400",
+    "end": "1364120"
+  },
+  {
+    "text": "UDP unreliable and you kind of kind of stumped me there but it kind of doesn't matter in this case because we're",
+    "start": "1364120",
+    "end": "1369840"
+  },
+  {
+    "text": "getting our reliability at a higher level so it's the TCP stuff on top",
+    "start": "1369840",
+    "end": "1375159"
+  },
+  {
+    "text": "inside that's what would actually do the retries if this failed you can kind of think of the the UDP connection as a bit",
+    "start": "1375159",
+    "end": "1381360"
+  },
+  {
+    "text": "like just an Ethernet like send it on the wire that's not reliable either but it doesn't matter because the retries are handed by handled by the the layer",
+    "start": "1381360",
+    "end": "1387840"
+  },
+  {
+    "text": "above so UDP is okay in this case and this is exactly how well the UDP flannel",
+    "start": "1387840",
+    "end": "1393480"
+  },
+  {
+    "text": "back end Works which we'll get to again in a minute",
+    "start": "1393480",
+    "end": "1399960"
+  },
+  {
+    "text": "so right I guess you're getting it now it's a similar setup to before",
+    "start": "1401279",
+    "end": "1409159"
+  },
+  {
+    "text": "let's have a look at the code so again all this stuff is exact exactly identical to before before if we pop",
+    "start": "1410600",
+    "end": "1417080"
+  },
+  {
+    "text": "down we can see the stuff specific to uh this step so as before we have to enable",
+    "start": "1417080",
+    "end": "1422120"
+  },
+  {
+    "text": "IP forwarding but the key thing here is we are using socat to set up this tunnel",
+    "start": "1422120",
+    "end": "1428039"
+  },
+  {
+    "text": "between the two the two nodes so if you not come across socat before I only come across it recently when I was looking at",
+    "start": "1428039",
+    "end": "1434120"
+  },
+  {
+    "text": "this because I fully expected to have to write a little process behind this just to set this demo up and do that UDP",
+    "start": "1434120",
+    "end": "1439320"
+  },
+  {
+    "text": "stuff and I come across socat and is amazing so this tool sets up a bidirectional route between two or two",
+    "start": "1439320",
+    "end": "1446400"
+  },
+  {
+    "text": "endpoints and those endpoints could be TCP or UDP or standard in or stood out or ton devices and um yeah if you just",
+    "start": "1446400",
+    "end": "1453279"
+  },
+  {
+    "text": "type man socat it'll blow your mind it's amazing it does loads of stuff so there's a lot going on in this so",
+    "start": "1453279",
+    "end": "1458679"
+  },
+  {
+    "text": "remember we're going to be running this on both sides and uh so just this one",
+    "start": "1458679",
+    "end": "1464120"
+  },
+  {
+    "text": "line is saying set up a ton device give it an IP address bring that interface up behind that tund device I want the ud",
+    "start": "1464120",
+    "end": "1471080"
+  },
+  {
+    "text": "process which is supp listening on Port 9000 so any packets that come into it it",
+    "start": "1471080",
+    "end": "1476919"
+  },
+  {
+    "text": "will receive them and send them to the tund device and it bro is sending stuff out on Port 90002 to the other node so",
+    "start": "1476919",
+    "end": "1482799"
+  },
+  {
+    "text": "any packets that come from the tund device it will send them out e Zer onto the other node and because we're running this same thing on both sides we get",
+    "start": "1482799",
+    "end": "1490200"
+  },
+  {
+    "text": "connectivity between the two oh and finally there's a yes so",
+    "start": "1490200",
+    "end": "1496000"
+  },
+  {
+    "text": "there's a couple of little um I say or other things that you need to do to get this to set up so when you start dealing",
+    "start": "1496000",
+    "end": "1501760"
+  },
+  {
+    "text": "with overlay networks you have to kind of worry about the MTU so this is the maximum transition unit and uh that b",
+    "start": "1501760",
+    "end": "1508520"
+  },
+  {
+    "text": "yeah so we've got to account for the 8 byes of UDP header hence I'm setting it",
+    "start": "1508520",
+    "end": "1514000"
+  },
+  {
+    "text": "here to 1492 uh bumping it down from 1500 which is what it was before uh if we didn't do",
+    "start": "1514000",
+    "end": "1520600"
+  },
+  {
+    "text": "this it would probably still work but if you just got a packet which was just above that bit it will get fragmented and that's well in this case it probably",
+    "start": "1520600",
+    "end": "1526919"
+  },
+  {
+    "text": "wouldn't matter but in the general scheme you don't want to do that um so yeah it's just something you might have to be wary of if you're setting this",
+    "start": "1526919",
+    "end": "1533520"
+  },
+  {
+    "text": "stuff up yourself finally we've got this um stuff about disabling reverse path filtering and um so this is a little",
+    "start": "1533520",
+    "end": "1541000"
+  },
+  {
+    "text": "little more subtle so Linux by default if you send a packet out of one interface and it receives a response in",
+    "start": "1541000",
+    "end": "1546240"
+  },
+  {
+    "text": "on a different interface it will just drop that it will consider it as kind of suspicious which kind of makes a lot of",
+    "start": "1546240",
+    "end": "1552120"
+  },
+  {
+    "text": "sense really in general but in this case when we're sending a packet from say one node to a container on the other node",
+    "start": "1552120",
+    "end": "1559799"
+  },
+  {
+    "text": "the packet will go across the ton device going up to the container but on the way back it will just come straight out of e zero and back into the node hence the",
+    "start": "1559799",
+    "end": "1566679"
+  },
+  {
+    "text": "packet's going out of one interface coming in on a different interface uh so unless we disable this in this case",
+    "start": "1566679",
+    "end": "1572720"
+  },
+  {
+    "text": "anyway this demo won't work I guess there's other ways you could work around this maybe you can do some sort of um",
+    "start": "1572720",
+    "end": "1578320"
+  },
+  {
+    "text": "more complicated routing stuff using kind of source based routing to ensure that the packet goes over the thund",
+    "start": "1578320",
+    "end": "1584520"
+  },
+  {
+    "text": "device no matter whether it's destined for the node or the container but yeah in this case I've chose to do",
+    "start": "1584520",
+    "end": "1591240"
+  },
+  {
+    "text": "it this way so let's have we go running this",
+    "start": "1591240",
+    "end": "1597440"
+  },
+  {
+    "text": "stuff so run it on both oh no it's typical it didn't",
+    "start": "1600080",
+    "end": "1609240"
+  },
+  {
+    "text": "work let have another guy",
+    "start": "1611440",
+    "end": "1616158"
+  },
+  {
+    "text": "let's try one more time before I start resorting to uh videos or",
+    "start": "1619360",
+    "end": "1625240"
+  },
+  {
+    "text": "something y it's looking good so uh what was I can yeah so first",
+    "start": "1628919",
+    "end": "1636120"
+  },
+  {
+    "text": "of all let's see if it you know if it's connected see if it actually",
+    "start": "1636120",
+    "end": "1640919"
+  },
+  {
+    "text": "works so as before I'm going to exec into the container on the left hand node and try and ping the container on the",
+    "start": "1641279",
+    "end": "1646720"
+  },
+  {
+    "text": "right hand node",
+    "start": "1646720",
+    "end": "1650080"
+  },
+  {
+    "text": "cool so that's working and uh as before you can see the TL's gone down by two which is what you would expect it's been",
+    "start": "1655120",
+    "end": "1660720"
+  },
+  {
+    "text": "rooted on both nodes and um and if I ping the node",
+    "start": "1660720",
+    "end": "1667440"
+  },
+  {
+    "text": "itself then it should be down to 63 so there yeah so that proves we got connectivity so if we draw in a little",
+    "start": "1667440",
+    "end": "1673679"
+  },
+  {
+    "text": "deeper now and actually look at what's going on with the packet as it traverses through the through the through the",
+    "start": "1673679",
+    "end": "1679240"
+  },
+  {
+    "text": "various interfaces so on the one side I'm going to run this little script which just pings",
+    "start": "1679240",
+    "end": "1685360"
+  },
+  {
+    "text": "continuously so let's set that one going on the other side I've got this little",
+    "start": "1685360",
+    "end": "1690919"
+  },
+  {
+    "text": "script running which uh basically um given an argument of the interface name it will uh do a t-sh it use t-shark to",
+    "start": "1690919",
+    "end": "1697159"
+  },
+  {
+    "text": "kind of sniff the packets on that interface and t-shark if you haven't come across it is like the terminal version of wire shark and it's a bit",
+    "start": "1697159",
+    "end": "1703960"
+  },
+  {
+    "text": "like TCP dump it's it's great great for this kind of stuff uh so first things",
+    "start": "1703960",
+    "end": "1709600"
+  },
+  {
+    "text": "let's try and capture the packet coming in sort of through the front door so this is the EMP 0",
+    "start": "1709600",
+    "end": "1718080"
+  },
+  {
+    "text": "S8 cool so as you can see the packet is coming in through the front door but the source and the IP addresses here are of",
+    "start": "1719000",
+    "end": "1725279"
+  },
+  {
+    "text": "the nodes itself so this here you can see the encapsulation in in in process so you don't see anything about the IP",
+    "start": "1725279",
+    "end": "1732080"
+  },
+  {
+    "text": "source and destinations the 172 ones of the actual containers that's invisible and that stuff is all held Within the",
+    "start": "1732080",
+    "end": "1738640"
+  },
+  {
+    "text": "the little data section at the end so you can see it's an Ethernet packet wrapped in IP packet within the UDP packet and then the data which would be",
+    "start": "1738640",
+    "end": "1745080"
+  },
+  {
+    "text": "the IP packet of the container itself so now if we stop that and kind of drill in",
+    "start": "1745080",
+    "end": "1751240"
+  },
+  {
+    "text": "one level deeper and we go to the ton",
+    "start": "1751240",
+    "end": "1757200"
+  },
+  {
+    "text": "device now you can see the packets have been unwrapped and you can actually see the source and destination IPS of the",
+    "start": "1758799",
+    "end": "1765240"
+  },
+  {
+    "text": "actual containers itself and uh likewise you can see just like I said it's a raw IP packet and inside of that you can see",
+    "start": "1765240",
+    "end": "1771559"
+  },
+  {
+    "text": "the icmp packet which is the the Ping and then we can just drill in one more",
+    "start": "1771559",
+    "end": "1779200"
+  },
+  {
+    "text": "step we should see now we're capturing the packets on the bridge on the right hand node and you can see it's the same",
+    "start": "1780200",
+    "end": "1786279"
+  },
+  {
+    "text": "it's the same Source an IP uh packet so of the containers themselves uh but you can see now it's been ripped uh wrapped",
+    "start": "1786279",
+    "end": "1792559"
+  },
+  {
+    "text": "in an Ethernet packet so it's been wrapped in Ethernet packet sent onto the bridge which again is is what we would",
+    "start": "1792559",
+    "end": "1800679"
+  },
+  {
+    "text": "expect so that is basically kind of the whole overlay Network just kind of you",
+    "start": "1800880",
+    "end": "1807840"
+  },
+  {
+    "text": "know patched together in a few lines of bash there uh so what's this well let's have a quick recap first and see what",
+    "start": "1807840",
+    "end": "1815120"
+  },
+  {
+    "start": "1814000",
+    "end": "1887000"
+  },
+  {
+    "text": "we've done so we've gone through these four steps and so the first step was the single Network namespace and the key",
+    "start": "1815120",
+    "end": "1821519"
+  },
+  {
+    "text": "point there was uh if you want to connect name spaces to nodes you can use V Pairs and then the second step if you",
+    "start": "1821519",
+    "end": "1827399"
+  },
+  {
+    "text": "have more than one network namespace on the same node where use these pairs along with a a bridge uh the third step",
+    "start": "1827399",
+    "end": "1834120"
+  },
+  {
+    "text": "was the case where we had multiple nodes but they were on the same L2 Network and that was a kind of easy one where you can just set up some routing rules to",
+    "start": "1834120",
+    "end": "1840360"
+  },
+  {
+    "text": "just directly hop to the node the destination node and then the fourth step is what we just did and the key",
+    "start": "1840360",
+    "end": "1846080"
+  },
+  {
+    "text": "point there was you you can use a ton device to create the overlay Network and uh a couple of like key",
+    "start": "1846080",
+    "end": "1852159"
+  },
+  {
+    "text": "takeaways at least for me understanding the different types of routing rules that was kind of my you know my kind of aha moment for",
+    "start": "1852159",
+    "end": "1858639"
+  },
+  {
+    "text": "understanding this stuff and uh and ton devices well they're know one of the ways you can well it allows all this",
+    "start": "1858639",
+    "end": "1864440"
+  },
+  {
+    "text": "kind of virtual magic to to work and in terms of tools well you've got IP for setting all up you've got socat for just",
+    "start": "1864440",
+    "end": "1871600"
+  },
+  {
+    "text": "creating bir directional streams for testing and then for debugging stuff your TCP dump and t-shark uh they are",
+    "start": "1871600",
+    "end": "1878799"
+  },
+  {
+    "text": "your friends so finally uh I just want to kind of bring all this back to sort",
+    "start": "1878799",
+    "end": "1884559"
+  },
+  {
+    "text": "of real life I guess and try and relate it back to some existing stuff that exists out there uh so one of the common",
+    "start": "1884559",
+    "end": "1891639"
+  },
+  {
+    "start": "1887000",
+    "end": "2009000"
+  },
+  {
+    "text": "um uh Network Solutions for kubernetes is is flannel and flannel has a bunch of different back ends and uh they work in",
+    "start": "1891639",
+    "end": "1899000"
+  },
+  {
+    "text": "different ways so one of the back ends is a host Gateway back end which exactly corresponds to step three so that's when you have the all the nodes on the same",
+    "start": "1899000",
+    "end": "1905240"
+  },
+  {
+    "text": "R2 Network one of the back ends is a UDP back end which is basically what step four does uh so although it doesn't do",
+    "start": "1905240",
+    "end": "1912000"
+  },
+  {
+    "text": "it with socat and things um it in essence it's the same but that wouldn't be the one that you would typically use",
+    "start": "1912000",
+    "end": "1918000"
+  },
+  {
+    "text": "in in production or anything that's more like a kind of almost like an educational backend as far as I can tell maybe debugging uh so what it would",
+    "start": "1918000",
+    "end": "1924240"
+  },
+  {
+    "text": "really use is vxlan and vxlan is is an overlay Network it's a UDP thing but it's implemented in the kernel and it's",
+    "start": "1924240",
+    "end": "1929919"
+  },
+  {
+    "text": "I guess it's more efficient and things and then we also have these Cloud specific backends so they set roots in",
+    "start": "1929919",
+    "end": "1935200"
+  },
+  {
+    "text": "the cloud which I talked about earlier so one for Amazon one for GCE and um on the other thing I want to characterize",
+    "start": "1935200",
+    "end": "1941360"
+  },
+  {
+    "text": "in these different um Network Solutions is where they store their uh node to IP",
+    "start": "1941360",
+    "end": "1948399"
+  },
+  {
+    "text": "range mappings because they all do it slightly differently so in the case of flannel well flannel just stores it in",
+    "start": "1948399",
+    "end": "1955720"
+  },
+  {
+    "text": "SCD uh there's Calico that's a a popular one um there's I believe you well all of",
+    "start": "1956320",
+    "end": "1962919"
+  },
+  {
+    "text": "these things are so configurable but you can set it up such that there's no overlay for just L2 stuff so it uses a",
+    "start": "1962919",
+    "end": "1968200"
+  },
+  {
+    "text": "step three next toop routing uh for cross Network stuff it can use another type of overlay Network which is ipip",
+    "start": "1968200",
+    "end": "1976320"
+  },
+  {
+    "text": "encapsulation uh but I I'm sure you can configure it to use other things too um and in terms of it's no to pod subnet",
+    "start": "1976320",
+    "end": "1982600"
+  },
+  {
+    "text": "mappings I believe that's done via bgp so you run bgp agents on your node and they kind of Gossip this around uh weave",
+    "start": "1982600",
+    "end": "1989720"
+  },
+  {
+    "text": "is the final one or another one in terms of connectivity similar to flannel so it uses vxlan which is the UDP overlay uh",
+    "start": "1989720",
+    "end": "1997880"
+  },
+  {
+    "text": "but the difference being it doesn't use SD I believe it has its pod subnet to node mappings distributed peerto peer",
+    "start": "1997880",
+    "end": "2006120"
+  },
+  {
+    "text": "somehow so that's basically all I've got to say so",
+    "start": "2006120",
+    "end": "2011360"
+  },
+  {
+    "text": "all of these scripts and stuff you can uh just go on to this um uh get her page",
+    "start": "2011360",
+    "end": "2016799"
+  },
+  {
+    "text": "and um and grab them and FID around and and send us some comments if you know",
+    "start": "2016799",
+    "end": "2022200"
+  },
+  {
+    "text": "that' be great uh yeah any",
+    "start": "2022200",
+    "end": "2027790"
+  },
+  {
+    "text": "[Applause]",
+    "start": "2027790",
+    "end": "2031210"
+  },
+  {
+    "text": "questions got about about one minute I think so",
+    "start": "2034159",
+    "end": "2039720"
+  },
+  {
+    "text": "no",
+    "start": "2041320",
+    "end": "2044320"
+  },
+  {
+    "text": "y I guess it's sort of well it is simulating like an L2 switch so it's it's kind of using ethernet package just",
+    "start": "2055720",
+    "end": "2061878"
+  },
+  {
+    "text": "as the way a normal physical switch would don't understand why they do that",
+    "start": "2061879",
+    "end": "2067200"
+  },
+  {
+    "text": "why would they oh okay I",
+    "start": "2067200",
+    "end": "2072200"
+  },
+  {
+    "text": "see I think they're probably yeah you probably don't have to you could do it other ways I'm sure it's just the way it works",
+    "start": "2072399",
+    "end": "2079359"
+  },
+  {
+    "text": "here cool",
+    "start": "2081280",
+    "end": "2085280"
+  }
+]

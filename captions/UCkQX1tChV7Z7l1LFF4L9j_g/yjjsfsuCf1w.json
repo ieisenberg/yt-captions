@@ -1,0 +1,2317 @@
+[
+  {
+    "text": "[Music]",
+    "start": "3320",
+    "end": "8769"
+  },
+  {
+    "text": "[Music]",
+    "start": "10950",
+    "end": "16800"
+  },
+  {
+    "text": "hello everyone and thank you for joining me today my name is Lily marra um I'm an engineering manager at a company called",
+    "start": "16800",
+    "end": "23519"
+  },
+  {
+    "text": "one signal in San Francisco we write customer messaging software that helps",
+    "start": "23519",
+    "end": "28560"
+  },
+  {
+    "text": "millions of app Developers connect with billions of users we send around 13 billion push notifications every single",
+    "start": "28560",
+    "end": "35800"
+  },
+  {
+    "text": "day um I've been writing rust since around 2016 and writing it",
+    "start": "35800",
+    "end": "41200"
+  },
+  {
+    "text": "professionally at one signal since 2019 I'm one of the authors of the book",
+    "start": "41200",
+    "end": "46320"
+  },
+  {
+    "text": "refactoring to rest and that's available now in Early Access at manning.com",
+    "start": "46320",
+    "end": "53039"
+  },
+  {
+    "text": "so uh today I'm going to uh talk a little bit about how we took one of our",
+    "start": "53039",
+    "end": "58359"
+  },
+  {
+    "text": "highest throughput uh end points and made it stop bringing the website down",
+    "start": "58359",
+    "end": "63440"
+  },
+  {
+    "text": "every day um so we're going to be talking about how we took a synchronous endpoint",
+    "start": "63440",
+    "end": "70320"
+  },
+  {
+    "text": "that was leaving a ton of load on the database at our HTTP Edge layer and",
+    "start": "70320",
+    "end": "76200"
+  },
+  {
+    "text": "moved that into an asynchronous workload that we could much more control the uh",
+    "start": "76200",
+    "end": "81360"
+  },
+  {
+    "text": "internal impact of uh so since this is a retrospective we're going to be jumping back in time",
+    "start": "81360",
+    "end": "87960"
+  },
+  {
+    "text": "uh a little bit by by a couple of years right so at this time we were sending around 8 billion push notifications",
+    "start": "87960",
+    "end": "94960"
+  },
+  {
+    "text": "every day and we had a team of around 10 Engineers on what was then called The",
+    "start": "94960",
+    "end": "100079"
+  },
+  {
+    "text": "backend team at one signal we had maybe 25 Engineers total now when you're",
+    "start": "100079",
+    "end": "105719"
+  },
+  {
+    "text": "operating at that sort of you know we considered it you know largest scale with that kind of small team you have to",
+    "start": "105719",
+    "end": "113040"
+  },
+  {
+    "text": "make a lot of uh simplifying assumptions about your problems space right",
+    "start": "113040",
+    "end": "118840"
+  },
+  {
+    "text": "um this is going to come into play later on as we kind of get into the architecture",
+    "start": "118840",
+    "end": "124520"
+  },
+  {
+    "text": "of the system but it's important to remember that you know a lot of the trade-offs that we made you know we made",
+    "start": "124520",
+    "end": "131039"
+  },
+  {
+    "text": "because we had specific performance goals that we were trying to serve and you know we had other things that we",
+    "start": "131039",
+    "end": "136400"
+  },
+  {
+    "text": "didn't quite care so much about so the problem that we're trying to solve today is backing the API that",
+    "start": "136400",
+    "end": "143280"
+  },
+  {
+    "text": "allows our customers to update the data that's associated with their subscriptions so at one signal at the",
+    "start": "143280",
+    "end": "149560"
+  },
+  {
+    "text": "time our data model was centered on subscriptions which we defined as a single installation of an application on",
+    "start": "149560",
+    "end": "156040"
+  },
+  {
+    "text": "a single device so one human person might have many one signal subscriptions",
+    "start": "156040",
+    "end": "161280"
+  },
+  {
+    "text": "associated with them for different applications and different devices each subscription can have a number of key",
+    "start": "161280",
+    "end": "167879"
+  },
+  {
+    "text": "value properties associated with them and customers might send us HTTP requests like this one that allow them",
+    "start": "167879",
+    "end": "175040"
+  },
+  {
+    "text": "to update those properties for example you can see in this instance someone is sending send us an HTTP put request uh",
+    "start": "175040",
+    "end": "182120"
+  },
+  {
+    "text": "so that they can update the first name and last name fields to John Smith and",
+    "start": "182120",
+    "end": "187680"
+  },
+  {
+    "text": "this request also gives us the subscription ID which you know correlates with the row ID in the",
+    "start": "187680",
+    "end": "192879"
+  },
+  {
+    "text": "database as well as the app ID which is more or less a customer data set",
+    "start": "192879",
+    "end": "198640"
+  },
+  {
+    "text": "ID um so you can see in this instance you know we have one human person um and",
+    "start": "198640",
+    "end": "205000"
+  },
+  {
+    "text": "she has a mobile device and she has a web browser that's on a uh laptop or or",
+    "start": "205000",
+    "end": "212560"
+  },
+  {
+    "text": "desktop right um so the mobile device has two subscriptions that are associated with it it has an SMS",
+    "start": "212560",
+    "end": "218360"
+  },
+  {
+    "text": "subscription and it has a mobile push subscription for a mobile app and the web push uh the the uh web browser also",
+    "start": "218360",
+    "end": "226480"
+  },
+  {
+    "text": "has a web push subscription that are associated with it so there's multiple subscriptions across multiple devices",
+    "start": "226480",
+    "end": "232959"
+  },
+  {
+    "text": "but they all sort of correspond with the same human person so at this time we didn't really have a data model that",
+    "start": "232959",
+    "end": "238360"
+  },
+  {
+    "text": "allowed for the the the unification of these uh subscription records to like one uh human person uh like we like we",
+    "start": "238360",
+    "end": "246280"
+  },
+  {
+    "text": "do now um and you can see each of these subscriptions has associated with it in",
+    "start": "246280",
+    "end": "251720"
+  },
+  {
+    "text": "the database um an account type property so this might be something that a",
+    "start": "251720",
+    "end": "256759"
+  },
+  {
+    "text": "customer uses to do uh substitution at the time they deliver a notification so",
+    "start": "256759",
+    "end": "261959"
+  },
+  {
+    "text": "they might do some kind of templating that allows them to send a slightly different message body to people with",
+    "start": "261959",
+    "end": "267240"
+  },
+  {
+    "text": "different account types um they could also just do segmentation that allowed you know send this message only to",
+    "start": "267240",
+    "end": "273880"
+  },
+  {
+    "text": "people who have VIP account levels and you know send this message to people who have user account types um so this",
+    "start": "273880",
+    "end": "282800"
+  },
+  {
+    "text": "system is fairly flexible and you know our customers do do like it but you know",
+    "start": "282800",
+    "end": "289080"
+  },
+  {
+    "text": "somebody has to maintain the infrastructure that allows you to store arbitrary amounts of",
+    "start": "289080",
+    "end": "294240"
+  },
+  {
+    "text": "data now the original format of this was an HTTP API that performed synchronous",
+    "start": "294240",
+    "end": "299960"
+  },
+  {
+    "text": "postgress rights right so our customer makes an HTTP request either from their",
+    "start": "299960",
+    "end": "305840"
+  },
+  {
+    "text": "own servers or from the r sdks on uh their users",
+    "start": "305840",
+    "end": "311919"
+  },
+  {
+    "text": "devices uh we block our we block the HTTP request in our web servers and the",
+    "start": "311919",
+    "end": "317520"
+  },
+  {
+    "text": "post crust right completes and we send a 200 back the back to the device now you",
+    "start": "317520",
+    "end": "323360"
+  },
+  {
+    "text": "know this works for a time it work it certainly works at 100 users it probably works at 10,000 users uh maybe it maybe",
+    "start": "323360",
+    "end": "330560"
+  },
+  {
+    "text": "it even works at several million users but once we started getting into the the billion range we have billions of users",
+    "start": "330560",
+    "end": "336319"
+  },
+  {
+    "text": "we're sending billions of notifications a day and a uh notification send was you",
+    "start": "336319",
+    "end": "342680"
+  },
+  {
+    "text": "know generally speaking fairly well correlated with um these property update",
+    "start": "342680",
+    "end": "348440"
+  },
+  {
+    "text": "requests right because after a notification sends maybe a user takes some kind of action and the customer",
+    "start": "348440",
+    "end": "354400"
+  },
+  {
+    "text": "wants to update their the uh subscriptions properties as a result of this So eventually we grow to such a",
+    "start": "354400",
+    "end": "361000"
+  },
+  {
+    "text": "scale that we get hammered by traffic uh incessantly uh generally speaking at the",
+    "start": "361000",
+    "end": "366840"
+  },
+  {
+    "text": "hour and half hour marks because people love to schedule their messages to go",
+    "start": "366840",
+    "end": "372080"
+  },
+  {
+    "text": "out on the hour on the half hour nobody is scheduling their push notifications",
+    "start": "372080",
+    "end": "378160"
+  },
+  {
+    "text": "to be delivered at you know 2:12 in the morning people are scheduling their",
+    "start": "378160",
+    "end": "383319"
+  },
+  {
+    "text": "messages to be delivered at 9:00 in the morning right um because it's it's just",
+    "start": "383319",
+    "end": "388599"
+  },
+  {
+    "text": "easier it it makes makes more sense as as a marketer and it uh comes more naturally right so everybody is doing",
+    "start": "388599",
+    "end": "395960"
+  },
+  {
+    "text": "that meaning at that hour mark we are getting tons and tons of traffic at this end point and it would frequently lead",
+    "start": "395960",
+    "end": "403240"
+  },
+  {
+    "text": "to issues with postgress as it really couldn't keep up with the volume of rights that we're sending it so there's",
+    "start": "403240",
+    "end": "409280"
+  },
+  {
+    "text": "a huge enormous bottleneck here and very frequently this would just cause kind of our entire HTTP layer to go down right",
+    "start": "409280",
+    "end": "416919"
+  },
+  {
+    "text": "because all of our postgress connections would just be completely saturated running these synchronous HTTP",
+    "start": "416919",
+    "end": "424639"
+  },
+  {
+    "text": "rights uh so what did we do well we we took this synchronous system and we made",
+    "start": "424639",
+    "end": "431120"
+  },
+  {
+    "text": "it asynchronous by introducing a layer of queing now what is a q Q's are a very",
+    "start": "431120",
+    "end": "438400"
+  },
+  {
+    "text": "fundamental data structure that are talked about in you know computer science classes they work in a very similar way to the queue you had waited",
+    "start": "438400",
+    "end": "444840"
+  },
+  {
+    "text": "in at the cafe items are in queed at one side they sit on the queue for a period",
+    "start": "444840",
+    "end": "449960"
+  },
+  {
+    "text": "of time and then in the end items are DED from the other side and they're handed off to some kind of processor",
+    "start": "449960",
+    "end": "456080"
+  },
+  {
+    "text": "that does something with them um now we can control the rate at",
+    "start": "456080",
+    "end": "461199"
+  },
+  {
+    "text": "which messages are dced right we can slow down our processor or we could you know try to speed up our processor so",
+    "start": "461199",
+    "end": "468800"
+  },
+  {
+    "text": "that messages sit in the queue for uh as little time as possible or we could uh",
+    "start": "468800",
+    "end": "474280"
+  },
+  {
+    "text": "you know slow our slow our processor down a little bit so that we don't sort of overwhelm the processor on the end",
+    "start": "474280",
+    "end": "479639"
+  },
+  {
+    "text": "because remember we're we're running postgress rights here so if there's a huge spike in the number of requests",
+    "start": "479639",
+    "end": "484879"
+  },
+  {
+    "text": "that come in uh really all that happens is more messages sit in the queue and our postgress servers don't get",
+    "start": "484879",
+    "end": "491120"
+  },
+  {
+    "text": "overloaded because they're processing a more or less constant rate of messages",
+    "start": "491120",
+    "end": "497720"
+  },
+  {
+    "text": "per second or at least a rate of messages that has some kind of known upper bound on",
+    "start": "497720",
+    "end": "503879"
+  },
+  {
+    "text": "it now we are introducing an additional metric here right in in our previous",
+    "start": "503879",
+    "end": "508960"
+  },
+  {
+    "text": "world really the only metrics that we had were maybe the number of requests that we're processing at one time and you know the",
+    "start": "508960",
+    "end": "514919"
+  },
+  {
+    "text": "CPU memory limits on our web workers and on our postrest workers but now we have",
+    "start": "514919",
+    "end": "520959"
+  },
+  {
+    "text": "this new thing that we need to measure and it's going to turn out to be really important for us to be measuring this right and it's the number of messages",
+    "start": "520959",
+    "end": "527440"
+  },
+  {
+    "text": "that are sitting in that queue waiting to be processed and this is a metric that we called the lag of our Q um",
+    "start": "527440",
+    "end": "535000"
+  },
+  {
+    "text": "whether or not that's a perfect term is debatable but we have four messages",
+    "start": "535000",
+    "end": "540360"
+  },
+  {
+    "text": "right now that are sitting in this particular queue we have a red blue orange and green message that are",
+    "start": "540360",
+    "end": "546399"
+  },
+  {
+    "text": "sitting in the queue waiting to be processed and we have a purple message that has been removed from the queue so",
+    "start": "546399",
+    "end": "551640"
+  },
+  {
+    "text": "it's no longer waiting so we would say that we have four messages in lag for this Q that's represented on this",
+    "start": "551640",
+    "end": "559480"
+  },
+  {
+    "text": "slide now A Q uh like I said earlier is just an abstract data structure you know",
+    "start": "559680",
+    "end": "565120"
+  },
+  {
+    "text": "in in the real world we we don't use abstract data structures right we use concrete implementations of data",
+    "start": "565120",
+    "end": "571079"
+  },
+  {
+    "text": "structures and in our case we use Apache Kafka uh Apache Kafka is a very nice",
+    "start": "571079",
+    "end": "578560"
+  },
+  {
+    "text": "high performance uh message log system and it has a lot of neat features that",
+    "start": "578560",
+    "end": "583880"
+  },
+  {
+    "text": "you don't get with just the basic sort of abstract cue um and it has a ton of",
+    "start": "583880",
+    "end": "589279"
+  },
+  {
+    "text": "use cases Beyond uh what we're going to discuss in in this talk but uh today we're going to talk",
+    "start": "589279",
+    "end": "596160"
+  },
+  {
+    "text": "about how we use it to uh back our postrest wres so how how does Kafka work how how",
+    "start": "596160",
+    "end": "603040"
+  },
+  {
+    "text": "are these things sort of structured right so with our with a sort of basic",
+    "start": "603040",
+    "end": "609920"
+  },
+  {
+    "text": "cue that you might think about as just you know you might import from your uh programming languages standard Library",
+    "start": "609920",
+    "end": "616160"
+  },
+  {
+    "text": "you might have a list of messages that uh sits in memory and you might remove things uh from that list of messages as",
+    "start": "616160",
+    "end": "623600"
+  },
+  {
+    "text": "they're being processed as you DQ them but that's not what we get in Apache Kafka you know we have a number of data",
+    "start": "623600",
+    "end": "630279"
+  },
+  {
+    "text": "structures that are represented on this slide so let's uh let's talk about them one at a time so the first thing that's",
+    "start": "630279",
+    "end": "635720"
+  },
+  {
+    "text": "on here is the producer this is the thing that Ines messages to Apache kovka so in our case this was our HTTP server",
+    "start": "635720",
+    "end": "643720"
+  },
+  {
+    "text": "that's uh taking messages from the HTTP API and it's adding them to our Kafka Q",
+    "start": "643720",
+    "end": "649720"
+  },
+  {
+    "text": "by calling the send method on Kafka right it's adding them to Kafka in something called a topic this is a",
+    "start": "649720",
+    "end": "656120"
+  },
+  {
+    "text": "logical grouping of messages you know message where where messages have the same sort of purpose each message has a",
+    "start": "656120",
+    "end": "663600"
+  },
+  {
+    "text": "numerical ID an auto incrementing numerical ID called an offset so that starts at zero and it gets gets bigger",
+    "start": "663600",
+    "end": "670360"
+  },
+  {
+    "text": "over time uh the thing that pulls messages off of kfka that DQ's message is called",
+    "start": "670360",
+    "end": "676320"
+  },
+  {
+    "text": "a consumer so in this case we have a single consumer that's called a and it",
+    "start": "676320",
+    "end": "682560"
+  },
+  {
+    "text": "has pulled the first message uh off of the log of the que right and uh but the thing that's",
+    "start": "682560",
+    "end": "689880"
+  },
+  {
+    "text": "interesting here is you'll notice that that message is still on the Queue I it hasn't been removed right it's still on",
+    "start": "689880",
+    "end": "696480"
+  },
+  {
+    "text": "the topic so the the the thing that's different about Kafka from sort of the the typical Q implementation is that the",
+    "start": "696480",
+    "end": "703760"
+  },
+  {
+    "text": "messages don't actually get deleted from kafka's data structures they stay there",
+    "start": "703760",
+    "end": "709399"
+  },
+  {
+    "text": "and the thing that changes is just the pointer inside the topic to which",
+    "start": "709399",
+    "end": "714480"
+  },
+  {
+    "text": "message has been read so this is going to give us a little bit of flexibility in terms of how this is implemented but",
+    "start": "714480",
+    "end": "722079"
+  },
+  {
+    "text": "uh it's important to note that really what we're changing is we're just moving this sort of pointer around in there so",
+    "start": "722079",
+    "end": "728160"
+  },
+  {
+    "text": "you notice that our consumer a has read message zero it processes message zero",
+    "start": "728160",
+    "end": "733240"
+  },
+  {
+    "text": "and then once it's done it sends cka a message called a commit and that uh that advances this pointer so it moves the",
+    "start": "733240",
+    "end": "740160"
+  },
+  {
+    "text": "pointer from zero to one so we're now the next time we ask kka for a message it's going to give us the next message",
+    "start": "740160",
+    "end": "746680"
+  },
+  {
+    "text": "in the log back so one of the nice sort of flexible",
+    "start": "746680",
+    "end": "752600"
+  },
+  {
+    "text": "things that you can do with Kafka because it has uh this this uh you know moving pointer thing is you can actually",
+    "start": "752600",
+    "end": "759839"
+  },
+  {
+    "text": "have multiple consumers which read from the same exact topic and every consumer",
+    "start": "759839",
+    "end": "765639"
+  },
+  {
+    "text": "is actually going to be able to see every single message that's on the topic and this is beneficial if you wanted to",
+    "start": "765639",
+    "end": "773440"
+  },
+  {
+    "text": "you know have a a single a single cat topic that has just a ton of data on it",
+    "start": "773440",
+    "end": "778560"
+  },
+  {
+    "text": "that might might be useful uh in you know in Broad context and maybe one",
+    "start": "778560",
+    "end": "785440"
+  },
+  {
+    "text": "application maybe one application reads 90% of the data and another application reads you know 30% of the data obviously",
+    "start": "785440",
+    "end": "792839"
+  },
+  {
+    "text": "those add up to more than 100% there's overlaps there could be overlaps you know because each me each consumer is",
+    "start": "792839",
+    "end": "799920"
+  },
+  {
+    "text": "going to see every message that's on there you get a lot of flexibility in how you want to uh utilize that data",
+    "start": "799920",
+    "end": "807760"
+  },
+  {
+    "text": "right so in this in this instance we can see that there are two consumers that are both reading from the same topic uh",
+    "start": "807760",
+    "end": "813519"
+  },
+  {
+    "text": "and they're at different points in the topic",
+    "start": "813519",
+    "end": "818199"
+  },
+  {
+    "text": "right now uh as your user base grows you probably want to be able to process more",
+    "start": "820120",
+    "end": "825959"
+  },
+  {
+    "text": "than one message at a time right uh both of these consumers are just looking at a single message they're looking at",
+    "start": "825959",
+    "end": "831720"
+  },
+  {
+    "text": "different messages but they are both looking at single messages and they are both going to want to process every",
+    "start": "831720",
+    "end": "837600"
+  },
+  {
+    "text": "message that's on that queue so uh what do we do about this it turns out that that Kafka has a feature that's",
+    "start": "837600",
+    "end": "844199"
+  },
+  {
+    "text": "built in for uh scaling things horizontally and that is called a partition so I I know that I presented",
+    "start": "844199",
+    "end": "852240"
+  },
+  {
+    "text": "each topic as an independent cue of messages previously it turns out that within a topic there are numbered",
+    "start": "852240",
+    "end": "858600"
+  },
+  {
+    "text": "partitions and these are the actual logs of messages that have independent uh",
+    "start": "858600",
+    "end": "865800"
+  },
+  {
+    "text": "numbering schemes for offsets and they can be consumed uh independently by",
+    "start": "865800",
+    "end": "873120"
+  },
+  {
+    "text": "either single instances of a consumer or indeed like multiple instances of a consumer so in this instance you know on",
+    "start": "873120",
+    "end": "880000"
+  },
+  {
+    "text": "here we have a topic that has two partitions we could have two instances of the consumer uh that were running in",
+    "start": "880000",
+    "end": "887320"
+  },
+  {
+    "text": "say two different kubernetes pods or you know on two physical servers that were",
+    "start": "887320",
+    "end": "892560"
+  },
+  {
+    "text": "uh separated and had dedicated resources or they could simply be running in two threads of the same consumer instance",
+    "start": "892560",
+    "end": "900680"
+  },
+  {
+    "text": "uh so we we talked previously about uh lag right so notice that these two",
+    "start": "908839",
+    "end": "915519"
+  },
+  {
+    "text": "partitions they have independent lag from each other because they are two different cues with two different",
+    "start": "915519",
+    "end": "920920"
+  },
+  {
+    "text": "positions sort of in the Q right uh partition one actually doesn't have any",
+    "start": "920920",
+    "end": "926279"
+  },
+  {
+    "text": "lag because it's it's sort of red up to the end of the queue and partition Zer",
+    "start": "926279",
+    "end": "931639"
+  },
+  {
+    "text": "has uh three messages in lag because there's still message uh 2 three and",
+    "start": "931639",
+    "end": "936680"
+  },
+  {
+    "text": "four that are sitting on the Queue and waiting to be processed by the consumer",
+    "start": "936680",
+    "end": "942040"
+  },
+  {
+    "text": "so you might say that the topic as a whole has three messages in lag because it's just those three messages from",
+    "start": "942040",
+    "end": "947720"
+  },
+  {
+    "text": "partition zero but you could you know subdivide that down into the two partitions and indeed in most cases if",
+    "start": "947720",
+    "end": "956040"
+  },
+  {
+    "text": "you have a a resource that's sitting back there behind just one of the partitions you will very often find that",
+    "start": "956040",
+    "end": "963440"
+  },
+  {
+    "text": "you know one of your partitions or you know one grouping of your partitions starts to lag and it's generally",
+    "start": "963440",
+    "end": "970519"
+  },
+  {
+    "text": "speaking not smeared across the whole range",
+    "start": "970519",
+    "end": "977000"
+  },
+  {
+    "text": "so we have our multiple partitions but when we have a message that we want to add to our topic uh what do we do",
+    "start": "977000",
+    "end": "984839"
+  },
+  {
+    "text": "with it which which of those partitions does it go to there's a couple of different ways that we can distribute messages uh to our different partitions",
+    "start": "984839",
+    "end": "992040"
+  },
+  {
+    "text": "inside the kfka topic the first one is fairly intuitive you know if we don't",
+    "start": "992040",
+    "end": "998160"
+  },
+  {
+    "text": "tell Kafka which partition we want a message to go to we just get round robin partitioning right so in this instance",
+    "start": "998160",
+    "end": "1005199"
+  },
+  {
+    "text": "there are three topics and each time we we uh add a message to our kfka topic",
+    "start": "1005199",
+    "end": "1011959"
+  },
+  {
+    "text": "Kafka is just going to pick one of those topics or one of those partitions and just sort of assign the message to it so",
+    "start": "1011959",
+    "end": "1018800"
+  },
+  {
+    "text": "this might be a perfectly acceptable partitioning strategy for many use cases",
+    "start": "1018800",
+    "end": "1025558"
+  },
+  {
+    "text": "but in our case this was not really going to work for us because remember we",
+    "start": "1025559",
+    "end": "1032000"
+  },
+  {
+    "text": "were doing postgress wrs and each of these messages remember was a",
+    "start": "1032000",
+    "end": "1037400"
+  },
+  {
+    "text": "subscription update that had a customer data set ID and a row ID on it and we",
+    "start": "1037400",
+    "end": "1044798"
+  },
+  {
+    "text": "had a we have a cluster of postgress servers that are partitioned by uh",
+    "start": "1044799",
+    "end": "1052480"
+  },
+  {
+    "text": "customer data set ID we don't have one postgress server per customer but we do have you know a postgress server that is",
+    "start": "1052480",
+    "end": "1059640"
+  },
+  {
+    "text": "responsible for a range of customer data set IDs so this meant at the time that",
+    "start": "1059640",
+    "end": "1065120"
+  },
+  {
+    "text": "we were adding our message to Kafka we actually knew at that time which postgress server the message was going",
+    "start": "1065120",
+    "end": "1072600"
+  },
+  {
+    "text": "to be written to eventually so at the time we generated our message and wrote it into Kafka we would actually assign",
+    "start": "1072600",
+    "end": "1079400"
+  },
+  {
+    "text": "it explicitly to a partition that was tied to that particular postgress",
+    "start": "1079400",
+    "end": "1085679"
+  },
+  {
+    "text": "server now again this as is shown on here uh gives us some amount of",
+    "start": "1085679",
+    "end": "1093360"
+  },
+  {
+    "text": "separation between the postest servers but you may notice that within each postest server there's really not any",
+    "start": "1093360",
+    "end": "1099559"
+  },
+  {
+    "text": "concurrency there's a single partition that's responsible for each postest server so we we are not going to have",
+    "start": "1099559",
+    "end": "1107039"
+  },
+  {
+    "text": "the ability to do current rights on our postc crust server we're going to be you know fairly",
+    "start": "1107039",
+    "end": "1113760"
+  },
+  {
+    "text": "slow so the way that we would get around this is by having multiple uh cka",
+    "start": "1113760",
+    "end": "1120120"
+  },
+  {
+    "text": "partitions that would be responsible for each postest server right in this case we have four partitions and two postest",
+    "start": "1120120",
+    "end": "1128280"
+  },
+  {
+    "text": "servers so each postest server has two Kafka partitions that are associated with it and we can process those two",
+    "start": "1128280",
+    "end": "1135200"
+  },
+  {
+    "text": "partitions concurrently meaning we can perform two concurrent rights to our postest",
+    "start": "1135200",
+    "end": "1142000"
+  },
+  {
+    "text": "servers now this strategy will will get you fairly far but we did run into some",
+    "start": "1142000",
+    "end": "1147520"
+  },
+  {
+    "text": "issues with it the system isn't",
+    "start": "1147520",
+    "end": "1152640"
+  },
+  {
+    "text": "super flexible right so what happens in",
+    "start": "1152640",
+    "end": "1158039"
+  },
+  {
+    "text": "a world where we want to change that concurrency number right and there's a lot of reasons why we might want to do",
+    "start": "1158039",
+    "end": "1164360"
+  },
+  {
+    "text": "this maybe uh maybe we're able to get some Hardware updates that we and have",
+    "start": "1164360",
+    "end": "1170840"
+  },
+  {
+    "text": "we have you know better CPUs that are available for our postc servers and so we want to increase the concurrency of",
+    "start": "1170840",
+    "end": "1176000"
+  },
+  {
+    "text": "our rights or maybe we decide that we actually want to prioritize reads and",
+    "start": "1176000",
+    "end": "1181600"
+  },
+  {
+    "text": "we're okay with slightly higher message latency so we want to reduce the concurrency of our postrest",
+    "start": "1181600",
+    "end": "1188400"
+  },
+  {
+    "text": "rights uh in this instance we would have to do what's called repartitioning our",
+    "start": "1188400",
+    "end": "1193960"
+  },
+  {
+    "text": "kovka topic and this entails some rather interesting",
+    "start": "1193960",
+    "end": "1200840"
+  },
+  {
+    "text": "gymnastics if we had a topic that had say four partitions and we wanted to go to a topic that had six partitions so we",
+    "start": "1200840",
+    "end": "1208080"
+  },
+  {
+    "text": "wanted to be able to change a right concurrency from 2 to three uh we would have to create a new empty topic that",
+    "start": "1208080",
+    "end": "1215440"
+  },
+  {
+    "text": "had six partitions and we would have to rewrite all of the data from the old",
+    "start": "1215440",
+    "end": "1220600"
+  },
+  {
+    "text": "partition the old topic to the new topic and we would have to manage doing that",
+    "start": "1220600",
+    "end": "1225679"
+  },
+  {
+    "text": "you know at the same time as we were shifting new rights uh onto the new topic right",
+    "start": "1225679",
+    "end": "1233799"
+  },
+  {
+    "text": "so if you want to maintain message uh ordering while doing something like this",
+    "start": "1233799",
+    "end": "1239520"
+  },
+  {
+    "text": "it's really quite uh quite a juggling act and so this is something that we wanted to engineer our weight out of",
+    "start": "1239520",
+    "end": "1246919"
+  },
+  {
+    "text": "having to do every time that we wanted to change our uh postris concurrency",
+    "start": "1246919",
+    "end": "1252000"
+  },
+  {
+    "text": "level right so what what do we do instead how do we get around this kind",
+    "start": "1252000",
+    "end": "1259039"
+  },
+  {
+    "text": "of this kind of issue with the strategy",
+    "start": "1259039",
+    "end": "1264158"
+  },
+  {
+    "text": "right the solution that we developed here was to concurrently process Kafka",
+    "start": "1269840",
+    "end": "1274880"
+  },
+  {
+    "text": "messages in memory uh within each Kafka partition so this is something that we",
+    "start": "1274880",
+    "end": "1281919"
+  },
+  {
+    "text": "called subpartition processing this is not something that generally speak",
+    "start": "1281919",
+    "end": "1288120"
+  },
+  {
+    "text": "speaking uh you know folks like confluent Consultants will recommend that you do but uh we have found it to",
+    "start": "1288120",
+    "end": "1294679"
+  },
+  {
+    "text": "be very useful and extremely effective for uh meeting our particular needs so",
+    "start": "1294679",
+    "end": "1300279"
+  },
+  {
+    "text": "what does this look like so inside of our consumer instance",
+    "start": "1300279",
+    "end": "1305840"
+  },
+  {
+    "text": "uh you know as mentioned we have a number of partitions that are sitting there in memory and processing concurrently within each one of those",
+    "start": "1305840",
+    "end": "1312960"
+  },
+  {
+    "text": "partitions right Kafka has a number of messages uh that it knows about and",
+    "start": "1312960",
+    "end": "1319039"
+  },
+  {
+    "text": "inside of our consumer instance inside the partition level we",
+    "start": "1319039",
+    "end": "1324600"
+  },
+  {
+    "text": "have a number of workers these are you know more or less threads that are that",
+    "start": "1324600",
+    "end": "1329960"
+  },
+  {
+    "text": "are sitting there and they're able to process messages concurrently within the partition so instead of asking Kafka for",
+    "start": "1329960",
+    "end": "1337000"
+  },
+  {
+    "text": "the next message we would ask it for the next say four messages and we would process those uh concurrently send our",
+    "start": "1337000",
+    "end": "1344679"
+  },
+  {
+    "text": "rights to postest concurrently and if it were that easy uh this would be an extremely uh boring and",
+    "start": "1344679",
+    "end": "1352360"
+  },
+  {
+    "text": "short talk I'm afraid uh once you start doing this things start to get uh a lot",
+    "start": "1352360",
+    "end": "1357679"
+  },
+  {
+    "text": "more complicated and we'll run into a lot of issues along the way the first of which",
+    "start": "1357679",
+    "end": "1363799"
+  },
+  {
+    "text": "that becomes uh extremely obvious when you when you try and achieve this is uh",
+    "start": "1363799",
+    "end": "1370559"
+  },
+  {
+    "text": "it becomes a lot more difficult to manage commits so let's talk about why that",
+    "start": "1370559",
+    "end": "1376640"
+  },
+  {
+    "text": "is if you're you're processing messages concurrently that you know are linearly",
+    "start": "1376640",
+    "end": "1384240"
+  },
+  {
+    "text": "ordered in Kafka eventually you're going to get to a point where you process messages out of order right so let's",
+    "start": "1384240",
+    "end": "1392400"
+  },
+  {
+    "text": "imagine that we have you know message 0 1 2 and 3 that are all sitting there in memory they're being processed",
+    "start": "1392400",
+    "end": "1398000"
+  },
+  {
+    "text": "concurrently and we just so happen to finish processing message zero and message three at the same time while one",
+    "start": "1398000",
+    "end": "1405240"
+  },
+  {
+    "text": "and two are still processing uh what do we do in that situation so if we follow this sort of",
+    "start": "1405240",
+    "end": "1413080"
+  },
+  {
+    "text": "standard Kafka rules what we would do is we would send Kafka a commit for message",
+    "start": "1413080",
+    "end": "1419039"
+  },
+  {
+    "text": "zero telling Kafka that hey I finished the processing on message uh with offset",
+    "start": "1419039",
+    "end": "1424200"
+  },
+  {
+    "text": "zero and you can mark it as done and if I ask you for more messages in the future you don't have to give me message",
+    "start": "1424200",
+    "end": "1429919"
+  },
+  {
+    "text": "zero because you know it's it's done it's over and once we've done this remember",
+    "start": "1429919",
+    "end": "1436240"
+  },
+  {
+    "text": "we've also finished processing message three concurrently so we would also send Kafka a commit for the message with",
+    "start": "1436240",
+    "end": "1442760"
+  },
+  {
+    "text": "offset 3 and Kafka says okay that's great message 3 is finished so I will",
+    "start": "1442760",
+    "end": "1449080"
+  },
+  {
+    "text": "never show you message 3 or any of the messages before message 3 again because",
+    "start": "1449080",
+    "end": "1454520"
+  },
+  {
+    "text": "it turns out that kfka does not store the completion of every single message it only stores the last message or it",
+    "start": "1454520",
+    "end": "1462640"
+  },
+  {
+    "text": "only stores sort of the the greatest message that has been committed because it assumes that read the queue from the",
+    "start": "1462640",
+    "end": "1468960"
+  },
+  {
+    "text": "beginning to the end and you don't skip any messages like we're",
+    "start": "1468960",
+    "end": "1474159"
+  },
+  {
+    "text": "doing so this is a problem this isn't going to you know evict message One and",
+    "start": "1474159",
+    "end": "1480159"
+  },
+  {
+    "text": "Two from the memory of our worker but it is going to prevent us from replaying",
+    "start": "1480159",
+    "end": "1485640"
+  },
+  {
+    "text": "those messages if we get into a situation like say our consumer instance",
+    "start": "1485640",
+    "end": "1491080"
+  },
+  {
+    "text": "uh restarts or you know crashes or something like that while message one",
+    "start": "1491080",
+    "end": "1496399"
+  },
+  {
+    "text": "and two are still being processed acced if the consumer instance comes back up and it asks kfka for the messages again",
+    "start": "1496399",
+    "end": "1503679"
+  },
+  {
+    "text": "um it's never going to get message one and two replayed because you know Kafka",
+    "start": "1503679",
+    "end": "1508919"
+  },
+  {
+    "text": "thinks that they've been committed they they've finished processing so it doesn't need to show them again um for",
+    "start": "1508919",
+    "end": "1515240"
+  },
+  {
+    "text": "our uh for our purposes we consider this to be an unacceptable data Integrity",
+    "start": "1515240",
+    "end": "1520480"
+  },
+  {
+    "text": "solution right we wanted to make sure that every update was being processed uh by the database right so what is the",
+    "start": "1520480",
+    "end": "1528200"
+  },
+  {
+    "text": "solution here how do we how do we get out of this problem what do we do with this message three given that we can't send it to",
+    "start": "1528200",
+    "end": "1536720"
+  },
+  {
+    "text": "Kafka the solution that we came up with was to create uh a data structure in the memory of our Kafka consumer which we",
+    "start": "1536720",
+    "end": "1543240"
+  },
+  {
+    "text": "called a commit buffer right so instead of sending messages to Kafka when they're committed we write them into",
+    "start": "1543240",
+    "end": "1549720"
+  },
+  {
+    "text": "this inmemory commit buffer it has uh one slot for all of the uh messages that",
+    "start": "1549720",
+    "end": "1557039"
+  },
+  {
+    "text": "are in memory and you know it just has is committed is completed is not completed right so",
+    "start": "1557039",
+    "end": "1564039"
+  },
+  {
+    "text": "right now it has two messages in it or it has two completed messages in it zero and three and you can see it has empty",
+    "start": "1564039",
+    "end": "1570600"
+  },
+  {
+    "text": "slots there for one and two so we have the messages written into",
+    "start": "1570600",
+    "end": "1575760"
+  },
+  {
+    "text": "the buffer and then what we're going to do is we're going to start at the beginning and scan for a contiguous",
+    "start": "1575760",
+    "end": "1581480"
+  },
+  {
+    "text": "block of completed messages so if we do that we can see that there's a single",
+    "start": "1581480",
+    "end": "1587000"
+  },
+  {
+    "text": "completed message message at the beginning message zero and we can take that completed",
+    "start": "1587000",
+    "end": "1592159"
+  },
+  {
+    "text": "message and we can send it as a commit to Kafka and then after that we need to",
+    "start": "1592159",
+    "end": "1598360"
+  },
+  {
+    "text": "do nothing for a little bit because if we look at the beginning there's not a single committed message that's at the",
+    "start": "1598360",
+    "end": "1604159"
+  },
+  {
+    "text": "beginning of that commit buffer so it's not safe for us to send kofka any more commits at this point we need to sit",
+    "start": "1604159",
+    "end": "1611080"
+  },
+  {
+    "text": "around and we need to wait for messages one and two to be completed by our Cofe consumer uh at which point we can",
+    "start": "1611080",
+    "end": "1618919"
+  },
+  {
+    "text": "scan again from the beginning for the longest block of contiguous messages we",
+    "start": "1618919",
+    "end": "1624559"
+  },
+  {
+    "text": "find that one two and three are completed and we can send Kafka a commit for the message with offset three and it",
+    "start": "1624559",
+    "end": "1632039"
+  },
+  {
+    "text": "will know that okay three and everything before it have been completed and I don't ever need to replay",
+    "start": "1632039",
+    "end": "1639320"
+  },
+  {
+    "text": "them now there is a concession of this model um and it's a pretty important one",
+    "start": "1639320",
+    "end": "1645360"
+  },
+  {
+    "text": "that you definitely need to design around this model uh uses something called at",
+    "start": "1645360",
+    "end": "1650559"
+  },
+  {
+    "text": "least once delivery there's a couple of different uh models of Cofe consumers",
+    "start": "1650559",
+    "end": "1655720"
+  },
+  {
+    "text": "and you know generally asynchronous processors like this um this means that",
+    "start": "1655720",
+    "end": "1661760"
+  },
+  {
+    "text": "messages are going to be replayed it means you will definitely get to a point where a cop consumer reads a message",
+    "start": "1661760",
+    "end": "1669480"
+  },
+  {
+    "text": "reads the same exact message more than one time like it it will happen and you",
+    "start": "1669480",
+    "end": "1674799"
+  },
+  {
+    "text": "need to design your system to account for this possibility there's a lot of different ways you can do this you might have say a Rea server",
+    "start": "1674799",
+    "end": "1682399"
+  },
+  {
+    "text": "that sits there and tracks an item potency key at the time that your message is completed um we uh actually",
+    "start": "1682399",
+    "end": "1690720"
+  },
+  {
+    "text": "took the Kafka offset from the message and we wrote it into postgress and we use that as a comparison at the time we",
+    "start": "1690720",
+    "end": "1697519"
+  },
+  {
+    "text": "were doing our right to make sure we didn't update any rows you know more than once if we've already applied that",
+    "start": "1697519",
+    "end": "1703399"
+  },
+  {
+    "text": "update but this is something that you have to design into your system or you will get inconsistent data right imagine",
+    "start": "1703399",
+    "end": "1710399"
+  },
+  {
+    "text": "you're ticking a counter and you you know apply the same counter tick more than once you're going to get bad data",
+    "start": "1710399",
+    "end": "1716440"
+  },
+  {
+    "text": "so you've got to design around it there are other uh models of delivery there's",
+    "start": "1716440",
+    "end": "1722080"
+  },
+  {
+    "text": "at most once delivery which is where uh you know you know you're not going to see something twice but it might not",
+    "start": "1722080",
+    "end": "1728399"
+  },
+  {
+    "text": "show up you know it might not show up once uh and there's also exactly once delivery which is a very large bucket",
+    "start": "1728399",
+    "end": "1735120"
+  },
+  {
+    "text": "that you pour money into and uh at the end it doesn't work",
+    "start": "1735120",
+    "end": "1741120"
+  },
+  {
+    "text": "so let's uh let's review all the pieces that we've kind of talked about here some of this is standard Kafka and some",
+    "start": "1741120",
+    "end": "1748240"
+  },
+  {
+    "text": "of it is specific to what we were trying to do at one signal we have a Kafka topic that contains a number of",
+    "start": "1748240",
+    "end": "1754600"
+  },
+  {
+    "text": "partitions which are independent cues of messages and each message has an auto incrementing numerical offset that's",
+    "start": "1754600",
+    "end": "1762799"
+  },
+  {
+    "text": "sort of like its ID we have producers that inq messages into kfka and we have",
+    "start": "1762799",
+    "end": "1768640"
+  },
+  {
+    "text": "consumers which DQ messages out of Kafka and we can control the concurrency",
+    "start": "1768640",
+    "end": "1774480"
+  },
+  {
+    "text": "of our consumers via Kafka partitioning the number of partitions we create and",
+    "start": "1774480",
+    "end": "1779679"
+  },
+  {
+    "text": "this subpartitioning thing that uh is you know very specific to what we're doing at one signal and the the really",
+    "start": "1779679",
+    "end": "1786559"
+  },
+  {
+    "text": "nice thing about this subpartitioning scheme is it since our workers are really just threads in the memory of our",
+    "start": "1786559",
+    "end": "1793080"
+  },
+  {
+    "text": "consumer we can control the number of those extremely easily you you know right now they're essentially numbers in",
+    "start": "1793080",
+    "end": "1799960"
+  },
+  {
+    "text": "a configuration file of our kofka consumer we can change those by redeploying the kofka consumer and in",
+    "start": "1799960",
+    "end": "1806519"
+  },
+  {
+    "text": "theory we could design a way to change those while a process was running without having you know any downtime",
+    "start": "1806519",
+    "end": "1813159"
+  },
+  {
+    "text": "whatsoever we we don't do that because we don't feel that that level of live liveliness is necessary um but we can be",
+    "start": "1813159",
+    "end": "1821559"
+  },
+  {
+    "text": "you know very flexible up to the point that that we think is useful right it's also very important to",
+    "start": "1821559",
+    "end": "1828600"
+  },
+  {
+    "text": "remember that these coffee consumers are performing postgress rights you know",
+    "start": "1828600",
+    "end": "1833840"
+  },
+  {
+    "text": "let's talk about these postgress wrs for a minute let's talk about what they're actually doing because the fact that",
+    "start": "1833840",
+    "end": "1839039"
+  },
+  {
+    "text": "we're doing post risk rights is actually quite important and quite relevant and it's going to have a lot of impact on",
+    "start": "1839039",
+    "end": "1845080"
+  },
+  {
+    "text": "how we manage concurrency in this system yeah so we're doing postrest",
+    "start": "1845080",
+    "end": "1851120"
+  },
+  {
+    "text": "rights um postgress has a bunch of rows in it",
+    "start": "1851120",
+    "end": "1856399"
+  },
+  {
+    "text": "right all these kfka updates are fundamentally saying hey take this postest row and update some property on",
+    "start": "1856399",
+    "end": "1863600"
+  },
+  {
+    "text": "it let's imagine for a moment that we receive two kfka",
+    "start": "1863600",
+    "end": "1868720"
+  },
+  {
+    "text": "updates at the same time or around the same time right and we process those two",
+    "start": "1868720",
+    "end": "1875559"
+  },
+  {
+    "text": "concurrently they're both trying to update the same exact Row in postgress one of them is setting a property called",
+    "start": "1875559",
+    "end": "1881720"
+  },
+  {
+    "text": "a to 10 and another one is setting the property a to 20 well imagine we got the",
+    "start": "1881720",
+    "end": "1887320"
+  },
+  {
+    "text": "the one setting a to 10 first and the one setting a to 202nd now I don't know",
+    "start": "1887320",
+    "end": "1893080"
+  },
+  {
+    "text": "why a customer might send us to conflicting property updates in quick succession like this it's really not my",
+    "start": "1893080",
+    "end": "1899480"
+  },
+  {
+    "text": "concern the thing that is my concern is trying to make sure that we replay our customers data and we apply our",
+    "start": "1899480",
+    "end": "1905200"
+  },
+  {
+    "text": "customers data you know in exactly the order that they sent it to us so if",
+    "start": "1905200",
+    "end": "1911279"
+  },
+  {
+    "text": "we're processing these two things concurrently we might just so happen to process the message setting a to 20",
+    "start": "1911279",
+    "end": "1919158"
+  },
+  {
+    "text": "first uh meaning in the database we get 20 and then at a later time we finished",
+    "start": "1919320",
+    "end": "1925679"
+  },
+  {
+    "text": "the message setting a to 10 meaning we would get 10 in the database now that might be confusing",
+    "start": "1925679",
+    "end": "1932360"
+  },
+  {
+    "text": "from a customer's perspective because you know they sent us they sent us set",
+    "start": "1932360",
+    "end": "1937559"
+  },
+  {
+    "text": "it to 10 set it to 20 so it would seem like the property should be set to",
+    "start": "1937559",
+    "end": "1943360"
+  },
+  {
+    "text": "20 um so this is not an acceptable state of the world for us we need to we need",
+    "start": "1943360",
+    "end": "1950120"
+  },
+  {
+    "text": "to design around this problem so what are we trying to do we",
+    "start": "1950120",
+    "end": "1956080"
+  },
+  {
+    "text": "need to maximize concurrency we want to make sure that we are like saturating our postgress connections and getting as",
+    "start": "1956080",
+    "end": "1962720"
+  },
+  {
+    "text": "much out of those as we possibly can but we need to minimize contention if",
+    "start": "1962720",
+    "end": "1968039"
+  },
+  {
+    "text": "there's a single row that's uh getting a bunch of updates sent to it we can never",
+    "start": "1968039",
+    "end": "1973639"
+  },
+  {
+    "text": "process those updates concurrently because they might complete out of order and that might lead to an inconsistent",
+    "start": "1973639",
+    "end": "1979200"
+  },
+  {
+    "text": "state of the customer's data and we don't want to do that uh so what do we do well we created",
+    "start": "1979200",
+    "end": "1988840"
+  },
+  {
+    "text": "um some more cu's because we it's it's Q's all the way down we love Q's right",
+    "start": "1988840",
+    "end": "1994200"
+  },
+  {
+    "text": "so recall that we had a number of processors for messages in memory those subpartition processors right instead of",
+    "start": "1994200",
+    "end": "2002840"
+  },
+  {
+    "text": "having them just grab messages randomly off the main partition queue",
+    "start": "2002840",
+    "end": "2007880"
+  },
+  {
+    "text": "what we did is we took the subscription ID which is the row ID remember and we hashed that and we sort of moduled it by",
+    "start": "2007880",
+    "end": "2017200"
+  },
+  {
+    "text": "the number of workers that we had in memory and then we assigned it to a CU",
+    "start": "2017200",
+    "end": "2023880"
+  },
+  {
+    "text": "that was tied one to one to those processors right so you can see in this case we have the real q that represents",
+    "start": "2023880",
+    "end": "2031320"
+  },
+  {
+    "text": "every message that's in the Kafka partition we have a blue q that represents some some portion of the",
+    "start": "2031320",
+    "end": "2037799"
+  },
+  {
+    "text": "messages that you know happened to Hash uh and the red CU that happened to",
+    "start": "2037799",
+    "end": "2044159"
+  },
+  {
+    "text": "Hash to the same uh Q right because these hashes are based on the uh the",
+    "start": "2044159",
+    "end": "2050760"
+  },
+  {
+    "text": "subscription ID which is the row ID we know that updates which are bound for the same row will never complete",
+    "start": "2050760",
+    "end": "2057839"
+  },
+  {
+    "text": "concurrently because they will be in the same que which has only a single processor associated with it however",
+    "start": "2057839",
+    "end": "2065440"
+  },
+  {
+    "text": "since these row IDs you know we assume are assigned basically fairly um these",
+    "start": "2065440",
+    "end": "2072398"
+  },
+  {
+    "text": "cues are going to have a bunch of messages in them and you know we we'll be able to process lots of things",
+    "start": "2072399",
+    "end": "2078358"
+  },
+  {
+    "text": "concurrently all right so there's been a lot lot of data structures that we've talked about let's try to put them all",
+    "start": "2078359",
+    "end": "2084398"
+  },
+  {
+    "text": "together into one sort of grand unifying view of uh what our kfka consumers look",
+    "start": "2084399",
+    "end": "2089919"
+  },
+  {
+    "text": "like",
+    "start": "2089919",
+    "end": "2092440"
+  },
+  {
+    "text": "right so at the far far end we have a producer that Ines messages into our",
+    "start": "2095079",
+    "end": "2101320"
+  },
+  {
+    "text": "Kafka topic and it tells Kafka hey please send this to this particular partition because it's going to wind up",
+    "start": "2101320",
+    "end": "2107320"
+  },
+  {
+    "text": "in this postgress database that kfka topic has its messages dced by a",
+    "start": "2107320",
+    "end": "2113359"
+  },
+  {
+    "text": "consumer which is consuming multiple partitions of messages concurrently within those partitions we take the row",
+    "start": "2113359",
+    "end": "2120640"
+  },
+  {
+    "text": "ID we hash it and we use that to assign a message to a particular subpartition Q",
+    "start": "2120640",
+    "end": "2127640"
+  },
+  {
+    "text": "which is tied to a particular subpartition processor once messages are",
+    "start": "2127640",
+    "end": "2132680"
+  },
+  {
+    "text": "finished being processed by those subpartition processors we add them to a commit buffer and eventually commit them",
+    "start": "2132680",
+    "end": "2139119"
+  },
+  {
+    "text": "to Kafka and these processors are all sending a bunch of rights to uh some",
+    "start": "2139119",
+    "end": "2146359"
+  },
+  {
+    "text": "postc servers right so this got us pretty far but at a",
+    "start": "2146359",
+    "end": "2151839"
+  },
+  {
+    "text": "certain point um we started running into some more issues because you know there",
+    "start": "2151839",
+    "end": "2157400"
+  },
+  {
+    "text": "there's always more issues than you think there's going to be it's always so simple in in theory right and I mean",
+    "start": "2157400",
+    "end": "2163240"
+  },
+  {
+    "text": "wasn't this simple I thought it was so it's so so uh beautiful um but we ran into some more",
+    "start": "2163240",
+    "end": "2169359"
+  },
+  {
+    "text": "issues we're adding additional layers of inmemory queuing so we're asking Kafka",
+    "start": "2169359",
+    "end": "2175440"
+  },
+  {
+    "text": "to hey please give us lots of lots of messages and when there's not a lot of",
+    "start": "2175440",
+    "end": "2181079"
+  },
+  {
+    "text": "Kafka lag this works just fine because you can ask Kafka for all the messages and there's not very many of them but at",
+    "start": "2181079",
+    "end": "2188599"
+  },
+  {
+    "text": "a certain point you're going to lag your cof Q because you know you're going to",
+    "start": "2188599",
+    "end": "2193760"
+  },
+  {
+    "text": "have some operational issues that cause your messages to stop processing and there's going to be a bunch of messages",
+    "start": "2193760",
+    "end": "2199119"
+  },
+  {
+    "text": "that build up and lag and this means that your consumers are going to ask Kafka for too many messages and you're",
+    "start": "2199119",
+    "end": "2206240"
+  },
+  {
+    "text": "going to overload the memory of your consumer processes which is going to make them fall over which means they're",
+    "start": "2206240",
+    "end": "2211359"
+  },
+  {
+    "text": "not going to process messages which means the lag is going to get bigger which means your pro your problem is not",
+    "start": "2211359",
+    "end": "2216480"
+  },
+  {
+    "text": "going going to go away on its own uh so how did we solve this one it was fairly simple we added a cap on the",
+    "start": "2216480",
+    "end": "2223760"
+  },
+  {
+    "text": "number of messages that each consumer instance was allowed to hold in memory right so once we got to a certain number",
+    "start": "2223760",
+    "end": "2229440"
+  },
+  {
+    "text": "of messages in memory it just sort of stopped asking cofa for messages and it would check back at a later time to see",
+    "start": "2229440",
+    "end": "2236760"
+  },
+  {
+    "text": "if some messages had cleared out and some memory space had opened up and once we did this to our shock and",
+    "start": "2236760",
+    "end": "2245480"
+  },
+  {
+    "text": "awe everything was fine for uh an amount of time but at the end of",
+    "start": "2245480",
+    "end": "2253400"
+  },
+  {
+    "text": "that amount of time things were no longer fine and this not finess uh had",
+    "start": "2253400",
+    "end": "2259839"
+  },
+  {
+    "text": "the following characteristics we started getting paged intermittently on high amounts of lag on",
+    "start": "2259839",
+    "end": "2266960"
+  },
+  {
+    "text": "our kfka topic and there was a very clear demarcation line between the fine",
+    "start": "2266960",
+    "end": "2272920"
+  },
+  {
+    "text": "and the not fine metrics right uh everything was just sort of ticking along at a very low Baseline level and",
+    "start": "2272920",
+    "end": "2279440"
+  },
+  {
+    "text": "then all of a sudden out of nowhere line goes up in a bad way",
+    "start": "2279440",
+    "end": "2285040"
+  },
+  {
+    "text": "right and we delved into the stats on",
+    "start": "2285040",
+    "end": "2290119"
+  },
+  {
+    "text": "our consumer instances with some expectations that were very soundly uh",
+    "start": "2290119",
+    "end": "2297160"
+  },
+  {
+    "text": "busted we expected that our consumer instances would have had their CPU jump",
+    "start": "2297160",
+    "end": "2303280"
+  },
+  {
+    "text": "way up because oh there's a bunch more messages to process I'm working really hard to process those",
+    "start": "2303280",
+    "end": "2309480"
+  },
+  {
+    "text": "messages we expected CPU to go way up and we expected the number of idle connections to go way down uh but in",
+    "start": "2309480",
+    "end": "2316839"
+  },
+  {
+    "text": "reality we saw the exact opposite happen we saw the CPU usage go way down and the",
+    "start": "2316839",
+    "end": "2321880"
+  },
+  {
+    "text": "number of idle connections jump way up almost to the maximum and uh this confused us to no",
+    "start": "2321880",
+    "end": "2331560"
+  },
+  {
+    "text": "end but we didn't really have a lot more uh observability options in this at this",
+    "start": "2331880",
+    "end": "2337680"
+  },
+  {
+    "text": "time really we were kind of just dealing with metrics and we had some unstructured logs that were sitting on",
+    "start": "2337680",
+    "end": "2343920"
+  },
+  {
+    "text": "the boxes like the boxes not on not in the kubernetes uh config store um so at",
+    "start": "2343920",
+    "end": "2353760"
+  },
+  {
+    "text": "this time I insisted on getting us to a point where we had centralized logging it was something that I wanted when I first joined the company and it was it",
+    "start": "2353760",
+    "end": "2361040"
+  },
+  {
+    "text": "was uh not prioritized at that time but I used this as kind of a jumping off point to be like no we need Central",
+    "start": "2361040",
+    "end": "2366800"
+  },
+  {
+    "text": "logging like this is the proof right so we added some centralized logging so all of our workers started sending data to a",
+    "start": "2366800",
+    "end": "2374240"
+  },
+  {
+    "text": "central location and it wasn't a lot of data mind you it was relatively simple we added the we sent in the app ID which",
+    "start": "2374240",
+    "end": "2381640"
+  },
+  {
+    "text": "remember was the customer data set ID we sent in the subscription ID which is the",
+    "start": "2381640",
+    "end": "2387000"
+  },
+  {
+    "text": "row ID the SQL statement that was being uh executed and the consumer",
+    "start": "2387000",
+    "end": "2393480"
+  },
+  {
+    "text": "instance so this allowed us to do some stuff like group our logs by which",
+    "start": "2393480",
+    "end": "2400440"
+  },
+  {
+    "text": "customer data set ID was sending us the most updates and what we found was kind of",
+    "start": "2400440",
+    "end": "2405920"
+  },
+  {
+    "text": "surprising we found that almost all of the updates that were coming through were coming from a single customer which",
+    "start": "2405920",
+    "end": "2411200"
+  },
+  {
+    "text": "we're going to call closely um it was something on the order of you know if if closely was doing",
+    "start": "2411200",
+    "end": "2416720"
+  },
+  {
+    "text": "maybe 500 updates per second our next largest customer was doing like 30 and",
+    "start": "2416720",
+    "end": "2422599"
+  },
+  {
+    "text": "every other customer on that same pod was doing Maybe you know a a combined",
+    "start": "2422599",
+    "end": "2429119"
+  },
+  {
+    "text": "rate of you know 100 so it was really dominating the",
+    "start": "2429119",
+    "end": "2436079"
+  },
+  {
+    "text": "logs and since we had it we also grouped by the subscription ID the row ID and we",
+    "start": "2436079",
+    "end": "2442880"
+  },
+  {
+    "text": "actually found that there was a single row ID that was dominating our logs",
+    "start": "2442880",
+    "end": "2448200"
+  },
+  {
+    "text": "right a single row ID was getting all the updates so uh what was what what what",
+    "start": "2448200",
+    "end": "2455560"
+  },
+  {
+    "text": "was happening here right the first thing uh that we looked",
+    "start": "2455560",
+    "end": "2461000"
+  },
+  {
+    "text": "at well it's important to remember right that it wasn't just the case that we were getting a lot of updates for a",
+    "start": "2461000",
+    "end": "2466839"
+  },
+  {
+    "text": "single row but it was also the case that we sort of stopped doing everything else right remember number of idle",
+    "start": "2466839",
+    "end": "2472680"
+  },
+  {
+    "text": "connections jumped way up CPU jumped way down so there was really nothing going on except the processing of these uh",
+    "start": "2472680",
+    "end": "2480319"
+  },
+  {
+    "text": "single updates the single subscription updates so what was happening we wanted",
+    "start": "2480319",
+    "end": "2485920"
+  },
+  {
+    "text": "to see was in those updates it was a bunch of updates to like single fields",
+    "start": "2485920",
+    "end": "2491319"
+  },
+  {
+    "text": "at a time and basically every single one of those updates was completely incompatible right um there was constant",
+    "start": "2491319",
+    "end": "2500200"
+  },
+  {
+    "text": "updates happening to the location field so it was jumping from San Francisco to New York to Tokyo back to San Francisco",
+    "start": "2500200",
+    "end": "2507839"
+  },
+  {
+    "text": "to Boise it was just all over the place and it made really no sense to us right",
+    "start": "2507839",
+    "end": "2512920"
+  },
+  {
+    "text": "we looked in postgress and we started just you know refreshing this particular subscription and yeah location is",
+    "start": "2512920",
+    "end": "2519720"
+  },
+  {
+    "text": "constantly changing uh key value pairs are constantly changing but there were a",
+    "start": "2519720",
+    "end": "2524760"
+  },
+  {
+    "text": "couple fields that were staying very consistent the device type was always",
+    "start": "2524760",
+    "end": "2529800"
+  },
+  {
+    "text": "email that was never changing and the identifier which is what we use to",
+    "start": "2529800",
+    "end": "2535000"
+  },
+  {
+    "text": "message a particular subscription it might be an email if you know it's an email subscription or it might be a push",
+    "start": "2535000",
+    "end": "2541480"
+  },
+  {
+    "text": "token for you know an iOS or an Android device um it it just depends on the",
+    "start": "2541480",
+    "end": "2547079"
+  },
+  {
+    "text": "subscription type but the identifier was never changing and it was always set to admin",
+    "start": "2547079",
+    "end": "2552520"
+  },
+  {
+    "text": "at closely now this raised alarm bells for",
+    "start": "2552520",
+    "end": "2558480"
+  },
+  {
+    "text": "us and let's talk about why so one signal started as a uh push notification",
+    "start": "2558480",
+    "end": "2565000"
+  },
+  {
+    "text": "company but we started branching out from that um you know a couple years ago we started moving into Omni Channel",
+    "start": "2565000",
+    "end": "2571040"
+  },
+  {
+    "text": "messaging that let our customers reach their user base across multiple platforms",
+    "start": "2571040",
+    "end": "2576880"
+  },
+  {
+    "text": "and the sort of first way that we did that was by adding a method to our SDK is called set",
+    "start": "2576880",
+    "end": "2582520"
+  },
+  {
+    "text": "email and what this does as kind of implied if you have a push SDK that has",
+    "start": "2582520",
+    "end": "2588839"
+  },
+  {
+    "text": "a subscription in it you call the set email method it will uh create a new",
+    "start": "2588839",
+    "end": "2594480"
+  },
+  {
+    "text": "subscription that has that uh email address as its delivery method and it",
+    "start": "2594480",
+    "end": "2600319"
+  },
+  {
+    "text": "will set the parent of that uh push record to the new email record and it",
+    "start": "2600319",
+    "end": "2606760"
+  },
+  {
+    "text": "will store that email record in the SDK and anytime you update a property from",
+    "start": "2606760",
+    "end": "2612040"
+  },
+  {
+    "text": "that SDK it will duplicate the update uh to that uh email",
+    "start": "2612040",
+    "end": "2618599"
+  },
+  {
+    "text": "record so we Ed this parent property to check and see um how many records were",
+    "start": "2619040",
+    "end": "2626119"
+  },
+  {
+    "text": "were linked to this admin at closely record right so closely had around 5",
+    "start": "2626119",
+    "end": "2631440"
+  },
+  {
+    "text": "million users total and about 4.8 million of those users have had the same",
+    "start": "2631440",
+    "end": "2637480"
+  },
+  {
+    "text": "exact uh parent record so almost every single one of those users had uh had had",
+    "start": "2637480",
+    "end": "2646359"
+  },
+  {
+    "text": "you know set email admin at closely called in its SDK right so every time",
+    "start": "2646359",
+    "end": "2653800"
+  },
+  {
+    "text": "one of those 4.8 million users had any of its properties updated we had an identical update mirrored to this one",
+    "start": "2653800",
+    "end": "2660480"
+  },
+  {
+    "text": "Central record so our copq was very heavily weighted or not even very heavily but",
+    "start": "2660480",
+    "end": "2667480"
+  },
+  {
+    "text": "just sort of subtly weighted with too many updates for this uh one subscription record so why why is this a",
+    "start": "2667480",
+    "end": "2675760"
+  },
+  {
+    "text": "problem why why is this such a big deal that there's like a little bit more there's like a just thumb on the scale",
+    "start": "2675760",
+    "end": "2681400"
+  },
+  {
+    "text": "right why why is this so bad so remember that our subpartition",
+    "start": "2681400",
+    "end": "2687559"
+  },
+  {
+    "text": "cues right these are these are not like totally independent cues right these are",
+    "start": "2687559",
+    "end": "2693000"
+  },
+  {
+    "text": "views onto a single real que the C partition right",
+    "start": "2693000",
+    "end": "2699960"
+  },
+  {
+    "text": "um so in a normal situation where there's you know sort of an a fair basically Fair distribution of messages",
+    "start": "2699960",
+    "end": "2707800"
+  },
+  {
+    "text": "um we have three qes here uh when say the green Q or the green processor",
+    "start": "2707800",
+    "end": "2715319"
+  },
+  {
+    "text": "finishes processing its message it can grab the next Green message off Q2 and",
+    "start": "2715319",
+    "end": "2720760"
+  },
+  {
+    "text": "the next one um and the messages are kind of spaced out about the same so we",
+    "start": "2720760",
+    "end": "2726200"
+  },
+  {
+    "text": "can kind of you know that there's always going to be more messages to to run right but if we put our thumb on the",
+    "start": "2726200",
+    "end": "2732720"
+  },
+  {
+    "text": "scale and we we wait this a little bit uh unfairly right when the green queue",
+    "start": "2732720",
+    "end": "2739480"
+  },
+  {
+    "text": "finishes processing this message that's the only message that's in memory right now right remember there's a limit on",
+    "start": "2739480",
+    "end": "2746319"
+  },
+  {
+    "text": "how many messages that we can pull into memory and there's a real Kafka",
+    "start": "2746319",
+    "end": "2752240"
+  },
+  {
+    "text": "partition that's you know representing this this queue of messages here so we",
+    "start": "2752240",
+    "end": "2757680"
+  },
+  {
+    "text": "can't Advance the CU to look for more green messages until we process some of",
+    "start": "2757680",
+    "end": "2763920"
+  },
+  {
+    "text": "these red messages right so what's going to happen is the green q and then later",
+    "start": "2763920",
+    "end": "2770720"
+  },
+  {
+    "text": "on the the blue Q q1 those are going to process their messages and then there's not going to be any work for them to do",
+    "start": "2770720",
+    "end": "2777960"
+  },
+  {
+    "text": "and unfortunately because of the way that postgress works because we're sending lots of updates to one row uh",
+    "start": "2777960",
+    "end": "2785160"
+  },
+  {
+    "text": "postgress is actually going to get slower because postgress is not super great at having one row get hammered",
+    "start": "2785160",
+    "end": "2790440"
+  },
+  {
+    "text": "with updates so this is kind of a a worst case situation for us",
+    "start": "2790440",
+    "end": "2796559"
+  },
+  {
+    "text": "and in reality it was slightly worse than I'm discussing here because I'm",
+    "start": "2796559",
+    "end": "2802160"
+  },
+  {
+    "text": "kind of zoomed in to the partition level but because our limit of messages was at",
+    "start": "2802160",
+    "end": "2808440"
+  },
+  {
+    "text": "the consumer level at the application Level uh it was actually affecting every",
+    "start": "2808440",
+    "end": "2814040"
+  },
+  {
+    "text": "single partition that was assigned to to a single consumer instance so it was smeared across a number of partitions",
+    "start": "2814040",
+    "end": "2821559"
+  },
+  {
+    "text": "not just the one partition that had closely app on it uh so so what did we do in this",
+    "start": "2821559",
+    "end": "2828240"
+  },
+  {
+    "text": "situation the first thing that we did uh that very quickly resolved this particular problem was we skipped",
+    "start": "2828240",
+    "end": "2834559"
+  },
+  {
+    "text": "updates that were going to the closely uh admin record right um and we fixed",
+    "start": "2834559",
+    "end": "2844359"
+  },
+  {
+    "text": "uh we fixed fix the limiting so it was you know zoomed into the partition level",
+    "start": "2844359",
+    "end": "2849800"
+  },
+  {
+    "text": "so you wouldn't be able to blow up um the whole consumer level stats by having",
+    "start": "2849800",
+    "end": "2855640"
+  },
+  {
+    "text": "one partition go Haywire like this we also put limits in place that stopped customers from linking so many records",
+    "start": "2855640",
+    "end": "2862880"
+  },
+  {
+    "text": "together using our sdks because you know that's obvious that was a fairly obvious",
+    "start": "2862880",
+    "end": "2868280"
+  },
+  {
+    "text": "uh misuse case you know customer saw set email and they assumed that they were supposed to set it to their email of the",
+    "start": "2868280",
+    "end": "2876000"
+  },
+  {
+    "text": "account owner right so what did we learn uh what what",
+    "start": "2876000",
+    "end": "2881040"
+  },
+  {
+    "text": "did we learn during this talk what did we learn as a results of this you know very inventive",
+    "start": "2881040",
+    "end": "2887319"
+  },
+  {
+    "text": "customer uh so we learned how we can take intensive API right workloads and",
+    "start": "2887319",
+    "end": "2892839"
+  },
+  {
+    "text": "we can shift them from the API layer down into asynchronous workers to reduce",
+    "start": "2892839",
+    "end": "2898559"
+  },
+  {
+    "text": "the operational burden of those rights we learned how we could do subpartition",
+    "start": "2898559",
+    "end": "2904440"
+  },
+  {
+    "text": "queuing to increase the currency of our cof consumers uh in a configurable and",
+    "start": "2904440",
+    "end": "2909920"
+  },
+  {
+    "text": "flexible way and we also learned some of the struggles that you might face while you're trying to do SUB partition",
+    "start": "2909920",
+    "end": "2915440"
+  },
+  {
+    "text": "queuing we learned how centralized observability was valuable to us in tracking down this uh particular issue",
+    "start": "2915440",
+    "end": "2923319"
+  },
+  {
+    "text": "and we also learned although I'm sure everyone is aware of this that no matter how creative your engineering and design",
+    "start": "2923319",
+    "end": "2930520"
+  },
+  {
+    "text": "and product teams may be your customers are almost certainly more creative",
+    "start": "2930520",
+    "end": "2937599"
+  },
+  {
+    "text": "all right now I'd like to thank everybody for watching my talk today um if you're interested in uh contacting me",
+    "start": "2937720",
+    "end": "2946240"
+  },
+  {
+    "text": "via my socials or email um my information is on my website lila. exyz",
+    "start": "2946240",
+    "end": "2952319"
+  },
+  {
+    "text": "there's also a link where you can read some of my writing or uh buy my book which is also available on manning.com",
+    "start": "2952319",
+    "end": "2959319"
+  },
+  {
+    "text": "so thank you for watching and have a great rest of your",
+    "start": "2959319",
+    "end": "2964520"
+  },
+  {
+    "text": "day [Music]",
+    "start": "2964520",
+    "end": "2972060"
+  }
+]

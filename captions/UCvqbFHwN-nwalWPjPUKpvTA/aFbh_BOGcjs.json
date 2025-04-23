@@ -1,0 +1,1680 @@
+[
+  {
+    "start": "0",
+    "end": "61000"
+  },
+  {
+    "text": "thanks for the traduction so as mentioned my name is Greg Haynes some soft engineer at IBM I focused primarily",
+    "start": "60",
+    "end": "6810"
+  },
+  {
+    "text": "on open source and cloud software development recently this is meant focusing on K native and as mentioned",
+    "start": "6810",
+    "end": "14280"
+  },
+  {
+    "text": "the cold start performance characteristics of K native and so my hope here today is to give you a little",
+    "start": "14280",
+    "end": "20010"
+  },
+  {
+    "text": "bit of a story of what we've worked on over the past six months and trying to improve candidates cold start",
+    "start": "20010",
+    "end": "25019"
+  },
+  {
+    "text": "performance the idea being this is a it's a good story from a user standpoint",
+    "start": "25019",
+    "end": "30420"
+  },
+  {
+    "text": "on how to how you can potentially beat many of the performance characteristics you get from kubernetes out of the box",
+    "start": "30420",
+    "end": "35910"
+  },
+  {
+    "text": "because in k native performance in this scenario when we're scaling from zero is",
+    "start": "35910",
+    "end": "41190"
+  },
+  {
+    "text": "extremely critical to the usability of our platform in addition to that I'm",
+    "start": "41190",
+    "end": "46680"
+  },
+  {
+    "text": "going to talk a little bit about the different measuring techniques we've used to find where in kubernetes we've",
+    "start": "46680",
+    "end": "52079"
+  },
+  {
+    "text": "this latency has been introduced in different methods people can use to debug and diagnose performance issues in",
+    "start": "52079",
+    "end": "57870"
+  },
+  {
+    "text": "kubernetes so how we're gonna get there",
+    "start": "57870",
+    "end": "63170"
+  },
+  {
+    "start": "61000",
+    "end": "61000"
+  },
+  {
+    "text": "I'm gonna start with a bit of key native design and specifically our architecture for what goes on during scale tip from",
+    "start": "63170",
+    "end": "69630"
+  },
+  {
+    "text": "zero just to give some context about the things I'm discussing later on there's",
+    "start": "69630",
+    "end": "74790"
+  },
+  {
+    "text": "gonna be a lot of discussion about investigative techniques and how specifically how we can get tracing",
+    "start": "74790",
+    "end": "80310"
+  },
+  {
+    "text": "spans that are meaningful and detailed analysis about what's going on when",
+    "start": "80310",
+    "end": "85409"
+  },
+  {
+    "text": "we're mutating kubernetes resources then through that process we're also going to",
+    "start": "85409",
+    "end": "91500"
+  },
+  {
+    "text": "look at how we can given this information we get from these fans how",
+    "start": "91500",
+    "end": "96750"
+  },
+  {
+    "text": "we can use that information to find some maybe novel techniques or some clever solutions to beat the performance",
+    "start": "96750",
+    "end": "101970"
+  },
+  {
+    "text": "characteristics we're seeing and last lastly but most importantly we're hoping",
+    "start": "101970",
+    "end": "107880"
+  },
+  {
+    "text": "to actually get a result out of this which is faster cold smarter performance",
+    "start": "107880",
+    "end": "112490"
+  },
+  {
+    "text": "so what why is this an issue for us if you think about a normal application you",
+    "start": "113090",
+    "end": "119460"
+  },
+  {
+    "text": "know you're maybe you're running a blog on kubernetes or something like that the s ellos of the cooperate control plane",
+    "start": "119460",
+    "end": "125189"
+  },
+  {
+    "text": "generally are not affecting your application right so pod startup time usually is not gonna hopefully is not",
+    "start": "125189",
+    "end": "131940"
+  },
+  {
+    "text": "going to affect the response time of your way application on kubernetes if it does through something terrifying probably",
+    "start": "131940",
+    "end": "137830"
+  },
+  {
+    "text": "going on there and that's great that's it's a great design goal and it's",
+    "start": "137830",
+    "end": "143860"
+  },
+  {
+    "text": "something everyone should achieve and again it's almost certainly recommended",
+    "start": "143860",
+    "end": "148930"
+  },
+  {
+    "text": "and to be avoided at all cost to put this kubernetes control plane within your applications data plane and",
+    "start": "148930",
+    "end": "154000"
+  },
+  {
+    "text": "therefore take on the s loz of the kubernetes control plane it's part of your applications performance but here",
+    "start": "154000",
+    "end": "161440"
+  },
+  {
+    "text": "in K native what we're trying to do is actually extend kubernetes so our application to an extent is kubernetes",
+    "start": "161440",
+    "end": "166959"
+  },
+  {
+    "text": "itself and therefore it's somewhat unavoidable that the kouhei's control planes uh slows our dictate RSL",
+    "start": "166959",
+    "end": "173200"
+  },
+  {
+    "text": "applications s ELO's we are essentially the platform and so we can't completely",
+    "start": "173200",
+    "end": "179019"
+  },
+  {
+    "text": "avoid this and if we even were to try and avoid this this would essentially mean that we're reinventing everything",
+    "start": "179019",
+    "end": "184690"
+  },
+  {
+    "text": "below us which is intentionally not a design goal so these SLO characteristics",
+    "start": "184690",
+    "end": "190420"
+  },
+  {
+    "text": "are extremely important to Kane ADA's performance and it's somewhat unavoidable now that being said not",
+    "start": "190420",
+    "end": "196540"
+  },
+  {
+    "text": "everyone is building a kubernetes and I understand it's not always generally applicable but many of the things we've discovered maybe there are certain areas",
+    "start": "196540",
+    "end": "203140"
+  },
+  {
+    "text": "such as maybe you're running tests infrastructure it where before performance of your test deployments are",
+    "start": "203140",
+    "end": "211000"
+  },
+  {
+    "text": "going to be very dictated of how easy your test infrastructure infrastructure is to use or in other words generally",
+    "start": "211000",
+    "end": "217959"
+  },
+  {
+    "text": "performance is something that people can always enjoy whether or not it's a hard frog requirement and the problem to",
+    "start": "217959",
+    "end": "227709"
+  },
+  {
+    "start": "224000",
+    "end": "224000"
+  },
+  {
+    "text": "state it again is that cold starts in a native are costly to give you some context when I began hacking on this",
+    "start": "227709",
+    "end": "233290"
+  },
+  {
+    "text": "without Sto about five to six seconds what this means to give someone contacts",
+    "start": "233290",
+    "end": "239560"
+  },
+  {
+    "text": "or a cold start we're a service platform so the application we allow it to scale to zero meaning your applications",
+    "start": "239560",
+    "end": "246910"
+  },
+  {
+    "text": "getting no work no requests no no one's trying to use it it's great you won't be",
+    "start": "246910",
+    "end": "252640"
+  },
+  {
+    "text": "you're not paying for that infrastructure cost at that point we stopped running it entirely but then",
+    "start": "252640",
+    "end": "258579"
+  },
+  {
+    "text": "when you get another request later on we have to start your application so we have to pay the cost associated with",
+    "start": "258579",
+    "end": "263590"
+  },
+  {
+    "text": "deploying and getting your application up and running and kubernetes this means starting a pod created creating a service or populating",
+    "start": "263590",
+    "end": "271840"
+  },
+  {
+    "text": "the services endpoints so that networking traffic can reach that pod and this is somewhat costly as mentioned",
+    "start": "271840",
+    "end": "278080"
+  },
+  {
+    "text": "in the previous talk I believe the target SLO for pod startup in kubernetes is 99th percentile needs",
+    "start": "278080",
+    "end": "283840"
+  },
+  {
+    "text": "to be below 5 second response time for pod startup which for cold start that is",
+    "start": "283840",
+    "end": "289510"
+  },
+  {
+    "text": "significant if you a interesting data point you know github web books for",
+    "start": "289510",
+    "end": "295060"
+  },
+  {
+    "text": "example generally timeout at about five seconds so if you're cold start is above that that's completely limiting that use",
+    "start": "295060",
+    "end": "301240"
+  },
+  {
+    "text": "case for us so it's important that there's certain targets were able to hit to to provide more more use cases and",
+    "start": "301240",
+    "end": "308039"
+  },
+  {
+    "text": "even better than that if we can get below one second that's when many applications become are able to be used",
+    "start": "308039",
+    "end": "315250"
+  },
+  {
+    "text": "on our platform and present cold start or forward in their interface and then if you can get down a couple hundred",
+    "start": "315250",
+    "end": "320440"
+  },
+  {
+    "text": "milliseconds at that point you're maybe they are able to do user facing applications which are able to undergo",
+    "start": "320440",
+    "end": "325990"
+  },
+  {
+    "text": "code start that's where we hope to get to we have a long way to go um so a bit",
+    "start": "325990",
+    "end": "332800"
+  },
+  {
+    "start": "331000",
+    "end": "331000"
+  },
+  {
+    "text": "about our architecture how this works whenever quest comes in and your application has scaled to zero so we're",
+    "start": "332800",
+    "end": "339250"
+  },
+  {
+    "text": "no longer running it we have this pod called an activator and it's just a it's a deployment nothing terribly special",
+    "start": "339250",
+    "end": "345280"
+  },
+  {
+    "text": "there and we weave out all networking traffic to go to this activator service the idea being the applications not",
+    "start": "345280",
+    "end": "352120"
+  },
+  {
+    "text": "running at this point your request can't really just float out in the ether and not go somewhere something has to handle",
+    "start": "352120",
+    "end": "357550"
+  },
+  {
+    "text": "that request and hold on to it while we spin up a pod or your application to serve it",
+    "start": "357550",
+    "end": "362710"
+  },
+  {
+    "text": "that's the activators job from there the activator knows it got a request for",
+    "start": "362710",
+    "end": "369130"
+  },
+  {
+    "text": "your application it pokes what's called our autoscaler which as the name implies is responsible for controlling the size",
+    "start": "369130",
+    "end": "374620"
+  },
+  {
+    "text": "of your deployment the autoscaler says oh I have a request in I need to set at least a scale of one it creates that",
+    "start": "374620",
+    "end": "381280"
+  },
+  {
+    "text": "initial application the autoscaler does this by talking to kubernetes and it's",
+    "start": "381280",
+    "end": "386349"
+  },
+  {
+    "text": "literally sets the replicas count on a deployment to one which goes and creates a pod which goes and populates an",
+    "start": "386349",
+    "end": "392740"
+  },
+  {
+    "text": "endpoint eventually at the end of this the activator notices this and says ok I",
+    "start": "392740",
+    "end": "397840"
+  },
+  {
+    "text": "can now forward the request on application and does so it's about a",
+    "start": "397840",
+    "end": "402970"
+  },
+  {
+    "text": "four so it's a roughly four step process it's not terribly complicated but the end result is activator sees your",
+    "start": "402970",
+    "end": "407980"
+  },
+  {
+    "text": "application start the request gets forwarded through and as I stated before",
+    "start": "407980",
+    "end": "414040"
+  },
+  {
+    "start": "411000",
+    "end": "411000"
+  },
+  {
+    "text": "then we have about this five to seven second cold start time base the first",
+    "start": "414040",
+    "end": "420040"
+  },
+  {
+    "text": "question is well where where is that time getting spent obviously so one of the nice things were able to do in",
+    "start": "420040",
+    "end": "425050"
+  },
+  {
+    "text": "kubernetes is build off of ISTE oh the idea being that then we get its observability characteristics for free",
+    "start": "425050",
+    "end": "430210"
+  },
+  {
+    "text": "so I've highlighted in green here the request path of a request coming in externally and so it goes as I mentioned",
+    "start": "430210",
+    "end": "437830"
+  },
+  {
+    "text": "to the activator which then forwards it to your application sto should be giving us tracing spans for those things immediately and we can",
+    "start": "437830",
+    "end": "443230"
+  },
+  {
+    "text": "see if anything odd is up and that's what this is you're gonna be seeing a",
+    "start": "443230",
+    "end": "448930"
+  },
+  {
+    "text": "lot of these chases throughout this talk because this is really the main debugging tool we've been using to figure out where time is spent and see",
+    "start": "448930",
+    "end": "455140"
+  },
+  {
+    "text": "our improvements if you're not familiar with this interface this is a Zipkin UI",
+    "start": "455140",
+    "end": "460210"
+  },
+  {
+    "text": "and essentially these are just spans tracing spans around different operations that occurred what I've lit",
+    "start": "460210",
+    "end": "466690"
+  },
+  {
+    "text": "the top span which is that that blue line you're seeing is the activator wet",
+    "start": "466690",
+    "end": "472210"
+  },
+  {
+    "text": "so when the request comes in to the activator that span begins and when that activator responds closes the span and",
+    "start": "472210",
+    "end": "477610"
+  },
+  {
+    "text": "I've labeled at the beginning that's the request initially be coming in and then we see a whole lot of nothing",
+    "start": "477610",
+    "end": "483460"
+  },
+  {
+    "text": "essentially until we get endpoint ready and that's when our activator begins trying to send a request to the user application and fairly shortly",
+    "start": "483460",
+    "end": "490479"
+  },
+  {
+    "text": "afterwards you see that the request was served so we got some information here but to be perfectly honest you know it's",
+    "start": "490479",
+    "end": "497830"
+  },
+  {
+    "text": "not terribly useful we have this giant block in the middle of we're waiting on something before our endpoint becomes",
+    "start": "497830",
+    "end": "504070"
+  },
+  {
+    "text": "ready this is one of the major issues grant to initially even using Sto",
+    "start": "504070",
+    "end": "509760"
+  },
+  {
+    "text": "there's a lot of context missing the reason being as I mentioned our",
+    "start": "509760",
+    "end": "514930"
+  },
+  {
+    "text": "activator talks to an artist scaler which talks to kubernetes which manages a set of resources which then creates",
+    "start": "514930",
+    "end": "520960"
+  },
+  {
+    "text": "our user application those things aren't tied with the request lifecycle right you know our activator talking out",
+    "start": "520960",
+    "end": "527080"
+  },
+  {
+    "text": "autoscaler is not necessarily one-to-one with the request we could have multiple requests come in and what to create want to scale up a",
+    "start": "527080",
+    "end": "533580"
+  },
+  {
+    "text": "pod to one initially sim with kubernetes resources there's no really notion of a pod is tied to this initial request that",
+    "start": "533580",
+    "end": "540420"
+  },
+  {
+    "text": "came in there's no way sto can know about that and it's a bit of a problem because there's not it's not a great solution",
+    "start": "540420",
+    "end": "547649"
+  },
+  {
+    "text": "with this problem I guess I would say well but what we've done for now at least is we've set up a set of informers",
+    "start": "547649",
+    "end": "554640"
+  },
+  {
+    "text": "inside of our activator which watches these kubernetes resources so we sort of essentially application-level spans that",
+    "start": "554640",
+    "end": "560970"
+  },
+  {
+    "text": "watch the various kubernetes resources we know we're gonna get created as part of this cold start it's an example being",
+    "start": "560970",
+    "end": "567930"
+  },
+  {
+    "text": "maybe have a hello world application we know we're gonna create a hello world pod with certain labels on it so we set",
+    "start": "567930",
+    "end": "573690"
+  },
+  {
+    "text": "up informers to watch for those and then we have a state machine watching you know here's when the pod started here's when it's running here's when it became",
+    "start": "573690",
+    "end": "580230"
+  },
+  {
+    "text": "ready hopefully this you know gives us all is telling us a story about what's going on behind the scenes when this activating",
+    "start": "580230",
+    "end": "586800"
+  },
+  {
+    "text": "request comes in and as mentioned on the slide here I I really wish I had a",
+    "start": "586800",
+    "end": "592140"
+  },
+  {
+    "text": "better solution for this one of the issues being as I'm describing it's a state machine that we've made that's why",
+    "start": "592140",
+    "end": "598620"
+  },
+  {
+    "text": "tracking resources and trying to map them to requests it's not a one-to-one mapping it's fairly fragile and not",
+    "start": "598620",
+    "end": "604709"
+  },
+  {
+    "text": "crates of this is a there's a better pattern for this I love please come talk to me I'd love to hear about it so doing",
+    "start": "604709",
+    "end": "613950"
+  },
+  {
+    "text": "this though we're able to get a little bit more information most notably we have it we have a new span now it shows",
+    "start": "613950",
+    "end": "619080"
+  },
+  {
+    "text": "our pods running gives us basically seven seconds of our pod we're waiting for a pod from when it starts to when it",
+    "start": "619080",
+    "end": "625770"
+  },
+  {
+    "text": "goes ready that in the self is an earth-shattering we just know we're waiting on a pod but it's something",
+    "start": "625770",
+    "end": "631790"
+  },
+  {
+    "text": "fortunately we did a little bit more than that we also added tracing spans for our container life cycles as part of",
+    "start": "631790",
+    "end": "638339"
+  },
+  {
+    "text": "that so when each individual container in that pod goes from started to ready",
+    "start": "638339",
+    "end": "643350"
+  },
+  {
+    "text": "to running to ready and that's when things get interesting we're able to see",
+    "start": "643350",
+    "end": "649020"
+  },
+  {
+    "start": "647000",
+    "end": "647000"
+  },
+  {
+    "text": "right away that there's a four second container called misty Oh in it right in",
+    "start": "649020",
+    "end": "654720"
+  },
+  {
+    "text": "hindsight it's a little bit obvious when you if you know how its chair works one of the things that has to do is iptables",
+    "start": "654720",
+    "end": "660420"
+  },
+  {
+    "text": "programming of your pod as it starts up so it can reroute all up on traffic through its proxy well in it containers",
+    "start": "660420",
+    "end": "668350"
+  },
+  {
+    "text": "it does let's find it in a container that runs some iptables programming rules and it containers by definition",
+    "start": "668350",
+    "end": "673900"
+  },
+  {
+    "text": "run before your containers of your pods start so just off the bat this means",
+    "start": "673900",
+    "end": "679360"
+  },
+  {
+    "text": "they have to happen in sequence and there's always a base startup cost with an operation like starting container it",
+    "start": "679360",
+    "end": "685000"
+  },
+  {
+    "text": "in my experience it's roughly two seconds depending on container back-end and performance but you're paying that",
+    "start": "685000",
+    "end": "690640"
+  },
+  {
+    "text": "startup cost twice now all of a sudden all right so you've doubled the the pod startup time essentially simply by using",
+    "start": "690640",
+    "end": "696790"
+  },
+  {
+    "text": "this in a container that being said it's not necessarily an is-2 your problem but",
+    "start": "696790",
+    "end": "701800"
+  },
+  {
+    "text": "you this needs to get be gotten rid of if we can't run in it with an in a container if you're looking for some",
+    "start": "701800",
+    "end": "707110"
+  },
+  {
+    "text": "second pod startup time so fortunately",
+    "start": "707110",
+    "end": "712270"
+  },
+  {
+    "text": "Candida doesn't necessarily hard depend on Sto at least everywhere we can just simply run without these these sidecar",
+    "start": "712270",
+    "end": "718660"
+  },
+  {
+    "text": "on users applications it still use it elsewhere but also for folks who are very fitting using it there's some",
+    "start": "718660",
+    "end": "725350"
+  },
+  {
+    "text": "alternatives specifically there's a CNI adapter that is tier supports it's a little bit out of the scope of this talk",
+    "start": "725350",
+    "end": "731560"
+  },
+  {
+    "text": "but thank there's a talk fairly shortly afterwards called sto on K native where they talk about this a bit but at the",
+    "start": "731560",
+    "end": "738370"
+  },
+  {
+    "text": "end result being we have to get rid of this this in a container and in doing so",
+    "start": "738370",
+    "end": "743560"
+  },
+  {
+    "start": "743000",
+    "end": "743000"
+  },
+  {
+    "text": "things open up a lot more right you start to see now it's pod so our time is",
+    "start": "743560",
+    "end": "749350"
+  },
+  {
+    "text": "about 3.2 seconds in this new trace after we've removed this in a container so we've halved it right there that's a",
+    "start": "749350",
+    "end": "755650"
+  },
+  {
+    "text": "significant low hanging fruit improvement and but we there's also an",
+    "start": "755650",
+    "end": "762190"
+  },
+  {
+    "text": "additional gap we're starting to notice what's going on here is the overall startup time has decreased significantly",
+    "start": "762190",
+    "end": "767770"
+  },
+  {
+    "start": "763000",
+    "end": "763000"
+  },
+  {
+    "text": "like I said we have our pod startup time which has scaled everything out and now we notice that before our pod starts",
+    "start": "767770",
+    "end": "773950"
+  },
+  {
+    "text": "there's this large time gap that I've circled here and it's not really clear what it is it turns out that having this",
+    "start": "773950",
+    "end": "781630"
+  },
+  {
+    "text": "level of observability is great for finding regressions in your application and it turns out we had redesigns how we",
+    "start": "781630",
+    "end": "787030"
+  },
+  {
+    "text": "are out of scaler and our activator work a little bit and specifically the stats components and we're driving it by",
+    "start": "787030",
+    "end": "792880"
+  },
+  {
+    "text": "pulling loops that take one to two seconds each which is a three-second delay before even attempt to startup a pod so there",
+    "start": "792880",
+    "end": "799730"
+  },
+  {
+    "text": "you go like I guess the the key thing keep coming back to is that observer ability and metrics are great for a",
+    "start": "799730",
+    "end": "806420"
+  },
+  {
+    "text": "reason that mapping out of the way those two low hanging pieces of fruit being",
+    "start": "806420",
+    "end": "813020"
+  },
+  {
+    "start": "808000",
+    "end": "808000"
+  },
+  {
+    "text": "fixed you get a much better i we're starting to look a little lot better here we see now pod swipe time in this",
+    "start": "813020",
+    "end": "820490"
+  },
+  {
+    "text": "graph is two seconds that's because there's some variance in it due to several components but overall startup",
+    "start": "820490",
+    "end": "826100"
+  },
+  {
+    "text": "time is now at two two and a half second window so it's a long shot from our Reba game and more than that the low-hanging",
+    "start": "826100",
+    "end": "833600"
+  },
+  {
+    "text": "fruit seems to mostly be gone here what we're seeing is a pod most of the things that we're waiting on is are there two",
+    "start": "833600",
+    "end": "839450"
+  },
+  {
+    "text": "container starting up pod creation time takes most of the of our blocking time and our request time at the end takes a",
+    "start": "839450",
+    "end": "845300"
+  },
+  {
+    "text": "little bit so we're gonna have to dig a little bit further to figure out some",
+    "start": "845300",
+    "end": "851150"
+  },
+  {
+    "start": "848000",
+    "end": "848000"
+  },
+  {
+    "text": "ways we can potentially optimize this a bit more one thing you don't see here is we actually added additional metadata",
+    "start": "851150",
+    "end": "857390"
+  },
+  {
+    "text": "teeth each of these traces so I've described we have a state machine recording when each of the containers",
+    "start": "857390",
+    "end": "863690"
+  },
+  {
+    "text": "and a pod go right starting running and ready and you can think of these phases as started is when essentially the CRI",
+    "start": "863690",
+    "end": "871160"
+  },
+  {
+    "text": "SaneBox create call happens so that's you said create a pod it's trying to",
+    "start": "871160",
+    "end": "876200"
+  },
+  {
+    "text": "create the environment in which to run that pod running is essentially when the CRI container run it's called so it's",
+    "start": "876200",
+    "end": "882470"
+  },
+  {
+    "text": "we've exact your program and we're it's starting to run and then ready is dependent on Cooper attendees readiness",
+    "start": "882470",
+    "end": "888440"
+  },
+  {
+    "text": "probes if you have them defined so it's whenever your application reports that it's healthy and you can't see them in",
+    "start": "888440",
+    "end": "895100"
+  },
+  {
+    "text": "these traces so I've labeled them for you we actually have it as part of our zip in trace metadata and one thing we",
+    "start": "895100",
+    "end": "902270"
+  },
+  {
+    "text": "notice when you look at this is that the application under test here is just a",
+    "start": "902270",
+    "end": "907280"
+  },
+  {
+    "text": "hello world go you know it's a it's a hello world go binary that opens up port 8080 in returns hello world go it really",
+    "start": "907280",
+    "end": "913490"
+  },
+  {
+    "text": "has no business taking a second to start up and the end result of that is cout",
+    "start": "913490",
+    "end": "920930"
+  },
+  {
+    "text": "and we found that kubernetes readiness probes have a minimum granularity of about a second that's just the value",
+    "start": "920930",
+    "end": "927830"
+  },
+  {
+    "text": "used to the various probes or a second you can't really you can't or second base you can't get smaller than that so it's sort",
+    "start": "927830",
+    "end": "935420"
+  },
+  {
+    "text": "of a hard stop and we have to get clever here okay so we came up with this trick",
+    "start": "935420",
+    "end": "940880"
+  },
+  {
+    "start": "939000",
+    "end": "939000"
+  },
+  {
+    "text": "what we're doing it's long pulling of these readiness probes essentially so if",
+    "start": "940880",
+    "end": "946220"
+  },
+  {
+    "text": "you know bit about how can it works we have a separate container and everyone's application called the KU proxy it's",
+    "start": "946220",
+    "end": "952070"
+  },
+  {
+    "text": "just a it's our container where we can do kind of things essentially and what we do is we define a readiness probe",
+    "start": "952070",
+    "end": "958550"
+  },
+  {
+    "text": "from kubernetes into this cue proxy and we don't allow users to define readiness probes on their pod in fact what we do",
+    "start": "958550",
+    "end": "965000"
+  },
+  {
+    "text": "is we undefined them on a user's pod and we define them on the raid and perform those readiness probes from our own cute",
+    "start": "965000",
+    "end": "971480"
+  },
+  {
+    "text": "proxy the idea being is we can then control when a kubernetes readiness probe hits our cue proxy we're gonna",
+    "start": "971480",
+    "end": "977990"
+  },
+  {
+    "text": "leave that connection open we're not actually return unhealthy if it's unhealthy we're just gonna wait and then",
+    "start": "977990",
+    "end": "983420"
+  },
+  {
+    "text": "we're gonna pull extremely frequently on our user application so hopefully eventually if they use your application",
+    "start": "983420",
+    "end": "988970"
+  },
+  {
+    "text": "returns that it's healthy we can then immediately return back on that community readiness probe which performs essentially an edge trigger on",
+    "start": "988970",
+    "end": "996190"
+  },
+  {
+    "text": "to couplet that it should update the status of that pod and result being as",
+    "start": "996190",
+    "end": "1001570"
+  },
+  {
+    "text": "soon as our user app goes ready hopefully we can get a almost immediate ready status on our pod unfortunately",
+    "start": "1001570",
+    "end": "1010000"
+  },
+  {
+    "start": "1009000",
+    "end": "1009000"
+  },
+  {
+    "text": "after implementing this we still are seeing this one-second delay that's actually that trace I showed you before",
+    "start": "1010000",
+    "end": "1016029"
+  },
+  {
+    "text": "is from a code from a version of our code where we implemented this long polling and what we found out is that",
+    "start": "1016029",
+    "end": "1023429"
+  },
+  {
+    "text": "although although our solution works to an extent it's really only setting an upper bound of one second because",
+    "start": "1023429",
+    "end": "1029260"
+  },
+  {
+    "text": "couplet and are in our queue proxy code can race starting up so essentially our",
+    "start": "1029260",
+    "end": "1035709"
+  },
+  {
+    "text": "queue proxy can is not necessarily started by the time Kubla sends that first probe in and there's nothing we",
+    "start": "1035709",
+    "end": "1041530"
+  },
+  {
+    "text": "can do about that it's gonna get a TCP reset at that point and we have to wait the full second till the next probe",
+    "start": "1041530",
+    "end": "1047438"
+  },
+  {
+    "text": "comes in but still the reason I mentioned this is because for most applications sub-second startup isn't a",
+    "start": "1047439",
+    "end": "1053410"
+  },
+  {
+    "text": "thing but maybe you do want to have more accurate readiness probe response in this whole concept of long polling of",
+    "start": "1053410",
+    "end": "1060460"
+  },
+  {
+    "text": "readiness probe is a fair neat trick I think to get accurate transition times for when your pods get",
+    "start": "1060460",
+    "end": "1066830"
+  },
+  {
+    "text": "ready similarly we as a plan to mitigate this you can do over to an exact probe it so",
+    "start": "1066830",
+    "end": "1073850"
+  },
+  {
+    "text": "I have a network probe which in theory doesn't have this problem because the execs aren't waiting on the socket to become available but that still work to",
+    "start": "1073850",
+    "end": "1080720"
+  },
+  {
+    "text": "be done so let's step back a bit here",
+    "start": "1080720",
+    "end": "1085760"
+  },
+  {
+    "start": "1083000",
+    "end": "1083000"
+  },
+  {
+    "text": "and side table that and say look we got upper bound of a second on readiness",
+    "start": "1085760",
+    "end": "1091460"
+  },
+  {
+    "text": "probe and maybe there's not a whole lot we can do there off the shelf but let's soak on the side here we also have this data plane delay that's going on and if",
+    "start": "1091460",
+    "end": "1100100"
+  },
+  {
+    "text": "you notice a little bit or if you notice what's happening is it we have to send our traffic to our pod after it's become",
+    "start": "1100100",
+    "end": "1105620"
+  },
+  {
+    "text": "ready and say we're talking to a kubernetes service for example that",
+    "start": "1105620",
+    "end": "1110990"
+  },
+  {
+    "text": "granny's service like the cluster IP isn't able to route traffic to its backing pods until the pod becomes ready",
+    "start": "1110990",
+    "end": "1117290"
+  },
+  {
+    "text": "that's the only time when an endpoint gets populated so even if we did some clever trick to hack around readiness",
+    "start": "1117290",
+    "end": "1123260"
+  },
+  {
+    "text": "we'd still be blocked on this right like we're not be able to talk to our pods directly so well we might have to talk",
+    "start": "1123260",
+    "end": "1129290"
+  },
+  {
+    "text": "to our positively if you want to get around that so if you step back a little bit you can take this holistic view and",
+    "start": "1129290",
+    "end": "1134840"
+  },
+  {
+    "start": "1134000",
+    "end": "1134000"
+  },
+  {
+    "text": "realize that there's this concept of not ready it addresses that pipettor and endpoints so to clean all the detail",
+    "start": "1134840",
+    "end": "1142210"
+  },
+  {
+    "text": "commands endpoints work and services you have a service which you know generally",
+    "start": "1142210",
+    "end": "1147320"
+  },
+  {
+    "text": "map to something like a deployment and more completely a set of pods that that service came out of traffic to the only",
+    "start": "1147320",
+    "end": "1154970"
+  },
+  {
+    "text": "about traffic to those things when they're ready that's the whole point you know we're not going to send traffic to pods that aren't ready yet under normal",
+    "start": "1154970",
+    "end": "1160250"
+  },
+  {
+    "text": "conditions well in addition to that these endpoint objects which hold this set of addresses also have a block",
+    "start": "1160250",
+    "end": "1167030"
+  },
+  {
+    "text": "called not ready addresses which are very useful for us because they are as the name says there's set of pods that",
+    "start": "1167030",
+    "end": "1172760"
+  },
+  {
+    "text": "are not yet ready but it's the networking information for them if you did want to talk to them so what we can",
+    "start": "1172760",
+    "end": "1178910"
+  },
+  {
+    "text": "do is watch this because in activator as I mentioned early on we're watching the",
+    "start": "1178910",
+    "end": "1183980"
+  },
+  {
+    "text": "endpoint object to know when a pod becomes ready already so we can watch that and say oh if there's a not ready",
+    "start": "1183980",
+    "end": "1190400"
+  },
+  {
+    "text": "address and there's no ready addresses for the send point go ahead and send traffic do those not ready addresses or at least",
+    "start": "1190400",
+    "end": "1196580"
+  },
+  {
+    "text": "attempt to perform our own probing essentially for when that pod becomes ready and just bypass readiness all",
+    "start": "1196580",
+    "end": "1201950"
+  },
+  {
+    "text": "together from a community standpoint says the nice part of it it fixes this",
+    "start": "1201950",
+    "end": "1207289"
+  },
+  {
+    "text": "minor data plane delay that we were seeing before it also completely bypasses readiness in kubernetes some",
+    "start": "1207289",
+    "end": "1216320"
+  },
+  {
+    "text": "downsides to this approach though end up being that we're doing our own load balancing at that point right you know we're an activator deciding hey here's a",
+    "start": "1216320",
+    "end": "1223340"
+  },
+  {
+    "text": "set of IP addresses we can talk to that logic ends up having to live in our activator if you go with this one upside",
+    "start": "1223340",
+    "end": "1230960"
+  },
+  {
+    "text": "though what or way to mitigate that problem we're only watching for not ready addresses as soon as we see it a",
+    "start": "1230960",
+    "end": "1236269"
+  },
+  {
+    "text": "service become ready what we can do is always send traffic there and do normal load balancing and so basically we're",
+    "start": "1236269",
+    "end": "1242240"
+  },
+  {
+    "text": "limiting this to the cold start case which is essentially a load balancing with the backend size of one and very",
+    "start": "1242240",
+    "end": "1247730"
+  },
+  {
+    "text": "simple algorithm and the only bigger issue is that mesh networking poses a",
+    "start": "1247730",
+    "end": "1253490"
+  },
+  {
+    "text": "big problem here for trying to directly grab the pod IPS because we know how say it steel works or any of these mesh",
+    "start": "1253490",
+    "end": "1259610"
+  },
+  {
+    "text": "networking technologies generally they firewall off the application and make sure that you're going through the client side low power load balancing to",
+    "start": "1259610",
+    "end": "1266090"
+  },
+  {
+    "text": "do things like MPLS that doesn't work if the pods you're talking to are not yet ready because your client side low",
+    "start": "1266090",
+    "end": "1272809"
+  },
+  {
+    "text": "balancing algorithm will not allow you to talk to them at that point so we have two special case that but that being",
+    "start": "1272809",
+    "end": "1280399"
+  },
+  {
+    "start": "1279000",
+    "end": "1279000"
+  },
+  {
+    "text": "said they this isn't not yet merged code yet but I was able to hack together a prototype of this working and what we can see is we're able to get request",
+    "start": "1280399",
+    "end": "1287450"
+  },
+  {
+    "text": "responses that actually happened before our pod becomes ready so we're able to get a response from a not ready pod and",
+    "start": "1287450",
+    "end": "1293419"
+  },
+  {
+    "text": "also bypass data plane delay entirely first you ends up being a pretty neat hack if you can get this working and in",
+    "start": "1293419",
+    "end": "1301340"
+  },
+  {
+    "text": "addition to the small time savings what's really nice here is that any type of data plane delay that happens at scale so say like you're running our",
+    "start": "1301340",
+    "end": "1307820"
+  },
+  {
+    "text": "largest tier clusters which may take pod we may take longer to configure on pod startup that is bypassed entirely with",
+    "start": "1307820",
+    "end": "1314840"
+  },
+  {
+    "text": "this approach roughly this is where we're at today the most of the",
+    "start": "1314840",
+    "end": "1321559"
+  },
+  {
+    "text": "low-hanging fruit has gone out and we're at it we're at about two seconds of cold start time and there's some unmerged",
+    "start": "1321559",
+    "end": "1326630"
+  },
+  {
+    "text": "code and there's still some to do this is especially where we've hit the wall of now we need to start looking to",
+    "start": "1326630",
+    "end": "1331990"
+  },
+  {
+    "text": "more difficult things such as cupola cupola performance enhancements which we've begun doing it's a slight pitch",
+    "start": "1331990",
+    "end": "1340330"
+  },
+  {
+    "text": "for help upstream there but that being",
+    "start": "1340330",
+    "end": "1346600"
+  },
+  {
+    "text": "said we also have a slightly unrelated thing that's not it's not going to affect our two-second cold start",
+    "start": "1346600",
+    "end": "1352480"
+  },
+  {
+    "text": "performance out of the box but if you've used K native at scale which not many have one thing you end up noticing is",
+    "start": "1352480",
+    "end": "1358510"
+  },
+  {
+    "text": "that kubernetes control plane performance ends up being highly variable at scale ank this was mentioned",
+    "start": "1358510",
+    "end": "1364660"
+  },
+  {
+    "text": "in the previous talk as well about uh solos we need the SL O's are dictated about a cluster not necessarily being",
+    "start": "1364660",
+    "end": "1370540"
+  },
+  {
+    "text": "under high load when when your crew Bay's cluster becomes that our high load the control plane before latency",
+    "start": "1370540",
+    "end": "1376180"
+  },
+  {
+    "text": "specifically is highly variable and what I'm showing on this slide over here is",
+    "start": "1376180",
+    "end": "1382090"
+  },
+  {
+    "text": "on the left this is the time before we see a pod start creating so what I did here is I just doing ten cold starts at",
+    "start": "1382090",
+    "end": "1388510"
+  },
+  {
+    "text": "parallel which is a fairly small number and we already see about a second with the cold start second time before the",
+    "start": "1388510",
+    "end": "1394000"
+  },
+  {
+    "text": "coup based control plane begins starting a pod as that number grams up that becomes significant so I've mentioned",
+    "start": "1394000",
+    "end": "1401800"
+  },
+  {
+    "start": "1401000",
+    "end": "1401000"
+  },
+  {
+    "text": "the the crew base control plane performance it takes out is highly variable and more importantly many of",
+    "start": "1401800",
+    "end": "1408070"
+  },
+  {
+    "text": "the components such as the replication controller deployment controller things of that things like that are not easy to",
+    "start": "1408070",
+    "end": "1413440"
+  },
+  {
+    "text": "really scale out you know you can do H a and things like that but running multi master that is not a thing that they",
+    "start": "1413440",
+    "end": "1419920"
+  },
+  {
+    "text": "were really designed to do and it's sort of a inherent design flaw I would almost",
+    "start": "1419920",
+    "end": "1427300"
+  },
+  {
+    "text": "say of this reconciler pattern in event it's not so much a flaw is a trade-off that would decision that was made for",
+    "start": "1427300",
+    "end": "1433900"
+  },
+  {
+    "text": "consistency over over latency it gets you reasonable throughput we were things like batch processing but latency isn't",
+    "start": "1433900",
+    "end": "1440890"
+  },
+  {
+    "text": "one of the upsides of this design and so we're looking at doing next and we've",
+    "start": "1440890",
+    "end": "1446020"
+  },
+  {
+    "text": "done a fair bit of design work on it's actually bypassing this humanities control plane the idea being we can run",
+    "start": "1446020",
+    "end": "1452710"
+  },
+  {
+    "text": "the the activator as a daemon set on kubernetes so when requests come in",
+    "start": "1452710",
+    "end": "1459700"
+  },
+  {
+    "text": "we'll be able to send them directly to activator on one of the nodes which can then do what's do local scheduling this",
+    "start": "1459700",
+    "end": "1467240"
+  },
+  {
+    "text": "is done because if you know how scheduling kubernetes works there's a node name that gets written into a pod",
+    "start": "1467240",
+    "end": "1473179"
+  },
+  {
+    "text": "and that's what tells a couplet to that I should start looking at that pod definition it's and run it locally well",
+    "start": "1473179",
+    "end": "1480440"
+  },
+  {
+    "text": "as a user you can just write a pod definition with that node name already populated which bypasses scheduling and",
+    "start": "1480440",
+    "end": "1486139"
+  },
+  {
+    "text": "kubernetes entirely so we're gonna do it or we're hoping to do is run activators as a dataset on every node locally",
+    "start": "1486139",
+    "end": "1493009"
+  },
+  {
+    "text": "scheduled pause so that same node when requests come in which bypasses most of the kubernetes control plan notably this",
+    "start": "1493009",
+    "end": "1499850"
+  },
+  {
+    "text": "doesn't bypass couplet so things like like sidecar injection admission",
+    "start": "1499850",
+    "end": "1507019"
+  },
+  {
+    "text": "controllers at several still work it also but the reason this ends up being",
+    "start": "1507019",
+    "end": "1512450"
+  },
+  {
+    "text": "okay is because couplet unlike most of the kubernetes control plan is chartered and scaled out by node essentially every",
+    "start": "1512450",
+    "end": "1519289"
+  },
+  {
+    "text": "couplet is only looking for keys with its own node name so it has very different scaling characteristics and",
+    "start": "1519289",
+    "end": "1524509"
+  },
+  {
+    "text": "the rest of the kubernetes control plane the end result being we can bypass this",
+    "start": "1524509",
+    "end": "1530059"
+  },
+  {
+    "text": "control plane variability for the most part and and we rely on that they put",
+    "start": "1530059",
+    "end": "1535100"
+  },
+  {
+    "text": "parts that do scale out one downside though is if you notice we're sending",
+    "start": "1535100",
+    "end": "1540470"
+  },
+  {
+    "text": "local scheduling to whatever requests come in that means if essentially a load",
+    "start": "1540470",
+    "end": "1545480"
+  },
+  {
+    "text": "balancer is responsible for making scheduling decisions of where a pause get placed and so we have some design",
+    "start": "1545480",
+    "end": "1550850"
+  },
+  {
+    "text": "that we've worked out but essentially you have to be able to give hints to your load balancer to say here are the",
+    "start": "1550850",
+    "end": "1556279"
+  },
+  {
+    "text": "places you need to you should schedule requests for this certain application if they come in ahead of time because your",
+    "start": "1556279",
+    "end": "1561860"
+  },
+  {
+    "text": "load balancer isn't really something you can generally put a whole scheduler into and hack up a complex scheduling logic",
+    "start": "1561860",
+    "end": "1567830"
+  },
+  {
+    "text": "for so you do ahead of time placement um",
+    "start": "1567830",
+    "end": "1572960"
+  },
+  {
+    "text": "it's unfortunately I don't have data on this we did a little bit of prototyping a while ago I'm just a very simple you",
+    "start": "1572960",
+    "end": "1578749"
+  },
+  {
+    "text": "know write activators and Damon said schedule a pod locally and the results were fairly promising but this is very",
+    "start": "1578749",
+    "end": "1584090"
+  },
+  {
+    "text": "forward-looking work and something that we're hoping to do over the next two cycles and K native so you have to stay",
+    "start": "1584090",
+    "end": "1590029"
+  },
+  {
+    "text": "tuned for that and then lastly I just want to give a",
+    "start": "1590029",
+    "end": "1595880"
+  },
+  {
+    "start": "1592000",
+    "end": "1592000"
+  },
+  {
+    "text": "pitch for coming and working with us there's a whole lot of work to be done and as I said I was hoping to kind of",
+    "start": "1595880",
+    "end": "1601429"
+  },
+  {
+    "text": "catalog over the different components of kn8 the different tricks that we've found over the past six months for how",
+    "start": "1601429",
+    "end": "1607610"
+  },
+  {
+    "text": "we can how we can work around some these base performance characteristics of kubernetes hopefully you all can use",
+    "start": "1607610",
+    "end": "1613340"
+  },
+  {
+    "text": "them in their applications that they're useful but if not please come help us out in this website up here key native",
+    "start": "1613340",
+    "end": "1619790"
+  },
+  {
+    "text": "that Deb is where you can find all of our contact information if you have comments or would like to join any",
+    "start": "1619790",
+    "end": "1626179"
+  },
+  {
+    "text": "questions and thanks [Applause]",
+    "start": "1626179",
+    "end": "1633840"
+  },
+  {
+    "text": "[Music]",
+    "start": "1633840",
+    "end": "1636970"
+  },
+  {
+    "text": "hey just real briefly what what are some",
+    "start": "1642880",
+    "end": "1648830"
+  },
+  {
+    "text": "of the performance work what is some of the performance work in couplet that you're looking for some of the",
+    "start": "1648830",
+    "end": "1654890"
+  },
+  {
+    "text": "performance what the performance improvements in couplet that you're looking for yeah what are the points of",
+    "start": "1654890",
+    "end": "1660130"
+  },
+  {
+    "text": "improvements in couplet we're looking for um so one of the things that I've done some initial analysis on what we",
+    "start": "1660130",
+    "end": "1666860"
+  },
+  {
+    "text": "can do with it and we've realized that actually contain 20 RI container run",
+    "start": "1666860",
+    "end": "1672020"
+  },
+  {
+    "text": "calls are made they actually happened in sequence not in parallel just as straight so like every one of those",
+    "start": "1672020",
+    "end": "1677390"
+  },
+  {
+    "text": "calls takes about 0.4 seconds depending on the backend and so the number of containers you have actually affects how",
+    "start": "1677390",
+    "end": "1683350"
+  },
+  {
+    "text": "long startup takes so that and that was sort of no-brainer another thing we've",
+    "start": "1683350",
+    "end": "1689930"
+  },
+  {
+    "text": "also noticed is that between CRI sandbox create and that this initial container",
+    "start": "1689930",
+    "end": "1696260"
+  },
+  {
+    "text": "run calls there's a very it seems like there must be some type of polling that's going on because and it makes",
+    "start": "1696260",
+    "end": "1702530"
+  },
+  {
+    "text": "sense when you look at the CRI API there's no way to say okay CRI sandbox created but the async process is about",
+    "start": "1702530",
+    "end": "1707690"
+  },
+  {
+    "text": "like when does IP actually get realized in that sandbox when does the V that actually get",
+    "start": "1707690",
+    "end": "1713120"
+  },
+  {
+    "text": "attached to the into the that that C group those there's no back reporting",
+    "start": "1713120",
+    "end": "1720590"
+  },
+  {
+    "text": "interface you just say hey they must create in your CRI Java goes okay cool I'm gonna do that at some point then I think couplet is some polls for status",
+    "start": "1720590",
+    "end": "1727880"
+  },
+  {
+    "text": "of that so some type of edge triggered API there would be very helpful in this",
+    "start": "1727880",
+    "end": "1740120"
+  },
+  {
+    "text": "work you assume that the notary is going to run the pod already download that the",
+    "start": "1740120",
+    "end": "1745760"
+  },
+  {
+    "text": "image right because that's another time that can be like very long yeah so the",
+    "start": "1745760",
+    "end": "1752450"
+  },
+  {
+    "text": "questions about whether or not images are cached from the node already when you go to store an application um we've built in a caching sort of cop out into",
+    "start": "1752450",
+    "end": "1760160"
+  },
+  {
+    "text": "a native where it's like a CRT saying like oh here's the images you want cache and then we assume somebody can write a controller that can say oh if this image",
+    "start": "1760160",
+    "end": "1767660"
+  },
+  {
+    "text": "is this cache CRD has this image populated you'll make force around every node for",
+    "start": "1767660",
+    "end": "1773150"
+  },
+  {
+    "text": "my testing I just you know manually push the images on there and bypass it but we saw just copped out said look if you",
+    "start": "1773150",
+    "end": "1778850"
+  },
+  {
+    "text": "want it you can write a controller for doing your own caching ever considered",
+    "start": "1778850",
+    "end": "1792169"
+  },
+  {
+    "text": "keeping some running pods and they're not activated because yes but they also",
+    "start": "1792169",
+    "end": "1798049"
+  },
+  {
+    "text": "help if like if your actual application starts up time is significant yeah the",
+    "start": "1798049",
+    "end": "1804650"
+  },
+  {
+    "text": "questions about whether like essentially don't don't cold start don't scale the zero right we found it's really user",
+    "start": "1804650",
+    "end": "1811789"
+  },
+  {
+    "text": "specific some users are all about those cost savings maybe they have a model",
+    "start": "1811789",
+    "end": "1817309"
+  },
+  {
+    "text": "where they have tons of applications that are rarely used and some people are definitely like yes give me that switch to never your cold start so we have the",
+    "start": "1817309",
+    "end": "1824419"
+  },
+  {
+    "text": "flag but it's definitely not a thing we can just say you don't ever do",
+    "start": "1824419",
+    "end": "1829929"
+  },
+  {
+    "text": "so it's pretty interesting bow how will it work when you scale up meaning like",
+    "start": "1839100",
+    "end": "1847080"
+  },
+  {
+    "text": "start the first pot and it's working but you're working around the local answer",
+    "start": "1847080",
+    "end": "1852419"
+  },
+  {
+    "text": "at least the service local answer how will you make that work when you scale",
+    "start": "1852419",
+    "end": "1858549"
+  },
+  {
+    "text": "up to multiple pots when you have lots of requests you're talking about with the with the Dayman set setup how would",
+    "start": "1858549",
+    "end": "1865690"
+  },
+  {
+    "text": "you do with lots of modes yeah or at least I mean with the direct request forwarding to sorry I couldn't like when",
+    "start": "1865690",
+    "end": "1873760"
+  },
+  {
+    "text": "you're you're doing direct requests forwarding this one this was the last",
+    "start": "1873760",
+    "end": "1884169"
+  },
+  {
+    "text": "one yeah the one before basically when you're directly forwarding the request",
+    "start": "1884169",
+    "end": "1890799"
+  },
+  {
+    "text": "to the pot instead of the service IP oh how will you scale up then scale up so",
+    "start": "1890799",
+    "end": "1900130"
+  },
+  {
+    "text": "the idea is the yarder scaler is still in control of how many pot pods are running it's setting the replica count",
+    "start": "1900130",
+    "end": "1906159"
+  },
+  {
+    "text": "on the deployments and yeah well the activator is doing is it's only it's two",
+    "start": "1906159",
+    "end": "1911169"
+  },
+  {
+    "text": "there's sort of two phases of that life cycle the activator is watching for whether there's any ready addresses in addition to not ready addresses and this",
+    "start": "1911169",
+    "end": "1918490"
+  },
+  {
+    "text": "is one of those it's going to go normally through the cluster IP because that should work and that kind of prevents us from getting this case of",
+    "start": "1918490",
+    "end": "1923710"
+  },
+  {
+    "text": "actually having to implement of real load balancer in the autoscaler or in the activator then the other component",
+    "start": "1923710",
+    "end": "1929260"
+  },
+  {
+    "text": "is when your application scales up we do ask your ingress controller to redirect traffic to the service rather than the",
+    "start": "1929260",
+    "end": "1935409"
+  },
+  {
+    "text": "activator at all so requests when your application are running are supposed to go directly to the pods themselves but",
+    "start": "1935409",
+    "end": "1942220"
+  },
+  {
+    "text": "there's always a little window there because that's an async process",
+    "start": "1942220",
+    "end": "1946590"
+  },
+  {
+    "text": "thank you for a talk I heard question I didn't get really do you did you write",
+    "start": "1950480",
+    "end": "1956450"
+  },
+  {
+    "text": "your own scheduler because community supports custom scheduler or you just",
+    "start": "1956450",
+    "end": "1963590"
+  },
+  {
+    "text": "bypass it at all just said not label ends is it yeah so we we've only prototype this the design",
+    "start": "1963590",
+    "end": "1971929"
+  },
+  {
+    "text": "we've caught so far is when you're essentially deferring the load bounced or introduced scheduling which is a",
+    "start": "1971929",
+    "end": "1978080"
+  },
+  {
+    "text": "horrible scheduling algorithm because but all it's doing is saying whatever wherever date whichever node the request",
+    "start": "1978080",
+    "end": "1984590"
+  },
+  {
+    "text": "comes into that is where the pot is gonna end up printing scheduled our plan is roughly to do so it's called sub",
+    "start": "1984590",
+    "end": "1990289"
+  },
+  {
+    "text": "setting so we're gonna ahead of time say look maybe these two nodes or these three nodes are or the only nodes I",
+    "start": "1990289",
+    "end": "1996409"
+  },
+  {
+    "text": "should serve requests for this application the idea being then you're not limit you're limiting the path of likely if",
+    "start": "1996409",
+    "end": "2001450"
+  },
+  {
+    "text": "comes into one node then the second request comes in your backup a cold start every single time it's just ahead",
+    "start": "2001450",
+    "end": "2007539"
+  },
+  {
+    "text": "of time placement essentially",
+    "start": "2007539",
+    "end": "2010888"
+  },
+  {
+    "text": "any other questions okay thank you",
+    "start": "2018249",
+    "end": "2027339"
+  },
+  {
+    "text": "[Applause]",
+    "start": "2029390",
+    "end": "2031890"
+  }
+]

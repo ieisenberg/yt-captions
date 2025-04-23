@@ -1,0 +1,1422 @@
+[
+  {
+    "text": "so I'm Adam Wolfe Gordon I'm a senior engineer at digitalocean where I work on our managed Korean ease product which is called digitalocean community service hi",
+    "start": "30",
+    "end": "6870"
+  },
+  {
+    "text": "I'm Basha during my internship so we're",
+    "start": "6870",
+    "end": "17789"
+  },
+  {
+    "text": "gonna talk a bit today about how cluster Linnet works how we built it and how we've integrated it in our product but I",
+    "start": "17789",
+    "end": "24180"
+  },
+  {
+    "text": "want to start with why we wanted to build this tool and that story starts with something that a lot of you",
+    "start": "24180",
+    "end": "30240"
+  },
+  {
+    "text": "probably know which is like kubernetes is super flexible I Brian kind of touched on this in his keynote this morning actually that it's a very",
+    "start": "30240",
+    "end": "36899"
+  },
+  {
+    "text": "flexible tool this is one of the reasons why he mentioned kubernetes complex it's also one of the reasons why kubernetes",
+    "start": "36899",
+    "end": "42600"
+  },
+  {
+    "text": "has become very popular it can suit a lot of different use cases and it's flexible in a number of different ways",
+    "start": "42600",
+    "end": "48120"
+  },
+  {
+    "text": "it's flexible in that it can run pretty much anywhere you can run it on premise on hardware or on VMs you can run it in",
+    "start": "48120",
+    "end": "55260"
+  },
+  {
+    "text": "the cloud but run your own cluster so create a bunch of instances turn them into a cluster you can also use one of",
+    "start": "55260",
+    "end": "60989"
+  },
+  {
+    "text": "the many managed kubernetes offerings like our offering to UK s or UK s or GT",
+    "start": "60989",
+    "end": "66090"
+  },
+  {
+    "text": "there's a lot of them out there and you can configure kubernetes in a lot of different ways you can use different Network overlays which you're going to",
+    "start": "66090",
+    "end": "72060"
+  },
+  {
+    "text": "have deep effects on how your networking works you can use different storage drivers which are going to affect how",
+    "start": "72060",
+    "end": "77670"
+  },
+  {
+    "text": "your persistent storage works you can use different container runtimes like docker container D or G visor and beyond",
+    "start": "77670",
+    "end": "84720"
+  },
+  {
+    "text": "that there's all kinds of different ways to deploy your applications to Cooper Nettie's there's tools like helm that can help you with that other tools and",
+    "start": "84720",
+    "end": "91640"
+  },
+  {
+    "text": "depending on how you configure your kubernetes cluster and how you're using it you're gonna choose different",
+    "start": "91640",
+    "end": "97170"
+  },
+  {
+    "text": "processes for doing maintenance and things like upgrades and if you're using a managed offering like ours you don't",
+    "start": "97170",
+    "end": "102750"
+  },
+  {
+    "text": "really get to choose how you do maintenance and upgrades on your cluster because we take care of that for you what this all adds up to is that there's",
+    "start": "102750",
+    "end": "110939"
+  },
+  {
+    "text": "a lot of ways to get things wrong in kubernetes and if you get things wrong you're gonna have been expected downtime",
+    "start": "110939",
+    "end": "116009"
+  },
+  {
+    "text": "for your application and it's also hard to define best practices and sort of say if you do this you'll be fine because",
+    "start": "116009",
+    "end": "122369"
+  },
+  {
+    "text": "depending on your environment depending on your configuration that might or may not be true there's kind of different things you need to set up depending on",
+    "start": "122369",
+    "end": "128700"
+  },
+  {
+    "text": "your environment to keep your application safe so just to give a quick sort of",
+    "start": "128700",
+    "end": "133790"
+  },
+  {
+    "text": "motivating example this is what I do chaos cluster looks like in the abstract I we build our clusters out of virtual",
+    "start": "133790",
+    "end": "140570"
+  },
+  {
+    "text": "machines which we call droplets and you have a control plane which we run and then you have a bunch of worker nodes",
+    "start": "140570",
+    "end": "146300"
+  },
+  {
+    "text": "that run your workload and we've decided that nodes in do KS are essentially immutable this kind of fits with the",
+    "start": "146300",
+    "end": "152540"
+  },
+  {
+    "text": "kubernetes philosophy of livestock not pets so we provision these nodes automatically for you and once they're",
+    "start": "152540",
+    "end": "157880"
+  },
+  {
+    "text": "provision we don't really touch them manually we're not gonna go in and modify them so if something goes wrong",
+    "start": "157880",
+    "end": "163190"
+  },
+  {
+    "text": "with one of your worker nodes and it becomes unhealthy I we're not gonna SSH in and fix it because we don't have as a",
+    "start": "163190",
+    "end": "168560"
+  },
+  {
+    "text": "sage access to it we're not gonna try and fix it we're gonna recommend that you just hit the replace button it's",
+    "start": "168560",
+    "end": "173900"
+  },
+  {
+    "text": "gonna go away and you're gonna get a brand new node and we do upgrades in the same way so if you want to upgrade to",
+    "start": "173900",
+    "end": "179150"
+  },
+  {
+    "text": "this new teal version of kubernetes we're gonna replace your control plane with a new teal control plane and then",
+    "start": "179150",
+    "end": "184910"
+  },
+  {
+    "text": "we're going to replace all of your mouths all of your worker nodes one by one with a new teal worker node now what",
+    "start": "184910",
+    "end": "190940"
+  },
+  {
+    "text": "this means is that at the end of an upgrade you have an entirely new set of nodes that are unrelated to the nodes",
+    "start": "190940",
+    "end": "196130"
+  },
+  {
+    "text": "that came before them other than that they're running the same workloads they're part of the same cluster so obviously this has like a pretty deep",
+    "start": "196130",
+    "end": "201890"
+  },
+  {
+    "text": "impact on your workloads so when customers started using do KS and started doing upgrades on TAS they",
+    "start": "201890",
+    "end": "208310"
+  },
+  {
+    "text": "noticed some of these implications one of the things they noticed is that the node names aren't stable because we",
+    "start": "208310",
+    "end": "213860"
+  },
+  {
+    "text": "actually replace the nodes the know the new node is a new kubernetes object it has a different name than the old one so",
+    "start": "213860",
+    "end": "220220"
+  },
+  {
+    "text": "if you were using a node name specifier to schedule your workloads onto a specific node that node that workload is",
+    "start": "220220",
+    "end": "226580"
+  },
+  {
+    "text": "not going to be schedulable after the upgrade same with any custom labels that you said we don't persist those so if",
+    "start": "226580",
+    "end": "233000"
+  },
+  {
+    "text": "you're using labels to schedule workloads onto a specific set of nodes you're gonna have problems after an upgrade we do provide a node pool",
+    "start": "233000",
+    "end": "239540"
+  },
+  {
+    "text": "concept with the label so you can schedule though a schedule we're close to a specific set of nodes or a specific node but you just can't use your own",
+    "start": "239540",
+    "end": "245959"
+  },
+  {
+    "text": "custom labels for that at this point likewise IP address has changed because these are new nodes again I so if you're",
+    "start": "245959",
+    "end": "252920"
+  },
+  {
+    "text": "pointing something it directly at a at a node IP I you're gonna have a problem we recommend people use our matters build",
+    "start": "252920",
+    "end": "258560"
+  },
+  {
+    "text": "balancers for that and your file systems aren't persistent I anything that's on the local disk of the node is gonna be",
+    "start": "258560",
+    "end": "264280"
+  },
+  {
+    "text": "after every so we recommend that people use our block storage volumes if they want persistent storage we documented",
+    "start": "264280",
+    "end": "271180"
+  },
+  {
+    "text": "all of these things but not everyone's gonna read the docs all the time when they're deploying things and in particular people are going to deploy",
+    "start": "271180",
+    "end": "276610"
+  },
+  {
+    "text": "things the way they've deployed them before in different environments on different providers they're gonna use tools like helm that are generic and",
+    "start": "276610",
+    "end": "282880"
+  },
+  {
+    "text": "don't know about the sort of subtleties of the environment that you're running in so what we wanted was to",
+    "start": "282880",
+    "end": "288310"
+  },
+  {
+    "text": "automatically warn our customers if they had workloads that were configured in a way that we thought was going to cause problems because we didn't want someone",
+    "start": "288310",
+    "end": "295030"
+  },
+  {
+    "text": "to do an upgrade and then discover that all of their workloads were down and have to file a support ticket and wait for us to get to it",
+    "start": "295030",
+    "end": "300370"
+  },
+  {
+    "text": "we wanted to proactively warn them make sure that they understood what was gonna happen given the opportunity to fix things before men replaced all their",
+    "start": "300370",
+    "end": "306640"
+  },
+  {
+    "text": "notes so when Varsha started her summer internship this past summer with us this is the problem that we gave her we said",
+    "start": "306640",
+    "end": "312460"
+  },
+  {
+    "text": "we want to build this tool that will check those practices for workloads we want to integrate it into our product and use it to our customers so I'm gonna",
+    "start": "312460",
+    "end": "320200"
+  },
+  {
+    "text": "turn things over now the best practices",
+    "start": "320200",
+    "end": "337270"
+  },
+  {
+    "text": "that we check for can be specific to the platform the cluster is hosted on are generally applicable irrespective of",
+    "start": "337270",
+    "end": "344289"
+  },
+  {
+    "text": "where your cluster is posted it's a non-invasive tool which means that the",
+    "start": "344289",
+    "end": "349300"
+  },
+  {
+    "text": "class the checks that we run our run externally by accessing the objects via",
+    "start": "349300",
+    "end": "354640"
+  },
+  {
+    "text": "the kubernetes api based on our experience with do KS we had three",
+    "start": "354640",
+    "end": "360250"
+  },
+  {
+    "text": "specific goals in mind before we started building it which we didn't find was satisfied in any of the existing tools",
+    "start": "360250",
+    "end": "366960"
+  },
+  {
+    "text": "first we wanted to run the checks against a live cluster and I don't object manifests because actual",
+    "start": "366960",
+    "end": "374050"
+  },
+  {
+    "text": "workloads can sometimes differ from your object manifests hopefully you have a CI",
+    "start": "374050",
+    "end": "379720"
+  },
+  {
+    "text": "pipeline and place to deploy the object manifests to your cluster so that that's not the case but we wanted the cluster",
+    "start": "379720",
+    "end": "386530"
+  },
+  {
+    "text": "operators to identify issues in one place and then go fix their configurations later on and because we",
+    "start": "386530",
+    "end": "393669"
+  },
+  {
+    "text": "wanted to run this on Bo KS we cluster and not the object manifests we",
+    "start": "393669",
+    "end": "400509"
+  },
+  {
+    "text": "also wanted to run some platform specific checks as Adam mentioned there are some implications for workloads in",
+    "start": "400509",
+    "end": "406479"
+  },
+  {
+    "text": "the cluster which means that there will be issues occurring in your cluster based on which platform you use we",
+    "start": "406479",
+    "end": "414400"
+  },
+  {
+    "text": "wanted to run platform specific checks for those issues and because we wanted to run this tool on behalf of customers",
+    "start": "414400",
+    "end": "420759"
+  },
+  {
+    "text": "on do Kias we wanted a static library of checks and an API to interact with and",
+    "start": "420759",
+    "end": "426250"
+  },
+  {
+    "text": "not just the command line so with these goals in mind we started building",
+    "start": "426250",
+    "end": "431529"
+  },
+  {
+    "text": "cluster lint how bustling operates it is quite simple first we fetch all the",
+    "start": "431529",
+    "end": "436990"
+  },
+  {
+    "text": "relevant kubernetes api objects from the cluster and store them in memory we",
+    "start": "436990",
+    "end": "442960"
+  },
+  {
+    "text": "didn't want the checks themselves to worry about which objects to fetch fetch but rather focus on the operations",
+    "start": "442960",
+    "end": "450310"
+  },
+  {
+    "text": "themselves we have several part related checks in flatulent and we didn't want every part",
+    "start": "450310",
+    "end": "456069"
+  },
+  {
+    "text": "related check to query for pods from the cluster so once all these objects are in",
+    "start": "456069",
+    "end": "461740"
+  },
+  {
+    "text": "memory classify runs the applicable checks in parallel and each check reports some Diagnostics a diagnostic",
+    "start": "461740",
+    "end": "469120"
+  },
+  {
+    "text": "can have like a severity level like errors or warnings or suggestion and an",
+    "start": "469120",
+    "end": "474460"
+  },
+  {
+    "text": "actionable feedback for cluster operators the objects that have owners",
+    "start": "474460",
+    "end": "481719"
+  },
+  {
+    "text": "the owning object information is also provided so that cluster operators can",
+    "start": "481719",
+    "end": "487060"
+  },
+  {
+    "text": "identify the manifests they can fix their configurations for for example",
+    "start": "487060",
+    "end": "492430"
+  },
+  {
+    "text": "pots can have a deployment or a job as owner and provides that information as",
+    "start": "492430",
+    "end": "499240"
+  },
+  {
+    "text": "well the CLI reports these results in a pretty text or JSON format but you can",
+    "start": "499240",
+    "end": "504879"
+  },
+  {
+    "text": "also use the API to get a nice possible structure when we developed class land",
+    "start": "504879",
+    "end": "511060"
+  },
+  {
+    "text": "it was intended for all clusters that aspect of the cluster is hosted but there are some issues that will",
+    "start": "511060",
+    "end": "518289"
+  },
+  {
+    "text": "occur in your cluster based on the platform you use workloads that are fine on a self-hosted",
+    "start": "518289",
+    "end": "524410"
+  },
+  {
+    "text": "cluster or bare metal can be dangerous if you're using a managed service like kubernetes",
+    "start": "524410",
+    "end": "531010"
+  },
+  {
+    "text": "based on how the service is managed for you we came up with check groups to be",
+    "start": "531010",
+    "end": "537310"
+  },
+  {
+    "text": "able to run only the applicable checks in such cases to identify platform-specific issues for example on",
+    "start": "537310",
+    "end": "544060"
+  },
+  {
+    "text": "do case we have the no-name mode selector check bot selectors can be used",
+    "start": "544060",
+    "end": "549250"
+  },
+  {
+    "text": "to schedule pods on specific nodes while this is generally harmless because of",
+    "start": "549250",
+    "end": "554500"
+  },
+  {
+    "text": "how do KS is design you can have a breaking change or introduced when you",
+    "start": "554500",
+    "end": "560920"
+  },
+  {
+    "text": "upgrade or recycle the node which is why we wanted to identify and want customers",
+    "start": "560920",
+    "end": "567550"
+  },
+  {
+    "text": "of this issue before they upgraded currently we have three groups the BOK s",
+    "start": "567550",
+    "end": "573280"
+  },
+  {
+    "text": "group which consists of all the checks applicable to do KS clusters we run them",
+    "start": "573280",
+    "end": "578590"
+  },
+  {
+    "text": "by default before performing an upgrade on do KS this consists of the new names",
+    "start": "578590",
+    "end": "584140"
+  },
+  {
+    "text": "pot selector check node labels check web hooks that's the security related group",
+    "start": "584140",
+    "end": "591100"
+  },
+  {
+    "text": "which consists of checks like identifying privileged spots in your cluster containers running as root user",
+    "start": "591100",
+    "end": "598000"
+  },
+  {
+    "text": "and then there's the basic group which contains checks that are applicable to your cluster irrespective of where they",
+    "start": "598000",
+    "end": "604000"
+  },
+  {
+    "text": "are like if you have resources in the default namespace or you have spot",
+    "start": "604000",
+    "end": "609370"
+  },
+  {
+    "text": "volumes for your pots a checking belong to any number of groups this provides",
+    "start": "609370",
+    "end": "615130"
+  },
+  {
+    "text": "the cluster operators with the flexibility of choosing what checks are applicable for their cluster for example",
+    "start": "615130",
+    "end": "622360"
+  },
+  {
+    "text": "we have a bear pots check which is in the basic group and video KS group",
+    "start": "622360",
+    "end": "627960"
+  },
+  {
+    "text": "Bearpaw sketches identify spots that don't have owners usually when a pod has",
+    "start": "627960",
+    "end": "633310"
+  },
+  {
+    "text": "deployment or job as an owner they get tree should use on after a disruptive operation like an upgrade but their pots",
+    "start": "633310",
+    "end": "640060"
+  },
+  {
+    "text": "don't so we wanted to warn users of that before the OKs customers of creator",
+    "start": "640060",
+    "end": "646960"
+  },
+  {
+    "text": "which made sense to have the bear pots check in the do case groups but it is a",
+    "start": "646960",
+    "end": "652810"
+  },
+  {
+    "text": "fairly dangerous thing to have in any cluster so it means nice to have it in base as well the CLI and the API provide",
+    "start": "652810",
+    "end": "660590"
+  },
+  {
+    "text": "options to whitelist or blacklist groups and checks within those groups so that",
+    "start": "660590",
+    "end": "666500"
+  },
+  {
+    "text": "you can choose what checks are applicable for your cluster here's the",
+    "start": "666500",
+    "end": "672500"
+  },
+  {
+    "text": "check API for those of you looking to write a check we have some metadata methods like name and groups and the run",
+    "start": "672500",
+    "end": "680060"
+  },
+  {
+    "text": "method where the operation of the check is defined it has access to all the kubernetes objects which fetched earlier",
+    "start": "680060",
+    "end": "685760"
+  },
+  {
+    "text": "and after the check is performed reports diagnostics forecasts learn to be aware of the check and which group it belongs",
+    "start": "685760",
+    "end": "692330"
+  },
+  {
+    "text": "to checks must registered themselves in which a crash is free this is the",
+    "start": "692330",
+    "end": "697580"
+  },
+  {
+    "text": "example who sparked volumes check that belongs to the basic group so this check",
+    "start": "697580",
+    "end": "703460"
+  },
+  {
+    "text": "is applicable for clusters hosted anywhere this just identifies pods that",
+    "start": "703460",
+    "end": "708980"
+  },
+  {
+    "text": "use host pot volumes most parts are great when you have when you're trying",
+    "start": "708980",
+    "end": "714950"
+  },
+  {
+    "text": "something out in your cluster but are fairly dangerous when you're using it in production when you know you need to",
+    "start": "714950",
+    "end": "720110"
+  },
+  {
+    "text": "persist data this just identifies the pods and you can go and fix your",
+    "start": "720110",
+    "end": "725180"
+  },
+  {
+    "text": "configurations to use a cloud provider volume again like des has digitalocean",
+    "start": "725180",
+    "end": "730610"
+  },
+  {
+    "text": "block storage than EPS for gas this is a",
+    "start": "730610",
+    "end": "736460"
+  },
+  {
+    "text": "B okay a specific check although you could say that this belongs to some other cloud providers as well",
+    "start": "736460",
+    "end": "742610"
+  },
+  {
+    "text": "this is identify spots that use the host name label to share your thoughts on",
+    "start": "742610",
+    "end": "748370"
+  },
+  {
+    "text": "specific nodes we talked a lot about the kind of self checks that class length",
+    "start": "748370",
+    "end": "754520"
+  },
+  {
+    "text": "performs but what the repo also offers is recommendations for the best",
+    "start": "754520",
+    "end": "759710"
+  },
+  {
+    "text": "practices we've identified so far in some context behind why they became best practices for example this is the",
+    "start": "759710",
+    "end": "766430"
+  },
+  {
+    "text": "default namespace usually if you don't specify a namespace all the resources get dumped in the default namespace and",
+    "start": "766430",
+    "end": "773180"
+  },
+  {
+    "text": "this can be to privilege escalation or the source contention so to explicitly",
+    "start": "773180",
+    "end": "778220"
+  },
+  {
+    "text": "specify the namespace is a best practice and that's what we recommend in this",
+    "start": "778220",
+    "end": "783620"
+  },
+  {
+    "text": "case but for a do case specific check",
+    "start": "783620",
+    "end": "789050"
+  },
+  {
+    "text": "while having a host Mabel isn't necessarily a bad thing a work around here would be to use the do",
+    "start": "789050",
+    "end": "794990"
+  },
+  {
+    "text": "provided note to label to share your pods on specific nodes or set of nodes so that when your pods will be scheduled",
+    "start": "794990",
+    "end": "802820"
+  },
+  {
+    "text": "after an upgrade there are always some special objects in your clusters that",
+    "start": "802820",
+    "end": "809720"
+  },
+  {
+    "text": "are exceptions to all these best practices like if you have privileged",
+    "start": "809720",
+    "end": "814760"
+  },
+  {
+    "text": "spots in your cluster you know you want to check for parts that are progression you possibly also know there are some",
+    "start": "814760",
+    "end": "820310"
+  },
+  {
+    "text": "parts that you that need to be privileged one way to disable checks on such cases would be to use the command",
+    "start": "820310",
+    "end": "827870"
+  },
+  {
+    "text": "line and white-faced practice feature but that would disable the checks for all objects cluster while so you can use",
+    "start": "827870",
+    "end": "834800"
+  },
+  {
+    "text": "annotations for cluster lint to disable checks on the specific object and",
+    "start": "834800",
+    "end": "840020"
+  },
+  {
+    "text": "trustlink will just ignore the object and continue to perform the checks on the clusters this is a demo we have for",
+    "start": "840020",
+    "end": "848209"
+  },
+  {
+    "text": "cluster lint ion do KS let's start by creating it's a recorded demo",
+    "start": "848209",
+    "end": "853250"
+  },
+  {
+    "text": "I start by creating a cluster on the yes and once the cluster is created you will",
+    "start": "853250",
+    "end": "860390"
+  },
+  {
+    "text": "have access to the cube config ya know which you can use with class length like you would with cube CDL or anything else",
+    "start": "860390",
+    "end": "868870"
+  },
+  {
+    "text": "this is the wrapper for cluster length which has the binaries and context for",
+    "start": "874990",
+    "end": "881540"
+  },
+  {
+    "text": "each of the checks",
+    "start": "881540",
+    "end": "884380"
+  },
+  {
+    "text": "so the keep configure in the context of global flights that you have so you can always switch between clusters to run",
+    "start": "904440",
+    "end": "911399"
+  },
+  {
+    "text": "Gosselin since we started with like a",
+    "start": "911399",
+    "end": "918019"
+  },
+  {
+    "text": "creepy new cluster we would not have any resources so puzzling wouldn't report any issues so it's not by deploying a",
+    "start": "918019",
+    "end": "926939"
+  },
+  {
+    "text": "bad configuration and see what issues to us land reports",
+    "start": "926939",
+    "end": "933589"
+  },
+  {
+    "text": "this is the bad yeah no config which we're gonna deploy on to the cluster",
+    "start": "940080",
+    "end": "947450"
+  },
+  {
+    "text": "so this is a pretty text format that your cousin would report issues in I think we've discussed about the bare",
+    "start": "982520",
+    "end": "988850"
+  },
+  {
+    "text": "pots issue the resource contention and the default namespace we can go to the",
+    "start": "988850",
+    "end": "997279"
+  },
+  {
+    "text": "class land repo to find of the recommendations that we have for such issues or the checks that we perform so",
+    "start": "997279",
+    "end": "1004180"
+  },
+  {
+    "text": "far and then see how to fix the context for instance we've deployed a bit pod",
+    "start": "1004180",
+    "end": "1009820"
+  },
+  {
+    "text": "here first having a deployment or a job as the owner is what's recommended so",
+    "start": "1009820",
+    "end": "1016390"
+  },
+  {
+    "text": "that the pods can string should you laughter a disruptive operation so the",
+    "start": "1016390",
+    "end": "1022720"
+  },
+  {
+    "text": "bad config is now translated into something that would work without any",
+    "start": "1022720",
+    "end": "1029199"
+  },
+  {
+    "text": "issues",
+    "start": "1029199",
+    "end": "1031650"
+  },
+  {
+    "text": "this is the whitelist and the blacklist option that you can use to pick what",
+    "start": "1070290",
+    "end": "1075660"
+  },
+  {
+    "text": "groups you want to specify and then you can just use the Chasen structure to",
+    "start": "1075660",
+    "end": "1081270"
+  },
+  {
+    "text": "parse and see what the owning object information is for parts and other resources",
+    "start": "1081270",
+    "end": "1087320"
+  },
+  {
+    "text": "so let's dip lie the bad part again to get the issues back",
+    "start": "1087320",
+    "end": "1094160"
+  },
+  {
+    "text": "the Jason structure also provides durations that we run for each check so",
+    "start": "1108160",
+    "end": "1113470"
+  },
+  {
+    "text": "you can see if there are a lot more resources it's gonna take a lot more time and then provides a annotations and",
+    "start": "1113470",
+    "end": "1122130"
+  },
+  {
+    "text": "object owning object information as well along with the feedback by default on",
+    "start": "1122130",
+    "end": "1133720"
+  },
+  {
+    "text": "the CLI we run all the checks on a cluster but on do KS we don't only the",
+    "start": "1133720",
+    "end": "1139900"
+  },
+  {
+    "text": "BOK are specific checks",
+    "start": "1139900",
+    "end": "1143250"
+  },
+  {
+    "text": "that is it so I as we mentioned earlier",
+    "start": "1156410",
+    "end": "1165530"
+  },
+  {
+    "text": "one of our goals of cluster lint was to actually integrated into our product and I use it tomorrow our customers if",
+    "start": "1165530",
+    "end": "1170690"
+  },
+  {
+    "text": "they're gonna have problems before we do something disruptive I so we've done that at this point we have an endpoint",
+    "start": "1170690",
+    "end": "1176690"
+  },
+  {
+    "text": "in our public API which lets you run cluster lint on your do KS cluster and get the results it's also supported in",
+    "start": "1176690",
+    "end": "1184250"
+  },
+  {
+    "text": "the do control panel in a limited way we always run cluster lint asynchronously",
+    "start": "1184250",
+    "end": "1189560"
+  },
+  {
+    "text": "through our API just in case it takes a few seconds we don't want to have like I want HTTP requests sitting there for",
+    "start": "1189560",
+    "end": "1195140"
+  },
+  {
+    "text": "five or ten or 20 seconds ball runs so it actions that being to API calls one to request a run or another to your",
+    "start": "1195140",
+    "end": "1201740"
+  },
+  {
+    "text": "results you can see what the API looks like here we have two requests on the slide the first one in blue is the",
+    "start": "1201740",
+    "end": "1208550"
+  },
+  {
+    "text": "request to run cluster lint in this case we're requesting the default parameters which as fresh mentioned on das is just",
+    "start": "1208550",
+    "end": "1215390"
+  },
+  {
+    "text": "the Dok a specific group but you can specify which groups you would like in the payload of that post request if you",
+    "start": "1215390",
+    "end": "1222560"
+  },
+  {
+    "text": "want to so you can write any of the checks that cluster lewin supports what this returns is a run ID and you can use",
+    "start": "1222560",
+    "end": "1228590"
+  },
+  {
+    "text": "that run ID to fetch your results later we keep the results around for about a week so if you want to run cluster lint",
+    "start": "1228590",
+    "end": "1235490"
+  },
+  {
+    "text": "at a regular cadence and kind of track your results or something on your cluster you can do that I the second",
+    "start": "1235490",
+    "end": "1241040"
+  },
+  {
+    "text": "request here the one in orange is the request to get the results in this case we're requesting the results of just the",
+    "start": "1241040",
+    "end": "1247250"
+  },
+  {
+    "text": "last run that completed so that's what we get you can also use the run ID to request results of a particular right in",
+    "start": "1247250",
+    "end": "1254840"
+  },
+  {
+    "text": "this case we have a badly configured admission control webhook in our cluster I this is one of the number one problems",
+    "start": "1254840",
+    "end": "1261230"
+  },
+  {
+    "text": "we've seen customers have with upgrades is they have admission control web hooks that prevent some of our managed",
+    "start": "1261230",
+    "end": "1267470"
+  },
+  {
+    "text": "components from starting so our CNI for example and that makes an upgrade to go really badly because you don't have",
+    "start": "1267470",
+    "end": "1273020"
+  },
+  {
+    "text": "networking with you start up here new nodes so this that's the diagnostic to get here we do also run cluster lid",
+    "start": "1273020",
+    "end": "1281960"
+  },
+  {
+    "text": "before you request an upgrade if you request an upgrade through our control panel and you can see on the slide this",
+    "start": "1281960",
+    "end": "1287240"
+  },
+  {
+    "text": "is the dialog box that pops up if it returned any warnings so this is the same cluster from the previous slide it's got the",
+    "start": "1287240",
+    "end": "1293380"
+  },
+  {
+    "text": "Mission Control web foot problem and I gives us a couple of options for one it",
+    "start": "1293380",
+    "end": "1298600"
+  },
+  {
+    "text": "gives us a link to the docs so you can actually see how you might fix this problem now we're not just telling you",
+    "start": "1298600",
+    "end": "1304570"
+  },
+  {
+    "text": "there's a problem then leaving it up to you to fix it there's also a rerun button so if you go and fix your config really quickly come back you can hit the",
+    "start": "1304570",
+    "end": "1311500"
+  },
+  {
+    "text": "rerun button and see the new results and we do provide an option to just bypass",
+    "start": "1311500",
+    "end": "1316720"
+  },
+  {
+    "text": "the check and say yeah I'm fine I if you're really confident that it's not going to cause problems or if you just",
+    "start": "1316720",
+    "end": "1322570"
+  },
+  {
+    "text": "want to see what happens you can click that box and it's still proceed with your upgrade we are still working on",
+    "start": "1322570",
+    "end": "1331780"
+  },
+  {
+    "text": "cluster lint and I we have a few things in mind that we would like to do for one",
+    "start": "1331780",
+    "end": "1337150"
+  },
+  {
+    "text": "we'd like to add more checks we definitely don't cover everything there's a wide array of kubernetes best practices and we only cover some of them",
+    "start": "1337150",
+    "end": "1343740"
+  },
+  {
+    "text": "another is better integration into our product so as I mentioned right now we rented only before manually triggered",
+    "start": "1343740",
+    "end": "1350200"
+  },
+  {
+    "text": "upgrades automatically we'd like to run it also before our auto upgrades so if you said a maintenance window we will do",
+    "start": "1350200",
+    "end": "1356230"
+  },
+  {
+    "text": "auto upgrades on your cluster right now we don't run it in that case but we'd like to run it and maybe send you an email if you're gonna have problems with",
+    "start": "1356230",
+    "end": "1361990"
+  },
+  {
+    "text": "the auto upgrade so that you know ahead of time we'd also like to run it before other destructive operations like replacing a node or I've even scaling",
+    "start": "1361990",
+    "end": "1368830"
+  },
+  {
+    "text": "their cluster or something like that I ideally we would run it periodically and just report the results somewhere so",
+    "start": "1368830",
+    "end": "1374919"
+  },
+  {
+    "text": "you have a persistent place you can go and see maybe even track results over time but I've got finally we thought a",
+    "start": "1374919",
+    "end": "1380320"
+  },
+  {
+    "text": "lot about how to do version kubernetes version specific checks in cluster lint especially for the upgrade case we'd",
+    "start": "1380320",
+    "end": "1386049"
+  },
+  {
+    "text": "like to do checks for the next version before you do the upgrade so you can see am I using resources that are deprecated",
+    "start": "1386049",
+    "end": "1392590"
+  },
+  {
+    "text": "in the next version am I using fields that have changed their meanings or their names in the next version that I'm my own pirkled aren't gonna behave as",
+    "start": "1392590",
+    "end": "1398950"
+  },
+  {
+    "text": "I'd expect this is a little bit tricky because the kubernetes api and client will do some translation for you so if",
+    "start": "1398950",
+    "end": "1405220"
+  },
+  {
+    "text": "you request objects from one api group and they've migrated to another API group it will do that translation so it",
+    "start": "1405220",
+    "end": "1410980"
+  },
+  {
+    "text": "makes it a little bit hard to actually tell whether you're using anything deprecated but if people have ideas for how we can do these version specific",
+    "start": "1410980",
+    "end": "1417490"
+  },
+  {
+    "text": "checks that's something we'd like to hear before we started building plus hland we",
+    "start": "1417490",
+    "end": "1423240"
+  },
+  {
+    "text": "looked at some of the existing tools there are some great man if I space link the tools like you cube lint and copper",
+    "start": "1423240",
+    "end": "1429929"
+  },
+  {
+    "text": "which are ready to use in your CI Singh these systems to check if the yanil is sound before deploying onto the cluster",
+    "start": "1429929",
+    "end": "1435740"
+  },
+  {
+    "text": "Buckland identifies issues with your cluster after the workloads being deployed so they could be platform",
+    "start": "1435740",
+    "end": "1443309"
+  },
+  {
+    "text": "specific or that's something that you would the animal would be sound for but would create an issue later on you're",
+    "start": "1443309",
+    "end": "1449850"
+  },
+  {
+    "text": "interested in security spell checks specifically than there's cube bench cube bench can be deployed as an in",
+    "start": "1449850",
+    "end": "1457020"
+  },
+  {
+    "text": "cluster tool as a workload itself and it's gonna start reporting issues after",
+    "start": "1457020",
+    "end": "1462059"
+  },
+  {
+    "text": "you deploy it on to your cluster plus length is different from that because it works externally runs the checks on",
+    "start": "1462059",
+    "end": "1469500"
+  },
+  {
+    "text": "objects by accessing the kubernetes api if we want to focus on workload health",
+    "start": "1469500",
+    "end": "1475649"
+  },
+  {
+    "text": "and get a dashboard for it there's Polaris we intentionally did not want to focus on our workload help because",
+    "start": "1475649",
+    "end": "1482549"
+  },
+  {
+    "text": "there's the kubernetes dashboard and other observables are there to give you",
+    "start": "1482549",
+    "end": "1487559"
+  },
+  {
+    "text": "this information in terms of the checks pop icons closest to the class length I",
+    "start": "1487559",
+    "end": "1495090"
+  },
+  {
+    "text": "think the difference between the two tools is that class length also has this",
+    "start": "1495090",
+    "end": "1500429"
+  },
+  {
+    "text": "ability to provide specifics so finally",
+    "start": "1500429",
+    "end": "1506850"
+  },
+  {
+    "text": "before we wrap up we would love help with custer lint and assuming that most of the people in this room use",
+    "start": "1506850",
+    "end": "1513090"
+  },
+  {
+    "text": "kubernetes in some way there's a couple of ways that most of you can help us if you're interested one is to just give it",
+    "start": "1513090",
+    "end": "1519000"
+  },
+  {
+    "text": "a try on your clusters and let us know if it doesn't work or if it has surprising results if you have false",
+    "start": "1519000",
+    "end": "1524640"
+  },
+  {
+    "text": "positives or false negatives things that you didn't expect that's something we'd like to know the other is we would as I",
+    "start": "1524640",
+    "end": "1531870"
+  },
+  {
+    "text": "mentioned before love to have more checks and especially if you're running in an environment that's not do KS we",
+    "start": "1531870",
+    "end": "1538260"
+  },
+  {
+    "text": "would like to know what are the specific gotchas in those environments so if you're using e KS or gk e or you're",
+    "start": "1538260",
+    "end": "1544320"
+  },
+  {
+    "text": "running on pram on hardware or something like that we would love checks for those environments to add check groups to the",
+    "start": "1544320",
+    "end": "1549929"
+  },
+  {
+    "text": "tool that covers those environments I think some of the checks that we have for do KS are probably applicable to other clouds",
+    "start": "1549929",
+    "end": "1555090"
+  },
+  {
+    "text": "so if would start with those and sort of let us know what they think is applicable we",
+    "start": "1555090",
+    "end": "1560940"
+  },
+  {
+    "text": "would would love pull requests or issues it's all up and github so yeah let us",
+    "start": "1560940",
+    "end": "1566669"
+  },
+  {
+    "text": "know what you find and that's all we wanted to say today I see on the side",
+    "start": "1566669",
+    "end": "1571710"
+  },
+  {
+    "text": "our email addresses if you want to get in touch there's also another link to the github so go check out the cluster",
+    "start": "1571710",
+    "end": "1577200"
+  },
+  {
+    "text": "Lind and I think we've got time for questions we're also be around the conference so come and talk to us first video Thanks thanks Adam infection so",
+    "start": "1577200",
+    "end": "1593250"
+  },
+  {
+    "text": "I'd like to remind everybody you can go onto sched calm and review the talk that would be really great if you could and",
+    "start": "1593250",
+    "end": "1598440"
+  },
+  {
+    "text": "then if you have a question if you raise your hand I'll bring the mic over to you",
+    "start": "1598440",
+    "end": "1603740"
+  },
+  {
+    "text": "so a couple related questions can I write my own checks if there are some",
+    "start": "1607220",
+    "end": "1614279"
+  },
+  {
+    "text": "things internally maybe that I just don't want to put in the public repo that we do and is there a way to share",
+    "start": "1614279",
+    "end": "1622010"
+  },
+  {
+    "text": "checks do they just get checked into the repo yeah so right now that the check",
+    "start": "1622010",
+    "end": "1627779"
+  },
+  {
+    "text": "library is totally static checks registered themselves when the tool starts and it's it's all static it would",
+    "start": "1627779",
+    "end": "1633840"
+  },
+  {
+    "text": "be interesting to maybe use like go dynamic libraries for this to provide that ability to do like really org",
+    "start": "1633840",
+    "end": "1639929"
+  },
+  {
+    "text": "specific ones but it's not something we've been planning right now so the interesting idea",
+    "start": "1639929",
+    "end": "1645889"
+  },
+  {
+    "text": "yeah hi do you think it'd be out of scope to check for under unutilized",
+    "start": "1655980",
+    "end": "1663190"
+  },
+  {
+    "text": "resources like services with no end points or ingress --is that point to",
+    "start": "1663190",
+    "end": "1669400"
+  },
+  {
+    "text": "non-existent services or pvcs that are in use we do have that kind of I don't",
+    "start": "1669400",
+    "end": "1676990"
+  },
+  {
+    "text": "think we have one for ingress services but we have some checks for tidying up",
+    "start": "1676990",
+    "end": "1682060"
+  },
+  {
+    "text": "your cluster like unused Peavey's or PVCs or secrets hey so I really quick",
+    "start": "1682060",
+    "end": "1693340"
+  },
+  {
+    "text": "question so just about optimization I saw the linting it seemed like a relatively small you know example",
+    "start": "1693340",
+    "end": "1700210"
+  },
+  {
+    "text": "cluster what would you say the standard run time would be for something that maybe is because the linting is gonna be",
+    "start": "1700210",
+    "end": "1707260"
+  },
+  {
+    "text": "done after you've applied the configurations right it's gonna be done what is that what am i doing right now",
+    "start": "1707260",
+    "end": "1712270"
+  },
+  {
+    "text": "so it's gonna be generally from what I see used for enterprises and organizations that are pretty deep in",
+    "start": "1712270",
+    "end": "1719620"
+  },
+  {
+    "text": "already and need to see like where are all of my problems right so I guess",
+    "start": "1719620",
+    "end": "1724720"
+  },
+  {
+    "text": "that's where optimization becomes a big deal yeah so the I would say the slow",
+    "start": "1724720",
+    "end": "1730420"
+  },
+  {
+    "text": "part of cluster lint is fetching all the resources from the API server once we've",
+    "start": "1730420",
+    "end": "1736150"
+  },
+  {
+    "text": "done that the checks run I didn't memory object so they're pretty fast you know I mean if you had a huge number of pods it",
+    "start": "1736150",
+    "end": "1741850"
+  },
+  {
+    "text": "might take some milliseconds to iterate over them but in general it's pretty quick I think that in terms of",
+    "start": "1741850",
+    "end": "1750220"
+  },
+  {
+    "text": "optimizations being able to limit it more to like a namespace or a particular set of objects that might be helpful",
+    "start": "1750220",
+    "end": "1755710"
+  },
+  {
+    "text": "thing anything that we can do to kind of reduce the number of calls me I can make the API server to be helpful absolutely",
+    "start": "1755710",
+    "end": "1761770"
+  },
+  {
+    "text": "okay thank you very much",
+    "start": "1761770",
+    "end": "1764670"
+  },
+  {
+    "text": "Hey so the tool seems to allow you to check",
+    "start": "1772990",
+    "end": "1778010"
+  },
+  {
+    "text": "what you've already deployed do you have any plans to make it where it willl in like effectively before you deploy it or",
+    "start": "1778010",
+    "end": "1784820"
+  },
+  {
+    "text": "immediately after a deployment say nope that was bad and roll it back for you so",
+    "start": "1784820",
+    "end": "1791240"
+  },
+  {
+    "text": "we wanted to run this on light cluster so you wanted to run the checks only after the deployment but there are some",
+    "start": "1791240",
+    "end": "1798320"
+  },
+  {
+    "text": "ya know linting tools already out there to check that but that wouldn't catch issues like resource contention if",
+    "start": "1798320",
+    "end": "1805040"
+  },
+  {
+    "text": "you're dumping all your resources in the default namespace for which you have to deploy the workloads right so I get that",
+    "start": "1805040",
+    "end": "1811370"
+  },
+  {
+    "text": "but what I mean is is once I deploy and the cluster wind catches it can't are there any plans to make it where you'll",
+    "start": "1811370",
+    "end": "1817640"
+  },
+  {
+    "text": "just remove that build and say you introduced a root user to the in an application that's disallowed similar to",
+    "start": "1817640",
+    "end": "1825020"
+  },
+  {
+    "text": "something like an open policy agent I guess right I think that's an interesting idea it's I'm not sure if +1",
+    "start": "1825020",
+    "end": "1831740"
+  },
+  {
+    "text": "would be the best tool for that I think probably admission control and like I said open policy edge intern there's",
+    "start": "1831740",
+    "end": "1837320"
+  },
+  {
+    "text": "sort of better tools that things are running in the cluster have been better for doing that yeah and you could you",
+    "start": "1837320",
+    "end": "1845030"
+  },
+  {
+    "text": "could build it into your CD pipeline with close friend I think clustering is really more focused on like proactive",
+    "start": "1845030",
+    "end": "1850550"
+  },
+  {
+    "text": "identification of things that aren't problems right now but will be problems in the future I",
+    "start": "1850550",
+    "end": "1855860"
+  },
+  {
+    "text": "so really identifying like things that are gonna break when you do something disruptive or if you lose it or things like that",
+    "start": "1855860",
+    "end": "1862870"
+  },
+  {
+    "text": "hi thank you for doing this I was wondering for the reporting section have",
+    "start": "1871650",
+    "end": "1877650"
+  },
+  {
+    "text": "you guys thought about integrating it with like some sort of test framework",
+    "start": "1877650",
+    "end": "1882890"
+  },
+  {
+    "text": "like reporting with like tes NGO for example just in terms of like providing",
+    "start": "1882890",
+    "end": "1889110"
+  },
+  {
+    "text": "macer or more standardized output format and standardized open format being able so that we don't have to reinvent the",
+    "start": "1889110",
+    "end": "1896370"
+  },
+  {
+    "text": "reporting system just for this particular just for cluster lint sure I",
+    "start": "1896370",
+    "end": "1901470"
+  },
+  {
+    "text": "I think it's not something we thought of but it's an interesting idea it it's each each of the checks like we",
+    "start": "1901470",
+    "end": "1910860"
+  },
+  {
+    "text": "showed in the API actually just returns to structure so the outputting of that",
+    "start": "1910860",
+    "end": "1916080"
+  },
+  {
+    "text": "information is decoupled from the actual check so it would be fairly straightforward to add another output",
+    "start": "1916080",
+    "end": "1921179"
+  },
+  {
+    "text": "format if people wanted it right yeah I",
+    "start": "1921179",
+    "end": "1930420"
+  },
+  {
+    "text": "just mention the the grouping of the checks is a little bit like grouping of test Suites it's a little bit different in the a check can live in multiple",
+    "start": "1930420",
+    "end": "1936300"
+  },
+  {
+    "text": "groups and it can also live in no groups if they're if you have a check that's like kind of an outlier it doesn't have",
+    "start": "1936300",
+    "end": "1942179"
+  },
+  {
+    "text": "to be in a group so it's a yeah a little bit different than that scenario but yeah similar",
+    "start": "1942179",
+    "end": "1949429"
+  },
+  {
+    "text": "any more questions nope all right well thanks again Barcia",
+    "start": "1956420",
+    "end": "1963290"
+  },
+  {
+    "text": "[Applause]",
+    "start": "1963290",
+    "end": "1965780"
+  }
+]

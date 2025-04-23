@@ -1,0 +1,2856 @@
+[
+  {
+    "start": "0",
+    "end": "98000"
+  },
+  {
+    "text": "on Amazon Rua performance tuning I'm a",
+    "start": "3049",
+    "end": "9320"
+  },
+  {
+    "text": "principal engineer in the Aurora Postgres sequel team and my goal here is to actually I will cover a whole lot of",
+    "start": "9320",
+    "end": "16680"
+  },
+  {
+    "text": "information I have to go pretty quickly and the slide wants to go before I do but okay so my goal here is that you're",
+    "start": "16680",
+    "end": "25019"
+  },
+  {
+    "text": "gonna actually learn something out of this you're gonna I'm gonna cover some familiar things that you've seen before that should be comfortable for you some",
+    "start": "25019",
+    "end": "31170"
+  },
+  {
+    "text": "brand new things that you probably never seen before and I want to cover a top to bottom view",
+    "start": "31170",
+    "end": "36210"
+  },
+  {
+    "text": "a true deep dive from at the top level a single pane of glass for you at you can",
+    "start": "36210",
+    "end": "41489"
+  },
+  {
+    "text": "take a look to see what's going on with all of your databases at once to see you know where hotspots might be and then to",
+    "start": "41489",
+    "end": "48270"
+  },
+  {
+    "text": "be able to drill down through different levels to try to do something about it",
+    "start": "48270",
+    "end": "53930"
+  },
+  {
+    "text": "so the agenda is I'm going to go through fundamentals of Postgres equal performance tuning basically to set the",
+    "start": "53930",
+    "end": "59640"
+  },
+  {
+    "text": "stage for doing performance tuning to make sure that that certain things are taken care of ahead of time that are",
+    "start": "59640",
+    "end": "65700"
+  },
+  {
+    "text": "sort of fundamentals of tuning and then I'm going to go through query plan management and that's probably new to a",
+    "start": "65700",
+    "end": "73920"
+  },
+  {
+    "text": "lot of you those of you who have experience with Oracle or sequel server probably this will look familiar to you",
+    "start": "73920",
+    "end": "80640"
+  },
+  {
+    "text": "at some level and then I'm going to go through a review or exploration of",
+    "start": "80640",
+    "end": "86820"
+  },
+  {
+    "text": "performance insights so you can better understand the view the views that you probably seen and I think you may find",
+    "start": "86820",
+    "end": "94200"
+  },
+  {
+    "text": "that interesting and then we'll do a Q&A at the end if there's time so Postgres",
+    "start": "94200",
+    "end": "99329"
+  },
+  {
+    "start": "98000",
+    "end": "187000"
+  },
+  {
+    "text": "fundamentals of Postgres so this should be a familiar looking chart for many of",
+    "start": "99329",
+    "end": "105600"
+  },
+  {
+    "text": "you right so starting from the lower left-hand corner you have a database client it submits some requests in this",
+    "start": "105600",
+    "end": "112590"
+  },
+  {
+    "text": "case it's a the example that I'm going to use in several places in the presentation select count star from T or",
+    "start": "112590",
+    "end": "119100"
+  },
+  {
+    "text": "some column IDs less than 100 that gets sent to the server the server has to parse that it runs through its rewriter",
+    "start": "119100",
+    "end": "125640"
+  },
+  {
+    "text": "stage it runs through the planner which I'll talk a lot more about and then it has to think goes the executor and it",
+    "start": "125640",
+    "end": "132150"
+  },
+  {
+    "text": "goes out to the table and indexed fetches whatever it needs to fetch and it sends the response back to the DB",
+    "start": "132150",
+    "end": "137550"
+  },
+  {
+    "text": "client and when it sends the response back to the DB client there's a protocol for that and it says ok this thing has",
+    "start": "137550",
+    "end": "143520"
+  },
+  {
+    "text": "this many columns and the datatypes are this and so this has to happen every time you go back and forth the client",
+    "start": "143520",
+    "end": "150540"
+  },
+  {
+    "text": "has to parse that information it has something extract the data and then it can display it to you in some pretty way so that's the basic thing now but take a",
+    "start": "150540",
+    "end": "157590"
+  },
+  {
+    "text": "look on the right-hand side and you'll see that the inputs to this process are primarily going to be the schema that",
+    "start": "157590",
+    "end": "163290"
+  },
+  {
+    "text": "the DDL you created that defines the the tables and the indexes and so on columns some table statistics some column",
+    "start": "163290",
+    "end": "170820"
+  },
+  {
+    "text": "statistics and these are the primary things that the planner is going to use the the schema and the statistics and",
+    "start": "170820",
+    "end": "176060"
+  },
+  {
+    "text": "guck settings which in Postgres are things that control parameterize the the",
+    "start": "176060",
+    "end": "181730"
+  },
+  {
+    "text": "different parts of the product but principally the planners what I'm going to be talking about today so if we're",
+    "start": "181730",
+    "end": "188580"
+  },
+  {
+    "text": "going to talk about query tuning you know the query tuning cycle may be intuitively as this but just to explode",
+    "start": "188580",
+    "end": "195150"
+  },
+  {
+    "text": "it out in a little bit more detail you first you identify a slow query so how do you how do you do that well probably",
+    "start": "195150",
+    "end": "201300"
+  },
+  {
+    "text": "somebody walked into your office and said I've got a slow query this thing is this thing is running not well here can",
+    "start": "201300",
+    "end": "207720"
+  },
+  {
+    "text": "you help me with this or maybe you took a lick look at PG stat statements and took a look at the top ten by total time",
+    "start": "207720",
+    "end": "214590"
+  },
+  {
+    "text": "or maybe Auto explora auto explain or maybe this other thing I'll talk about query plan management or maybe",
+    "start": "214590",
+    "end": "221489"
+  },
+  {
+    "text": "performance insights there's lots of different ways to identify but what do you do if you're going to get this thing and it's slow first thing you're gonna",
+    "start": "221489",
+    "end": "228120"
+  },
+  {
+    "text": "do in Postgres is to run explain or explain analyze the difference between explaining explain analyze for those who",
+    "start": "228120",
+    "end": "234150"
+  },
+  {
+    "text": "don't know is explain analyze will give you the actual timings at each node how many rows actually came back how much",
+    "start": "234150",
+    "end": "241650"
+  },
+  {
+    "text": "time did it actually take to run this part of the plan so you explain analyze then you have to",
+    "start": "241650",
+    "end": "248670"
+  },
+  {
+    "text": "interpret and diagnose the problem and there's some skill involved in doing that as we'll see and then you have to",
+    "start": "248670",
+    "end": "255390"
+  },
+  {
+    "text": "figure out something to do about it so okay you have to devise some possible improvement which may or may not work",
+    "start": "255390",
+    "end": "260700"
+  },
+  {
+    "text": "and then you measure the effect maybe it didn't work so you go back and you",
+    "start": "260700",
+    "end": "265890"
+  },
+  {
+    "text": "reinterpret really diagnose with a different solution try another thing keep doing this and hopefully",
+    "start": "265890",
+    "end": "271290"
+  },
+  {
+    "text": "eventually you find something that makes it better oops and then you have to figure out",
+    "start": "271290",
+    "end": "278280"
+  },
+  {
+    "text": "some way to deploy the improvement to production and that's something that's not talked about as much that's very",
+    "start": "278280",
+    "end": "283500"
+  },
+  {
+    "text": "important all right so once you found this fix and once you've done it how do you implement this fix in a way that you",
+    "start": "283500",
+    "end": "288540"
+  },
+  {
+    "text": "can distribute to your running application in an efficient way and deploy it everywhere so explain analyze",
+    "start": "288540",
+    "end": "296460"
+  },
+  {
+    "start": "294000",
+    "end": "594000"
+  },
+  {
+    "text": "so here's explain analyze in the font that's too small for most of you to read but I hope you can actually read it",
+    "start": "296460",
+    "end": "301470"
+  },
+  {
+    "text": "because I'm going to ask you a question we're gonna do some audience participation on this in a second but you look at this and I don't know about",
+    "start": "301470",
+    "end": "307320"
+  },
+  {
+    "text": "you but the first thing I see is Wow lots of letters right lots of okay your",
+    "start": "307320",
+    "end": "312720"
+  },
+  {
+    "text": "eyes kind of glaze over at first and this guy just walked into your office and said this thing is slow what do I do",
+    "start": "312720",
+    "end": "318060"
+  },
+  {
+    "text": "and so you kind of have to focus okay so what I see when I look at this is the",
+    "start": "318060",
+    "end": "323310"
+  },
+  {
+    "text": "things that jump out at me ours is in this explain analyze the rows that were expected on the left by the planner was",
+    "start": "323310",
+    "end": "330210"
+  },
+  {
+    "text": "one hundred seven thousand eight hundred forty two the actual number of rows that came out was 521 that's a big difference",
+    "start": "330210",
+    "end": "336810"
+  },
+  {
+    "text": "so by the way I ripped this thing off the web I don't even know what the query is behind this but this is a plan that somebody actually thought was slow so",
+    "start": "336810",
+    "end": "343050"
+  },
+  {
+    "text": "here we are all looking at this as if it came into our office here right and then the next thing I would notice is okay",
+    "start": "343050",
+    "end": "349320"
+  },
+  {
+    "text": "that sort node first of all it's a sort node certain nodes are often slow common source problems okay we're doing a sort",
+    "start": "349320",
+    "end": "356220"
+  },
+  {
+    "text": "the actual time is 861 milliseconds down on the lower left the total execution time is 891 most of the time is in that",
+    "start": "356220",
+    "end": "363780"
+  },
+  {
+    "text": "sort so there you go I'm looking at this and I'm thinking you got a slow sort that's why it's slow so what do you do",
+    "start": "363780",
+    "end": "370020"
+  },
+  {
+    "text": "about this right so now you have to devise the possible solutions so this at",
+    "start": "370020",
+    "end": "375270"
+  },
+  {
+    "text": "this point I'm gonna pause this although it's a long presentation I have to go I'm gonna do a little audience participation here just came into your",
+    "start": "375270",
+    "end": "381690"
+  },
+  {
+    "text": "office you just saw this what do you tell them any ideas you have a slow store what do you do I couldn't hear",
+    "start": "381690",
+    "end": "392150"
+  },
+  {
+    "text": "yeah it doesn't matter possibly an index",
+    "start": "392150",
+    "end": "401210"
+  },
+  {
+    "text": "that it could get better statistics from an index maybe you could create if you look closely at this since I've had time",
+    "start": "401210",
+    "end": "407810"
+  },
+  {
+    "text": "to look and you haven't I'll tell you like okay it's gonna group on this st geo hash of geometry comma to huh okay",
+    "start": "407810",
+    "end": "414889"
+  },
+  {
+    "text": "so this is a post GIS query interesting enough come oh come on don't do that to",
+    "start": "414889",
+    "end": "419900"
+  },
+  {
+    "text": "me go back so there's a bunch of things you can do you might create an index in",
+    "start": "419900",
+    "end": "426080"
+  },
+  {
+    "text": "this case you might create a a geographic index on it if you did that then it wouldn't have to sort right",
+    "start": "426080",
+    "end": "431419"
+  },
+  {
+    "text": "because it would just be able to deliver Romantics that's one way to think about it the other thing is well maybe it's",
+    "start": "431419",
+    "end": "437690"
+  },
+  {
+    "text": "sorting because it didn't have it didn't think it had enough memory because remember we had this big over estimate it thought I had a sort of whole bunch",
+    "start": "437690",
+    "end": "443449"
+  },
+  {
+    "text": "of things it only had a sort of 521 things right so I found took that is to say there's only 521 distinct values it",
+    "start": "443449",
+    "end": "450440"
+  },
+  {
+    "text": "still had to sort them all if it's gonna use a sort based algorithm it could have used a hash based algorithm right it",
+    "start": "450440",
+    "end": "456380"
+  },
+  {
+    "text": "didn't have to sort that many could if it had plenty of room for the 521 rows if it built a hash table but it didn't",
+    "start": "456380",
+    "end": "463070"
+  },
+  {
+    "text": "build a hash table it did the aggregation because it's doing this group outer hit at the top so maybe the",
+    "start": "463070",
+    "end": "468349"
+  },
+  {
+    "text": "problem is that it shouldn't have been sorting in the first place right so one one solution that you might say is well",
+    "start": "468349",
+    "end": "473450"
+  },
+  {
+    "text": "you could try turn enable underscore sort equals false plant it again see if",
+    "start": "473450",
+    "end": "478580"
+  },
+  {
+    "text": "it uses a a hat or you could say the statistics are wrong and in this case a",
+    "start": "478580",
+    "end": "485229"
+  },
+  {
+    "text": "geo hash of thing comma two can only possibly return 1,024 values so the",
+    "start": "485229",
+    "end": "493010"
+  },
+  {
+    "text": "planner is kind of there's a bug there too like that should have been able to do a better job of estimating that",
+    "start": "493010",
+    "end": "498020"
+  },
+  {
+    "text": "because it's only possible to come up with one to 1024 values it's not smart enough to know that here it says it's",
+    "start": "498020",
+    "end": "504530"
+  },
+  {
+    "text": "doing an external merge search so if you increase workmen give it a little bit more memory so now it's maybe going to",
+    "start": "504530",
+    "end": "511190"
+  },
+  {
+    "text": "do a group two aggregation instead or maybe instead of doing you see it says external merge well that's a really so",
+    "start": "511190",
+    "end": "518479"
+  },
+  {
+    "text": "that's this that's postgis the slowest way to do sorts have you give it enough memory to do this sort",
+    "start": "518479",
+    "end": "525490"
+  },
+  {
+    "text": "in memory then it would go a lot faster to so there's basically like six seven",
+    "start": "525730",
+    "end": "531560"
+  },
+  {
+    "text": "ways to make this thing faster right and these are you know like how do you interpret this thing from this text to",
+    "start": "531560",
+    "end": "538400"
+  },
+  {
+    "text": "being able to do something good so there's some free visualization tools that you can get on the web this is a",
+    "start": "538400",
+    "end": "544520"
+  },
+  {
+    "text": "good one I think called debes I asked the author how to pronounce that because",
+    "start": "544520",
+    "end": "550130"
+  },
+  {
+    "text": "I didn't know how to pronounce it this is a Polish word depth heads and what",
+    "start": "550130",
+    "end": "556010"
+  },
+  {
+    "text": "debes does is it you you post as long as you don't mind posting this and making it this visible to others there's others",
+    "start": "556010",
+    "end": "562580"
+  },
+  {
+    "text": "that are more private than that but you upload it and the important things jump right out of here right says the rows of",
+    "start": "562580",
+    "end": "569050"
+  },
+  {
+    "text": "this operator were overestimated by a factor of two hundred seven times that's pretty bad and it highlights immediately",
+    "start": "569050",
+    "end": "577250"
+  },
+  {
+    "text": "that the problem is in this sort node so it focuses your attention from the immediate blur of all that text to okay",
+    "start": "577250",
+    "end": "584150"
+  },
+  {
+    "text": "we have an overestimation problem we have a slow node almost all the time is happening in this one node let's so it",
+    "start": "584150",
+    "end": "591410"
+  },
+  {
+    "text": "makes it a lot clearer what you're supposed to do about it so debes is cool so what are some of the",
+    "start": "591410",
+    "end": "597470"
+  },
+  {
+    "start": "594000",
+    "end": "744000"
+  },
+  {
+    "text": "problems that you should look for in an explained analyze output and this is not a complete list of course but these are",
+    "start": "597470",
+    "end": "604700"
+  },
+  {
+    "text": "sort of the the very common things to look for the most important thing I",
+    "start": "604700",
+    "end": "610850"
+  },
+  {
+    "text": "think is there's a large difference between the estimated and actual rows",
+    "start": "610850",
+    "end": "615920"
+  },
+  {
+    "text": "right if the cardinality estimates are off lots of things go wrong basically the the optimizer is now guessing and",
+    "start": "615920",
+    "end": "623290"
+  },
+  {
+    "text": "your mileage may vary a lot second thing to look for is index usage is it using",
+    "start": "623290",
+    "end": "631160"
+  },
+  {
+    "text": "the wrong index is it using no index maybe choosing the right index but it's not using it in the way that you wanted",
+    "start": "631160",
+    "end": "637460"
+  },
+  {
+    "text": "it to be used a large number of buffers red means generally that the working set",
+    "start": "637460",
+    "end": "643190"
+  },
+  {
+    "text": "hasn't been cached that would be a warning indicator large number of rows filtered by a post joined predicate",
+    "start": "643190",
+    "end": "648470"
+  },
+  {
+    "text": "reading more data than necessary which might be partitioned pruning not happening or clustering not it should",
+    "start": "648470",
+    "end": "654980"
+  },
+  {
+    "text": "have been done not index only access not being used there slow nodes sort a granata in is a sore",
+    "start": "654980",
+    "end": "663589"
+  },
+  {
+    "text": "spot that we're fixing or large sequential scans CTS are currently a",
+    "start": "663589",
+    "end": "669050"
+  },
+  {
+    "text": "partitioning a optimization boundary and count is slow also if you see lossy being reported I",
+    "start": "669050",
+    "end": "677029"
+  },
+  {
+    "text": "had a hole down slow down here rats okay",
+    "start": "677029",
+    "end": "683230"
+  },
+  {
+    "text": "if you see it being reported as oh it's not a good thing if it gets reported as",
+    "start": "683230",
+    "end": "688910"
+  },
+  {
+    "text": "lossy a bitmap scan that means it's actually run out of memory the interpretation of that when you see that",
+    "start": "688910",
+    "end": "695029"
+  },
+  {
+    "text": "and explain output is you need to increase your work mem Postgres is clever when you have a lot of rows that need to be read it's still",
+    "start": "695029",
+    "end": "701899"
+  },
+  {
+    "text": "clever it's it shifts to a lossy representation but then it has to go back to the heap to get those rows and that slow so if you see lossy that",
+    "start": "701899",
+    "end": "708850"
+  },
+  {
+    "text": "interpret that to mean increasing work mem and there's good algorithms posted",
+    "start": "708850",
+    "end": "714980"
+  },
+  {
+    "text": "on the web for how much you should increase it by also functions are by default volatile which turns off certain",
+    "start": "714980",
+    "end": "722269"
+  },
+  {
+    "text": "query optimizations if in fact the the function was immutable you should make",
+    "start": "722269",
+    "end": "727790"
+  },
+  {
+    "text": "sure declared it is immutable then you'll get the full set of up the of optimizations that are available by the",
+    "start": "727790",
+    "end": "733160"
+  },
+  {
+    "text": "optimizer so these are the common things and that was really fast right it's like we could have gone I actually deleted a",
+    "start": "733160",
+    "end": "739250"
+  },
+  {
+    "text": "bunch of slides in this area we can do a whole workshop just on this right but these are like the heavy hitters kind of",
+    "start": "739250",
+    "end": "744829"
+  },
+  {
+    "start": "744000",
+    "end": "856000"
+  },
+  {
+    "text": "thing second thing is up is optimizer parameters so Guk's are more than just",
+    "start": "744829",
+    "end": "750079"
+  },
+  {
+    "text": "optimizer parameters but I'm going to focus on those parameters that affect the optimizer first point is that Guk's",
+    "start": "750079",
+    "end": "756050"
+  },
+  {
+    "text": "can be set at different levels you can set it at the session level if you're connected and let's say talking to psql",
+    "start": "756050",
+    "end": "763819"
+  },
+  {
+    "text": "you can set things and that would be the session level you can also set it at the role level database level system level",
+    "start": "763819",
+    "end": "770689"
+  },
+  {
+    "text": "or you can set it on an individual function so there's lots of different levels and they override each other and",
+    "start": "770689",
+    "end": "777139"
+  },
+  {
+    "text": "so that's kind of good so I have included I'm not going to go through each of these of course but in two",
+    "start": "777139",
+    "end": "782660"
+  },
+  {
+    "text": "general categories Postgres has very crude controls over",
+    "start": "782660",
+    "end": "787730"
+  },
+  {
+    "text": "planning first is the enable flags and it's a just pick one like enable",
+    "start": "787730",
+    "end": "793040"
+  },
+  {
+    "text": "join you can set an able hash joint equals false if you have some planning you're some node in your statement",
+    "start": "793040",
+    "end": "799370"
+  },
+  {
+    "text": "that's using hash string you don't think it should be you don't have control over an individual node you have to turn off",
+    "start": "799370",
+    "end": "804589"
+  },
+  {
+    "text": "the entire statement that's really very coarse level control but that's what they offer so there's lots of things for",
+    "start": "804589",
+    "end": "812630"
+  },
+  {
+    "text": "enabling and disabling individual features but it applies to the entire statement not to an individual node and",
+    "start": "812630",
+    "end": "819139"
+  },
+  {
+    "text": "in the second section there's one of the really cool unique characteristics of",
+    "start": "819139",
+    "end": "825019"
+  },
+  {
+    "text": "post graphs is that you can actually control the cost model you can really twiddle it like do really cool things",
+    "start": "825019",
+    "end": "831170"
+  },
+  {
+    "text": "it's very powerful but they're there but again how to do this so that it applies only when you want it to apply you can",
+    "start": "831170",
+    "end": "838940"
+  },
+  {
+    "text": "become problematic and I'll I'll tell you how you can deal with that I'm the ones I've color-coded in green",
+    "start": "838940",
+    "end": "845449"
+  },
+  {
+    "text": "are kind of the high leverage ones that you will find are going to be the most useful to fix plans by default a little",
+    "start": "845449",
+    "end": "854149"
+  },
+  {
+    "text": "segue to my next slide I think so recommended settings for for Postgres core or postscript sequel first thing is",
+    "start": "854149",
+    "end": "861050"
+  },
+  {
+    "start": "856000",
+    "end": "1083000"
+  },
+  {
+    "text": "I recommend you set the random page cost to one some people recommend as high as",
+    "start": "861050",
+    "end": "866360"
+  },
+  {
+    "text": "1.5 the default from the community is 4 and that would be appropriate maybe for",
+    "start": "866360",
+    "end": "872089"
+  },
+  {
+    "text": "rotating media but for SSDs and all of our stuff is backed by SSDs you have no",
+    "start": "872089",
+    "end": "877970"
+  },
+  {
+    "text": "rotational latency there's a second factor that random page costs models",
+    "start": "877970",
+    "end": "883490"
+  },
+  {
+    "text": "which is the effect of buffering like a vase of asynchronous prefetch so if",
+    "start": "883490",
+    "end": "889399"
+  },
+  {
+    "text": "you're doing a sequential scan you're going to be doing a lot of prefetching very effectively the system knows what",
+    "start": "889399",
+    "end": "894769"
+  },
+  {
+    "text": "pages are going to be read next it's very efficient in the case of random reads it does not know as well so if",
+    "start": "894769",
+    "end": "900319"
+  },
+  {
+    "text": "they all happen to be buffered ahead of time you'd want to that would tend to make that factor 1.0 if they're not all",
+    "start": "900319",
+    "end": "908510"
+  },
+  {
+    "text": "buffered ahead of time then maybe as much as 1.5 but you still have no rotational latency so I'm gonna say",
+    "start": "908510",
+    "end": "916040"
+  },
+  {
+    "text": "these are my recommendations you don't have to trust me I'm gonna show you how you can find this out for yourself and",
+    "start": "916040",
+    "end": "922040"
+  },
+  {
+    "text": "you can make your own decisions about it um but random page cost set it to one is what I would say as a starting-point",
+    "start": "922040",
+    "end": "928970"
+  },
+  {
+    "text": "work mem is by default four megabytes and that's appropriate for OLTP for the",
+    "start": "928970",
+    "end": "934670"
+  },
+  {
+    "text": "most part if you are doing something like data warehousing it would be much too small you have big cash joins or",
+    "start": "934670",
+    "end": "941660"
+  },
+  {
+    "text": "whatever and you need to have a lot of temporary space you need more work man so for a data warehousing setting maybe",
+    "start": "941660",
+    "end": "947750"
+  },
+  {
+    "text": "four gigabytes if it's only data warehouse type queries but for OLTP the",
+    "start": "947750",
+    "end": "953960"
+  },
+  {
+    "text": "situation is different this is this is a memory limit for every node in each",
+    "start": "953960",
+    "end": "959570"
+  },
+  {
+    "text": "statement in every you know in every transaction right for a pivot for each statement that's currently running maybe",
+    "start": "959570",
+    "end": "965990"
+  },
+  {
+    "text": "you have four thousand statements running so this the way Postgres manages memory is in this sort of fencepost",
+    "start": "965990",
+    "end": "974270"
+  },
+  {
+    "text": "style of you know every operator has its own limit so if you have four thousand",
+    "start": "974270",
+    "end": "979850"
+  },
+  {
+    "text": "of them you better make that a pretty tight limit you might even reduce it from four megabytes in general but for any",
+    "start": "979850",
+    "end": "985790"
+  },
+  {
+    "text": "particular query that you need to make go faster you can increase work mem as long as you can scope that setting for",
+    "start": "985790",
+    "end": "992300"
+  },
+  {
+    "text": "that statement that makes sense we'll get into that more for max peril workers",
+    "start": "992300",
+    "end": "997340"
+  },
+  {
+    "text": "per gather OLTP can't really exploit parallel query very much again if you have 4,000 2,000 4,000 concurrent",
+    "start": "997340",
+    "end": "1005850"
+  },
+  {
+    "text": "transactions the way para query works as it tries to reuse the number of",
+    "start": "1005850",
+    "end": "1011740"
+  },
+  {
+    "text": "background workers that you have available which by default is 8 so you figure if you have 4,000 requesters all",
+    "start": "1011740",
+    "end": "1018040"
+  },
+  {
+    "text": "wanting to get at that 8 most of them are not going to benefit from Carol curry at all so for OLTP set it to minus 1 turn it",
+    "start": "1018040",
+    "end": "1025959"
+  },
+  {
+    "text": "off would be my suggestion and for an individual report query or something that you need to go fast",
+    "start": "1025959",
+    "end": "1031510"
+  },
+  {
+    "text": "that is can benefit from peril kree turn it on for that statement and again I'll show you how so",
+    "start": "1031510",
+    "end": "1039069"
+  },
+  {
+    "text": "shared preload libraries PG stat statements and PG hint plan would be important for doing query tuning which",
+    "start": "1039070",
+    "end": "1046360"
+  },
+  {
+    "text": "this talk is about the default statistics target I'll talk more about but set that to 256 the default is 100",
+    "start": "1046360",
+    "end": "1052780"
+  },
+  {
+    "text": "you could set it higher others a time trade-off the higher it is the long it takes to run analyze but 256 is a good",
+    "start": "1052780",
+    "end": "1059920"
+  },
+  {
+    "text": "trade-off I think and you can increase the from collapse limit and joint collapse limit to 20 as",
+    "start": "1059920",
+    "end": "1065890"
+  },
+  {
+    "text": "long as you keep the Gekko threshold at 12 or lower which is the default so",
+    "start": "1065890",
+    "end": "1071200"
+  },
+  {
+    "text": "we'll just leave it at that and there's a set of query plan management parameters that we can come back to",
+    "start": "1071200",
+    "end": "1076870"
+  },
+  {
+    "text": "later but I'm just including it on this slide so if you get the slides it's there for your reference so before",
+    "start": "1076870",
+    "end": "1084910"
+  },
+  {
+    "start": "1083000",
+    "end": "1519000"
+  },
+  {
+    "text": "moving on to query plan management let's talk about preliminaries for setting your system up for good performance so",
+    "start": "1084910",
+    "end": "1090760"
+  },
+  {
+    "text": "before you talk about tuning individual queries you know let's not shoot",
+    "start": "1090760",
+    "end": "1095950"
+  },
+  {
+    "text": "ourselves in the foot right from the start first preliminary is make sure you have sufficient RAM so reading from SSD",
+    "start": "1095950",
+    "end": "1102580"
+  },
+  {
+    "text": "or disk even worse is much slower than reading from RAM so what you want to do",
+    "start": "1102580",
+    "end": "1108280"
+  },
+  {
+    "text": "is you want to get your cache hit ratio very high for an OLTP type application you want to see that to be 99 percent or",
+    "start": "1108280",
+    "end": "1116350"
+  },
+  {
+    "text": "higher right so if you don't see if it's much lower than 99 percent scale up to a",
+    "start": "1116350",
+    "end": "1123040"
+  },
+  {
+    "text": "higher instance you probably need additional memory there you if you have performance insights enabled you can",
+    "start": "1123040",
+    "end": "1129130"
+  },
+  {
+    "text": "check to see which statements are waiting for i/o so you can get a finer granularity but basically when you're",
+    "start": "1129130",
+    "end": "1135790"
+  },
+  {
+    "text": "doing your reads you want to be reading from RAM you don't want to be reading from disk second preliminary is to check",
+    "start": "1135790",
+    "end": "1141640"
+  },
+  {
+    "text": "index availability in usage make sure you have primary keys defined I",
+    "start": "1141640",
+    "end": "1146760"
+  },
+  {
+    "text": "recommend you have foreign key index is defined as well so the optimizer can",
+    "start": "1146760",
+    "end": "1152200"
+  },
+  {
+    "text": "efficiently join in either joint order otherwise you constrain the optimizer too much and check for missing other",
+    "start": "1152200",
+    "end": "1158200"
+  },
+  {
+    "text": "indexes meaning non key indexes and there's some reference queries from the",
+    "start": "1158200",
+    "end": "1164770"
+  },
+  {
+    "text": "community down here that are really excellent in the case of missing other indexes what it's doing is it's checking",
+    "start": "1164770",
+    "end": "1170080"
+  },
+  {
+    "text": "the amount of scanning that you're doing versus the amount of index you know going going at something sequentially",
+    "start": "1170080",
+    "end": "1175390"
+  },
+  {
+    "text": "versus via an index and if you're scanning it sequentially that's an indication that you might be missing an",
+    "start": "1175390",
+    "end": "1181240"
+  },
+  {
+    "text": "index so that's it it identifies those cases pretty efficiently and also check for redundant or unused indexes so",
+    "start": "1181240",
+    "end": "1188020"
+  },
+  {
+    "text": "that's just slowing it down again I've included the links here so if you get the slides you can follow up",
+    "start": "1188020",
+    "end": "1193889"
+  },
+  {
+    "text": "and find those the actual queries on the website the third preliminary is to collect",
+    "start": "1193889",
+    "end": "1201119"
+  },
+  {
+    "text": "accurate statistics and this is going to be somewhat surprising I think for some",
+    "start": "1201119",
+    "end": "1206639"
+  },
+  {
+    "text": "of you especially coming from other systems but also for the folks who have experience with Postgres so cardinality",
+    "start": "1206639",
+    "end": "1212399"
+  },
+  {
+    "text": "estimation again accuracy is again the main determine of plant quality so you want to get the the cardinality",
+    "start": "1212399",
+    "end": "1217799"
+  },
+  {
+    "text": "estimates to be as as accurate as it can be and your main lever for being able to make that happen is to collect accurate",
+    "start": "1217799",
+    "end": "1224399"
+  },
+  {
+    "text": "statistics now I'm going to show I don't know if I actually show statistics and",
+    "start": "1224399",
+    "end": "1230460"
+  },
+  {
+    "text": "this but I go through a benchmark here and when you run analyze on it it estimates various quantities which we're",
+    "start": "1230460",
+    "end": "1236220"
+  },
+  {
+    "text": "going to show down below here and they are just wildly inaccurate on real",
+    "start": "1236220",
+    "end": "1241799"
+  },
+  {
+    "text": "customer distributions great if data is uniformly distributed it does a nice job you know everything's the same frequency",
+    "start": "1241799",
+    "end": "1248129"
+  },
+  {
+    "text": "but in real we're gonna go through the joint order benchmark which is basically",
+    "start": "1248129",
+    "end": "1253529"
+  },
+  {
+    "text": "the Internet Movie Database and there's real things like real actors and real movies and real you know everything and",
+    "start": "1253529",
+    "end": "1259649"
+  },
+  {
+    "text": "on that database with real data distributions analyze does a terrible job at estimating things because you",
+    "start": "1259649",
+    "end": "1265499"
+  },
+  {
+    "text": "have highly skewed distributions and other things that happen in the real world so what statistics does it",
+    "start": "1265499",
+    "end": "1271619"
+  },
+  {
+    "text": "actually keep it keeps four tables it keeps the number of rows and the number of pages and that's it and four column",
+    "start": "1271619",
+    "end": "1279690"
+  },
+  {
+    "text": "statistics it keeps the number of distinct values in each column it keeps the number the most common values that a",
+    "start": "1279690",
+    "end": "1286679"
+  },
+  {
+    "text": "high frequency values within each column so by definition something is high frequency if it occurs 25% more",
+    "start": "1286679",
+    "end": "1294330"
+  },
+  {
+    "text": "frequently or more than the average frequency which is the number of rows divided by the number of distinct values",
+    "start": "1294330",
+    "end": "1300509"
+  },
+  {
+    "text": "that's the average so if it's twenty five percent or higher more than that it is by definition a common value and",
+    "start": "1300509",
+    "end": "1306869"
+  },
+  {
+    "text": "there's a special list of the most common values where it keeps that that list is not infinitely long that list is",
+    "start": "1306869",
+    "end": "1313609"
+  },
+  {
+    "text": "limited by this parameter that is by default 100 so by default it would only",
+    "start": "1313609",
+    "end": "1319830"
+  },
+  {
+    "text": "keep as many as 100 frequent values the height balanced histogram of non",
+    "start": "1319830",
+    "end": "1325260"
+  },
+  {
+    "text": "frequent values I'm sorry yes yeah I'm non frequent values so here it basically keeps a histogram which is used for",
+    "start": "1325260",
+    "end": "1331710"
+  },
+  {
+    "text": "things like range queries range query predicate estimates estimation so for X",
+    "start": "1331710",
+    "end": "1338070"
+  },
+  {
+    "text": "between this value and that value how many you know what fraction of the table is going to get returned and it also",
+    "start": "1338070",
+    "end": "1344310"
+  },
+  {
+    "text": "keeps a couple of other things the null fraction the average length of like a varchar' column and the correlation to",
+    "start": "1344310",
+    "end": "1351570"
+  },
+  {
+    "text": "heat border so and in version 10 it also keeps multi column statistics this is",
+    "start": "1351570",
+    "end": "1357390"
+  },
+  {
+    "text": "less commonly useful but but again and if you're if somebody comes into your office and says that a query is slow one",
+    "start": "1357390",
+    "end": "1364290"
+  },
+  {
+    "text": "of the reasons it might be slow is that it doesn't recognize the planner doesn't recognize that there's a correlation between different columns let's say you",
+    "start": "1364290",
+    "end": "1371340"
+  },
+  {
+    "text": "have a predicate where we're make equal honda and model equals accord well the",
+    "start": "1371340",
+    "end": "1378270"
+  },
+  {
+    "text": "optimizer will combine that ANDed predicate and it'll think that a very small number of values result that the",
+    "start": "1378270",
+    "end": "1385980"
+  },
+  {
+    "text": "selectivity is very small but in fact Tom does the only one that makes the",
+    "start": "1385980",
+    "end": "1391050"
+  },
+  {
+    "text": "Accord and so if you just said model equals a quart the selectivity would have been about the same but as it as it",
+    "start": "1391050",
+    "end": "1397500"
+  },
+  {
+    "text": "really is so it doesn't know that these are correlated predicates and it's going to underestimate the selectivity a lot",
+    "start": "1397500",
+    "end": "1402980"
+  },
+  {
+    "text": "so the ability to have multi column statistics compensates for that so",
+    "start": "1402980",
+    "end": "1408630"
+  },
+  {
+    "text": "that's just something to keep an eye on when you look at the explained output if the estimated number if the estimated",
+    "start": "1408630",
+    "end": "1413730"
+  },
+  {
+    "text": "cardinality is coming out really bad sometimes it's because there's a hidden correlation that hasn't been modeled yet",
+    "start": "1413730",
+    "end": "1419010"
+  },
+  {
+    "text": "so it's it's good if you can model those now here's a tip notice I said the most",
+    "start": "1419010",
+    "end": "1427230"
+  },
+  {
+    "text": "common values list is defined in part by the number of rows divided by by the number of distinct right it's 25% more",
+    "start": "1427230",
+    "end": "1433860"
+  },
+  {
+    "text": "than that so if you have a really bad estimate of the number of distinct values you're probably going to have not",
+    "start": "1433860",
+    "end": "1439050"
+  },
+  {
+    "text": "very good list of most common values either right depending on which way that's miss estimated so you want to",
+    "start": "1439050",
+    "end": "1446160"
+  },
+  {
+    "text": "estimate the number of distinct values very accurately and we have a script that we can make available to anybody",
+    "start": "1446160",
+    "end": "1452400"
+  },
+  {
+    "text": "who asks us for it which is the arc stat script which will go through and it will give you an",
+    "start": "1452400",
+    "end": "1457799"
+  },
+  {
+    "text": "accurate estimate of all of the distinct value accounts in all of your tables or any of your tables that have a table",
+    "start": "1457799",
+    "end": "1464940"
+  },
+  {
+    "text": "cardinality bigger than a certain threshold so that's really handy so now you can get your statistics at least the",
+    "start": "1464940",
+    "end": "1472110"
+  },
+  {
+    "text": "n distinct statistics accurate to begin with then we and that overrides what's on the table for each column and then",
+    "start": "1472110",
+    "end": "1478590"
+  },
+  {
+    "text": "when you run analyze you'll now get much more accurate statistics as a result of that so that's it does yep works on the",
+    "start": "1478590",
+    "end": "1487500"
+  },
+  {
+    "text": "vanillin Postgres as well as the question second tip is to increase this",
+    "start": "1487500",
+    "end": "1493049"
+  },
+  {
+    "text": "B statistics target to at least 256 so that now your histograms are going to be",
+    "start": "1493049",
+    "end": "1498090"
+  },
+  {
+    "text": "more accurate your MCV lists are going to be more accurate so if you have good indistinct and you have a higher",
+    "start": "1498090",
+    "end": "1505140"
+  },
+  {
+    "text": "statistics target now you have a much better chance of getting good cardinality estimates and good plans so",
+    "start": "1505140",
+    "end": "1511440"
+  },
+  {
+    "text": "that is the preliminaries part of the talk so now let's talk about query plan management which some people over here I",
+    "start": "1511440",
+    "end": "1520140"
+  },
+  {
+    "start": "1519000",
+    "end": "1909000"
+  },
+  {
+    "text": "know have definitely heard of it or using it over here just kind of a show of hands how many you have ever heard of",
+    "start": "1520140",
+    "end": "1525270"
+  },
+  {
+    "text": "a query plan management for for Aurora a few we need to do a better job of",
+    "start": "1525270",
+    "end": "1532200"
+  },
+  {
+    "text": "getting the message out there so customers wanted enterprise-level",
+    "start": "1532200",
+    "end": "1537570"
+  },
+  {
+    "text": "optimizer features for Postgres things I",
+    "start": "1537570",
+    "end": "1543539"
+  },
+  {
+    "text": "heard please give us a way to control the optimizer it doesn't even have hints built into the the core product and",
+    "start": "1543539",
+    "end": "1551120"
+  },
+  {
+    "text": "preferably give us a way to control the the optimizer that doesn't require us to",
+    "start": "1551120",
+    "end": "1556500"
+  },
+  {
+    "text": "stick hints into our application code a little bit of a digression on hints a",
+    "start": "1556500",
+    "end": "1565309"
+  },
+  {
+    "text": "little bit of big digression on hints here is if you hint it and say ok here I",
+    "start": "1565309",
+    "end": "1570720"
+  },
+  {
+    "text": "happen to know that I see a hash join I wanted to use a index nested loop right",
+    "start": "1570720",
+    "end": "1575789"
+  },
+  {
+    "text": "I have a nice index and you say the hint I want to use a nested loop join for this for this particular joint which you",
+    "start": "1575789",
+    "end": "1582000"
+  },
+  {
+    "text": "can do with PG hint plan ok fine and then time passes and that works was great you put it into your application",
+    "start": "1582000",
+    "end": "1588270"
+  },
+  {
+    "text": "time passes though I'll just let that play time passes and then people leave other people come on",
+    "start": "1588270",
+    "end": "1595470"
+  },
+  {
+    "text": "board things change data distributions change like lots of stuff changes and then somebody comes along and say you",
+    "start": "1595470",
+    "end": "1601350"
+  },
+  {
+    "text": "know we could make this application perform really better if we drop that index and added another index right so",
+    "start": "1601350",
+    "end": "1607530"
+  },
+  {
+    "text": "but that other index isn't usable for that particular join that they don't even know about right it's not usable",
+    "start": "1607530",
+    "end": "1613320"
+  },
+  {
+    "text": "for that but you've still set to use a nested loop so now it says okay I must use a nested loop but I don't have an",
+    "start": "1613320",
+    "end": "1619050"
+  },
+  {
+    "text": "index for that joint anymore so now I have to use a non index nested loop joint and performance goes down the",
+    "start": "1619050",
+    "end": "1624900"
+  },
+  {
+    "text": "tubes right because a non index nested loop joint is terrible basically for anything other than a trivial size inner",
+    "start": "1624900",
+    "end": "1631370"
+  },
+  {
+    "text": "so hence in a nutshell create fragility in an application and",
+    "start": "1631370",
+    "end": "1641940"
+  },
+  {
+    "text": "over a period of time it becomes less and less maintainable so having hints in your application code is not a good",
+    "start": "1641940",
+    "end": "1647520"
+  },
+  {
+    "text": "thing to have the other thing you want to do is you want to prevent the optimizer from flipping to slow plans",
+    "start": "1647520",
+    "end": "1653370"
+  },
+  {
+    "text": "you may have like a centralized group that does all the query optimization and",
+    "start": "1653370",
+    "end": "1658740"
+  },
+  {
+    "text": "now you want to ship your application out but you don't have any control over what's going to happen once it gets in the field and you're you know rightfully",
+    "start": "1658740",
+    "end": "1665720"
+  },
+  {
+    "text": "concerned that the plants might flip to a plan that's not as good you might also",
+    "start": "1665720",
+    "end": "1671910"
+  },
+  {
+    "text": "want to be able to create and distribute optimized plans with an application as you can do with Oracle and as you can do",
+    "start": "1671910",
+    "end": "1677670"
+  },
+  {
+    "text": "with some other systems and you want to be able to preserve plans across an upgrade to a new version of the our DBMS",
+    "start": "1677670",
+    "end": "1683700"
+  },
+  {
+    "text": "so you get a new version you get a new optimizer you get new statistics so how",
+    "start": "1683700",
+    "end": "1689280"
+  },
+  {
+    "text": "do you preserve your plans and not be exposed to everything changing not have to reinvest so what does query plan",
+    "start": "1689280",
+    "end": "1694770"
+  },
+  {
+    "text": "management do first thing it provides a persistent plant representation known as",
+    "start": "1694770",
+    "end": "1700860"
+  },
+  {
+    "text": "a plan outline and I'll show what that plan outline looks like secondly for every sequel statement that's executed",
+    "start": "1700860",
+    "end": "1706890"
+  },
+  {
+    "text": "two or more times the planner finds a minimum cost plan as usual as it always",
+    "start": "1706890",
+    "end": "1712770"
+  },
+  {
+    "text": "does it always does this and then if this is the first plan found that really",
+    "start": "1712770",
+    "end": "1718050"
+  },
+  {
+    "text": "that's executed twice or more then save it as an approved plan otherwise if this is a new plan save it",
+    "start": "1718050",
+    "end": "1724849"
+  },
+  {
+    "text": "as an unapproved plan because you'll have at least one approve plan and then with the approved plans now replant and",
+    "start": "1724849",
+    "end": "1731570"
+  },
+  {
+    "text": "choose the minimum cost approved plan so now you have control over which plans",
+    "start": "1731570",
+    "end": "1736849"
+  },
+  {
+    "text": "are going to be chosen and if no proof plans can be recreated then use the optimizers plan because you've always got the optimizers plan finally it",
+    "start": "1736849",
+    "end": "1745220"
+  },
+  {
+    "text": "evaluate the performance of new plans off wine during plant evolution so",
+    "start": "1745220",
+    "end": "1750679"
+  },
+  {
+    "text": "instead of doing it like right then and you know like the optimizer thinks it's better you know you're going to stick to",
+    "start": "1750679",
+    "end": "1757340"
+  },
+  {
+    "text": "the approved plans the minimum cost approved plan but then switch and and do this line bake-off activity to figure",
+    "start": "1757340",
+    "end": "1766070"
+  },
+  {
+    "text": "out if the plan that the optimizer thought was really good is in fact faster and if it is then it can become an approved plan so the Q p.m. enhanced",
+    "start": "1766070",
+    "end": "1774679"
+  },
+  {
+    "text": "query processing flow we have the chart that we saw before but now query plan",
+    "start": "1774679",
+    "end": "1779899"
+  },
+  {
+    "text": "management is shown and its relationship to the planner is here and there's basically a hook and I'm not going to go",
+    "start": "1779899",
+    "end": "1786080"
+  },
+  {
+    "text": "through all the internal details but it's basically what I just described and so now the planner talks to query plan",
+    "start": "1786080",
+    "end": "1791779"
+  },
+  {
+    "text": "management and it has its own store of plans that you have approved or unapproved or rejected or preferred and",
+    "start": "1791779",
+    "end": "1798859"
+  },
+  {
+    "text": "it goes to this whole process of figuring out the minimum cost approved plan for every query so here's a very",
+    "start": "1798859",
+    "end": "1805970"
+  },
+  {
+    "text": "simple example so again this is the first example that I showed so that count star were ID less than 100 or were",
+    "start": "1805970",
+    "end": "1812960"
+  },
+  {
+    "text": "ID less than 10,000 and let's suppose ID less than 100 is very selective and so",
+    "start": "1812960",
+    "end": "1817970"
+  },
+  {
+    "text": "if there's an index available you might want to use a b-tree for that do look up with the index and then do the counting",
+    "start": "1817970",
+    "end": "1824419"
+  },
+  {
+    "text": "or if ID less than 10,000 maybe all the rows or most of the rows satisfy that so",
+    "start": "1824419",
+    "end": "1829849"
+  },
+  {
+    "text": "you just want to sequentially scan it i'm security scan the heat and count so",
+    "start": "1829849",
+    "end": "1836239"
+  },
+  {
+    "text": "qpm treats this is one statement with two different literals and this is what the plan outline would look for would",
+    "start": "1836239",
+    "end": "1842239"
+  },
+  {
+    "text": "look like on the left-hand side you can see the sequel hash so we take this statement we strip off the literals we",
+    "start": "1842239",
+    "end": "1849559"
+  },
+  {
+    "text": "normally normalize that and then we hash it and you'll see that for these two statements it has the same sequel hash",
+    "start": "1849559",
+    "end": "1854619"
+  },
+  {
+    "text": "they have two different in hashes because the plan is different the first statement is approved the",
+    "start": "1854619",
+    "end": "1861440"
+  },
+  {
+    "text": "second statement is unapproved so it's always going to execute the first one until you tell the second one is okay",
+    "start": "1861440",
+    "end": "1867139"
+  },
+  {
+    "text": "two on the right you'll see what the plan outline looks like and that looks",
+    "start": "1867139",
+    "end": "1872869"
+  },
+  {
+    "text": "maybe a little unfamiliar to you at the moment but your eyes get used to it and it reads just like an explained plan",
+    "start": "1872869",
+    "end": "1878539"
+  },
+  {
+    "text": "here it says do an aggregation at the top and index only scan I'm at the top when I'm referring to of the index named",
+    "start": "1878539",
+    "end": "1885769"
+  },
+  {
+    "text": "T underscore ID which is defined on table T and the one on the bottom says do a sequential scan of table T so those",
+    "start": "1885769",
+    "end": "1892249"
+  },
+  {
+    "text": "are the two plans we were talking about and that's what it would look like in a plan outline so what qpm is going to do",
+    "start": "1892249",
+    "end": "1898759"
+  },
+  {
+    "text": "is it's going to take that plan outline and it's going to recreate the original plan so that's not a plan as such it's a",
+    "start": "1898759",
+    "end": "1904490"
+  },
+  {
+    "text": "it's a JSON representation of the plan it's going to read this and it's going to be able to apply that to the query",
+    "start": "1904490",
+    "end": "1912110"
+  },
+  {
+    "start": "1909000",
+    "end": "2157000"
+  },
+  {
+    "text": "planning time so what do we say we save a lot of statistics about each plan at planning time we save the estimated",
+    "start": "1912110",
+    "end": "1918799"
+  },
+  {
+    "text": "total cost the last used date which means this is the last time that the planner decided that this was an optimal",
+    "start": "1918799",
+    "end": "1925669"
+  },
+  {
+    "text": "plan and we also keep the query ID so it's joinable to PG stat statements so now you can get aggregated statistics",
+    "start": "1925669",
+    "end": "1931570"
+  },
+  {
+    "text": "for each statement so that's what's saved at planning time then at execution",
+    "start": "1931570",
+    "end": "1941450"
+  },
+  {
+    "text": "time we also save the last use date so if you let's say have a prepared statement it's executed many times every",
+    "start": "1941450",
+    "end": "1946970"
+  },
+  {
+    "text": "time it's executed also we update the last used date so the last use date is whether the optimizer thought it was the",
+    "start": "1946970",
+    "end": "1953570"
+  },
+  {
+    "text": "optimal plan or you executed it that's an interesting point in time and then",
+    "start": "1953570",
+    "end": "1960350"
+  },
+  {
+    "text": "during this bake-off procedure which is called evolve plan baselines it keeps a",
+    "start": "1960350",
+    "end": "1965990"
+  },
+  {
+    "text": "number of other statistics it keeps the estimated and actual rows because they can now it knows that it keeps something",
+    "start": "1965990",
+    "end": "1972019"
+  },
+  {
+    "text": "called cardinality error which I'll talk more about it's an important new statistic that isn't available from",
+    "start": "1972019",
+    "end": "1977899"
+  },
+  {
+    "text": "Postgres currently keeps the planning time the execution time the total time",
+    "start": "1977899",
+    "end": "1982999"
+  },
+  {
+    "text": "benefit and the execution time benefit which is the incremental amount of time",
+    "start": "1982999",
+    "end": "1988249"
+  },
+  {
+    "text": "that this plan is better than any other plan for this statement with its literal bindings and its",
+    "start": "1988249",
+    "end": "1994700"
+  },
+  {
+    "text": "parameter bindings and finally there's a",
+    "start": "1994700",
+    "end": "2000159"
+  },
+  {
+    "text": "last validated and last verified so validated means this is the last time we",
+    "start": "2000159",
+    "end": "2006429"
+  },
+  {
+    "text": "validated that this was the fastest possible plan for this statement and these and these bindings and last",
+    "start": "2006429",
+    "end": "2011980"
+  },
+  {
+    "text": "verified is it will tell you the last time we verified that you could even recreate the plan from the plan outline",
+    "start": "2011980",
+    "end": "2019179"
+  },
+  {
+    "text": "so for example the the plan outline may refer to an index that you have decided",
+    "start": "2019179",
+    "end": "2024610"
+  },
+  {
+    "text": "to drop in which case it's no longer valid now a couple of go back do that",
+    "start": "2024610",
+    "end": "2033399"
+  },
+  {
+    "text": "again so unused plans are automatically deleted based on the last use date by",
+    "start": "2033399",
+    "end": "2041980"
+  },
+  {
+    "text": "default it's 32 days but eventually they expire so it basically cleans it up for",
+    "start": "2041980",
+    "end": "2046990"
+  },
+  {
+    "text": "you so you don't have to constantly worry about this thing filling up with plans that are now irrelevant the plan",
+    "start": "2046990",
+    "end": "2052300"
+  },
+  {
+    "text": "hasn't been used in a while the space will automatically be reclaimed and you can you can control what that window is",
+    "start": "2052300",
+    "end": "2058089"
+  },
+  {
+    "text": "but it happens automatically for you now cardinality error I'm going to come back to so slow queries with high",
+    "start": "2058089",
+    "end": "2064210"
+  },
+  {
+    "text": "cardinality re cardinality or tuning opportunities if you have a slow plan",
+    "start": "2064210",
+    "end": "2069638"
+  },
+  {
+    "text": "the high cardinality error is computed by taking the actual versus estimated rows taking the log of each of those",
+    "start": "2069639",
+    "end": "2076419"
+  },
+  {
+    "text": "taking the difference in the absolute value of that for each node and then it sums it up over all nodes in the plan so",
+    "start": "2076419",
+    "end": "2082329"
+  },
+  {
+    "text": "it's an aggregated metric of how much the optimizer was guessing and guessed",
+    "start": "2082329",
+    "end": "2088060"
+  },
+  {
+    "text": "wrong so it's actually it's okay if it guesses but if it guesses wrong that's bad right so if you have something that",
+    "start": "2088060",
+    "end": "2093638"
+  },
+  {
+    "text": "has high cardinality error that says optimizer had no idea how many rows are coming out of this it did not do a good",
+    "start": "2093639",
+    "end": "2100119"
+  },
+  {
+    "text": "job in terms of asked estimated versus actual good chance that you might you",
+    "start": "2100119",
+    "end": "2105400"
+  },
+  {
+    "text": "know it might be a fruitful thing to look into this plan especially if it's a slow plan so it it helps you focus your",
+    "start": "2105400",
+    "end": "2112839"
+  },
+  {
+    "text": "attention on where it might be most valuable so quickly how to enable qpm on",
+    "start": "2112839",
+    "end": "2119049"
+  },
+  {
+    "text": "your cluster set RDS that enable plan management to one in your cluster level parameter",
+    "start": "2119049",
+    "end": "2124450"
+  },
+  {
+    "text": "just set it to one and set capture plan baselines to automatic use plan",
+    "start": "2124450",
+    "end": "2131059"
+  },
+  {
+    "text": "baselines to true in your database level parameter group I also recommend like",
+    "start": "2131059",
+    "end": "2136549"
+  },
+  {
+    "text": "your you probably just want to do this once so there's some it uses shared memory which has to be allocated at",
+    "start": "2136549",
+    "end": "2142219"
+  },
+  {
+    "text": "server start time so I would recommend setting the max plans to ten thousand",
+    "start": "2142219",
+    "end": "2147259"
+  },
+  {
+    "text": "and max databases to ten and that's the number of distinct databases on a Postgres cluster and then you just",
+    "start": "2147259",
+    "end": "2154819"
+  },
+  {
+    "text": "restart your instance so if you if you have if you just set things up like that",
+    "start": "2154819",
+    "end": "2161839"
+  },
+  {
+    "start": "2157000",
+    "end": "2467000"
+  },
+  {
+    "text": "then it doesn't you you restart your instance once you don't have to restart it every time you can then go through on",
+    "start": "2161839",
+    "end": "2167779"
+  },
+  {
+    "text": "an individual database or you can set it in your template one database say create extension a PG plan management that's",
+    "start": "2167779",
+    "end": "2174229"
+  },
+  {
+    "text": "the name of the extension that implements qpm and that's it you just run your application after that just run",
+    "start": "2174229",
+    "end": "2180950"
+  },
+  {
+    "text": "it and because this thing lives inside the planner it's always listening for",
+    "start": "2180950",
+    "end": "2186079"
+  },
+  {
+    "text": "when plant when new plans are discovered and sees if any plan is executed at least twice it becomes interesting it",
+    "start": "2186079",
+    "end": "2193430"
+  },
+  {
+    "text": "says ok let's save the plan for that initially it saves it as an approved plan it finds a different plan it says",
+    "start": "2193430",
+    "end": "2199279"
+  },
+  {
+    "text": "ok that's interesting save that as an unapproved plan and just keep going do you want to just let it run as long as",
+    "start": "2199279",
+    "end": "2206059"
+  },
+  {
+    "text": "necessary to till it tries all the different plans after it's F and saves that in the DBA plans view so after some",
+    "start": "2206059",
+    "end": "2213829"
+  },
+  {
+    "text": "period of time of running it you've now captured a bunch of plans the first one",
+    "start": "2213829",
+    "end": "2219170"
+  },
+  {
+    "text": "if there's more than one plan for a statement then the first one will be approved and the remaining are unapproved but there's no real reason at",
+    "start": "2219170",
+    "end": "2226069"
+  },
+  {
+    "text": "this point to prefer the first one to the other one so set them all to approved and then run evolve plan",
+    "start": "2226069",
+    "end": "2231349"
+  },
+  {
+    "text": "baselines to reject any that are slow and that's it you just it's like super easy now this",
+    "start": "2231349",
+    "end": "2238039"
+  },
+  {
+    "text": "might be a thousand different plans this might be ten thousand different plans and you've just now optimized everything",
+    "start": "2238039",
+    "end": "2244369"
+  },
+  {
+    "text": "with an almost completely automatic procedure",
+    "start": "2244369",
+    "end": "2249460"
+  },
+  {
+    "text": "unclear we could so the there are a few hooks that we would need to have so the",
+    "start": "2257410",
+    "end": "2264219"
+  },
+  {
+    "text": "the information so the question is are we ever planning to move this upstream",
+    "start": "2264219",
+    "end": "2270079"
+  },
+  {
+    "text": "so the the problem is that we want to be able to use this let's say with PG hint",
+    "start": "2270079",
+    "end": "2275299"
+  },
+  {
+    "text": "plan just this is actually an important point to understand too so what this",
+    "start": "2275299",
+    "end": "2280880"
+  },
+  {
+    "text": "enables you to do is you can you can modify the plan with PG hint plan and then save it with query plan management",
+    "start": "2280880",
+    "end": "2287359"
+  },
+  {
+    "text": "and then get rid of the hints so you don't need to keep the hint in your application code anymore but to make that work in the the planner",
+    "start": "2287359",
+    "end": "2295099"
+  },
+  {
+    "text": "info structure for each query block we have to maintain information so that whatever the plan that came so that PG",
+    "start": "2295099",
+    "end": "2301339"
+  },
+  {
+    "text": "hint plan and everybody else that creates a plan and the other extension that's not yet invented right can can",
+    "start": "2301339",
+    "end": "2307369"
+  },
+  {
+    "text": "save this information so they that we can create a query plan outline for it right and so that that bit has to be",
+    "start": "2307369",
+    "end": "2314150"
+  },
+  {
+    "text": "actually in the core that has to be cord that part would need to be there before we could just make this an extension",
+    "start": "2314150",
+    "end": "2319369"
+  },
+  {
+    "text": "that's available anywhere it's not a lot of stuff that's in core but there's there's a little bit anyway little",
+    "start": "2319369",
+    "end": "2325009"
+  },
+  {
+    "text": "diversion for that so I'm not going to go through this in detail but more for",
+    "start": "2325009",
+    "end": "2330949"
+  },
+  {
+    "text": "reference the API that you interact with evolve plan baselines I already showed",
+    "start": "2330949",
+    "end": "2336170"
+  },
+  {
+    "text": "that's the thing that does the performance bake off and you can say I want to if it satisfies some speed up",
+    "start": "2336170",
+    "end": "2341179"
+  },
+  {
+    "text": "factor let's say 10% faster 10% slower I want to take some action which can be",
+    "start": "2341179",
+    "end": "2346489"
+  },
+  {
+    "text": "approve reject or don't do anything just show me just show me what the different times are validate plans quickly goes",
+    "start": "2346489",
+    "end": "2355759"
+  },
+  {
+    "text": "through and reap lands all of the statements that you select and decides if the plan can be recreated if you've",
+    "start": "2355759",
+    "end": "2362089"
+  },
+  {
+    "text": "changed and I'll show you if you've changed ducks then it will find new plans perhaps and save them as",
+    "start": "2362089",
+    "end": "2368089"
+  },
+  {
+    "text": "unapproved plans B so you can use validate plans for that purpose as well get explained statement it gives you",
+    "start": "2368089",
+    "end": "2373130"
+  },
+  {
+    "text": "something you can't do today so auto explain you have to configure ahead of",
+    "start": "2373130",
+    "end": "2378439"
+  },
+  {
+    "text": "time and you can say I want to do and explain analyze for everything and then",
+    "start": "2378439",
+    "end": "2384499"
+  },
+  {
+    "text": "your system grinds to a halt it's really a lot of overhead you don't want to do that here you can get the",
+    "start": "2384499",
+    "end": "2390440"
+  },
+  {
+    "text": "explained statement to do the explain analyze because you have the parameters and you have the the literals you have",
+    "start": "2390440",
+    "end": "2396830"
+  },
+  {
+    "text": "the literals and bound parameter values so that at any point in time you can go back and do an explained analyze and",
+    "start": "2396830",
+    "end": "2402710"
+  },
+  {
+    "text": "actually run it and get the actual rows and get all the information that you really need to really do the performance",
+    "start": "2402710",
+    "end": "2408170"
+  },
+  {
+    "text": "analysis so get explained statement gets all that stuff for you for any statements that you want it's sort of",
+    "start": "2408170",
+    "end": "2413660"
+  },
+  {
+    "text": "like an infinite precision auto explain that can be done after the fact you",
+    "start": "2413660",
+    "end": "2420110"
+  },
+  {
+    "text": "don't need to put all the load on your system in order to get it you can do it after the fact because you've got the",
+    "start": "2420110",
+    "end": "2426140"
+  },
+  {
+    "text": "whole plans with their parameters so you can rerun it set plant plan status you",
+    "start": "2426140",
+    "end": "2431360"
+  },
+  {
+    "text": "can explicitly set something to approved or unapproved or reject it or whatever similarly there's another dimension you",
+    "start": "2431360",
+    "end": "2438260"
+  },
+  {
+    "text": "can turn enable disabled on or off you can delete plans reloading plans reloads",
+    "start": "2438260",
+    "end": "2443450"
+  },
+  {
+    "text": "it into shared memory from disk if you want to do that explicitly and you also have a way to tell when the plan was",
+    "start": "2443450",
+    "end": "2448910"
+  },
+  {
+    "text": "last used remember we saved the last time the the last date that the either",
+    "start": "2448910",
+    "end": "2454160"
+  },
+  {
+    "text": "the planner picked something is an optimal plan or that it was executed you know you also have a function that says",
+    "start": "2454160",
+    "end": "2459590"
+  },
+  {
+    "text": "when was that date and I'll show why that's useful to have and here's a link",
+    "start": "2459590",
+    "end": "2465140"
+  },
+  {
+    "text": "at the bottom which has our our online documentation which goes into a lot more detail about that",
+    "start": "2465140",
+    "end": "2470930"
+  },
+  {
+    "start": "2467000",
+    "end": "2726000"
+  },
+  {
+    "text": "so the routine activities that you have to do you have to periodically run evolve plan baselines because you'll",
+    "start": "2470930",
+    "end": "2478280"
+  },
+  {
+    "text": "find that new plans keep getting discovered all the time maybe the optimizer was right maybe they're faster so do the bake-off",
+    "start": "2478280",
+    "end": "2485050"
+  },
+  {
+    "text": "approve anything that's faster and rejected if it's not and occasionally",
+    "start": "2485050",
+    "end": "2491690"
+  },
+  {
+    "text": "run validate plans to check if you got any stale plans now I talked about shared memory usage so how does that",
+    "start": "2491690",
+    "end": "2499070"
+  },
+  {
+    "text": "work in the in the context of a cluster well first thing like whenever a plan is",
+    "start": "2499070",
+    "end": "2504320"
+  },
+  {
+    "text": "created and new it's stored in in shared memory on the rewrite node as well as",
+    "start": "2504320",
+    "end": "2510020"
+  },
+  {
+    "text": "stored in in storage in the aura storage cluster which is shown at the bottom but",
+    "start": "2510020",
+    "end": "2517820"
+  },
+  {
+    "text": "we keep the last used dates updated in shared man we want to do that with ultra-low overhead so we don't write that to disk",
+    "start": "2517820",
+    "end": "2523920"
+  },
+  {
+    "text": "at that point periodically we have a little demon that runs and picks that",
+    "start": "2523920",
+    "end": "2529590"
+  },
+  {
+    "text": "stuff up from shared memory and writes it out to storage that runs by default once an hour and just pushes things out",
+    "start": "2529590",
+    "end": "2535830"
+  },
+  {
+    "text": "similarly on the read-only knows that also has the same the same daemon that",
+    "start": "2535830",
+    "end": "2542580"
+  },
+  {
+    "text": "runs and it's now going to pick it up from from persistent storage and load it",
+    "start": "2542580",
+    "end": "2548490"
+  },
+  {
+    "text": "into store into shared memory on the read-only nodes so this way plans get propagated around the cluster",
+    "start": "2548490",
+    "end": "2554610"
+  },
+  {
+    "text": "automatically you don't have to worry about that but it also means that there's a delay right so there's like an",
+    "start": "2554610",
+    "end": "2562080"
+  },
+  {
+    "text": "hour delay up to an hour delay to write it out to do persistent storage and up to an hour delay on the read only nodes",
+    "start": "2562080",
+    "end": "2568320"
+  },
+  {
+    "text": "to read it back so they get you can be lagged by 2 hours so if you want it immediately if you're on a read-only",
+    "start": "2568320",
+    "end": "2574380"
+  },
+  {
+    "text": "node you want to use it immediately then you can use the reload function just reload it immediately and it'll get you",
+    "start": "2574380",
+    "end": "2579540"
+  },
+  {
+    "text": "whatever's on storage and similarly there's another function that pushes it out immediately if you want to do that so if you're in like diff test and you",
+    "start": "2579540",
+    "end": "2586620"
+  },
+  {
+    "text": "want to move a plan to the read-only nodes you can do that so what does this also give you so now you want to be able",
+    "start": "2586620",
+    "end": "2591930"
+  },
+  {
+    "text": "to optimize centrally and distribute locally and globally so you might have your your cracked optimizer team that's",
+    "start": "2591930",
+    "end": "2598920"
+  },
+  {
+    "text": "gonna you know optimize your application now you can save your plans you're going to get your plans in this plans table",
+    "start": "2598920",
+    "end": "2604620"
+  },
+  {
+    "text": "and now you can distribute it wherever you need to in this case I'm showing on or a nine point six platform you can",
+    "start": "2604620",
+    "end": "2612450"
+  },
+  {
+    "text": "save it there and distribute it to other Ororo 9.6 --is also you can preserve",
+    "start": "2612450",
+    "end": "2618480"
+  },
+  {
+    "text": "plans across a major version upgrade now this is actually not a gimme here right doing this there's there is a lot that's",
+    "start": "2618480",
+    "end": "2625530"
+  },
+  {
+    "text": "different across major versions and keeping it keeping plans the same is",
+    "start": "2625530",
+    "end": "2630570"
+  },
+  {
+    "text": "more challenging across a major version upgrade but let's say you know with version 10 you're gonna get parallel you",
+    "start": "2630570",
+    "end": "2637890"
+  },
+  {
+    "text": "know parallel hash join parallel aggregation brand-new statistics the",
+    "start": "2637890",
+    "end": "2643050"
+  },
+  {
+    "text": "multi column statistics and all that and that's gonna make things better always right well know right a lot of times it",
+    "start": "2643050",
+    "end": "2650670"
+  },
+  {
+    "text": "doesn't make it better sometimes it'll be better sometimes it can be worse so what you can do is you can upgrade",
+    "start": "2650670",
+    "end": "2658170"
+  },
+  {
+    "text": "keep those plans now all the new plans that the optimizer finds in version 10 will be saved as unapproved plans you do",
+    "start": "2658170",
+    "end": "2665010"
+  },
+  {
+    "text": "the bake-off if it's better in version 10 you approve it if it's not better in version 10 you say I want to keep the",
+    "start": "2665010",
+    "end": "2671010"
+  },
+  {
+    "text": "nine-point-six plan thank you very much and so it gets better and better with each release without risk of of plan",
+    "start": "2671010",
+    "end": "2677220"
+  },
+  {
+    "text": "regression that's kind of a big deal so",
+    "start": "2677220",
+    "end": "2682500"
+  },
+  {
+    "text": "I'm not going to go through this in so much detail because it's probably going to be running late but export-import of",
+    "start": "2682500",
+    "end": "2688140"
+  },
+  {
+    "text": "plans is basically to use PG dump and PG reason PG restore and I'll just and we",
+    "start": "2688140",
+    "end": "2693300"
+  },
+  {
+    "text": "have in our documentation the details of how to accomplish that it's not surprising the only surprising part is",
+    "start": "2693300",
+    "end": "2699960"
+  },
+  {
+    "text": "being an extension you can't dump the plans table itself you have to put it to",
+    "start": "2699960",
+    "end": "2705450"
+  },
+  {
+    "text": "a plans copy but that turns out to be a feature rather than a bug because now you can for example take an individual",
+    "start": "2705450",
+    "end": "2711360"
+  },
+  {
+    "text": "plan the guy just walked into your office he said this thing is slow you fix it you can export just that one plan",
+    "start": "2711360",
+    "end": "2717420"
+  },
+  {
+    "text": "and push that around and merge that into your plans table so that's actually very valuable to be able to do a subset of",
+    "start": "2717420",
+    "end": "2723360"
+  },
+  {
+    "text": "the plans table so the second thing I'll mention or many things I'll mention",
+    "start": "2723360",
+    "end": "2729920"
+  },
+  {
+    "start": "2726000",
+    "end": "2978000"
+  },
+  {
+    "text": "partition tables partition table support creates a special challenge because in Postgres partitions are themselves",
+    "start": "2729920",
+    "end": "2736200"
+  },
+  {
+    "text": "tables and so if we're computing this plan hash over this thing how can it be",
+    "start": "2736200",
+    "end": "2741390"
+  },
+  {
+    "text": "the same if the tables are different so that's problem so the Postgres 11 naming",
+    "start": "2741390",
+    "end": "2746550"
+  },
+  {
+    "text": "convention is to have an alpha prefix followed by digits or anything like sales report 2018 11 here the alpha",
+    "start": "2746550",
+    "end": "2753450"
+  },
+  {
+    "text": "prefix is sales underscore report underscore and the hash the plant hash is going to be based on that and so it",
+    "start": "2753450",
+    "end": "2760980"
+  },
+  {
+    "text": "doesn't matter which partition you refer to it considers them all the same so",
+    "start": "2760980",
+    "end": "2766560"
+  },
+  {
+    "text": "what does that mean all the same that have the same prefix so what that means is it matters so it's sensitive to the",
+    "start": "2766560",
+    "end": "2775950"
+  },
+  {
+    "text": "number of partitions that are referenced but not to which partition so if you have a plan that refers to one partition",
+    "start": "2775950",
+    "end": "2781920"
+  },
+  {
+    "text": "same sequel statement refers to a different partition because it's a different literal binding let's say",
+    "start": "2781920",
+    "end": "2787680"
+  },
+  {
+    "text": "to be the same plan because it's just one if you have two plans this one refers to five partitions this one",
+    "start": "2787680",
+    "end": "2792900"
+  },
+  {
+    "text": "refers to one partition then it's going to be different so this is our compromise - how to deal with this this",
+    "start": "2792900",
+    "end": "2800309"
+  },
+  {
+    "text": "issue so as promised how to tune an",
+    "start": "2800309",
+    "end": "2806400"
+  },
+  {
+    "text": "optimizer setting so I had some recommended duct settings for a Postgres so suppose you have let's say the you're",
+    "start": "2806400",
+    "end": "2815369"
+  },
+  {
+    "text": "interested in the plans that took longer than 10 seconds to execute and for those",
+    "start": "2815369",
+    "end": "2820470"
+  },
+  {
+    "text": "you're going to increase the workmen to give it more memory to do things like use hash hash aggregations at assorted",
+    "start": "2820470",
+    "end": "2828480"
+  },
+  {
+    "text": "aggregation let's say since we use that example at the beginning so here's an easy way to do that set work mem - for",
+    "start": "2828480",
+    "end": "2835710"
+  },
+  {
+    "text": "gigabyte at the session level so we're going to relax the memory requirement and then run validate plans which you",
+    "start": "2835710",
+    "end": "2841859"
+  },
+  {
+    "text": "remember is going to reap complies and run through the planner all of the plans that satisfy the Weir Clause here so",
+    "start": "2841859",
+    "end": "2847710"
+  },
+  {
+    "text": "we're going to get all of our plans that are either all of our statements that have plans that are either approved or",
+    "start": "2847710",
+    "end": "2852869"
+  },
+  {
+    "text": "preferred where the execution time is at least ten seconds ten thousand milliseconds and do that just execute",
+    "start": "2852869",
+    "end": "2859799"
+  },
+  {
+    "text": "that and then reset the workmen back where it was what happened okay so we replanned all of the things all of the statements",
+    "start": "2859799",
+    "end": "2866430"
+  },
+  {
+    "text": "that satisfied those requirements all the slow queries and if setting the work mem to four gigabytes made any",
+    "start": "2866430",
+    "end": "2872640"
+  },
+  {
+    "text": "difference at all we now have an unapproved plan we saved it now what you can do with that well of",
+    "start": "2872640",
+    "end": "2877950"
+  },
+  {
+    "text": "course you can run if all plan baselines and figure out whether those new plans are faster if they are you approve them",
+    "start": "2877950",
+    "end": "2884790"
+  },
+  {
+    "text": "so it's a little bit more complex than that but not much so you have your unapproved plans in this case plan three",
+    "start": "2884790",
+    "end": "2892230"
+  },
+  {
+    "text": "and plan for the new one approve plans that we just created if it's not better but uses more memory than you probably",
+    "start": "2892230",
+    "end": "2899579"
+  },
+  {
+    "text": "want to reject that plan so you mark that all rejected but if it's faster if it a nice improvement you might want to",
+    "start": "2899579",
+    "end": "2905460"
+  },
+  {
+    "text": "approve it now if there's already there will already have been an approved plan for that statement so that existing",
+    "start": "2905460",
+    "end": "2910950"
+  },
+  {
+    "text": "approved plan you might want to reject it or you might want to make one of them",
+    "start": "2910950",
+    "end": "2916470"
+  },
+  {
+    "text": "preferred and preferred is a if you have many approved plans",
+    "start": "2916470",
+    "end": "2921650"
+  },
+  {
+    "text": "you probably want to use this additional category called preferred because remember the optimizer is going to",
+    "start": "2921650",
+    "end": "2927690"
+  },
+  {
+    "text": "always be asked to produce the minimum cost approved plan in an extreme case suppose you had 40 approved plans if you",
+    "start": "2927690",
+    "end": "2936930"
+  },
+  {
+    "text": "have so many approved plans for the same statement chances are you're going to get a 40 first and if they're all about",
+    "start": "2936930",
+    "end": "2943049"
+  },
+  {
+    "text": "the same you don't want to have the optimizer go through the overhead of costing each one of these 40 every time",
+    "start": "2943049",
+    "end": "2948329"
+  },
+  {
+    "text": "that would be wasteful so you can mark one or two or small numbers preferred and then it's just going to use it'll",
+    "start": "2948329",
+    "end": "2954480"
+  },
+  {
+    "text": "it'll do a minimum cost preferred plan and if it can't create any of those that don't try a minimal cost approved plan",
+    "start": "2954480",
+    "end": "2960510"
+  },
+  {
+    "text": "if they can't find any of those then it'll use the optimizers plan so that's the so if you see reject it if you've",
+    "start": "2960510",
+    "end": "2969000"
+  },
+  {
+    "text": "already analyzed it and you know it's no good if we see that one again we're not going to go run through this process",
+    "start": "2969000",
+    "end": "2974700"
+  },
+  {
+    "text": "again so you can explain analyze the",
+    "start": "2974700",
+    "end": "2980670"
+  },
+  {
+    "start": "2978000",
+    "end": "3102000"
+  },
+  {
+    "text": "topcase lowest plans by calling get explained statement in this case on",
+    "start": "2980670",
+    "end": "2986190"
+  },
+  {
+    "text": "those plans were planning time plus execution time descent or sorted by",
+    "start": "2986190",
+    "end": "2991650"
+  },
+  {
+    "text": "planning total time descending limit 50 and you can get a script and you can export that script and now you can retry",
+    "start": "2991650",
+    "end": "2998760"
+  },
+  {
+    "text": "running explain analyze with that script very easily it's kind of a cool thing note that in the bottom here there's an",
+    "start": "2998760",
+    "end": "3005210"
+  },
+  {
+    "text": "execute range query 1 comma 10,000 so it actually remembers all the bound parameter values so when you create the",
+    "start": "3005210",
+    "end": "3012140"
+  },
+  {
+    "text": "explained script you're actually able to do the explained analyze on it so so",
+    "start": "3012140",
+    "end": "3019750"
+  },
+  {
+    "text": "analyzing a top statement from performance insights I have a whole section of performance insights I'm not",
+    "start": "3019750",
+    "end": "3024770"
+  },
+  {
+    "text": "going to be able to get to that today because we're already pretty late but this is an example of something that you would get from performance insights and",
+    "start": "3024770",
+    "end": "3031579"
+  },
+  {
+    "text": "it might tell you that the highlighted item is one of its top case statements",
+    "start": "3031579",
+    "end": "3036920"
+  },
+  {
+    "text": "so you could take that you could call evolve plan baselines where the sequel text matches what performance insights",
+    "start": "3036920",
+    "end": "3043700"
+  },
+  {
+    "text": "tells you and you could say since this just happened today right and you could say we're plan last used equals current",
+    "start": "3043700",
+    "end": "3050420"
+  },
+  {
+    "text": "date so this is a statement that was run today or that was planned today and there may be other plans for",
+    "start": "3050420",
+    "end": "3057840"
+  },
+  {
+    "text": "that same statement there were a runner planned today but this is this is I want to run for I want to I want to take this",
+    "start": "3057840",
+    "end": "3063780"
+  },
+  {
+    "text": "and I want to compare it if it's a brand new statement that's slow then I want to understand maybe the optimizer if all",
+    "start": "3063780",
+    "end": "3070380"
+  },
+  {
+    "text": "has already found a better plan for this thing and I just want to approve it so this thing will tell me if the plan",
+    "start": "3070380",
+    "end": "3076740"
+  },
+  {
+    "text": "that's saved for this thing already has another plan and if so go ahead and approve it and then the next day so this you might be able to turn around a fix",
+    "start": "3076740",
+    "end": "3083250"
+  },
+  {
+    "text": "for this particular customer in a minute right and then in another minute you can",
+    "start": "3083250",
+    "end": "3089400"
+  },
+  {
+    "text": "distribute it to all the places where you have you know oh this this is a plan that should be approved everywhere we",
+    "start": "3089400",
+    "end": "3094620"
+  },
+  {
+    "text": "should now export this plan push it out to all of the regions and now you've completed the fixed very quickly I'll",
+    "start": "3094620",
+    "end": "3103290"
+  },
+  {
+    "start": "3102000",
+    "end": "3128000"
+  },
+  {
+    "text": "just go through again just in the next five minutes that's all I've got here's the joint order benchmark and",
+    "start": "3103290",
+    "end": "3109290"
+  },
+  {
+    "text": "here was the top ten slowest queries on our biggest instance sighs so the",
+    "start": "3109290",
+    "end": "3115590"
+  },
+  {
+    "text": "slowest one was 18 seconds on our biggest instance so scaling up the instance isn't going to help here for",
+    "start": "3115590",
+    "end": "3122550"
+  },
+  {
+    "text": "the with a default statistics target of a hundred and so fixing the statistics",
+    "start": "3122550",
+    "end": "3130190"
+  },
+  {
+    "start": "3128000",
+    "end": "3222000"
+  },
+  {
+    "text": "produced a surprising results running analyze basically I just ran analyze and",
+    "start": "3130190",
+    "end": "3137550"
+  },
+  {
+    "text": "then I replanned okay I'm gonna set the statistics target rerun analyze and I got 24 new plans wow that's a lot of new",
+    "start": "3137550",
+    "end": "3145260"
+  },
+  {
+    "text": "plans just from running analyze that okay we're fine well let's reanalyze again i got 41 more plans or a 41 total",
+    "start": "3145260",
+    "end": "3153690"
+  },
+  {
+    "text": "new plan then 59 plans than 75 plans then it's up to 168 new plans all I did",
+    "start": "3153690",
+    "end": "3159990"
+  },
+  {
+    "text": "was run analyze over and over again and it just kept finding different plans all over the place so what the heck is going",
+    "start": "3159990",
+    "end": "3165510"
+  },
+  {
+    "text": "on here right so here's the distribution of number of plans per sequel hash and",
+    "start": "3165510",
+    "end": "3173040"
+  },
+  {
+    "text": "you see that some plans some statements got a different plan every time I ran",
+    "start": "3173040",
+    "end": "3178680"
+  },
+  {
+    "text": "analyze that's how unstable it was right others 10 times 10 out of 11 times it's",
+    "start": "3178680",
+    "end": "3184050"
+  },
+  {
+    "text": "a new plan all the way down so the only thing that was changing is I was running lies so and and of these ten or eleven",
+    "start": "3184050",
+    "end": "3190770"
+  },
+  {
+    "text": "plans some are better than others usually not enormous ly different but they can be different so what's",
+    "start": "3190770",
+    "end": "3196170"
+  },
+  {
+    "text": "happening is that analyze first of all is has some stochastic random elements",
+    "start": "3196170",
+    "end": "3201840"
+  },
+  {
+    "text": "to it and also above this is a complex query benchmark and so above twelve you",
+    "start": "3201840",
+    "end": "3207660"
+  },
+  {
+    "text": "know above eleven twelve and above number of joint items you're using gecko and gecko randomly tries changing the",
+    "start": "3207660",
+    "end": "3216150"
+  },
+  {
+    "text": "plan based on symmetric and then it stops and wherever it stops is what you",
+    "start": "3216150",
+    "end": "3221310"
+  },
+  {
+    "text": "get and so for the ones that have so anyway that's why so optimized the",
+    "start": "3221310",
+    "end": "3226980"
+  },
+  {
+    "start": "3222000",
+    "end": "3249000"
+  },
+  {
+    "text": "slowest plans with a high Cardinal error you'll see the cardinality error is now shown here on the right these are",
+    "start": "3226980",
+    "end": "3232619"
+  },
+  {
+    "text": "extremely high values in this log metric this uses another visualizer called",
+    "start": "3232619",
+    "end": "3239340"
+  },
+  {
+    "text": "tachyons it showed that the cardinality was missed miss estimated by in this case twelve thirty one times to eighteen",
+    "start": "3239340",
+    "end": "3245970"
+  },
+  {
+    "text": "thousand five hundred times so really really bad cardinality estimates so what",
+    "start": "3245970",
+    "end": "3251369"
+  },
+  {
+    "text": "I did first I ran this extension called aqo which is not available in general",
+    "start": "3251369",
+    "end": "3256530"
+  },
+  {
+    "text": "Alicia and I'm playing with it internally but aqo actually is it uses a machine learning algorithm to fix the",
+    "start": "3256530",
+    "end": "3262470"
+  },
+  {
+    "text": "cardinality miss estimates and so by running that the basically ran twice as",
+    "start": "3262470",
+    "end": "3268320"
+  },
+  {
+    "text": "fast and then I optimized parameters including using parallel queries",
+    "start": "3268320",
+    "end": "3273600"
+  },
+  {
+    "text": "selectively because now I can change parameters on an individual statement and remember that and that got me up to three times faster than the default and",
+    "start": "3273600",
+    "end": "3280200"
+  },
+  {
+    "text": "I haven't looked at any individual queries yet all I've done is just do generic things so I was able to make",
+    "start": "3280200",
+    "end": "3285570"
+  },
+  {
+    "text": "this benchmark 3x faster not by changing the the instance size or anything else without looking at any individual",
+    "start": "3285570",
+    "end": "3292440"
+  },
+  {
+    "text": "queries now of course then you can look at individual queries you check you know look at individual courier in this case",
+    "start": "3292440",
+    "end": "3297990"
+  },
+  {
+    "start": "3293000",
+    "end": "3320000"
+  },
+  {
+    "text": "it looked like maybe a hash time is being used instead of and I said loop drive might have been better but you",
+    "start": "3297990",
+    "end": "3303630"
+  },
+  {
+    "text": "find the slowest node in the plan look for the biggest cardinality mismatches miss estimates find the slowest node in",
+    "start": "3303630",
+    "end": "3309300"
+  },
+  {
+    "text": "the plan and then consider adding indexes and hints and index columns and",
+    "start": "3309300",
+    "end": "3315140"
+  },
+  {
+    "text": "materialized views change the things right so these are the the usual",
+    "start": "3315140",
+    "end": "3320490"
+  },
+  {
+    "text": "suspects you go through the usual suspects and you you figure out you know how to make this thing faster and then you deploy",
+    "start": "3320490",
+    "end": "3327120"
+  },
+  {
+    "start": "3327000",
+    "end": "3353000"
+  },
+  {
+    "text": "your effects so I've run out of time we will have another session where we go",
+    "start": "3327120",
+    "end": "3332820"
+  },
+  {
+    "text": "through all the things you can do to make a slow statement faster and you",
+    "start": "3332820",
+    "end": "3337980"
+  },
+  {
+    "text": "know this is again a not exhaustive list but there's plenty of things that you can do beyond this so we got to 3x",
+    "start": "3337980",
+    "end": "3344340"
+  },
+  {
+    "text": "without even trying hard basically right so now there's all the things that you can do on an individual query to make it",
+    "start": "3344340",
+    "end": "3350580"
+  },
+  {
+    "text": "go fast and I'll just mention that's for",
+    "start": "3350580",
+    "end": "3356880"
+  },
+  {
+    "start": "3353000",
+    "end": "3379000"
+  },
+  {
+    "text": "a complex query for if you take a look for OLTP you'll notice like even for",
+    "start": "3356880",
+    "end": "3362220"
+  },
+  {
+    "text": "this complex query benchmark there are many said about one third of the statements had a planning time that was",
+    "start": "3362220",
+    "end": "3368340"
+  },
+  {
+    "text": "over 50% of the total time so you want to reduce planning time especially in an OLTP setting so you want to use prepared",
+    "start": "3368340",
+    "end": "3374040"
+  },
+  {
+    "text": "statements and qpm gives you ways to make sure that it gets cached and that",
+    "start": "3374040",
+    "end": "3379320"
+  },
+  {
+    "start": "3379000",
+    "end": "3383000"
+  },
+  {
+    "text": "the right thing gets cached and so there's a different focus of attention for for OLTP and I'll just say going",
+    "start": "3379320",
+    "end": "3387780"
+  },
+  {
+    "start": "3383000",
+    "end": "3485000"
+  },
+  {
+    "text": "back to this this diagram you can start to look at different techniques for different delays in the execution so",
+    "start": "3387780",
+    "end": "3395580"
+  },
+  {
+    "text": "rejected plans obviously you're not going to execute your slow plans anymore you preferred plans you can use to keep",
+    "start": "3395580",
+    "end": "3402450"
+  },
+  {
+    "text": "cue PMS overhead down and this other thing called the unapproved plan execution threshold which says if the",
+    "start": "3402450",
+    "end": "3407970"
+  },
+  {
+    "text": "estimated cost is really small like under 100 don't bother going through",
+    "start": "3407970",
+    "end": "3413310"
+  },
+  {
+    "text": "this expensive process because it's probably all planning time anyway and it's probably super simple so just",
+    "start": "3413310",
+    "end": "3418440"
+  },
+  {
+    "text": "execute it this is under your control by default it's turned off but you can set it up to to optimize trivial queries",
+    "start": "3418440",
+    "end": "3426260"
+  },
+  {
+    "text": "prepared statements is really important for getting rid of planning time there's",
+    "start": "3426260",
+    "end": "3431790"
+  },
+  {
+    "text": "limitations in the way it's implemented in Postgres but that's a very important optimization client-side caching I",
+    "start": "3431790",
+    "end": "3437730"
+  },
+  {
+    "text": "mentioned early on that all the metadata comes back to the client and tells you about number of columns and data types",
+    "start": "3437730",
+    "end": "3444060"
+  },
+  {
+    "text": "and all that well if you have client sign caching enabled it can reuse that information so you can eliminate that",
+    "start": "3444060",
+    "end": "3449550"
+  },
+  {
+    "text": "overhead similarly on the send side it can just be sending the statement name instead of all the parameters it can you",
+    "start": "3449550",
+    "end": "3455250"
+  },
+  {
+    "text": "you can use binary transfer to go back and forth so client-side caching is used for that PL PG sequel is good for",
+    "start": "3455250",
+    "end": "3461880"
+  },
+  {
+    "text": "packaging multiple statements together so if you have less back and forth communication between client and server",
+    "start": "3461880",
+    "end": "3467400"
+  },
+  {
+    "text": "and performance insights can give you insight about weight states so all of",
+    "start": "3467400",
+    "end": "3473550"
+  },
+  {
+    "text": "this is sort of like within this within the context of one statement but then if you have 4,000 concurrent statements",
+    "start": "3473550",
+    "end": "3478950"
+  },
+  {
+    "text": "going on you'll find that it's doing a great deal of weighting and that much doing right and so this can give you",
+    "start": "3478950",
+    "end": "3485670"
+  },
+  {
+    "text": "insight about what the weight states are and you can use that to mitigate but I have run out of time so thank you very",
+    "start": "3485670",
+    "end": "3492000"
+  },
+  {
+    "text": "much I hope this has been educational for you know doing the deep dive on performance and thank you very much for",
+    "start": "3492000",
+    "end": "3498270"
+  },
+  {
+    "text": "for listening [Applause]",
+    "start": "3498270",
+    "end": "3505109"
+  }
+]

@@ -1,0 +1,1598 @@
+[
+  {
+    "start": "0",
+    "end": "120000"
+  },
+  {
+    "text": "hello my name is matthew falla and i will be um our presenter today on",
+    "start": "80",
+    "end": "5200"
+  },
+  {
+    "text": "discussing the flipbit event loop systems and also some of the optimization efforts that we took recently uh so just a little bit about",
+    "start": "5200",
+    "end": "11920"
+  },
+  {
+    "text": "myself um yeah i've been working on this pr that just got approved and merged into flip",
+    "start": "11920",
+    "end": "18000"
+  },
+  {
+    "text": "at 1.9 it changes up a little bit of the event loop system transitioning over from",
+    "start": "18000",
+    "end": "24800"
+  },
+  {
+    "text": "a fifo event loop to a priority queue that we'll get into what exactly that is in just a little bit um and so yeah so",
+    "start": "24800",
+    "end": "31679"
+  },
+  {
+    "text": "we're uh we just wanted to share um a little bit about kind of our findings uh the improvement uh metrics",
+    "start": "31679",
+    "end": "38480"
+  },
+  {
+    "text": "and statistics and also kind of what you can do about the flip community and what",
+    "start": "38480",
+    "end": "43520"
+  },
+  {
+    "text": "aws can do to join in on the optimization efforts um so a little bit about myself i work for aws amazon web",
+    "start": "43520",
+    "end": "50000"
+  },
+  {
+    "text": "services and also i am on the ecs observability team so we work heavily with flint bit",
+    "start": "50000",
+    "end": "57199"
+  },
+  {
+    "text": "and on flip it integrations trying to build sort of images that are on top of",
+    "start": "57199",
+    "end": "62640"
+  },
+  {
+    "text": "fluid bit to help our customers send logs easily to amazon services and also",
+    "start": "62640",
+    "end": "67760"
+  },
+  {
+    "text": "wherever else they would like to send their logs or metrics and also a little bit about me is that i",
+    "start": "67760",
+    "end": "73520"
+  },
+  {
+    "text": "studied at the university of southern california where i got my bachelor's in computer science um",
+    "start": "73520",
+    "end": "78799"
+  },
+  {
+    "text": "and yeah i'm just thrilled to be presenting to you kind of our findings on",
+    "start": "78799",
+    "end": "84720"
+  },
+  {
+    "text": "the uh flip bit event loop today uh so yeah the the title of this presentation is uh flip bit event loop",
+    "start": "84720",
+    "end": "92479"
+  },
+  {
+    "text": "uh demystify it and join in on optimization efforts so i hope that after this talk uh we can all be kind of",
+    "start": "92479",
+    "end": "99119"
+  },
+  {
+    "text": "up to speed on what the event loop is uh and also you know what optimization efforts are sort of being taken um to",
+    "start": "99119",
+    "end": "106399"
+  },
+  {
+    "text": "improve it and also what can be taken in the future um all right so yeah let's begin with i",
+    "start": "106399",
+    "end": "112159"
+  },
+  {
+    "text": "think the best way which is the customer impact uh why should we care about the event loop in",
+    "start": "112159",
+    "end": "118320"
+  },
+  {
+    "text": "the first place and optimizing it so uh yeah let's just start with statistics um so our customers are kind",
+    "start": "118320",
+    "end": "125360"
+  },
+  {
+    "start": "120000",
+    "end": "323000"
+  },
+  {
+    "text": "of sharing with us that we're they're getting like 50 broken pipe errors and 49 connection timeout errors within a",
+    "start": "125360",
+    "end": "132000"
+  },
+  {
+    "text": "span of five minutes and they're seeing this just kind of appear in their flip it logs and this is not very good so um each",
+    "start": "132000",
+    "end": "139599"
+  },
+  {
+    "text": "time you see one of these errors that triggers a retry and that it means that there's a genuine network error",
+    "start": "139599",
+    "end": "145760"
+  },
+  {
+    "text": "that's occurring and this is quite a bit it's like 100 errors in five minutes which",
+    "start": "145760",
+    "end": "150800"
+  },
+  {
+    "text": "uh to degrade performance uh when does this happen so um you can",
+    "start": "150800",
+    "end": "156400"
+  },
+  {
+    "text": "see that in low throughput cases uh we're seeing it's very relatively stable as soon as you start sending logs at like 40",
+    "start": "156400",
+    "end": "163040"
+  },
+  {
+    "text": "megabytes per second plus um for some maybe maybe some of the bigger companies or uh you know for uh you know like",
+    "start": "163040",
+    "end": "170959"
+  },
+  {
+    "text": "maybe uh one kilobyte logs 40 40 megabytes per second so uh in those cases you'll be",
+    "start": "170959",
+    "end": "177200"
+  },
+  {
+    "text": "starting to see the errors on the right hand side so connection timed outs broken pipes and connection",
+    "start": "177200",
+    "end": "182560"
+  },
+  {
+    "text": "initialization errors uh so we kind of took to the whiteboard trying to",
+    "start": "182560",
+    "end": "188000"
+  },
+  {
+    "text": "figure out some ideas of what could be causing these problems uh at first we thought maybe it's",
+    "start": "188000",
+    "end": "193360"
+  },
+  {
+    "text": "api issues so maybe you were thinking that the place that we're sending our logs are having network problems like",
+    "start": "193360",
+    "end": "199040"
+  },
+  {
+    "text": "fire hose but then we we realized that you know other customers are using fire hose without flip fit and they're not",
+    "start": "199040",
+    "end": "204480"
+  },
+  {
+    "text": "seeing these problems so we talked that out uh the second is that it could be like a timeout",
+    "start": "204480",
+    "end": "210239"
+  },
+  {
+    "text": "problem so maybe fire hose is working it's just we're not waiting long enough",
+    "start": "210239",
+    "end": "215599"
+  },
+  {
+    "text": "but it clearly says that um it's taking 10 seconds plus and yeah so we said no",
+    "start": "215599",
+    "end": "221120"
+  },
+  {
+    "text": "there's no way that fire hose could genuinely be taking uh 10 seconds for the network",
+    "start": "221120",
+    "end": "226640"
+  },
+  {
+    "text": "request to complete and sure enough we we verified that yeah fire host does not take um",
+    "start": "226640",
+    "end": "233360"
+  },
+  {
+    "text": "you know 10 seconds to complete uh in fact what we did when we profiled",
+    "start": "233360",
+    "end": "238400"
+  },
+  {
+    "text": "zip is we found that the network calls complete within around 100 milliseconds",
+    "start": "238400",
+    "end": "244000"
+  },
+  {
+    "text": "or less however when you have some code",
+    "start": "244000",
+    "end": "249200"
+  },
+  {
+    "text": "that makes a network call and flip bit it actually takes around",
+    "start": "249200",
+    "end": "254400"
+  },
+  {
+    "text": "you know 10 seconds to complete the line of code that's that's responsible for making the network call so what we'll",
+    "start": "254400",
+    "end": "260320"
+  },
+  {
+    "text": "see that the network call itself the actual network activity completes in about 100 seconds but the code when it",
+    "start": "260320",
+    "end": "265440"
+  },
+  {
+    "text": "gets to that point takes you know 10 seconds to to move to the next line",
+    "start": "265440",
+    "end": "271440"
+  },
+  {
+    "text": "so what's going on there's a little bit of hanging whenever you make a network called movement we found out that there's some some hangs uh you know it",
+    "start": "271440",
+    "end": "277040"
+  },
+  {
+    "text": "hangs for like 10 seconds and at least these problems appear right afterwards um so this is just a small diagram of",
+    "start": "277040",
+    "end": "283280"
+  },
+  {
+    "text": "what we found is happening when some code is running uh the code gets suspended to make a network call just",
+    "start": "283280",
+    "end": "288400"
+  },
+  {
+    "text": "kind of wait for the network call the network call completes really quickly but then it takes over 10 seconds for",
+    "start": "288400",
+    "end": "294560"
+  },
+  {
+    "text": "the code to get back into the running state and that's the problem so just a um",
+    "start": "294560",
+    "end": "301440"
+  },
+  {
+    "text": "some metrics that we were collecting uh yeah so you can see the blue and the silver the blue represents broken pipe errors",
+    "start": "301440",
+    "end": "307600"
+  },
+  {
+    "text": "you see they're very heavily clustered and then the silver is the connection timeout also there's a lot of clusters you can see uh",
+    "start": "307600",
+    "end": "314560"
+  },
+  {
+    "text": "maybe more clusters uh and um yeah but but uh but yeah this is just a",
+    "start": "314560",
+    "end": "321039"
+  },
+  {
+    "text": "lot of errors that are occurring so in order to really get to the bottom of",
+    "start": "321039",
+    "end": "326960"
+  },
+  {
+    "start": "323000",
+    "end": "404000"
+  },
+  {
+    "text": "what what the issues are and how we can resolve it we needed to really look into how fluidbit",
+    "start": "326960",
+    "end": "333360"
+  },
+  {
+    "text": "manages code right how fluid manages suspending code and resuming code",
+    "start": "333360",
+    "end": "338560"
+  },
+  {
+    "text": "um and so to do that we have to get to the very base layer uh and that's the event loop so that's how flip it handles",
+    "start": "338560",
+    "end": "344720"
+  },
+  {
+    "text": "running code and so um yeah that's what this presentation is gonna be about it's gonna be about",
+    "start": "344720",
+    "end": "350080"
+  },
+  {
+    "text": "demystifying the event loop so that we could resolve these problems and then joining in on the optimization efforts",
+    "start": "350080",
+    "end": "356319"
+  },
+  {
+    "text": "and we hope that we can guide you through that so that you can also join in as well um so kind of a quick summary of the",
+    "start": "356319",
+    "end": "363199"
+  },
+  {
+    "text": "things that we want to cover um event driven programming which is kind of the fundamental of how fluid bit",
+    "start": "363199",
+    "end": "369600"
+  },
+  {
+    "text": "paradigm sort of works in terms of events and code",
+    "start": "369600",
+    "end": "375199"
+  },
+  {
+    "text": "then next is a thought framework to think about the event loop that we've been using here at aws",
+    "start": "375199",
+    "end": "380639"
+  },
+  {
+    "text": "and then second is third is the event leave improvement and then next is going to be a network",
+    "start": "380639",
+    "end": "387680"
+  },
+  {
+    "text": "stability improvement chart so just swipes and metrics and then priority event loop problems so",
+    "start": "387680",
+    "end": "393759"
+  },
+  {
+    "text": "we might have a chance to take a look at some of the problems with the current solution and then some future work that we can we can all sort of work on",
+    "start": "393759",
+    "end": "400479"
+  },
+  {
+    "text": "uh to further optimize the pet loop all right great so let's begin with the",
+    "start": "400479",
+    "end": "406800"
+  },
+  {
+    "start": "404000",
+    "end": "683000"
+  },
+  {
+    "text": "event programming paradigm so this is a paradigm that flip it",
+    "start": "406800",
+    "end": "411919"
+  },
+  {
+    "text": "really uses where you can make sort of blocking network calls",
+    "start": "411919",
+    "end": "417280"
+  },
+  {
+    "text": "without hogging the cpu so if you're looking at some programming language like java or python",
+    "start": "417280",
+    "end": "423840"
+  },
+  {
+    "text": "when you make like a network call or when you do some sort of blocking operation what you'll usually see is that the code or the thread will sort of",
+    "start": "423840",
+    "end": "431120"
+  },
+  {
+    "text": "block and and not allow anything else to run for a certain amount of time when you make a network call so that's kind",
+    "start": "431120",
+    "end": "436720"
+  },
+  {
+    "text": "of what we're seeing right here it's a synchronous um networking operation so the code just blocks waits for the",
+    "start": "436720",
+    "end": "442080"
+  },
+  {
+    "text": "network call to complete and then the code will resume um and in that time maybe the cpu the thread will not be",
+    "start": "442080",
+    "end": "448560"
+  },
+  {
+    "text": "doing anything it'll just be kind of like sleeping waiting for the event and flip it however we see something a",
+    "start": "448560",
+    "end": "453759"
+  },
+  {
+    "text": "little bit smarter so this is closer to like maybe like a javascript node.js style um networking right where",
+    "start": "453759",
+    "end": "460400"
+  },
+  {
+    "text": "what happens is when you run some code and the code stops on a network call what hap actually some other work begins",
+    "start": "460400",
+    "end": "467759"
+  },
+  {
+    "text": "to run on the cpu so the cpu is not being idle and once the network call completes uh the code gets",
+    "start": "467759",
+    "end": "474879"
+  },
+  {
+    "text": "triggered to to get resumed um and yeah when it's when it's able to resume they'll just start running again so",
+    "start": "474879",
+    "end": "481280"
+  },
+  {
+    "text": "um yeah this is very uh very good very beneficial for uh heavy io operation",
+    "start": "481280",
+    "end": "487759"
+  },
+  {
+    "text": "code uh so when there's a lot of network calls taking place uh you're not just going to let the cpu be idle for every",
+    "start": "487759",
+    "end": "493199"
+  },
+  {
+    "text": "time you make a network call all right so uh yeah let's take a look at how this is exactly working",
+    "start": "493199",
+    "end": "499840"
+  },
+  {
+    "text": "so the code is running for a little bit uh the network call gets made when the network call finishes this triangle",
+    "start": "499840",
+    "end": "505599"
+  },
+  {
+    "text": "thing appears right so that's your event and the event triggers the code to run",
+    "start": "505599",
+    "end": "511199"
+  },
+  {
+    "text": "so yeah that's this is kind of like how your standard network call will be made",
+    "start": "511199",
+    "end": "518719"
+  },
+  {
+    "text": "so key concept of event-driven programming so this is maybe a little bit more of a complicated scenario that",
+    "start": "519519",
+    "end": "524959"
+  },
+  {
+    "text": "shows these events um is that there's always these events and the",
+    "start": "524959",
+    "end": "530640"
+  },
+  {
+    "text": "events trigger the code to run so whenever you have code that you need to run you always",
+    "start": "530640",
+    "end": "536160"
+  },
+  {
+    "text": "make an event first the event gets triggered and the trigger defense starts the code so here you can see that we",
+    "start": "536160",
+    "end": "541360"
+  },
+  {
+    "text": "have two events we have the start code event and start other work event so same as in the",
+    "start": "541360",
+    "end": "547279"
+  },
+  {
+    "text": "previous slide great so the start code event gets triggered both of these events are triggered",
+    "start": "547279",
+    "end": "552720"
+  },
+  {
+    "text": "at first only one of them gets to be processed so it starts the code",
+    "start": "552720",
+    "end": "559839"
+  },
+  {
+    "text": "the code hits a network call so it gets suspended um and it's waiting on that",
+    "start": "560000",
+    "end": "565040"
+  },
+  {
+    "text": "network call to complete the other work event",
+    "start": "565040",
+    "end": "570399"
+  },
+  {
+    "text": "now flip bit uh realizes that you know there's no work uh",
+    "start": "570399",
+    "end": "576000"
+  },
+  {
+    "text": "being done because the code's been suspended and so it",
+    "start": "576000",
+    "end": "582080"
+  },
+  {
+    "text": "decides okay let's go look through all of our other events is there anything else that's that's you know triggered",
+    "start": "582080",
+    "end": "587120"
+  },
+  {
+    "text": "and it finds this other work event this is great okay um this other work event tells us to start up the other work so",
+    "start": "587120",
+    "end": "593680"
+  },
+  {
+    "text": "it goes ahead and runs the other work now while that other work is running um",
+    "start": "593680",
+    "end": "599360"
+  },
+  {
+    "text": "the the network call finishes and so that generates a new event called the network event",
+    "start": "599360",
+    "end": "604959"
+  },
+  {
+    "text": "that doesn't really mean too much for fluidpay at this point because it's just processing the other work",
+    "start": "604959",
+    "end": "610560"
+  },
+  {
+    "text": "until the other work completes so other work completes and all of a sudden flip it says oh no work is being done let's",
+    "start": "610560",
+    "end": "615760"
+  },
+  {
+    "text": "take a look at our events and in this case it sees oh there's a network event great uh what does this tell us to do",
+    "start": "615760",
+    "end": "620959"
+  },
+  {
+    "text": "well it tells us to resume the code so it resumes the code and that's it that's our more advanced",
+    "start": "620959",
+    "end": "628000"
+  },
+  {
+    "text": "scenario it's a more advanced example of event loop so you can see that we ran some code",
+    "start": "628000",
+    "end": "633600"
+  },
+  {
+    "text": "and the key concept is that all the code is sort of being triggered to run by these events and you know",
+    "start": "633600",
+    "end": "640000"
+  },
+  {
+    "text": "if you want to run some new code just make an event let it get triggered and then when it gets triggered then the code will run",
+    "start": "640000",
+    "end": "647920"
+  },
+  {
+    "text": "and a really key part of this is that all this is running on just one single thread and so it's kind of a awesome",
+    "start": "647920",
+    "end": "654320"
+  },
+  {
+    "text": "um you know paradigm uh for for managing asynchronous operations just all on one",
+    "start": "654320",
+    "end": "661920"
+  },
+  {
+    "text": "single thread without having to manage multi-threading or anything complicated like that",
+    "start": "661920",
+    "end": "668480"
+  },
+  {
+    "text": "and not allowing for the cpu to be idle so yeah all this is",
+    "start": "668480",
+    "end": "674800"
+  },
+  {
+    "text": "why fluentfit is extremely efficient and you can take a look online for other",
+    "start": "674800",
+    "end": "680240"
+  },
+  {
+    "text": "documents on venture programming if you'd like to learn more okay so event driven programming what is",
+    "start": "680240",
+    "end": "687040"
+  },
+  {
+    "start": "683000",
+    "end": "893000"
+  },
+  {
+    "text": "the event loop so this is kind of the next section so um diving in a bit uh the event loop is kind of like this",
+    "start": "687040",
+    "end": "694399"
+  },
+  {
+    "text": "layer that everything else all the code and fluid bit runs on top of",
+    "start": "694399",
+    "end": "699839"
+  },
+  {
+    "text": "um so you kind of think about it as like this fundamental base layer that schedules everything but that runs that",
+    "start": "699839",
+    "end": "706640"
+  },
+  {
+    "text": "sort of system that we talked about where events trigger code to run let's take a look at the different responsibilities in fluid because flip",
+    "start": "706640",
+    "end": "713279"
+  },
+  {
+    "text": "it has an event loop and also the code that sits on top so the code's responsibility is to code",
+    "start": "713279",
+    "end": "720160"
+  },
+  {
+    "text": "essentially all fluid bits so all of the plugins the core fluent bit everything is sorted in this code",
+    "start": "720160",
+    "end": "725760"
+  },
+  {
+    "text": "section the code also is responsible for triggering and to not uh not just triggering but sorry registering events",
+    "start": "725760",
+    "end": "732560"
+  },
+  {
+    "text": "to the event loop and also removing those events from the event loop once they get triggered",
+    "start": "732560",
+    "end": "737920"
+  },
+  {
+    "text": "the event loop however its job is to monitor those events so maybe like a network call event and when",
+    "start": "737920",
+    "end": "744480"
+  },
+  {
+    "text": "those events get triggered like the network all completes it needs to run the code um that's associated with that event",
+    "start": "744480",
+    "end": "752000"
+  },
+  {
+    "text": "so you can see there's kind of like a bi-directional connection the code puts events the event loop puts events into",
+    "start": "752000",
+    "end": "757200"
+  },
+  {
+    "text": "code all right um great so this sort of bridge that's connecting these two",
+    "start": "757200",
+    "end": "762320"
+  },
+  {
+    "text": "sections is the events themselves so the events bridge together code pointers and also event file descriptors",
+    "start": "762320",
+    "end": "770240"
+  },
+  {
+    "text": "so file descriptors are just kind of like a way that the operating system can monitor different files um",
+    "start": "770240",
+    "end": "776560"
+  },
+  {
+    "text": "or maybe not files because in linux everything is file so you can monitor things like network calls timers",
+    "start": "776560",
+    "end": "782639"
+  },
+  {
+    "text": "timeouts anything really that the operating system needs to take a look at on windows this might be something sort",
+    "start": "782639",
+    "end": "788560"
+  },
+  {
+    "text": "of similar on like sockets but in flint bit we just have some kind of abstraction and call of these things",
+    "start": "788560",
+    "end": "794720"
+  },
+  {
+    "text": "file descriptors these events are added to the event loop all right so for the code the only",
+    "start": "794720",
+    "end": "801519"
+  },
+  {
+    "text": "thing we really have to care about because there's different types of code just to be aware of that there's like callbacks uh core code that's embedded",
+    "start": "801519",
+    "end": "808000"
+  },
+  {
+    "text": "into the event loop and code genes we really care about optimizing the code in case so that's mainly what we're going to be",
+    "start": "808000",
+    "end": "813839"
+  },
+  {
+    "text": "taking a look at in uh in in the next few minutes",
+    "start": "813839",
+    "end": "819519"
+  },
+  {
+    "text": "yep so the curtains include all the plug-in code it includes",
+    "start": "819519",
+    "end": "825440"
+  },
+  {
+    "text": "sort of input and output filter filter code and that's mainly what we need to optimize",
+    "start": "825680",
+    "end": "833279"
+  },
+  {
+    "text": "so there's a bit of an issue with discussing um how to improve the event loop and that's that things can get",
+    "start": "833360",
+    "end": "839120"
+  },
+  {
+    "text": "really complicated very quickly because you're talking about code routines yields connection timeouts ready lists and a",
+    "start": "839120",
+    "end": "845519"
+  },
+  {
+    "text": "lot of different things that are sort of working together to create the system that everything else",
+    "start": "845519",
+    "end": "850880"
+  },
+  {
+    "text": "can be built on top of so at aws we found that the best way to think about the event leave is with an",
+    "start": "850880",
+    "end": "857040"
+  },
+  {
+    "text": "analogy and this allows us to really uh really just sort of scratch our spitball",
+    "start": "857040",
+    "end": "863279"
+  },
+  {
+    "text": "ideas towards improving the event loop without having to dive into the implementation and the nitty-gritty",
+    "start": "863279",
+    "end": "869199"
+  },
+  {
+    "text": "details but looking at it from a high level that allows us to conceptually target you know the best solutions",
+    "start": "869199",
+    "end": "874480"
+  },
+  {
+    "text": "possible and really optimize the from a conceptual perspective and then",
+    "start": "874480",
+    "end": "879519"
+  },
+  {
+    "text": "allowing for those implementation details to get worked out whenever we decide to choose a different path",
+    "start": "879519",
+    "end": "885760"
+  },
+  {
+    "text": "to optimize a little bit of that loop so let's take a look at this analogy",
+    "start": "885760",
+    "end": "891440"
+  },
+  {
+    "start": "893000",
+    "end": "1333000"
+  },
+  {
+    "text": "so the analogy is the following and we're about to explain it so this is it but we're going to go",
+    "start": "895680",
+    "end": "900800"
+  },
+  {
+    "text": "through it one by one there's some people at uh desk and they're filling out",
+    "start": "900800",
+    "end": "906320"
+  },
+  {
+    "text": "these forms and they're making calls to their friends when they need answers for the form so going through it one by one",
+    "start": "906320",
+    "end": "913440"
+  },
+  {
+    "text": "uh there's these people um they're they're just kind of like waiting around and these people represent the cover",
+    "start": "913440",
+    "end": "919040"
+  },
+  {
+    "text": "teams uh then there's a desk um this desk represents the cpu so the person needs to be at the desk to do some work",
+    "start": "919040",
+    "end": "926560"
+  },
+  {
+    "text": "and then there's forms so forms kind of represent the code when you're at the desk you can be filling out your form you can be uh you",
+    "start": "926560",
+    "end": "932880"
+  },
+  {
+    "text": "know adding answers to the forms but what if you don't know an answer to the form well then you have to step away",
+    "start": "932880",
+    "end": "938880"
+  },
+  {
+    "text": "from the desk call your friend um get the answer so that's kind of this bone-a-friend section there in the bottom",
+    "start": "938880",
+    "end": "945759"
+  },
+  {
+    "text": "all right where are they going to be doing this well they're going to be doing this in the phone booth so the phone booth represents a not ready list",
+    "start": "945759",
+    "end": "951759"
+  },
+  {
+    "text": "so stepping away from the desk represents and calling your friend represents doing a network call this phone booth represents the not ready",
+    "start": "951759",
+    "end": "958399"
+  },
+  {
+    "text": "list so um there's just kind of a list of these coachings these people",
+    "start": "958399",
+    "end": "963680"
+  },
+  {
+    "text": "that are making network calls and they're not waiting in the desk line and and lastly that desk line represents",
+    "start": "963680",
+    "end": "970720"
+  },
+  {
+    "text": "a first in first out evently ready list so when you finish making your network",
+    "start": "970720",
+    "end": "976560"
+  },
+  {
+    "text": "call when you finish calling your friend and you have an answer for your form well you can't write it down immediately",
+    "start": "976560",
+    "end": "982000"
+  },
+  {
+    "text": "because you don't have the desk you don't have the cpu so what you need to do is stand in line for the desk and once you get to the",
+    "start": "982000",
+    "end": "988000"
+  },
+  {
+    "text": "very front of the line then you will have access to your code which is the form and you can write down the answer",
+    "start": "988000",
+    "end": "995040"
+  },
+  {
+    "text": "and continue on your work filling out other questions on the forum",
+    "start": "995040",
+    "end": "1001360"
+  },
+  {
+    "text": "all right so um yeah going through an example we have one",
+    "start": "1001360",
+    "end": "1007440"
+  },
+  {
+    "text": "person who's filling out his form he's at the very front of the line uh he gets to a question that requires",
+    "start": "1007440",
+    "end": "1013199"
+  },
+  {
+    "text": "him to phone a friend so that's like a network call or something so he steps into the phone of friend line away from",
+    "start": "1013199",
+    "end": "1018320"
+  },
+  {
+    "text": "the desk um the code is still around it's just no longer being processed by a",
+    "start": "1018320",
+    "end": "1024000"
+  },
+  {
+    "text": "car routine at this point um someone else uh comes steps up to the desk who's waiting in line the next person",
+    "start": "1024000",
+    "end": "1031038"
+  },
+  {
+    "text": "and he grabs his code his form and begins filling it out um and when he when he gets a network",
+    "start": "1031039",
+    "end": "1038240"
+  },
+  {
+    "text": "caller finishes then he'll step away from the desk um and then next someone who is phoning their friend",
+    "start": "1038240",
+    "end": "1044400"
+  },
+  {
+    "text": "gets an answer from their friend so that's like the network call completes and what they do is they need to stand back in line",
+    "start": "1044400",
+    "end": "1050400"
+  },
+  {
+    "text": "great so that's the whole example so yeah flipbitland um we already kind",
+    "start": "1050400",
+    "end": "1055840"
+  },
+  {
+    "text": "of covered it but uh essentially all keyboard code routines they're waiting in line for the desk to to get to the cpu uh",
+    "start": "1055840",
+    "end": "1063280"
+  },
+  {
+    "text": "want to make a network call they have to step away and then when the network all completes then they can step back in",
+    "start": "1063280",
+    "end": "1068480"
+  },
+  {
+    "text": "line and then wait for the desk to write down their answer and continue on their work",
+    "start": "1068480",
+    "end": "1073840"
+  },
+  {
+    "text": "all right great um so obstacles there are a couple of different things that we have to keep in mind the first is that these cover teams have",
+    "start": "1073840",
+    "end": "1081520"
+  },
+  {
+    "text": "a problem remembering their answer once they get it from their friend so when they stand back in line if the line",
+    "start": "1081520",
+    "end": "1087919"
+  },
+  {
+    "text": "takes over ten minutes uh then over two minutes then they will forget their answer so in flipbit land this is kind",
+    "start": "1087919",
+    "end": "1094640"
+  },
+  {
+    "text": "of like saying that if you finish your network call and then you",
+    "start": "1094640",
+    "end": "1100240"
+  },
+  {
+    "text": "are starting to wait to go write down the answer to process that network call to complete it if you wait too long there will be a",
+    "start": "1100240",
+    "end": "1107840"
+  },
+  {
+    "text": "broken type pipe or connection timeout error which is not a good thing",
+    "start": "1107840",
+    "end": "1113840"
+  },
+  {
+    "text": "so so what we need to do is make sure that",
+    "start": "1113840",
+    "end": "1119840"
+  },
+  {
+    "text": "this line can be short enough that you can remember your answer when you get to the desk",
+    "start": "1119840",
+    "end": "1125840"
+  },
+  {
+    "text": "after you phone your friend uh the second constrainer obstacle is that person",
+    "start": "1125840",
+    "end": "1131919"
+  },
+  {
+    "text": "switching takes time so when you stand in when you change",
+    "start": "1131919",
+    "end": "1136960"
+  },
+  {
+    "text": "from just a line to a desk and a new person takes a desk that takes a bit of time so we don't want to",
+    "start": "1136960",
+    "end": "1142480"
+  },
+  {
+    "text": "add more person switches what we have right now is fine",
+    "start": "1142480",
+    "end": "1148760"
+  },
+  {
+    "text": "okay so there's a problem with the first in first out um event loop which we're looking at",
+    "start": "1150559",
+    "end": "1157120"
+  },
+  {
+    "text": "right here so you can see the first and first step because when you stand in line",
+    "start": "1157120",
+    "end": "1162240"
+  },
+  {
+    "text": "then you have to kind of wait in line uh for all the people in front of you to get to the desk",
+    "start": "1162240",
+    "end": "1168080"
+  },
+  {
+    "text": "to get to the cpu in order to begin running your code again and here's the problem once this desk",
+    "start": "1168080",
+    "end": "1175200"
+  },
+  {
+    "text": "line gets really long all of a sudden when you finish phoning your friend you have to stand in this",
+    "start": "1175200",
+    "end": "1180240"
+  },
+  {
+    "text": "really long line that's maybe like 10 minutes and when you get to your desk you forget your your um",
+    "start": "1180240",
+    "end": "1186080"
+  },
+  {
+    "text": "your network calls result so there's a broken pipe or connection timeout problem",
+    "start": "1186080",
+    "end": "1192720"
+  },
+  {
+    "text": "so where are these people coming from how can this line get so long well the answer is that uh all these",
+    "start": "1192720",
+    "end": "1198799"
+  },
+  {
+    "text": "people are are kind of like inactive proteins right so they're these carotenes are sort of queued by",
+    "start": "1198799",
+    "end": "1205200"
+  },
+  {
+    "text": "the input plugins so in flip it you have like these input plugins that are generating the data they're generating",
+    "start": "1205200",
+    "end": "1210720"
+  },
+  {
+    "text": "all the logs to get sort of flushed by the output plugins well with the old",
+    "start": "1210720",
+    "end": "1215760"
+  },
+  {
+    "text": "fluid bits so flip it 1.8 what would happen is that you would just have all of these sort of data all these sort of",
+    "start": "1215760",
+    "end": "1221600"
+  },
+  {
+    "text": "proteins waiting uh to be sent over um to the desk line right so they're",
+    "start": "1221600",
+    "end": "1227360"
+  },
+  {
+    "text": "waiting to go from inactive to active and unfortunately",
+    "start": "1227360",
+    "end": "1232799"
+  },
+  {
+    "text": "um the old solution which was in flip 1.8 is to take all these people immediately when you see them uh every",
+    "start": "1232799",
+    "end": "1239919"
+  },
+  {
+    "text": "time there's a flush move all of the people who are inactive who just got generated by the input plugins to active",
+    "start": "1239919",
+    "end": "1245919"
+  },
+  {
+    "text": "so to the desk line and what that what that causes is is for the desk line to get really long",
+    "start": "1245919",
+    "end": "1252720"
+  },
+  {
+    "text": "so you can imagine that if you are um creating like a hundred different input uh chunks of data um or a hundred",
+    "start": "1252720",
+    "end": "1260480"
+  },
+  {
+    "text": "different code routines on input plugins immediately those hundred proteins get",
+    "start": "1260480",
+    "end": "1265679"
+  },
+  {
+    "text": "turned into active proteins then that's a lot of protein to be processing at the same time and that's what we're seeing",
+    "start": "1265679",
+    "end": "1270880"
+  },
+  {
+    "text": "we're seeing uh sometimes around like 100 or more currents being processed at the exact same time",
+    "start": "1270880",
+    "end": "1276880"
+  },
+  {
+    "text": "and you'll you'll see that because there's so many currencies being processed at the same time this line gets extremely long and uh people forget",
+    "start": "1276880",
+    "end": "1283760"
+  },
+  {
+    "text": "their answers by the time they get them to the desk so uh what how we can resolve this is with a new policy",
+    "start": "1283760",
+    "end": "1290400"
+  },
+  {
+    "text": "so the new policy is that we need to have the people in hold line so the input plugins uh sort of output",
+    "start": "1290400",
+    "end": "1298480"
+  },
+  {
+    "text": "we need to have them wait um until everyone at the desk has cleared so what that does is it make",
+    "start": "1298480",
+    "end": "1305039"
+  },
+  {
+    "text": "sure that the desk line is as short as possible so if there's someone kind of like in this first first row um",
+    "start": "1305039",
+    "end": "1312559"
+  },
+  {
+    "text": "who's waiting at the desk line then we will not allow anyone to be admitted from the hold line into the desk line",
+    "start": "1312559",
+    "end": "1319679"
+  },
+  {
+    "text": "however if you look at the next section if the desk line is empty so that might mean that there's still people",
+    "start": "1319679",
+    "end": "1325679"
+  },
+  {
+    "text": "processing network calls at the phone booth but if the desk line is empty then we can start admitting people from the",
+    "start": "1325679",
+    "end": "1330960"
+  },
+  {
+    "text": "whole line to do this we need to implement a priority queue",
+    "start": "1330960",
+    "end": "1337039"
+  },
+  {
+    "start": "1333000",
+    "end": "1513000"
+  },
+  {
+    "text": "so um yeah just going to the new policy this is same slide",
+    "start": "1337039",
+    "end": "1343600"
+  },
+  {
+    "text": "yeah so we can see that that now we're keeping the uh desk line extremely short",
+    "start": "1344080",
+    "end": "1349440"
+  },
+  {
+    "text": "so you can see that that people get to the desk they make a network call when the network call completes they go back to",
+    "start": "1349440",
+    "end": "1356080"
+  },
+  {
+    "text": "the desk line and we're not allowing anyone else to join this sort of group of coaches until um all the people on",
+    "start": "1356080",
+    "end": "1363919"
+  },
+  {
+    "text": "the desk are clear so we can keep this this desk line very short and to implement that we need we",
+    "start": "1363919",
+    "end": "1370640"
+  },
+  {
+    "text": "we can just make really there be two priorities so the inactive care teams have a lower priority to hit",
+    "start": "1370640",
+    "end": "1377280"
+  },
+  {
+    "text": "the desk than the people who are waiting at the desk so the active care routines those funds can",
+    "start": "1377280",
+    "end": "1382960"
+  },
+  {
+    "text": "get a higher party and get prioritized",
+    "start": "1382960",
+    "end": "1388400"
+  },
+  {
+    "text": "and just by doing that we can implement this policy so how does this look if we revisit the event loop",
+    "start": "1388400",
+    "end": "1395360"
+  },
+  {
+    "text": "well um if you remember before we had these events they were all having the same priority",
+    "start": "1395360",
+    "end": "1401440"
+  },
+  {
+    "text": "before now we're going to add priorities on top of that so you can see that we added numbers to these events um and added",
+    "start": "1401440",
+    "end": "1408000"
+  },
+  {
+    "text": "some priorities so the people so kind of looking at on the right hand side on the left hand",
+    "start": "1408000",
+    "end": "1413200"
+  },
+  {
+    "text": "side um the people are representing currencies so kind of remembering to our event driven programming these events",
+    "start": "1413200",
+    "end": "1418640"
+  },
+  {
+    "text": "trigger code or co routines to run so each of these events have kind of people attached to them so now we can",
+    "start": "1418640",
+    "end": "1424080"
+  },
+  {
+    "text": "prioritize the people right so the people who are inactive we give them an event that's linked to them with a priority of",
+    "start": "1424080",
+    "end": "1430960"
+  },
+  {
+    "text": "uh two right so they don't get the priority uh and then the people who are active right who are making network",
+    "start": "1430960",
+    "end": "1436960"
+  },
+  {
+    "text": "calls who are already standing in the desk line they get a priority event of one and so these events when they get",
+    "start": "1436960",
+    "end": "1443919"
+  },
+  {
+    "text": "triggered uh we'll always make sure to prioritize um the higher priority and you can see that when you do choose an",
+    "start": "1443919",
+    "end": "1449840"
+  },
+  {
+    "text": "event one event gets triggered well then you send one of these people to the active coaching spot",
+    "start": "1449840",
+    "end": "1455279"
+  },
+  {
+    "text": "at the desk right which is this top section above the event loop which is writing the code",
+    "start": "1455279",
+    "end": "1460400"
+  },
+  {
+    "text": "all right so let's take a look at the change of responsibilities so um the code responsibilities everything's",
+    "start": "1460400",
+    "end": "1466960"
+  },
+  {
+    "text": "the same except the code also needs to set a appropriate priority to the events",
+    "start": "1466960",
+    "end": "1472400"
+  },
+  {
+    "text": "however this is not mandatory because um this was implemented such that you don't have to",
+    "start": "1472400",
+    "end": "1477760"
+  },
+  {
+    "text": "choose a priority um if you don't choose it then it'll just be the default party uh which is what we had previously",
+    "start": "1477760",
+    "end": "1483679"
+  },
+  {
+    "text": "and everything will work the same and then next is the event loop so the event loop everything's the same except",
+    "start": "1483679",
+    "end": "1490559"
+  },
+  {
+    "text": "we're going to make sure that if if a couple events are triggered a couple events are active we're going to process",
+    "start": "1490559",
+    "end": "1496159"
+  },
+  {
+    "text": "through the higher priority events first and lastly for the events everything's the same except um instead of just",
+    "start": "1496159",
+    "end": "1503279"
+  },
+  {
+    "text": "having code pointers and um file descriptors that we're monitoring",
+    "start": "1503279",
+    "end": "1508559"
+  },
+  {
+    "text": "for the events what we need to also add is the priority which is optional",
+    "start": "1508559",
+    "end": "1514960"
+  },
+  {
+    "start": "1513000",
+    "end": "1658000"
+  },
+  {
+    "text": "great let's take a look at the improvements now that we implemented this so this pr was implemented and",
+    "start": "1514960",
+    "end": "1520480"
+  },
+  {
+    "text": "merged into 1.9 um so yeah we're doing a lot of testing on 1.8.11",
+    "start": "1520480",
+    "end": "1526240"
+  },
+  {
+    "text": "uh and we're also doing it under a bunch of different slowdowns so we were adding some delays a little bit and see how",
+    "start": "1526240",
+    "end": "1531600"
+  },
+  {
+    "text": "they would react uh how the network uh problems would get impacted by slower machines",
+    "start": "1531600",
+    "end": "1537360"
+  },
+  {
+    "text": "and you can see that all across the board we're seeing tremendous improvement so you know from 96 to 100",
+    "start": "1537360",
+    "end": "1544080"
+  },
+  {
+    "text": "improvements on the connection timeouts and the current teams are being reduced by 50 to 81 um and this is in terms of active",
+    "start": "1544080",
+    "end": "1550080"
+  },
+  {
+    "text": "curtains so this is you know tremendous results all right uh next up is just some",
+    "start": "1550080",
+    "end": "1556080"
+  },
+  {
+    "text": "tangible error data you know we can see that we had 51 errors in a span of five minutes",
+    "start": "1556080",
+    "end": "1561360"
+  },
+  {
+    "text": "that got reduced to two errors um for the broken pipe we had a 51 connection timeout errors in the span of",
+    "start": "1561360",
+    "end": "1567360"
+  },
+  {
+    "text": "five minutes when we're sending logs 40 megabytes per second one kilobyte logs that got reduced to one",
+    "start": "1567360",
+    "end": "1574000"
+  },
+  {
+    "text": "in five minutes so tremendous results um the current teams went down from 15 to seven",
+    "start": "1574000",
+    "end": "1579919"
+  },
+  {
+    "text": "on average you can see these errors this is the",
+    "start": "1579919",
+    "end": "1584960"
+  },
+  {
+    "text": "sort of graph that we showed before tons of clusters of errors um and you can see that the clusters are",
+    "start": "1584960",
+    "end": "1591279"
+  },
+  {
+    "text": "always preceded by these large amounts of proteins and this is all 1.8",
+    "start": "1591279",
+    "end": "1596960"
+  },
+  {
+    "text": "so high number of proteins yields a high number of errors well now you can see the number of proteins went down so this the axis is a",
+    "start": "1596960",
+    "end": "1603760"
+  },
+  {
+    "text": "little bit different so the old axis was up to 60. now the new axis is up to 18 so these proteins are being kept at a",
+    "start": "1603760",
+    "end": "1610240"
+  },
+  {
+    "text": "much lower level you can see that because of that there's much less errors in fact we only",
+    "start": "1610240",
+    "end": "1616159"
+  },
+  {
+    "text": "see three errors you can barely see it down here at the bottom right hand corner of the graph",
+    "start": "1616159",
+    "end": "1621520"
+  },
+  {
+    "text": "so yeah so again just looking at these two graphs you can see there's a tremendous improvement from 1.8 to 1.9",
+    "start": "1621520",
+    "end": "1628240"
+  },
+  {
+    "text": "um so just this quick summary uh the network errors got reduced from 96 to",
+    "start": "1628240",
+    "end": "1633440"
+  },
+  {
+    "text": "100 so really good really good stuff the active proteins got reduced by about a",
+    "start": "1633440",
+    "end": "1638640"
+  },
+  {
+    "text": "factor of three and then error clusters were removed so all this is really",
+    "start": "1638640",
+    "end": "1645200"
+  },
+  {
+    "text": "great stuff okay so um really quickly let's take a look at",
+    "start": "1645200",
+    "end": "1651200"
+  },
+  {
+    "text": "we're going to skip through the uh improvements and problems uh just so that we have time",
+    "start": "1651200",
+    "end": "1657600"
+  },
+  {
+    "text": "um all right so we're going to get into the related domains of development so um yeah so what can we do in the future",
+    "start": "1657600",
+    "end": "1664799"
+  },
+  {
+    "start": "1658000",
+    "end": "1918000"
+  },
+  {
+    "text": "for the event so we covered so far the uh you know some some adventure programming paradigms we covered so far",
+    "start": "1664799",
+    "end": "1671600"
+  },
+  {
+    "text": "some uh you know problems with the event leave solutions with the event lube and also what is the event loop and and also how",
+    "start": "1671600",
+    "end": "1679440"
+  },
+  {
+    "text": "did that you know how did those changes how this changes the event loop uh impact fluid bit in a profound way to",
+    "start": "1679440",
+    "end": "1685600"
+  },
+  {
+    "text": "make network stability uh improve and increase uh but now let's get into some related",
+    "start": "1685600",
+    "end": "1691440"
+  },
+  {
+    "text": "domains of development you know what's left to be done well if bluebit really wants to be as",
+    "start": "1691440",
+    "end": "1697200"
+  },
+  {
+    "text": "performant as possible in order to do that we need to utilize as many you know threads as possible",
+    "start": "1697200",
+    "end": "1703279"
+  },
+  {
+    "text": "uh so recently there was a transition from you know just kind of single threaded application to multi-threaded",
+    "start": "1703279",
+    "end": "1708720"
+  },
+  {
+    "text": "application with workers so that means that every worker gets run sort of on a different uh server for",
+    "start": "1708720",
+    "end": "1716399"
+  },
+  {
+    "text": "output plug-ins you can run output plug-ins on different workers which which get run in different threads",
+    "start": "1716399",
+    "end": "1722320"
+  },
+  {
+    "text": "that doesn't work though however yet for input plugins or filters so kind of on the future roadmap flip it",
+    "start": "1723200",
+    "end": "1729760"
+  },
+  {
+    "text": "there's a lot of talk in the community about adding worker support for input",
+    "start": "1729760",
+    "end": "1735760"
+  },
+  {
+    "text": "and also filter plugins and so to do that we really have to take",
+    "start": "1735760",
+    "end": "1740880"
+  },
+  {
+    "text": "into consideration the event loop um because you can kind of think of every single worker is having its own event",
+    "start": "1740880",
+    "end": "1747279"
+  },
+  {
+    "text": "loop so every time you have a thread that can run asynchronous code it needs its own event loop and so in",
+    "start": "1747279",
+    "end": "1753440"
+  },
+  {
+    "text": "order to make these changes we'll have to have this fundamental sort of concept of the event loop in our minds",
+    "start": "1753440",
+    "end": "1760720"
+  },
+  {
+    "text": "which yeah hopefully this discussion sort of allowed you to to sort of uh gain the insight into",
+    "start": "1760720",
+    "end": "1767919"
+  },
+  {
+    "text": "all right the next part is the reducing events so another you know key to this",
+    "start": "1767919",
+    "end": "1773840"
+  },
+  {
+    "text": "event leave system is to not have too much event pollution so if we have too many events in the event loops then it becomes very inefficient uh so there are",
+    "start": "1773840",
+    "end": "1780320"
+  },
+  {
+    "text": "some events right now that that don't really need to be there that we can reduce duplication of uh mainly like the",
+    "start": "1780320",
+    "end": "1785760"
+  },
+  {
+    "text": "dns timeouts and some of the other timeouts at the time when the dns timeouts were implemented there wasn't really a good",
+    "start": "1785760",
+    "end": "1791679"
+  },
+  {
+    "text": "mechanism to coalesce these events uh but ever since there was some code that was written that brings together",
+    "start": "1791679",
+    "end": "1798159"
+  },
+  {
+    "text": "all the cleanup functions and that's used for like the network timeouts",
+    "start": "1798159",
+    "end": "1804000"
+  },
+  {
+    "text": "so some some talk that's been happening in the community as to bring together all these dns timeouts so",
+    "start": "1804000",
+    "end": "1809440"
+  },
+  {
+    "text": "you don't have all these random events sitting everywhere one for every single dns uh call uh one for every single network",
+    "start": "1809440",
+    "end": "1815840"
+  },
+  {
+    "text": "event um in order to really make a little bit more efficient because less of the less",
+    "start": "1815840",
+    "end": "1821120"
+  },
+  {
+    "text": "events that we have the better that's the less person switching for the desks that we talked about",
+    "start": "1821120",
+    "end": "1826799"
+  },
+  {
+    "text": "all right so that's all that we have time for um so i'm really looking forward to the q a um right after this",
+    "start": "1826799",
+    "end": "1833039"
+  },
+  {
+    "text": "and also you know uh just thank you so much for your time that you're spending",
+    "start": "1833039",
+    "end": "1838880"
+  },
+  {
+    "text": "to listen in on this discussion i hope it really helps to give you some fundamental understanding of the flip event loop and how you can join in on",
+    "start": "1838880",
+    "end": "1845679"
+  },
+  {
+    "text": "some optimization efforts with this mental framework in mind now if you would like to stick around",
+    "start": "1845679",
+    "end": "1852159"
+  },
+  {
+    "text": "we'll have a follow-up section for this to go into the details that we skipped over and also some deep dive on",
+    "start": "1852159",
+    "end": "1858799"
+  },
+  {
+    "text": "discussing kind of how exactly we implemented some of these changes right so the",
+    "start": "1858799",
+    "end": "1864559"
+  },
+  {
+    "text": "bucket cue um some task pipes um some you know multi-threading uh you know",
+    "start": "1864559",
+    "end": "1870799"
+  },
+  {
+    "text": "between uh the different the different threads and different workers getting into that just a little bit uh but we",
+    "start": "1870799",
+    "end": "1876080"
+  },
+  {
+    "text": "don't have time for that in this discussion so we'll post a link maybe in the q a for the full talk",
+    "start": "1876080",
+    "end": "1882080"
+  },
+  {
+    "text": "over there if you have any questions my github handle is matthew folla his first",
+    "start": "1882080",
+    "end": "1887600"
+  },
+  {
+    "text": "name and last name there's spaces no all lowercase please feel free to reach out to me",
+    "start": "1887600",
+    "end": "1893279"
+  },
+  {
+    "text": "uh and yeah i look forward to what fluidvit has to offer to the community and to all the customers going forward",
+    "start": "1893279",
+    "end": "1900159"
+  },
+  {
+    "text": "um and with all of the you know network improvements that have been made and can be made in the future um you know via",
+    "start": "1900159",
+    "end": "1907039"
+  },
+  {
+    "text": "the event loop um being fully optimized and so thank you so much for uh joining",
+    "start": "1907039",
+    "end": "1912159"
+  },
+  {
+    "text": "us today and i look forward to our q a right after this okay",
+    "start": "1912159",
+    "end": "1920120"
+  }
+]

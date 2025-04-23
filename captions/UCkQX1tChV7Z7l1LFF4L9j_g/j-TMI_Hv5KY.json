@@ -1,0 +1,2097 @@
+[
+  {
+    "text": "[Music]",
+    "start": "3320",
+    "end": "14289"
+  },
+  {
+    "text": "a slowdown in request processing can eventually make your service unavailable",
+    "start": "15040",
+    "end": "20720"
+  },
+  {
+    "text": "chances are not all requests need to be processed right away some of them just need an acknowledgement of receipt have",
+    "start": "20720",
+    "end": "27519"
+  },
+  {
+    "text": "you asked yourself would i benefit from asynchronous processing of requests if",
+    "start": "27519",
+    "end": "32719"
+  },
+  {
+    "text": "so how do i make such a change in a live large scale mission critical system",
+    "start": "32719",
+    "end": "38960"
+  },
+  {
+    "text": "hi my name is sharma padilla i'm going to talk about how we migrated a user-facing system from",
+    "start": "38960",
+    "end": "46480"
+  },
+  {
+    "text": "synchronous request response based system to an asynchronous one",
+    "start": "46480",
+    "end": "53039"
+  },
+  {
+    "text": "i want to talk about what motivated us to embark on this journey",
+    "start": "53039",
+    "end": "59520"
+  },
+  {
+    "text": "what system design changes we made um and most interestingly what were the",
+    "start": "59520",
+    "end": "64799"
+  },
+  {
+    "text": "challenges in this process and what design choices we had or",
+    "start": "64799",
+    "end": "70240"
+  },
+  {
+    "text": "trade-offs we delayed and i'm going to touch upon the validation process we used and how we",
+    "start": "70240",
+    "end": "76560"
+  },
+  {
+    "text": "rolled it out so netflix is available to over 200",
+    "start": "76560",
+    "end": "82400"
+  },
+  {
+    "text": "million members worldwide watch tvs",
+    "start": "82400",
+    "end": "88240"
+  },
+  {
+    "text": "documentaries tv shows documentaries movies on a variety of devices",
+    "start": "88240",
+    "end": "94960"
+  },
+  {
+    "text": "when they come to netflix they are given a variety of choice",
+    "start": "94960",
+    "end": "100799"
+  },
+  {
+    "text": "through our personalized recommendations you press play",
+    "start": "100799",
+    "end": "107520"
+  },
+  {
+    "text": "sit back and enjoy watching the movie while the movie plays during the",
+    "start": "107520",
+    "end": "113439"
+  },
+  {
+    "text": "playback we collect a lot of data for both operational",
+    "start": "113439",
+    "end": "118640"
+  },
+  {
+    "text": "and analytical use cases some of these data drives are product features like viewing history and",
+    "start": "118640",
+    "end": "125119"
+  },
+  {
+    "text": "continue watching which lets our members stop a movie in between and come back to it to continue",
+    "start": "125119",
+    "end": "132400"
+  },
+  {
+    "text": "watching from that point on on any other device later the data also feeds personalization and",
+    "start": "132400",
+    "end": "139680"
+  },
+  {
+    "text": "recommendations engines and the core business analytics",
+    "start": "139680",
+    "end": "146879"
+  },
+  {
+    "text": "today i'm going to talk about how our experience migrating one of the product",
+    "start": "146879",
+    "end": "151920"
+  },
+  {
+    "text": "features viewing history which lets members see their past",
+    "start": "151920",
+    "end": "157440"
+  },
+  {
+    "text": "viewing activity and optionally hide it now we're talking about",
+    "start": "157440",
+    "end": "162480"
+  },
+  {
+    "text": "um making available global materialized views in a very low latency near real-time",
+    "start": "162480",
+    "end": "169599"
+  },
+  {
+    "text": "fashion so what motivated us to embark on this",
+    "start": "169599",
+    "end": "175440"
+  },
+  {
+    "text": "journey so let's look at our existing system at the time",
+    "start": "175440",
+    "end": "180560"
+  },
+  {
+    "text": "at a high level we have netflix client on devices such as mobile phones computers laptops tvs",
+    "start": "180560",
+    "end": "188080"
+  },
+  {
+    "text": "that is sending data during playback into the netflix cloud first it reaches",
+    "start": "188080",
+    "end": "193200"
+  },
+  {
+    "text": "the gateway service from there it goes to playback api playback api manages the life cycle of",
+    "start": "193200",
+    "end": "199760"
+  },
+  {
+    "text": "the playback sessions in addition it sends the playback data",
+    "start": "199760",
+    "end": "205680"
+  },
+  {
+    "text": "into the request processor layer within request processor among other",
+    "start": "205680",
+    "end": "212400"
+  },
+  {
+    "text": "things it is storing both short-term and long-term viewing data um into",
+    "start": "212400",
+    "end": "218799"
+  },
+  {
+    "text": "persistence which is cassandra for us and also into a caching layer which is",
+    "start": "218799",
+    "end": "223920"
+  },
+  {
+    "text": "ev cache which lets us do really quick lookups most of the time this system is",
+    "start": "223920",
+    "end": "229280"
+  },
+  {
+    "text": "working absolutely fine once in a real while it is possible that an individual request being processed",
+    "start": "229280",
+    "end": "235760"
+  },
+  {
+    "text": "is slowed down because of a network blip or maybe one of the cassandra nodes",
+    "start": "235760",
+    "end": "241439"
+  },
+  {
+    "text": "slowed down for a brief time when that happens since it is a synchronous processing the request",
+    "start": "241439",
+    "end": "248319"
+  },
+  {
+    "text": "processing thread in the request processor layer has to wait",
+    "start": "248319",
+    "end": "254400"
+  },
+  {
+    "text": "and then this in turn slows down the upstream playback api service which in turn",
+    "start": "254400",
+    "end": "260720"
+  },
+  {
+    "text": "slows down the gateway service itself now beyond a few retry strategies within",
+    "start": "260720",
+    "end": "267120"
+  },
+  {
+    "text": "the cloud the slowdown can hit the netflix client that's running on the member device",
+    "start": "267120",
+    "end": "273919"
+  },
+  {
+    "text": "sometimes this is referred to as the back pressure and back pressure can manifest itself as",
+    "start": "273919",
+    "end": "279919"
+  },
+  {
+    "text": "unavailability in your system and can build up a queue of items that the client may",
+    "start": "279919",
+    "end": "287759"
+  },
+  {
+    "text": "have to retry some of this data is very critical to",
+    "start": "287759",
+    "end": "293600"
+  },
+  {
+    "text": "what we do and we want to avoid any data loss if the clients were to run",
+    "start": "293600",
+    "end": "299520"
+  },
+  {
+    "text": "out of the key for example so before i go into what changes we made",
+    "start": "299520",
+    "end": "306240"
+  },
+  {
+    "text": "you recognize that if you were to abstract things out we are following a few steps that are",
+    "start": "306240",
+    "end": "314479"
+  },
+  {
+    "text": "um part of a generic data processing pipeline we ingest",
+    "start": "314479",
+    "end": "320000"
+  },
+  {
+    "text": "enrich process store and serve there's",
+    "start": "320000",
+    "end": "325120"
+  },
+  {
+    "text": "business analytics data warehouse and there's also personalization recommendation engines into which we",
+    "start": "325120",
+    "end": "330800"
+  },
+  {
+    "text": "serve this data so the rest of the talk is going to focus on these layers from ingest to",
+    "start": "330800",
+    "end": "336840"
+  },
+  {
+    "text": "store so what changes did we make so between the playback api service and",
+    "start": "336840",
+    "end": "342800"
+  },
+  {
+    "text": "the request processor we introduced a durable queue so now when the request comes in",
+    "start": "342800",
+    "end": "349120"
+  },
+  {
+    "text": "it's put into the durable queue and immediately acknowledge there is no need to wait for that request to be processed",
+    "start": "349120",
+    "end": "357919"
+  },
+  {
+    "text": "well it turns out apache kafka fits this use case pretty well",
+    "start": "357919",
+    "end": "363440"
+  },
+  {
+    "text": "kafka presents a log abstraction to which the producers like playback api",
+    "start": "363440",
+    "end": "370000"
+  },
+  {
+    "text": "can append to and then multiple consumers can then read from",
+    "start": "370000",
+    "end": "376479"
+  },
+  {
+    "text": "the kafka logs uh at at their own pace using",
+    "start": "376479",
+    "end": "381919"
+  },
+  {
+    "text": "offsets for example so this sounds simple we introduced apache kafka in between",
+    "start": "381919",
+    "end": "387840"
+  },
+  {
+    "text": "two of our processing layers and can we call it done well not quite",
+    "start": "387840",
+    "end": "393280"
+  },
+  {
+    "text": "we're operating at a scale at an approx approximate order of magnitude of one million events per",
+    "start": "393280",
+    "end": "399840"
+  },
+  {
+    "text": "second now at that scale you start to hit upon a few challenges in asynchronous",
+    "start": "399840",
+    "end": "405199"
+  },
+  {
+    "text": "processing so let's talk about that so i'm going to touch upon data loss",
+    "start": "405199",
+    "end": "410240"
+  },
+  {
+    "text": "processing latencies out of order and duplicate records consumer platform choice",
+    "start": "410240",
+    "end": "416800"
+  },
+  {
+    "text": "we still have to manage intermittent processing failures and then let's touch upon cross region",
+    "start": "416800",
+    "end": "422240"
+  },
+  {
+    "text": "aspects as well so when we think about data loss there's two aspects that i wanted to talk about",
+    "start": "422240",
+    "end": "428720"
+  },
+  {
+    "text": "one is well if the kafka cluster itself were to be unavailable of course you might lose",
+    "start": "428720",
+    "end": "434840"
+  },
+  {
+    "text": "data and one simple way to address that would be to add an additional standby",
+    "start": "434840",
+    "end": "440720"
+  },
+  {
+    "text": "cluster so if the primary cluster were to be unavailable due to unforeseen reasons",
+    "start": "440720",
+    "end": "446000"
+  },
+  {
+    "text": "then the publisher playback api here could then publish into the standby",
+    "start": "446000",
+    "end": "451840"
+  },
+  {
+    "text": "cluster the consumer the request processor in this case can",
+    "start": "451840",
+    "end": "457520"
+  },
+  {
+    "text": "connect to both kafka clusters and therefore not miss any data",
+    "start": "457520",
+    "end": "462639"
+  },
+  {
+    "text": "now obviously the trade-off here is additional cost and versus certain kind of data this makes sense",
+    "start": "462639",
+    "end": "470240"
+  },
+  {
+    "text": "does all data require this fortunately not we categorize our data for playback into",
+    "start": "470240",
+    "end": "476960"
+  },
+  {
+    "text": "two and a critical data gets this treatment with an additional cost with a standby",
+    "start": "476960",
+    "end": "483520"
+  },
+  {
+    "text": "cluster the other less critical data gets a normal",
+    "start": "483520",
+    "end": "489280"
+  },
+  {
+    "text": "single kafka cluster now kafka itself is highly available within kafka it employs multiple",
+    "start": "489280",
+    "end": "495919"
+  },
+  {
+    "text": "strategies to improve availability so in general it works fine",
+    "start": "495919",
+    "end": "501840"
+  },
+  {
+    "text": "another aspect to data loss is what's happening at publish time so let's dive into it a little bit so playback api",
+    "start": "503360",
+    "end": "510240"
+  },
+  {
+    "text": "gets a request it is publishing a record into kafka",
+    "start": "510240",
+    "end": "515440"
+  },
+  {
+    "text": "so there's a choice here kafka it has multiple partitions",
+    "start": "515440",
+    "end": "521440"
+  },
+  {
+    "text": "to increase scalability right and each partition is served by an ensemble of",
+    "start": "521440",
+    "end": "527120"
+  },
+  {
+    "text": "servers called brokers one of them is elected as the leader",
+    "start": "527120",
+    "end": "533279"
+  },
+  {
+    "text": "so when you are writing into a partition or publishing into a partition you are dealing with the leader broker",
+    "start": "533279",
+    "end": "541519"
+  },
+  {
+    "text": "now there's a choice to say do i wait for the leader to",
+    "start": "541519",
+    "end": "546839"
+  },
+  {
+    "text": "acknowledge that the item has actually been persisted into durable storage or do i also wait for the follower",
+    "start": "546839",
+    "end": "554320"
+  },
+  {
+    "text": "brokers to acknowledge that they have written into persistence as well",
+    "start": "554320",
+    "end": "559839"
+  },
+  {
+    "text": "if you're dealing with critical data it would make sense that yes you do want to wait for acknowledgement for all three",
+    "start": "559839",
+    "end": "565040"
+  },
+  {
+    "text": "of them turns out at a large scale this has implications",
+    "start": "565040",
+    "end": "570320"
+  },
+  {
+    "text": "um beyond just the cost of waiting for multiple rights",
+    "start": "570320",
+    "end": "576640"
+  },
+  {
+    "text": "if you were to lose um the leader broker well how do you handle that",
+    "start": "576640",
+    "end": "582080"
+  },
+  {
+    "text": "we're dealing with a cloud-native large-scale distributed system and failure scan and will happen and in fact",
+    "start": "582080",
+    "end": "588000"
+  },
+  {
+    "text": "it did happen for us when we deployed this within a couple of months",
+    "start": "588000",
+    "end": "593760"
+  },
+  {
+    "text": "so if the leader broker were to become unavailable or actually any broker were",
+    "start": "593760",
+    "end": "599040"
+  },
+  {
+    "text": "to be unavailable and if you're waiting for acknowledgement from all of them obviously your processing is going to",
+    "start": "599040",
+    "end": "604320"
+  },
+  {
+    "text": "slow down and that slow down again causes back pressure and unavailability which you're trying to avoid",
+    "start": "604320",
+    "end": "611519"
+  },
+  {
+    "text": "if you were to get acknowledgement just from one which is the leader broker there's an interesting case what if you",
+    "start": "611519",
+    "end": "618240"
+  },
+  {
+    "text": "were to then lose the leader broker later now leading election will",
+    "start": "618240",
+    "end": "624560"
+  },
+  {
+    "text": "come up with a different leader however if the item that was acknowledged by the",
+    "start": "624560",
+    "end": "631519"
+  },
+  {
+    "text": "leader was not completely replicated into the other brokers then",
+    "start": "631519",
+    "end": "637839"
+  },
+  {
+    "text": "doing such a re-election of the leader sometimes referred to as the unclean broker leader election",
+    "start": "637839",
+    "end": "644880"
+  },
+  {
+    "text": "could make you lose data which is what we're trying to avoid right",
+    "start": "644880",
+    "end": "651839"
+  },
+  {
+    "text": "so how did we handle this situation and again there's a trade-off here to make",
+    "start": "651839",
+    "end": "657760"
+  },
+  {
+    "text": "so we have a producer library that is a wrapper on top of the kafka producer client",
+    "start": "657760",
+    "end": "663920"
+  },
+  {
+    "text": "and there's two optimizations that are relevant here one is that because we use non-key partitions",
+    "start": "663920",
+    "end": "672399"
+  },
+  {
+    "text": "the library is able to write to a partition and if that",
+    "start": "672399",
+    "end": "677760"
+  },
+  {
+    "text": "partition were to be unavailable because the broker is unavailable then it automatically writes to a different",
+    "start": "677760",
+    "end": "683839"
+  },
+  {
+    "text": "partition because it's non-key partitioning strategy for us also if their partition is on an",
+    "start": "683839",
+    "end": "692360"
+  },
+  {
+    "text": "under-replicated set of brokers so that is the leader broker has more items than",
+    "start": "692360",
+    "end": "698399"
+  },
+  {
+    "text": "the follower leaders the application has not caught up completely then our library picks a different partition that",
+    "start": "698399",
+    "end": "705360"
+  },
+  {
+    "text": "is more well replicated so with these strategies we eventually",
+    "start": "705360",
+    "end": "711600"
+  },
+  {
+    "text": "ended up choosing to write in asynchronous mode where the publisher writes it into an in-memory queue and",
+    "start": "711600",
+    "end": "718320"
+  },
+  {
+    "text": "asynchronously publishes into kafka now this helps scale performance etc",
+    "start": "718320",
+    "end": "727040"
+  },
+  {
+    "text": "but we were interested in making sure we have an upper bound on what is the worst case data loss we would incur",
+    "start": "727040",
+    "end": "734880"
+  },
+  {
+    "text": "if multiple errors are all happening at the same time and we were happy with the upper bound",
+    "start": "734880",
+    "end": "741519"
+  },
+  {
+    "text": "we were able to configure based on the in-memory cue size and and the",
+    "start": "741519",
+    "end": "748399"
+  },
+  {
+    "text": "strategy of avoiding under-replicated partitions etc",
+    "start": "748959",
+    "end": "754160"
+  },
+  {
+    "text": "and we monitor this data durability so to speak and we consistently get four or five nines from",
+    "start": "754160",
+    "end": "760800"
+  },
+  {
+    "text": "it which is acceptable for us if your application must",
+    "start": "760800",
+    "end": "766000"
+  },
+  {
+    "text": "not lose any items of data then you may want to pick acknowledgement",
+    "start": "766000",
+    "end": "771120"
+  },
+  {
+    "text": "from all brokers before you call that item processed and that would suit well",
+    "start": "771120",
+    "end": "776320"
+  },
+  {
+    "text": "for you okay so processing latencies um",
+    "start": "776320",
+    "end": "783120"
+  },
+  {
+    "text": "are interesting in the sense that if you were to have a good idea on",
+    "start": "783120",
+    "end": "788160"
+  },
+  {
+    "text": "the peak traffic you're going to get chances are you can figure out the number of consumer processing nodes you",
+    "start": "788160",
+    "end": "793839"
+  },
+  {
+    "text": "need in your system you configure it once and since you can handle the peak it's",
+    "start": "793839",
+    "end": "800240"
+  },
+  {
+    "text": "all good it's simple it's a good situation to be in for us the traffic uh changes across the",
+    "start": "800240",
+    "end": "807600"
+  },
+  {
+    "text": "day across the day of the week as well and we see a 5x change from peak to trough of our",
+    "start": "807600",
+    "end": "814880"
+  },
+  {
+    "text": "traffic because of such a big volume change we",
+    "start": "814880",
+    "end": "820240"
+  },
+  {
+    "text": "wanted to be more efficient with our resources and we chose to auto scale and",
+    "start": "820240",
+    "end": "825360"
+  },
+  {
+    "text": "specifically we add or remove a certain number of consumer processing nodes",
+    "start": "825360",
+    "end": "831600"
+  },
+  {
+    "text": "based on the traffic so there's a trade-off to make there as well let's look at that",
+    "start": "831600",
+    "end": "839360"
+  },
+  {
+    "text": "whenever you change the number of consumers there is a rebalance that happens within",
+    "start": "839360",
+    "end": "845360"
+  },
+  {
+    "text": "kafka so all of the partitions are rebalanced across the new number of consumers so the trade-off here is",
+    "start": "845360",
+    "end": "852240"
+  },
+  {
+    "text": "resource efficiency versus paying the price of a rebalance rebalance can affect you different ways",
+    "start": "852240",
+    "end": "859199"
+  },
+  {
+    "text": "if your processing is stateful then you would have to do something",
+    "start": "859199",
+    "end": "864800"
+  },
+  {
+    "text": "a little bit complex as in you get a signal for rebalance you pause processing",
+    "start": "864800",
+    "end": "871120"
+  },
+  {
+    "text": "you take any in-memory state and you checkpoint that along with the kafka offset until which you have processed",
+    "start": "871120",
+    "end": "878320"
+  },
+  {
+    "text": "you let the rebalance happen after the rebalance you reload the checkpoint of data and then you start",
+    "start": "878320",
+    "end": "885279"
+  },
+  {
+    "text": "processing from the checkpointed offset if your processing",
+    "start": "885279",
+    "end": "890639"
+  },
+  {
+    "text": "is a little simpler or if you are storing state in an external fashion",
+    "start": "890639",
+    "end": "897839"
+  },
+  {
+    "text": "then it is possible for you to let the rebalance happen and just continue normally",
+    "start": "897839",
+    "end": "905040"
+  },
+  {
+    "text": "what's going to happen here is that since you may have had items that are in process when the rebalance starts",
+    "start": "905040",
+    "end": "912560"
+  },
+  {
+    "text": "and have not been acknowledged into kafka those items would show up on another",
+    "start": "912560",
+    "end": "919519"
+  },
+  {
+    "text": "processing node because that node now gets the partition after the rebalance",
+    "start": "919519",
+    "end": "924720"
+  },
+  {
+    "text": "so the worst case you are going to reprocess some number of items",
+    "start": "924720",
+    "end": "930000"
+  },
+  {
+    "text": "and if your processing is either important it's not a problem or if you have other ways of dealing with",
+    "start": "930000",
+    "end": "935440"
+  },
+  {
+    "text": "duplicates which i will talk about later then this might actually turn out well as well for you",
+    "start": "935440",
+    "end": "942079"
+  },
+  {
+    "text": "so the next question is how do i know when and by how much to order scale",
+    "start": "942079",
+    "end": "947680"
+  },
+  {
+    "text": "recall that we said we would need to increase the number of processing nodes because",
+    "start": "947680",
+    "end": "953759"
+  },
+  {
+    "text": "otherwise the items would sit longer in kafka and that's referred to as the lag how much",
+    "start": "953759",
+    "end": "959680"
+  },
+  {
+    "text": "lag are we seeing before an item is processed from the queue",
+    "start": "959680",
+    "end": "965839"
+  },
+  {
+    "text": "so one would think lag is a good metric to trigger or the scale and it makes sense you could scale up based on that",
+    "start": "965839",
+    "end": "972639"
+  },
+  {
+    "text": "the problem is you cannot easily scale down by this metric when the lag is zero how do we know if we were to scale down",
+    "start": "972639",
+    "end": "980000"
+  },
+  {
+    "text": "by one processing nerd 10 50",
+    "start": "980000",
+    "end": "985600"
+  },
+  {
+    "text": "you might flip flop by removing some notes and then watch us observing lag you add notes zero lag remove notes",
+    "start": "986079",
+    "end": "995120"
+  },
+  {
+    "text": "in practice a lot of people use a proxy instead cpu utilization is a good proxy for us",
+    "start": "995120",
+    "end": "1002560"
+  },
+  {
+    "text": "records per second turns out a good trigger for auto scaling",
+    "start": "1002560",
+    "end": "1008880"
+  },
+  {
+    "text": "in steady state you are able to tell how many records are processed",
+    "start": "1008880",
+    "end": "1015600"
+  },
+  {
+    "text": "per second and then based on that we can add more nodes or less",
+    "start": "1015600",
+    "end": "1022880"
+  },
+  {
+    "text": "uh we have an auto scaler and here's a result of a 24 hour period that i'm showing here",
+    "start": "1023360",
+    "end": "1028959"
+  },
+  {
+    "text": "um where our workers which are the consumers they aggressively scale up by the auto",
+    "start": "1028959",
+    "end": "1035280"
+  },
+  {
+    "text": "scaler so we want to avoid rebalances during scale up because we are",
+    "start": "1035280",
+    "end": "1040720"
+  },
+  {
+    "text": "already seeing a lot of data we want to quickly scale up and then let it slowly scale down later",
+    "start": "1040720",
+    "end": "1046240"
+  },
+  {
+    "text": "a few day balances in a day is okay um basically a coarse pane or a scaling",
+    "start": "1046240",
+    "end": "1054320"
+  },
+  {
+    "text": "so out of order and duplicate records are going to happen in a distributed system um",
+    "start": "1055120",
+    "end": "1060320"
+  },
+  {
+    "text": "well i talked about a few cases before on how they might happen if you're familiar with stream",
+    "start": "1060320",
+    "end": "1065520"
+  },
+  {
+    "text": "processing windowing is a technique a lot of people use um here you are collecting events based",
+    "start": "1065520",
+    "end": "1074559"
+  },
+  {
+    "text": "on a time window or you could do sessionization based on specifics of",
+    "start": "1074559",
+    "end": "1079679"
+  },
+  {
+    "text": "your application recall that this is for a playback session a video playback",
+    "start": "1079679",
+    "end": "1086320"
+  },
+  {
+    "text": "session which has a specific start and and events and therefore we could collect all",
+    "start": "1086320",
+    "end": "1091919"
+  },
+  {
+    "text": "events for a session within those boundaries it's possible we might miss a stop event",
+    "start": "1091919",
+    "end": "1099360"
+  },
+  {
+    "text": "if a member were to be watching a laptop for example and just close the laptop",
+    "start": "1099360",
+    "end": "1105120"
+  },
+  {
+    "text": "which will not give the netflix client a chance to transmit the stop event in which case we time out so either way we",
+    "start": "1105120",
+    "end": "1112400"
+  },
+  {
+    "text": "have sessions for for multiple events of that session and based on certain attributes within",
+    "start": "1112400",
+    "end": "1118480"
+  },
+  {
+    "text": "the data we could order them and also deduplicate them",
+    "start": "1118480",
+    "end": "1124799"
+  },
+  {
+    "text": "for example you could have a not monotonically increasing id or a timestamp",
+    "start": "1124799",
+    "end": "1131120"
+  },
+  {
+    "text": "from the client within those events and that could help you",
+    "start": "1131120",
+    "end": "1136240"
+  },
+  {
+    "text": "for writes we are able to deduplicate them by using the server timestamp that is the",
+    "start": "1136240",
+    "end": "1142400"
+  },
+  {
+    "text": "time when the event reaches our server since events are transmitted in order by",
+    "start": "1142400",
+    "end": "1148400"
+  },
+  {
+    "text": "the client we can use that for modified time when writing and therefore we do not see",
+    "start": "1148400",
+    "end": "1154799"
+  },
+  {
+    "text": "a problem with it so it turns out there are multiple",
+    "start": "1154799",
+    "end": "1161600"
+  },
+  {
+    "text": "platforms we can use for consuming and processing requests well that's luxury right so we have",
+    "start": "1161600",
+    "end": "1167520"
+  },
+  {
+    "text": "three mantis is a stream processing system that netflix open sourced a few years",
+    "start": "1167520",
+    "end": "1173200"
+  },
+  {
+    "text": "ago apache flink is a popular stream processing system and then there's the classic microservice which could use",
+    "start": "1173200",
+    "end": "1181919"
+  },
+  {
+    "text": "a consumer client and then just process the data from kafka so we started out",
+    "start": "1181919",
+    "end": "1187360"
+  },
+  {
+    "text": "with the question of hey which platform is the best one for me to use",
+    "start": "1187360",
+    "end": "1192720"
+  },
+  {
+    "text": "and realize that's not the right question i should be asking which processing",
+    "start": "1192720",
+    "end": "1198559"
+  },
+  {
+    "text": "platforms benefit which use cases and it turns out based on the use case you could use each of these three they all",
+    "start": "1198559",
+    "end": "1204720"
+  },
+  {
+    "text": "have pros and cons if you're doing complex stream processing mantis and apache flink are a",
+    "start": "1204720",
+    "end": "1211520"
+  },
+  {
+    "text": "very good fit apache flink also has a built-in support for stateful stream processing where",
+    "start": "1211520",
+    "end": "1217919"
+  },
+  {
+    "text": "each node can store its local state for example for sessionization",
+    "start": "1217919",
+    "end": "1223919"
+  },
+  {
+    "text": "microservices are very interesting at least for us because netflix engineers have",
+    "start": "1223919",
+    "end": "1231840"
+  },
+  {
+    "text": "an excellent support for the microservices ecosystem all the way from generating or starting",
+    "start": "1231919",
+    "end": "1238559"
+  },
+  {
+    "text": "with a clean code base all the way to ci cd pipelines and monitoring",
+    "start": "1238559",
+    "end": "1244960"
+  },
+  {
+    "text": "so we use all three for different use cases",
+    "start": "1244960",
+    "end": "1250559"
+  },
+  {
+    "text": "okay so now they're given these challenges well we still have to deal with the intermittent failures of",
+    "start": "1250880",
+    "end": "1258320"
+  },
+  {
+    "text": "processing if you were to get an item and got an intermittent failure well beyond",
+    "start": "1258320",
+    "end": "1264159"
+  },
+  {
+    "text": "maybe a simple retry we would want to block the entire",
+    "start": "1264159",
+    "end": "1269600"
+  },
+  {
+    "text": "queue behind because of one item sometimes people refer to that as head-of-line blocking",
+    "start": "1269600",
+    "end": "1275440"
+  },
+  {
+    "text": "so instead we put it aside process the rest of the queue and then come back to it later now a characteristic we would like",
+    "start": "1275440",
+    "end": "1282320"
+  },
+  {
+    "text": "for such a system is that there should be a finite time elapsing",
+    "start": "1282320",
+    "end": "1287919"
+  },
+  {
+    "text": "before we try it again there is no need to try it immediately so that's what we mean by a delay queue",
+    "start": "1287919",
+    "end": "1295360"
+  },
+  {
+    "text": "here in this picture there's a variety of ways you can implement this maybe you can write it",
+    "start": "1295360",
+    "end": "1300400"
+  },
+  {
+    "text": "into another kafka topic and then build another processor that builds in a delay",
+    "start": "1300400",
+    "end": "1306320"
+  },
+  {
+    "text": "um it turns out for us it's very easy to achieve this using amazon sqs since we",
+    "start": "1306320",
+    "end": "1311919"
+  },
+  {
+    "text": "already operate on ec2 we use the simple queue service",
+    "start": "1311919",
+    "end": "1316960"
+  },
+  {
+    "text": "to put an item and then the queue has a feature to optionally specify",
+    "start": "1316960",
+    "end": "1323679"
+  },
+  {
+    "text": "a future time when it should be made visible so that works easy",
+    "start": "1323679",
+    "end": "1329520"
+  },
+  {
+    "text": "cross-legion if um aspects are important in the sense that since netflix operates",
+    "start": "1330240",
+    "end": "1335280"
+  },
+  {
+    "text": "in multiple regions and it's a large distributed system it is possible a region may become",
+    "start": "1335280",
+    "end": "1341120"
+  },
+  {
+    "text": "unavailable once in a while we routinely practice for this and",
+    "start": "1341120",
+    "end": "1346559"
+  },
+  {
+    "text": "multiple times a year we take a region down just to make sure that we exercise our muscle of",
+    "start": "1346559",
+    "end": "1353200"
+  },
+  {
+    "text": "cross region traffic forwarding",
+    "start": "1353200",
+    "end": "1358960"
+  },
+  {
+    "text": "so well first thought it would make sense that a an item that was meant to",
+    "start": "1359440",
+    "end": "1365840"
+  },
+  {
+    "text": "be for another region could be just remotely published into a kafka topic",
+    "start": "1365840",
+    "end": "1371520"
+  },
+  {
+    "text": "using a tunnel across the regions that normally would work except when you do",
+    "start": "1371520",
+    "end": "1377679"
+  },
+  {
+    "text": "encounter a real outage of that region uh that remote publish is not going to",
+    "start": "1377679",
+    "end": "1383200"
+  },
+  {
+    "text": "work so a simple but subtle change we made is that",
+    "start": "1383200",
+    "end": "1388720"
+  },
+  {
+    "text": "we always want to publish locally so we publish to another kafka topic and asynchronously",
+    "start": "1388720",
+    "end": "1395440"
+  },
+  {
+    "text": "have a legion router send it to the other side so this way all events of a",
+    "start": "1395440",
+    "end": "1401520"
+  },
+  {
+    "text": "single playback session can be processed together",
+    "start": "1401520",
+    "end": "1406240"
+  },
+  {
+    "text": "now that we have challenges figured out trade-offs made",
+    "start": "1407120",
+    "end": "1412320"
+  },
+  {
+    "text": "um how did we test and roll it out shadow testing is popular chances are",
+    "start": "1412320",
+    "end": "1418640"
+  },
+  {
+    "text": "you may already be using such strategies in your environment for us this consisted of having playback",
+    "start": "1418640",
+    "end": "1424400"
+  },
+  {
+    "text": "api dual right into the existing synchronous system as well as into patchy kafka from which the asynchronous",
+    "start": "1424400",
+    "end": "1431679"
+  },
+  {
+    "text": "process processor was consuming and then we had a validator process that would validate",
+    "start": "1431679",
+    "end": "1437600"
+  },
+  {
+    "text": "that the in-flight requests are identical the next step was to make sure that it's",
+    "start": "1437600",
+    "end": "1443039"
+  },
+  {
+    "text": "not just the in-flight request processing that was identical but also the stored artifacts for which we",
+    "start": "1443039",
+    "end": "1448880"
+  },
+  {
+    "text": "created a shadow cassandra cluster now here you're trading up costs for higher",
+    "start": "1448880",
+    "end": "1455600"
+  },
+  {
+    "text": "confidence and if you have an environment where it is relatively easy",
+    "start": "1455600",
+    "end": "1462159"
+  },
+  {
+    "text": "to get additional resources for a short period of time which is certainly possible in a cloud environment like",
+    "start": "1462159",
+    "end": "1467679"
+  },
+  {
+    "text": "ours then it gives you the additional benefit",
+    "start": "1467679",
+    "end": "1473480"
+  },
+  {
+    "text": "of confidence before rolling it out and we rolled out using user id to give us a consistent slice of",
+    "start": "1474159",
+    "end": "1482320"
+  },
+  {
+    "text": "the traffic that we migrate into the new system um starting with one percent five",
+    "start": "1482320",
+    "end": "1488320"
+  },
+  {
+    "text": "percent all the way to hundred percent so that gave us really smooth migration without",
+    "start": "1488320",
+    "end": "1495760"
+  },
+  {
+    "text": "impact upstream or downstream systems so this is a quick look at where we are",
+    "start": "1495760",
+    "end": "1501679"
+  },
+  {
+    "text": "and where we're going so the items in blue here uh the",
+    "start": "1501679",
+    "end": "1506720"
+  },
+  {
+    "text": "playback api the kafka of course the viewing history processor bookmark processor are in production",
+    "start": "1506720",
+    "end": "1512480"
+  },
+  {
+    "text": "and we have the rest of the system that deal with other attribute there's an attributes processor and section logs",
+    "start": "1512480",
+    "end": "1518880"
+  },
+  {
+    "text": "which would be interesting because the size of the data is very large uh way larger than what you would",
+    "start": "1518880",
+    "end": "1525120"
+  },
+  {
+    "text": "normally write into kafka so we have some new challenges to solve there",
+    "start": "1525120",
+    "end": "1530480"
+  },
+  {
+    "text": "so with that i would summarize that i shared with you how asynchronous processing improved the",
+    "start": "1530880",
+    "end": "1537919"
+  },
+  {
+    "text": "availability and data quality for us i showed you how we reasoned about the design choices and what tradeoffs made",
+    "start": "1537919",
+    "end": "1544240"
+  },
+  {
+    "text": "sense for our environment and showed you how shadow testing and incremental rollout gave us confident",
+    "start": "1544240",
+    "end": "1550720"
+  },
+  {
+    "text": "and smooth rollout with this i invite you to think about how this applies to your environment",
+    "start": "1550720",
+    "end": "1557200"
+  },
+  {
+    "text": "what other tradeoffs you may make for a similar journey and i invite you to connect and tell me",
+    "start": "1557200",
+    "end": "1564799"
+  },
+  {
+    "text": "share with me your experiences thank you",
+    "start": "1564799",
+    "end": "1569720"
+  },
+  {
+    "text": "thank you for sharing your experience and giving this talk i think it was",
+    "start": "1571440",
+    "end": "1576799"
+  },
+  {
+    "text": "very helpful to the audience and i see a lot of questions they've already raised",
+    "start": "1576799",
+    "end": "1583120"
+  },
+  {
+    "text": "so some of it is you know a narrative and question answer and i sort of want to",
+    "start": "1583120",
+    "end": "1588880"
+  },
+  {
+    "text": "sort of hard when it's in a in a window but um do you want to tackle maybe the first",
+    "start": "1588880",
+    "end": "1595200"
+  },
+  {
+    "text": "thread in this um let's",
+    "start": "1595200",
+    "end": "1600559"
+  },
+  {
+    "text": "talk about okay there was a secondary cluster question right",
+    "start": "1600559",
+    "end": "1607360"
+  },
+  {
+    "text": "i think it's about the skill and availability and those sorts of things do you want to address those questions sure um yeah so",
+    "start": "1607360",
+    "end": "1614559"
+  },
+  {
+    "text": "the motivation for having a standby cluster is to avoid data loss in case kafka cluster",
+    "start": "1614559",
+    "end": "1621440"
+  },
+  {
+    "text": "itself becomes unavailable and the kafka itself is highly available in general it employs several strategies within the",
+    "start": "1621440",
+    "end": "1628320"
+  },
+  {
+    "text": "system for high availability so but since we're dealing with the",
+    "start": "1628320",
+    "end": "1633440"
+  },
+  {
+    "text": "critical playback session data we wanted the ability to",
+    "start": "1633440",
+    "end": "1638559"
+  },
+  {
+    "text": "have that cluster available again we make this available for certain critical data",
+    "start": "1638559",
+    "end": "1643679"
+  },
+  {
+    "text": "but not necessarily all of the data and the cluster is always available um as a warm standby",
+    "start": "1643679",
+    "end": "1651440"
+  },
+  {
+    "text": "and the publisher then upon detecting or if we determine that the",
+    "start": "1651440",
+    "end": "1657440"
+  },
+  {
+    "text": "primary cluster is going to be unavailable for some time then it switches writing publishing into the",
+    "start": "1657440",
+    "end": "1663279"
+  },
+  {
+    "text": "alternate cluster and they are similarly sized so there's no difference there and the consumers are",
+    "start": "1663279",
+    "end": "1670720"
+  },
+  {
+    "text": "have clients attached to both of these clusters and therefore can continue processing",
+    "start": "1670720",
+    "end": "1676240"
+  },
+  {
+    "text": "so um in practice have you seen how has your service done a failover beyond just",
+    "start": "1676240",
+    "end": "1682159"
+  },
+  {
+    "text": "your testing it right yeah early on we had a case where there",
+    "start": "1682159",
+    "end": "1687279"
+  },
+  {
+    "text": "was a misconfiguration on the kafka cluster human error always happens right",
+    "start": "1687279",
+    "end": "1694880"
+  },
+  {
+    "text": "and this caused um a publish to be stuck because",
+    "start": "1694880",
+    "end": "1700799"
+  },
+  {
+    "text": "the one of the for example for a particular partition",
+    "start": "1700799",
+    "end": "1705840"
+  },
+  {
+    "text": "there are three brokers in an ensemble to serve traffic and the publish mode",
+    "start": "1705840",
+    "end": "1711120"
+  },
+  {
+    "text": "was set to act all right and in that case if one of them one of the",
+    "start": "1711120",
+    "end": "1716720"
+  },
+  {
+    "text": "brokers were unavailable then it would stay there for a while and it caused an",
+    "start": "1716720",
+    "end": "1721760"
+  },
+  {
+    "text": "unexpected outage where we were able to switch quickly and then later realize there was a misconfiguration in how the",
+    "start": "1721760",
+    "end": "1727919"
+  },
+  {
+    "text": "broker was set up oh was it the publisher side or the broker",
+    "start": "1727919",
+    "end": "1734720"
+  },
+  {
+    "text": "the one of the brokers which is the cloud instance became unavailable so publishing oh you had all",
+    "start": "1734720",
+    "end": "1741440"
+  },
+  {
+    "text": "and maybe rf was not equal the the in-sync replica isr that's usually",
+    "start": "1741440",
+    "end": "1746799"
+  },
+  {
+    "text": "the problem right it's not equal to rf minus one is that the general problem so you're doing a rolling upgrade of your broker",
+    "start": "1746799",
+    "end": "1752720"
+  },
+  {
+    "text": "one went down and you stopped being able to publish yeah this is not doing an upgrade this",
+    "start": "1752720",
+    "end": "1758159"
+  },
+  {
+    "text": "was just uh an instance becoming unavailable oh you should have it in the cloud yeah",
+    "start": "1758159",
+    "end": "1764159"
+  },
+  {
+    "text": "okay got it yeah this sometimes this is the it wasn't the isr equals rf minus one problem correct",
+    "start": "1764159",
+    "end": "1769760"
+  },
+  {
+    "text": "that is no that's a difference okay so in this time how long does it take for your publisher to um",
+    "start": "1769760",
+    "end": "1777279"
+  },
+  {
+    "text": "detect the error and failover yeah so this is something that we we tuned um",
+    "start": "1777279",
+    "end": "1783200"
+  },
+  {
+    "text": "since we learned from it so in the beginning it was set to it basically caused",
+    "start": "1783200",
+    "end": "1789200"
+  },
+  {
+    "text": "an even worse case of back pressure because the publisher slowed down waiting for acknowledgements that it",
+    "start": "1789200",
+    "end": "1795360"
+  },
+  {
+    "text": "could not get um so what the way we have made it work right now and this touches",
+    "start": "1795360",
+    "end": "1801120"
+  },
+  {
+    "text": "upon another question of data loss that i'll end up answering as well which is we",
+    "start": "1801120",
+    "end": "1806480"
+  },
+  {
+    "text": "have uh first switch to act one act one will basically let us",
+    "start": "1806480",
+    "end": "1812159"
+  },
+  {
+    "text": "acknowledge or respond back as soon as we get an acknowledgement from leader broker",
+    "start": "1812159",
+    "end": "1818080"
+  },
+  {
+    "text": "this presents a problem that if the replication is not in sync then you",
+    "start": "1818080",
+    "end": "1823120"
+  },
+  {
+    "text": "could potentially lose data if the leader broker were to go away um but then we can avoid that in other",
+    "start": "1823120",
+    "end": "1829440"
+  },
+  {
+    "text": "ways i'll touch upon that later so and then we also um move to",
+    "start": "1829440",
+    "end": "1835440"
+  },
+  {
+    "text": "an asynchronous mode of publishing now this is totally interesting in a",
+    "start": "1835440",
+    "end": "1840559"
+  },
+  {
+    "text": "sense that for a case where you do not want to lose data it is not recommended",
+    "start": "1840559",
+    "end": "1846080"
+  },
+  {
+    "text": "the asynchronous mod lets us put the data into the memory buffer and have an asynchronous thread published into kafka",
+    "start": "1846080",
+    "end": "1853279"
+  },
+  {
+    "text": "the main advantage here is to get scalability and performance with the",
+    "start": "1853279",
+    "end": "1858880"
+  },
+  {
+    "text": "trade-off of a small amount of data loss and for certain applications uh we can",
+    "start": "1858880",
+    "end": "1865039"
+  },
+  {
+    "text": "easily get an upper bound on this data loss and therefore are able to make the",
+    "start": "1865039",
+    "end": "1870080"
+  },
+  {
+    "text": "trade-off and be satisfied with it so for example our data dutability requirements are four to five nines and",
+    "start": "1870080",
+    "end": "1877039"
+  },
+  {
+    "text": "we can easily get that with uh sizing the memory buffer and ensuring that a flush happens rather",
+    "start": "1877039",
+    "end": "1884480"
+  },
+  {
+    "text": "quickly and things like that okay you were talking about um",
+    "start": "1884480",
+    "end": "1890000"
+  },
+  {
+    "text": "durability and there's a question about what was the overall improvement in availability for your system end-to-end",
+    "start": "1890000",
+    "end": "1897279"
+  },
+  {
+    "text": "how did you measure yeah so i think i touched upon towards the end of the slide so we are in the",
+    "start": "1897279",
+    "end": "1903840"
+  },
+  {
+    "text": "process of migrating multiple components so the true availability will be visible",
+    "start": "1903840",
+    "end": "1910159"
+  },
+  {
+    "text": "when all components have migrated so there are some components that are still in the",
+    "start": "1910159",
+    "end": "1915440"
+  },
+  {
+    "text": "synchronous mode however for the components that we did migrate we are able to see",
+    "start": "1915440",
+    "end": "1921679"
+  },
+  {
+    "text": "a quite bit of less processing needed in a sense that we can have fewer",
+    "start": "1921679",
+    "end": "1927519"
+  },
+  {
+    "text": "consumer nodes and then absorb any intermittent spike",
+    "start": "1927519",
+    "end": "1933519"
+  },
+  {
+    "text": "in traffic with a small latency without incurring too much latency and auto scaling these",
+    "start": "1933519",
+    "end": "1940320"
+  },
+  {
+    "text": "instances so we've seen higher higher",
+    "start": "1940320",
+    "end": "1946399"
+  },
+  {
+    "text": "improved utilization of resources and yeah reduced footprint in the cloud",
+    "start": "1946399",
+    "end": "1952559"
+  },
+  {
+    "text": "okay so why would that happen just because kafka is faster so therefore",
+    "start": "1952559",
+    "end": "1958320"
+  },
+  {
+    "text": "the readers and writers don't need to be scaled up as much yeah it's a good question so",
+    "start": "1958320",
+    "end": "1964799"
+  },
+  {
+    "text": "in the synchronous system we need to be better prepared for spikes because otherwise there would be back",
+    "start": "1964799",
+    "end": "1970960"
+  },
+  {
+    "text": "pressure going back all the way to the clients and possibly data loss if the retries are exhausted so we need to run",
+    "start": "1970960",
+    "end": "1979200"
+  },
+  {
+    "text": "the system a little larger to be prepared for spikes whereas in kafka case since kafka is already",
+    "start": "1979200",
+    "end": "1986240"
+  },
+  {
+    "text": "sized for a certain amount of data that we were going to have the consumers may",
+    "start": "1986240",
+    "end": "1991679"
+  },
+  {
+    "text": "expect a little lag when there is a spike in traffic but as long as the",
+    "start": "1991679",
+    "end": "1996960"
+  },
+  {
+    "text": "lag is acceptable and you put auto scaling on these then you can run fewer consumer instances",
+    "start": "1996960",
+    "end": "2002799"
+  },
+  {
+    "text": "got it what's your auto scaling signal um that's that's a good point so",
+    "start": "2002799",
+    "end": "2008799"
+  },
+  {
+    "text": "originally it would seem that a lag would be a good metric to scale on because that is what we're trying to",
+    "start": "2008799",
+    "end": "2014159"
+  },
+  {
+    "text": "avoid but the problem with that is you cannot scale down easily",
+    "start": "2014159",
+    "end": "2019360"
+  },
+  {
+    "text": "and scale down that's right there's no signal for scaling down or scaling in yeah so um there's proxies",
+    "start": "2019360",
+    "end": "2026960"
+  },
+  {
+    "text": "for such a trigger that people end up using cpu utilization is a good one for",
+    "start": "2026960",
+    "end": "2032480"
+  },
+  {
+    "text": "us it made sense to do rps records per second in steady state we are able to",
+    "start": "2032480",
+    "end": "2037600"
+  },
+  {
+    "text": "estimate what is the records per second per consumer instance we're able to handle and based on that put a target",
+    "start": "2037600",
+    "end": "2043039"
+  },
+  {
+    "text": "tracking or a scaling policy this is more a bit like a pit controller",
+    "start": "2043039",
+    "end": "2048800"
+  },
+  {
+    "text": "style where it is trying to match the um amount of lag that is in the",
+    "start": "2048800",
+    "end": "2054638"
+  },
+  {
+    "text": "system or amount of rps that is happening and then add or remove instances so it's very aggressive in",
+    "start": "2054639",
+    "end": "2060240"
+  },
+  {
+    "text": "scale up um and then slowly scales down after",
+    "start": "2060240",
+    "end": "2066079"
+  },
+  {
+    "text": "interesting okay how would you have you generally had to test this",
+    "start": "2066079",
+    "end": "2072720"
+  },
+  {
+    "text": "how did you test this effectiveness like one issue with this is you know the proactive or predictive auto scaling",
+    "start": "2072720",
+    "end": "2078560"
+  },
+  {
+    "text": "right where upstream there's a bottleneck you don't get anything you scale in but i guess you scale in very",
+    "start": "2078560",
+    "end": "2085679"
+  },
+  {
+    "text": "carefully and slowly and then all of a sudden there's a burst you're not ready for it",
+    "start": "2085679",
+    "end": "2090878"
+  },
+  {
+    "text": "yeah this is something that we had tested because we're also using an auto scaling strategy that's built into manta",
+    "start": "2090879",
+    "end": "2096800"
+  },
+  {
+    "text": "stream processing system that i mentioned um and there are similar strategies available on ec2 cloud as well so what",
+    "start": "2096800",
+    "end": "2104640"
+  },
+  {
+    "text": "we were doing in the beginning for example when we did a region outage or cluster",
+    "start": "2104640",
+    "end": "2111200"
+  },
+  {
+    "text": "kafka cluster outage exercise was to pre-scale um cluster for for",
+    "start": "2111200",
+    "end": "2117920"
+  },
+  {
+    "text": "leading uh we scale the consumer cluster to prepare to read from",
+    "start": "2117920",
+    "end": "2123839"
+  },
+  {
+    "text": "from the other um cluster which would have a big spike in traffic but what we found was that the auto scaler is able",
+    "start": "2123839",
+    "end": "2129760"
+  },
+  {
+    "text": "to aggressively scale up within an acceptable lag of time",
+    "start": "2129760",
+    "end": "2136079"
+  },
+  {
+    "text": "otherwise we would have to manually scale up predictive order scaling does not seem",
+    "start": "2136079",
+    "end": "2141599"
+  },
+  {
+    "text": "to be required in this use case for us okay um another question someone asked is do",
+    "start": "2141599",
+    "end": "2148160"
+  },
+  {
+    "text": "you change the number of partitions over time automatically or do you do it manually",
+    "start": "2148160",
+    "end": "2153839"
+  },
+  {
+    "text": "okay now that's a good question because uh right now for this application we're using non-key partitions",
+    "start": "2153839",
+    "end": "2161280"
+  },
+  {
+    "text": "um so it makes it simpler to add the partitions so since we started this project we've not added partitions um i",
+    "start": "2161280",
+    "end": "2167599"
+  },
+  {
+    "text": "think we we try to estimate the overall size of the traffic and have large number of partitions so it is less",
+    "start": "2167599",
+    "end": "2175520"
+  },
+  {
+    "text": "likely for us to add there are other applications at netflix that have added partitions um",
+    "start": "2175520",
+    "end": "2181359"
+  },
+  {
+    "text": "and kafka handles that very well yeah",
+    "start": "2181359",
+    "end": "2186400"
+  },
+  {
+    "text": "um but yeah there's no auto increase in partitions uh currently you don't increase partitions okay",
+    "start": "2186400",
+    "end": "2192960"
+  },
+  {
+    "text": "um and typically again that's the it's easy to auto increase it's harder to determine when to decrease",
+    "start": "2192960",
+    "end": "2199280"
+  },
+  {
+    "text": "right because it can cause all sorts of bottlenecks and another question that was asked is um",
+    "start": "2199280",
+    "end": "2205280"
+  },
+  {
+    "text": "you know this is about the rebalance you touched on when you scale consumers this causes a rebalance with kafka to redistribute the traffic between the new",
+    "start": "2205280",
+    "end": "2211680"
+  },
+  {
+    "text": "amount of consumers this is not a trivial thing to do in kafka so",
+    "start": "2211680",
+    "end": "2216880"
+  },
+  {
+    "text": "um how does how does it work how do you make this thing work oh yeah so this is",
+    "start": "2216880",
+    "end": "2222400"
+  },
+  {
+    "text": "something that we had to spend some time figuring out what do we want to do um at one extreme of the spectrum so to",
+    "start": "2222400",
+    "end": "2229599"
+  },
+  {
+    "text": "speak we have the ability to get a notification when a rebalance is going to happen",
+    "start": "2229599",
+    "end": "2235839"
+  },
+  {
+    "text": "and then in the consumer cluster do a checkpoint of the state",
+    "start": "2235839",
+    "end": "2242400"
+  },
+  {
+    "text": "and of the kafka offsets and then let the rebalance happen and upon start you",
+    "start": "2242400",
+    "end": "2247920"
+  },
+  {
+    "text": "reload the same checkpoint state and the offsets and continue from there this is a coordination that's built into",
+    "start": "2247920",
+    "end": "2254640"
+  },
+  {
+    "text": "our stream processing system that's one way to do it there's another way to think about it um",
+    "start": "2254640",
+    "end": "2261680"
+  },
+  {
+    "text": "if if your processing is",
+    "start": "2261680",
+    "end": "2267200"
+  },
+  {
+    "text": "less stateful that is you you you are you are able to handle duplicates by",
+    "start": "2267200",
+    "end": "2274160"
+  },
+  {
+    "text": "either um a better strategy in how you process and save those data",
+    "start": "2274160",
+    "end": "2280240"
+  },
+  {
+    "text": "or if you have i'd important behavior in your operations then you could let the rebalance happen in the worst case you",
+    "start": "2280240",
+    "end": "2287839"
+  },
+  {
+    "text": "are going to get um a few duplicates processed and that is",
+    "start": "2287839",
+    "end": "2294160"
+  },
+  {
+    "text": "there is an upper bound to that right so if you like take the number of consumers",
+    "start": "2294160",
+    "end": "2300000"
+  },
+  {
+    "text": "um multiply that by the number of records that it grabs from kafka each time in the worst",
+    "start": "2300000",
+    "end": "2307359"
+  },
+  {
+    "text": "case that's the number of records you would process duplicate so i think it depends on the application for staple processing",
+    "start": "2307359",
+    "end": "2314640"
+  },
+  {
+    "text": "you should probably do checkpoint and restore and for less stateful or",
+    "start": "2314640",
+    "end": "2320240"
+  },
+  {
+    "text": "or quite important processing you could just look at the duplicates happen um so then it's in a case of overhead when you",
+    "start": "2320240",
+    "end": "2326480"
+  },
+  {
+    "text": "change the number of instances where you're doing the duplicate processing okay so i have another question uh this",
+    "start": "2326480",
+    "end": "2332480"
+  },
+  {
+    "text": "is from me actually um i have noticed something uh i i you know similarly i do this auto",
+    "start": "2332480",
+    "end": "2338240"
+  },
+  {
+    "text": "scaling with kafka right and i noticed a funny thing that happens once in a while",
+    "start": "2338240",
+    "end": "2343599"
+  },
+  {
+    "text": "where um the the nodes increase but the partitions don't rebalance i've",
+    "start": "2343599",
+    "end": "2349520"
+  },
+  {
+    "text": "actually noticed that and uh the way i then i you know have to do some manual",
+    "start": "2349520",
+    "end": "2356079"
+  },
+  {
+    "text": "guesswork and i find one pod you know kubernetes part is still got most of the traffic",
+    "start": "2356079",
+    "end": "2363359"
+  },
+  {
+    "text": "and is a bottleneck and then i have to kill that pod and of course this is again another thing",
+    "start": "2363359",
+    "end": "2368720"
+  },
+  {
+    "text": "someone should write that you know and auto detect and kill to force the rebalance",
+    "start": "2368720",
+    "end": "2375359"
+  },
+  {
+    "text": "because just because there are more nodes available with consumers kafka doesn't always be balanced to them",
+    "start": "2375359",
+    "end": "2383040"
+  },
+  {
+    "text": "like the typical uh trigger for rebalance for kafka is a timeout right there's a certain max poll interval if",
+    "start": "2383040",
+    "end": "2390480"
+  },
+  {
+    "text": "it doesn't hear back from you on a manual act in by default it's five minutes or something or maybe three",
+    "start": "2390480",
+    "end": "2395520"
+  },
+  {
+    "text": "minutes it's some large number i think it's five minutes but default and it'll rebalance weight but if it's",
+    "start": "2395520",
+    "end": "2401359"
+  },
+  {
+    "text": "humming along and you add more consumer threads it won't interrupt what it's doing to balance it out",
+    "start": "2401359",
+    "end": "2407440"
+  },
+  {
+    "text": "right even if the consumer cpu is really high if the consumer cpu is so high that it",
+    "start": "2407440",
+    "end": "2413440"
+  },
+  {
+    "text": "pegs the cpu to cause a five-minute timeout to happen the rebalance will be triggered but then at that point you've",
+    "start": "2413440",
+    "end": "2420560"
+  },
+  {
+    "text": "killed your sla if if you're sla sensitive right waiting for a five minute or three minute timeout",
+    "start": "2420560",
+    "end": "2426880"
+  },
+  {
+    "text": "um so i've noticed once it doesn't happen often like sometimes it doesn't",
+    "start": "2426880",
+    "end": "2432560"
+  },
+  {
+    "text": "preemptively auto balance sometimes it does most of the time 99 of the time it does",
+    "start": "2432560",
+    "end": "2438560"
+  },
+  {
+    "text": "one person at the time it doesn't and it's an operations uh like all hands on deck thing where we",
+    "start": "2438560",
+    "end": "2445440"
+  },
+  {
+    "text": "have to identify the part and kill it what have you ever run into this that's an interesting point you bring up",
+    "start": "2445440",
+    "end": "2450960"
+  },
+  {
+    "text": "i've not i've not handled that case myself i'll have to check with the uh theme that handles the kafka cluster",
+    "start": "2450960",
+    "end": "2457839"
+  },
+  {
+    "text": "itself more closely um but there might be another aspect to what you're saying is that",
+    "start": "2457839",
+    "end": "2463839"
+  },
+  {
+    "text": "there is a little bit of a math in the sense that the number of consumer instances and the number of partitions",
+    "start": "2463839",
+    "end": "2469839"
+  },
+  {
+    "text": "and brokers when you divide them um obviously unless you have a",
+    "start": "2469839",
+    "end": "2476640"
+  },
+  {
+    "text": "perfect multiples you're not going to divide the partitions across",
+    "start": "2476640",
+    "end": "2482160"
+  },
+  {
+    "text": "exactly and even if you add one more consumer instance it might not get any",
+    "start": "2482160",
+    "end": "2487599"
+  },
+  {
+    "text": "traffic because it doesn't necessarily get divided um equally or or",
+    "start": "2487599",
+    "end": "2492960"
+  },
+  {
+    "text": "in a healthy way so i think there's that aspect of how quickly you you can see rebalance happening in a",
+    "start": "2492960",
+    "end": "2499119"
+  },
+  {
+    "text": "good way when you had more broken uh more consumer instances um and for that reason",
+    "start": "2499119",
+    "end": "2505520"
+  },
+  {
+    "text": "it works a little bit better when the number of consumers is much smaller than",
+    "start": "2505520",
+    "end": "2510720"
+  },
+  {
+    "text": "the number of partitions so then you have a better ability to divide the",
+    "start": "2510720",
+    "end": "2516000"
+  },
+  {
+    "text": "traffic across them but the case you mentioned i have not allowed to go back and check with the team",
+    "start": "2516000",
+    "end": "2521359"
+  },
+  {
+    "text": "oh okay wonderful okay um have you so another way to answer this question is have you ever noticed",
+    "start": "2521359",
+    "end": "2527119"
+  },
+  {
+    "text": "hot spots like where there's um i mean the way i i noticed this is uh",
+    "start": "2527119",
+    "end": "2532720"
+  },
+  {
+    "text": "it's scaled out but performance is not improved and then i noticed it's because it",
+    "start": "2532720",
+    "end": "2538480"
+  },
+  {
+    "text": "didn't rebalance have you ever seen that where auto scaling didn't result in a drop in lag",
+    "start": "2538480",
+    "end": "2544560"
+  },
+  {
+    "text": "yeah the the hot spots happen especially when you're using key partition in this application i talked about we",
+    "start": "2544560",
+    "end": "2550720"
+  },
+  {
+    "text": "are not using key partition so we basically do a round robin um or spread",
+    "start": "2550720",
+    "end": "2556480"
+  },
+  {
+    "text": "across so in fact our publisher has a thin wrapper around the",
+    "start": "2556480",
+    "end": "2561680"
+  },
+  {
+    "text": "publisher client from kafka and what it does is it looks at things like the load",
+    "start": "2561680",
+    "end": "2567680"
+  },
+  {
+    "text": "or replication status on each of the brokers or each of",
+    "start": "2567680",
+    "end": "2573599"
+  },
+  {
+    "text": "the partitions and then it prefers to spread across so by the way i think",
+    "start": "2573599",
+    "end": "2579040"
+  },
+  {
+    "text": "we're out of time these are you know great questions and there are still a lot of questions people have that haven't been answered uh please join us",
+    "start": "2579040",
+    "end": "2585760"
+  },
+  {
+    "text": "in the zoom room and uh sharma will be there to answer your questions along with myself thank you sharma for your",
+    "start": "2585760",
+    "end": "2591760"
+  },
+  {
+    "text": "excellent presentation thank you and thank you everyone for your great questions see you at the zoom room",
+    "start": "2591760",
+    "end": "2598440"
+  },
+  {
+    "text": "[Music]",
+    "start": "2600180",
+    "end": "2605630"
+  },
+  {
+    "text": "you",
+    "start": "2607680",
+    "end": "2609760"
+  }
+]

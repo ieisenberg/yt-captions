@@ -1,0 +1,1602 @@
+[
+  {
+    "text": "hello everyone and welcome I hope you are having a good week here at kubecon today we're going to be talking about",
+    "start": "0",
+    "end": "6060"
+  },
+  {
+    "text": "doordasha's migration from statsd to Prometheus with over 10 million metrics per second",
+    "start": "6060",
+    "end": "11340"
+  },
+  {
+    "text": "before we get started I wanted to just do a quick poll of the room um how many people here work at",
+    "start": "11340",
+    "end": "16859"
+  },
+  {
+    "text": "companies that use stats d okay what about Prometheus",
+    "start": "16859",
+    "end": "22500"
+  },
+  {
+    "text": "all right and what about both okay all right try to catch some people",
+    "start": "22500",
+    "end": "29820"
+  },
+  {
+    "text": "in the middle of their migration right um cool so my name is Ben Raskin I'm a",
+    "start": "29820",
+    "end": "36180"
+  },
+  {
+    "text": "Solutions architect at chronosphere where I work on customer enablement and onboarding chronosphere is an",
+    "start": "36180",
+    "end": "41760"
+  },
+  {
+    "text": "observability company that focuses on focuses on cloud native companies prior",
+    "start": "41760",
+    "end": "47040"
+  },
+  {
+    "text": "to chronosphere I was a software engineer at Uber working on M3 an open",
+    "start": "47040",
+    "end": "52260"
+  },
+  {
+    "text": "source metrics platform",
+    "start": "52260",
+    "end": "55339"
+  },
+  {
+    "text": "about three and a half years ago after graduating from Canada University now",
+    "start": "57660",
+    "end": "63420"
+  },
+  {
+    "text": "I'm in our coin doctor of disability team and I have the whole organization to migrate from statistic platform to",
+    "start": "63420",
+    "end": "70520"
+  },
+  {
+    "text": "prometheus-based monitoring yeah cool so just a bit of an agenda um we're",
+    "start": "70520",
+    "end": "77280"
+  },
+  {
+    "text": "first going to look at some of the challenges that doordash faced with statsd we'll take a look at how",
+    "start": "77280",
+    "end": "82439"
+  },
+  {
+    "text": "Prometheus resolved those uh next we'll talk about the client-side migration effort from stats D to Prometheus next",
+    "start": "82439",
+    "end": "89700"
+  },
+  {
+    "text": "we'll talk about enablement sort of how we got you know the the end users and engineers and service teams up to speed",
+    "start": "89700",
+    "end": "95640"
+  },
+  {
+    "text": "and then finally we'll do a bit of a retro looking at some of the learnings and key results of this of this gigantic",
+    "start": "95640",
+    "end": "102180"
+  },
+  {
+    "text": "task so we want to begin by talking about some of the challenges that doordash",
+    "start": "102180",
+    "end": "107640"
+  },
+  {
+    "text": "faced with statsd so a lack of naming standardization and limited support for tags makes it hard to give context and",
+    "start": "107640",
+    "end": "114540"
+  },
+  {
+    "text": "meaning to underlying statsd metrics so we can see here we have two two metrics",
+    "start": "114540",
+    "end": "119579"
+  },
+  {
+    "text": "here coming from two different Services they're both tracking the same thing the number of page views but unless you have",
+    "start": "119579",
+    "end": "125579"
+  },
+  {
+    "text": "intimate knowledge of these services and the metrics that they're producing it's",
+    "start": "125579",
+    "end": "130860"
+  },
+  {
+    "text": "hard to know right that these two that these two metrics are in fact tracking the same thing we'll see in a bit with",
+    "start": "130860",
+    "end": "137099"
+  },
+  {
+    "text": "with tags and labels in Prometheus it's much easier to give context to these",
+    "start": "137099",
+    "end": "142860"
+  },
+  {
+    "text": "particular underlying Time series next the number of metric scales with",
+    "start": "142860",
+    "end": "148440"
+  },
+  {
+    "text": "user traffic in statsd this means if the number of user requests or traffic to",
+    "start": "148440",
+    "end": "154200"
+  },
+  {
+    "text": "the overall business goes up the number of metrics go up not necessarily the not necessarily the",
+    "start": "154200",
+    "end": "159420"
+  },
+  {
+    "text": "cardinality or unique number of metrics but the total volume this oftentimes requires the need for an aggregation",
+    "start": "159420",
+    "end": "165959"
+  },
+  {
+    "text": "tier before actually storing the the metrics in the time series database otherwise these metrics can grow",
+    "start": "165959",
+    "end": "171599"
+  },
+  {
+    "text": "exponentially next because statsd is sent over UDP there's the potential for packet loss",
+    "start": "171599",
+    "end": "178920"
+  },
+  {
+    "text": "this is particularly problematic especially during high traffic times when the server has the has the",
+    "start": "178920",
+    "end": "186060"
+  },
+  {
+    "text": "opportunity to get overwhelmed and therefore you could be dropping uh important data points",
+    "start": "186060",
+    "end": "192239"
+  },
+  {
+    "text": "next uh the way that stats du reports counters is is uh by Deltas",
+    "start": "192239",
+    "end": "199260"
+  },
+  {
+    "text": "um the the biggest issue with Delta counters is there's no way to interpolate missing data points so once",
+    "start": "199260",
+    "end": "206280"
+  },
+  {
+    "text": "once you know the the server drops the metrics because of you know packet loss",
+    "start": "206280",
+    "end": "211560"
+  },
+  {
+    "text": "or or some other reason why um you know why you would lose these uh",
+    "start": "211560",
+    "end": "217920"
+  },
+  {
+    "text": "these particular counters there's no way to actually estimate um or or interpolate those missing data",
+    "start": "217920",
+    "end": "223920"
+  },
+  {
+    "text": "points and finally uh the lack of histograms in stats D",
+    "start": "223920",
+    "end": "230659"
+  },
+  {
+    "text": "requires the need to pre-con pre-compute percentiles for for latencies",
+    "start": "230659",
+    "end": "237360"
+  },
+  {
+    "text": "um and the the biggest issue with uh with pre-computing percentiles is that when you want to aggregate them at query",
+    "start": "237360",
+    "end": "243480"
+  },
+  {
+    "text": "time it's mathematically uh nearly impossible to get an accurate uh",
+    "start": "243480",
+    "end": "249480"
+  },
+  {
+    "text": "representation of the of The aggregated View",
+    "start": "249480",
+    "end": "253640"
+  },
+  {
+    "text": "so why Prometheus um based on the issues and pinpoints we",
+    "start": "255120",
+    "end": "260459"
+  },
+  {
+    "text": "experienced in the statistic platform we set some new obserability requirements",
+    "start": "260459",
+    "end": "265560"
+  },
+  {
+    "text": "and principles first we have a strong preference of using open source the advantages include",
+    "start": "265560",
+    "end": "274100"
+  },
+  {
+    "text": "firstly is more cultivation compared to building and maintaining everything from",
+    "start": "274100",
+    "end": "279360"
+  },
+  {
+    "text": "scratch by ourselves secondly in terms of the integration we",
+    "start": "279360",
+    "end": "285000"
+  },
+  {
+    "text": "can make use of the open source data formats and an open source query languages lastly using open source can",
+    "start": "285000",
+    "end": "292620"
+  },
+  {
+    "text": "prevent vendor locking which means that we can consider ourselves hosting in the future",
+    "start": "292620",
+    "end": "298800"
+  },
+  {
+    "text": "second we want more governance and the control on the whole monitoring system we want standard conventions",
+    "start": "298800",
+    "end": "305460"
+  },
+  {
+    "text": "for example the standard for common tax and Matrix and naming conventions the",
+    "start": "305460",
+    "end": "310560"
+  },
+  {
+    "text": "common tags can be used the box for alerts and dashboards especially for dashboard it can be using for grouping",
+    "start": "310560",
+    "end": "316740"
+  },
+  {
+    "text": "and filtering also we want to improve the guidance and control on the call side if we have the",
+    "start": "316740",
+    "end": "324840"
+  },
+  {
+    "text": "ability to break down the usage by team and service and organization then we",
+    "start": "324840",
+    "end": "330780"
+  },
+  {
+    "text": "cancel quota and also really limit on the team and the service level",
+    "start": "330780",
+    "end": "335940"
+  },
+  {
+    "text": "the last requirement is about self-service and productivity empowerment so for new Services we want",
+    "start": "335940",
+    "end": "343620"
+  },
+  {
+    "text": "um the metrics can be automatically discovered and collected using the current metrics pipeline we don't want",
+    "start": "343620",
+    "end": "350520"
+  },
+  {
+    "text": "extra works also we want to automate the process of generating basic dashboards",
+    "start": "350520",
+    "end": "356280"
+  },
+  {
+    "text": "and alerts this is very important to accelerate the migration and onboarding",
+    "start": "356280",
+    "end": "361500"
+  },
+  {
+    "text": "process cool so why did doordash choose",
+    "start": "361500",
+    "end": "367199"
+  },
+  {
+    "text": "Prometheus so first of all Prometheus has emerged as the dominant standard for open source metrics and it aligned well",
+    "start": "367199",
+    "end": "373380"
+  },
+  {
+    "text": "with doordash's organizational strategy and requirements first of all the simple fact that there's a ton of community",
+    "start": "373380",
+    "end": "379500"
+  },
+  {
+    "text": "Source support out there really helped alleviate a lot of the pressure on the central observability team since now you",
+    "start": "379500",
+    "end": "386880"
+  },
+  {
+    "text": "know end users can could go to you know stack Overflow and GitHub and all these other resources online to to get the the",
+    "start": "386880",
+    "end": "394199"
+  },
+  {
+    "text": "answers to their questions as opposed to having the bottleneck on a central durability team next the query language promql has",
+    "start": "394199",
+    "end": "401819"
+  },
+  {
+    "text": "become the standard with regards to querying time series data so again this",
+    "start": "401819",
+    "end": "407520"
+  },
+  {
+    "text": "helped this really helped um uh onboarding of new Engineers since",
+    "start": "407520",
+    "end": "412800"
+  },
+  {
+    "text": "now you you know since now we have this uh kind of standard query language and it's not proprietary at all and so you",
+    "start": "412800",
+    "end": "420060"
+  },
+  {
+    "text": "can sort of bring those skills right to different companies the tag-based metric ingestion format",
+    "start": "420060",
+    "end": "426600"
+  },
+  {
+    "text": "allows you to give context and meaning to the underlying time series and there's several advantages of this one",
+    "start": "426600",
+    "end": "432720"
+  },
+  {
+    "text": "of one advantage that I wanted to highlight with regards to doordash is now it's with a tag based model it's",
+    "start": "432720",
+    "end": "440039"
+  },
+  {
+    "text": "super easy to see how many metrics um each service or each team is sending",
+    "start": "440039",
+    "end": "445860"
+  },
+  {
+    "text": "um uh ascending to the platform and so this makes it really easy to do cost accounting",
+    "start": "445860",
+    "end": "452220"
+  },
+  {
+    "text": "next uh because Prometheus is a pull-based system this allows for client-side aggregation so you no longer",
+    "start": "452220",
+    "end": "458099"
+  },
+  {
+    "text": "have this uh you no longer have this worry of your metric traffic scaling",
+    "start": "458099",
+    "end": "463979"
+  },
+  {
+    "text": "with your with your actual you know business or user traffic next uh strong support",
+    "start": "463979",
+    "end": "471360"
+  },
+  {
+    "text": "um that there's strong support for the more fundamental Tools in doordash with um with Prometheus",
+    "start": "471360",
+    "end": "477599"
+  },
+  {
+    "text": "um you know things like kubernetes and and Envoy um they really play well um uh nicely with uh with Prometheus",
+    "start": "477599",
+    "end": "486720"
+  },
+  {
+    "text": "and then finally um Prometheus has obviously native support for histograms uh such that you",
+    "start": "486720",
+    "end": "493800"
+  },
+  {
+    "text": "know you don't need to pre-compute percentiles and you can accurately aggregate um uh histograms at query time",
+    "start": "493800",
+    "end": "501840"
+  },
+  {
+    "text": "um and then lastly Prometheus reports counters as cumulative counters or running counters and I wanted to dive",
+    "start": "501840",
+    "end": "508680"
+  },
+  {
+    "text": "into this point just a little bit more I'm just talking a little bit uh about the sort of the visual representation",
+    "start": "508680",
+    "end": "516479"
+  },
+  {
+    "text": "differences between Delta counters and and running counters so we see here with Delta counters",
+    "start": "516479",
+    "end": "522419"
+  },
+  {
+    "text": "um when you lose a data point it's lost forever there's no way to know what that",
+    "start": "522419",
+    "end": "528720"
+  },
+  {
+    "text": "data point might have been with run encounters or cumulative counters because they're monotonically increasing",
+    "start": "528720",
+    "end": "534779"
+  },
+  {
+    "text": "you can apply a special rate function in prom 2L to interpolate or or estimate",
+    "start": "534779",
+    "end": "541800"
+  },
+  {
+    "text": "what that data point would have been",
+    "start": "541800",
+    "end": "545420"
+  },
+  {
+    "text": "okay let's see what we have done uh in the client-side migration",
+    "start": "546899",
+    "end": "552480"
+  },
+  {
+    "text": "for the Matrix generation part I will first introduce the custom metrics then",
+    "start": "552480",
+    "end": "557940"
+  },
+  {
+    "text": "the properties exporters that we have used lastly is about shell Labor Day jobs",
+    "start": "557940",
+    "end": "564440"
+  },
+  {
+    "text": "for custom metrics including the application and the service metrics we suggest the service owner and the",
+    "start": "564540",
+    "end": "570839"
+  },
+  {
+    "text": "microservices to use parameters native libraries to generate metrics uh one interesting case that I want to",
+    "start": "570839",
+    "end": "578160"
+  },
+  {
+    "text": "share with you guys is that um the python client with a multi-process pattern rather than a multi-thread",
+    "start": "578160",
+    "end": "584339"
+  },
+  {
+    "text": "pattern as we know um the problem just native client presume a multi-thread pattern which",
+    "start": "584339",
+    "end": "590580"
+  },
+  {
+    "text": "means the metrics can be shown within the workers however for the multi-process pattern we",
+    "start": "590580",
+    "end": "596279"
+  },
+  {
+    "text": "discovered that the measures can be incomplete or require customer implementation with unsorted LPS impact",
+    "start": "596279",
+    "end": "604560"
+  },
+  {
+    "text": "so to overcome the performance penalty we use test if it's water for this part",
+    "start": "604560",
+    "end": "609959"
+  },
+  {
+    "text": "of Matrix also we provide some internal libraries for the developers to use and for their",
+    "start": "609959",
+    "end": "617100"
+  },
+  {
+    "text": "flexibility for example we provide the internal library to generate HTTP and",
+    "start": "617100",
+    "end": "623459"
+  },
+  {
+    "text": "grpc metrics automatically also the jbm prompt just exporter is",
+    "start": "623459",
+    "end": "629100"
+  },
+  {
+    "text": "used in dot dash docker-based images to is part of the jvm metrics",
+    "start": "629100",
+    "end": "636680"
+  },
+  {
+    "text": "for some other cases and metrics we also use the open source exporters the",
+    "start": "637200",
+    "end": "643680"
+  },
+  {
+    "text": "community the community of prompters is so big and it provides and maintains so",
+    "start": "643680",
+    "end": "649620"
+  },
+  {
+    "text": "many useful open source exporters for example the AWS Cloud which is metrics",
+    "start": "649620",
+    "end": "657839"
+  },
+  {
+    "text": "there are many two exporters the first one is the official prompt just exporter",
+    "start": "657839",
+    "end": "663180"
+  },
+  {
+    "text": "and the second one is ycee exporter um the difference of the two exporters",
+    "start": "663180",
+    "end": "669180"
+  },
+  {
+    "text": "is the different apis used in their core functions and we choose the latter one",
+    "start": "669180",
+    "end": "675660"
+  },
+  {
+    "text": "because it have a better um cell Discovery mechanism and also have less load on apis",
+    "start": "675660",
+    "end": "683420"
+  },
+  {
+    "text": "also we we use testy uh its partners and statistics is still alive in our monitoring system",
+    "start": "683940",
+    "end": "690839"
+  },
+  {
+    "text": "there are many two cases that we use statistics powder the first one is that",
+    "start": "690839",
+    "end": "697140"
+  },
+  {
+    "text": "for the legendary system that cannot be migrated to parameters we use statistics",
+    "start": "697140",
+    "end": "702660"
+  },
+  {
+    "text": "powder for their part of Matrix the Second Use case is as I mentioned before for the python client with the multi",
+    "start": "702660",
+    "end": "709940"
+  },
+  {
+    "text": "process pattern we use Sassy exporters to cover the mattress format to",
+    "start": "709940",
+    "end": "715079"
+  },
+  {
+    "text": "parameters and then start forward forwarding them to the back end",
+    "start": "715079",
+    "end": "720779"
+  },
+  {
+    "text": "also we use Jeremy spotters notice Potters Kafka like supporters and PG",
+    "start": "720779",
+    "end": "726180"
+  },
+  {
+    "text": "bouncer exporters these are many are used for the infrastructure and platform related metrics",
+    "start": "726180",
+    "end": "733200"
+  },
+  {
+    "text": "for the show life the jobs that can now be scrapped by the mattress collector we",
+    "start": "733200",
+    "end": "738720"
+  },
+  {
+    "text": "use the parameters aggregation Gateway with a small modification for that part of Matrix",
+    "start": "738720",
+    "end": "745519"
+  },
+  {
+    "text": "to better control the metrics we have some standard text for all the metrics",
+    "start": "749640",
+    "end": "755100"
+  },
+  {
+    "text": "the common tags include first the service which is the service name second",
+    "start": "755100",
+    "end": "761100"
+  },
+  {
+    "text": "the app which is the application name one service can include multi different",
+    "start": "761100",
+    "end": "766320"
+  },
+  {
+    "text": "apps also we have kubernetes cluster which is",
+    "start": "766320",
+    "end": "771540"
+  },
+  {
+    "text": "to indicate the cluster that the service is running out",
+    "start": "771540",
+    "end": "776760"
+  },
+  {
+    "text": "and environment label is used to differentiate the production and staging",
+    "start": "776760",
+    "end": "782459"
+  },
+  {
+    "text": "environments also we have the staff environment which is used to different differentiate the",
+    "start": "782459",
+    "end": "788660"
+  },
+  {
+    "text": "Cannery sandbox with other environments the region zone are AWS terminologies",
+    "start": "788660",
+    "end": "795720"
+  },
+  {
+    "text": "and they are used to indicate the regional Zone ID that the services is",
+    "start": "795720",
+    "end": "802260"
+  },
+  {
+    "text": "deployed in lastly we have causal region which is used to analyze the mattress",
+    "start": "802260",
+    "end": "808500"
+  },
+  {
+    "text": "cost attribution as you can say in a dashboard there's a screenshot which shows one of",
+    "start": "808500",
+    "end": "816240"
+  },
+  {
+    "text": "our dashboard in a header we have the common tags in the drop down list for",
+    "start": "816240",
+    "end": "823139"
+  },
+  {
+    "text": "filtering",
+    "start": "823139",
+    "end": "825800"
+  },
+  {
+    "text": "yeah Nest is about server Discovery server Discovery is used to find and",
+    "start": "828959",
+    "end": "834060"
+  },
+  {
+    "text": "discover the jobs or services for scrapping uh it is dance row kubernetes",
+    "start": "834060",
+    "end": "840000"
+  },
+  {
+    "text": "and annotations which tell parameters will end points to describe the central",
+    "start": "840000",
+    "end": "846360"
+  },
+  {
+    "text": "of the ability team created a gold standard kubernetes manifest template which the service team can use a dot",
+    "start": "846360",
+    "end": "853560"
+  },
+  {
+    "text": "dash will have the service template which is to help the developer to generate the kubernetes Manifest",
+    "start": "853560",
+    "end": "859380"
+  },
+  {
+    "text": "automatically so after the service owner or the service team added annotation which means their jobs or Services is",
+    "start": "859380",
+    "end": "867839"
+  },
+  {
+    "text": "ready for scrapping um we also deployed the mattress collector as agent in the kubernetes",
+    "start": "867839",
+    "end": "875639"
+  },
+  {
+    "text": "cluster which means that for every note there's will be one um measures",
+    "start": "875639",
+    "end": "881220"
+  },
+  {
+    "text": "character to scrap all the matches on that node also for the service that are not",
+    "start": "881220",
+    "end": "888060"
+  },
+  {
+    "text": "deployed in the kubernetes environment we deploy The Matrix character as that",
+    "start": "888060",
+    "end": "893220"
+  },
+  {
+    "text": "car with the service which means that on the Matrix collector will collect the measures from that service automatically",
+    "start": "893220",
+    "end": "900240"
+  },
+  {
+    "text": "and forward them to the back end the default scrap options are also",
+    "start": "900240",
+    "end": "907380"
+  },
+  {
+    "text": "defined by the CLT team which means that the scrap options including like scrap",
+    "start": "907380",
+    "end": "913920"
+  },
+  {
+    "text": "frequency scrap timeout and so on um are this kind of configurations are included",
+    "start": "913920",
+    "end": "919680"
+  },
+  {
+    "text": "in the uh in in the um in the service collector also we populate the standard",
+    "start": "919680",
+    "end": "927480"
+  },
+  {
+    "text": "labels in The Matrix collector for all the metrics the standard labels as I",
+    "start": "927480",
+    "end": "933720"
+  },
+  {
+    "text": "described in the previous slides cool so during this migration",
+    "start": "933720",
+    "end": "941100"
+  },
+  {
+    "text": "um it also coincided with Hyper growth at doordash mainly accelerated by the pandemic and so cost control was a huge",
+    "start": "941100",
+    "end": "949079"
+  },
+  {
+    "text": "issue for the central observability team fortunately with a prometheus-based",
+    "start": "949079",
+    "end": "954120"
+  },
+  {
+    "text": "monitoring system there's a bunch of different mechanisms that can help you reduce cardinality control costs and",
+    "start": "954120",
+    "end": "961199"
+  },
+  {
+    "text": "improve uh performance so I wanted to talk about a couple of these different mechanisms so starting",
+    "start": "961199",
+    "end": "967920"
+  },
+  {
+    "text": "with relabel rules so relatable rules are a native Prometheus feature that allow you to drop labels or metrics",
+    "start": "967920",
+    "end": "976860"
+  },
+  {
+    "text": "client side so typically when you're using some of these open open source",
+    "start": "976860",
+    "end": "981899"
+  },
+  {
+    "text": "exporters that Emma talked about there's often time oftentimes metrics that you don't need you don't ever query",
+    "start": "981899",
+    "end": "989399"
+  },
+  {
+    "text": "them in dashboards or alerts and so you can safely drop them client-side",
+    "start": "989399",
+    "end": "995399"
+  },
+  {
+    "text": "the next two mechanisms roll up rules and mapping rules are features of M3 M3",
+    "start": "995399",
+    "end": "1001100"
+  },
+  {
+    "text": "as I explained in the in the beginning is open source metrics platform that was developed at Uber and it actually acts",
+    "start": "1001100",
+    "end": "1008060"
+  },
+  {
+    "text": "as the underlying metrics platform at chronosphere so roll up rules allow you to",
+    "start": "1008060",
+    "end": "1014060"
+  },
+  {
+    "text": "pre-aggregate metrics before actually storing them in the time series database so again just as with roll-up rules",
+    "start": "1014060",
+    "end": "1020600"
+  },
+  {
+    "text": "oftentimes with with common exporters there's usually labels",
+    "start": "1020600",
+    "end": "1025720"
+  },
+  {
+    "text": "or tags that you don't necessarily need and oftentimes these labels are very",
+    "start": "1025720",
+    "end": "1031579"
+  },
+  {
+    "text": "expensive they have high cardinality and you typically don't need to see you",
+    "start": "1031579",
+    "end": "1036918"
+  },
+  {
+    "text": "typically don't need to break down your your metrics by these particular labels a common one is is instance or pod ID so",
+    "start": "1036919",
+    "end": "1044959"
+  },
+  {
+    "text": "with rollup rules you can safely aggregate them before actually storing them in the the time series database",
+    "start": "1044959",
+    "end": "1051440"
+  },
+  {
+    "text": "mapping rules allow you to define the storage policies for each time series so",
+    "start": "1051440",
+    "end": "1057080"
+  },
+  {
+    "text": "this means you can down sample a subset of your metrics and store them at different resolutions so let's say your",
+    "start": "1057080",
+    "end": "1064460"
+  },
+  {
+    "text": "your default scrape interval is 30 seconds but you have a subset of metrics that you want to store at one minute",
+    "start": "1064460",
+    "end": "1070280"
+  },
+  {
+    "text": "what you can do is you can use mapping rules to to do that lastly we have recording rules so",
+    "start": "1070280",
+    "end": "1076880"
+  },
+  {
+    "text": "recording rules allow you to pre-compute expensive prompt ql expressions and then store those results in the time series",
+    "start": "1076880",
+    "end": "1083480"
+  },
+  {
+    "text": "database so all of these uh greatly improve performance especially at query time",
+    "start": "1083480",
+    "end": "1089960"
+  },
+  {
+    "text": "since now you're querying fewer and fewer Time series",
+    "start": "1089960",
+    "end": "1094840"
+  },
+  {
+    "text": "cool so I wanted to talk about uh enablement I think this was probably one of the more interesting uh pieces",
+    "start": "1096559",
+    "end": "1103880"
+  },
+  {
+    "text": "um doordash obviously has a lot of Engineers a lot of teams and so enabling",
+    "start": "1103880",
+    "end": "1109820"
+  },
+  {
+    "text": "the users on Prometheus and teaching them about prom ql was was one of the",
+    "start": "1109820",
+    "end": "1115100"
+  },
+  {
+    "text": "um I would say probably more difficult but interesting aspects of this migration so the first thing that we needed to",
+    "start": "1115100",
+    "end": "1122179"
+  },
+  {
+    "text": "teach users is how to best use the Prometheus data model because it because it's a tag based model and most of the",
+    "start": "1122179",
+    "end": "1129380"
+  },
+  {
+    "text": "engineering team was was used to statsd which is a node or path based model we really needed to to sort of",
+    "start": "1129380",
+    "end": "1136760"
+  },
+  {
+    "text": "um teach them about all the best practices and one of the main things was teaching them not to over index on the",
+    "start": "1136760",
+    "end": "1144559"
+  },
+  {
+    "text": "metric name but instead use tags and labels to give context and meeting meaning to the underlying Time series",
+    "start": "1144559",
+    "end": "1153020"
+  },
+  {
+    "text": "prompt ql as as I mentioned earlier is the Prometheus query language and it has",
+    "start": "1153020",
+    "end": "1158240"
+  },
+  {
+    "text": "become sort of the standard in the industry for querying time series data especially tag based time series data",
+    "start": "1158240",
+    "end": "1165500"
+  },
+  {
+    "text": "um and so we had to teach uh the engineering and service teams not only",
+    "start": "1165500",
+    "end": "1170600"
+  },
+  {
+    "text": "about sort of like the syntax and how to actually write these queries but we also had to teach them about the quirks of",
+    "start": "1170600",
+    "end": "1176900"
+  },
+  {
+    "text": "promql two of these that I wanted to highlight are how you query counters",
+    "start": "1176900",
+    "end": "1182780"
+  },
+  {
+    "text": "because with a with a running or cumulative counter you need to apply a",
+    "start": "1182780",
+    "end": "1188299"
+  },
+  {
+    "text": "special rate function and oftentimes and one of the benefits right of the rate",
+    "start": "1188299",
+    "end": "1193760"
+  },
+  {
+    "text": "function is that it will actually interpolate or estimate missing data points and so we had to we had to really",
+    "start": "1193760",
+    "end": "1200720"
+  },
+  {
+    "text": "sort of you know kind of pull back the covers a bit on the rate function and especially with the more sort of",
+    "start": "1200720",
+    "end": "1207140"
+  },
+  {
+    "text": "technical or power users of um of the of the system",
+    "start": "1207140",
+    "end": "1212900"
+  },
+  {
+    "text": "um next we had to talk about um sort of how to query histograms versus timers",
+    "start": "1212900",
+    "end": "1218059"
+  },
+  {
+    "text": "um so with histograms as you'll recall um you do all the percentile calculations at query time and you do",
+    "start": "1218059",
+    "end": "1225200"
+  },
+  {
+    "text": "this through uh specialized prompt ql functions",
+    "start": "1225200",
+    "end": "1230480"
+  },
+  {
+    "text": "next not everything needs to be built from scratch because we now had a standard data model throughout doordash",
+    "start": "1230480",
+    "end": "1237460"
+  },
+  {
+    "text": "what we could do is we could rely on open source dashboards and alerts and",
+    "start": "1237460",
+    "end": "1242600"
+  },
+  {
+    "text": "recording rules that we could just pull into the system and teams could just you",
+    "start": "1242600",
+    "end": "1247700"
+  },
+  {
+    "text": "know get get all that visibility right out of the box even with even with service teams we could build gold",
+    "start": "1247700",
+    "end": "1254960"
+  },
+  {
+    "text": "standard dashboards that other service teams could use as models for for",
+    "start": "1254960",
+    "end": "1260600"
+  },
+  {
+    "text": "building their dashboards uh lastly um the doordash central observability",
+    "start": "1260600",
+    "end": "1267559"
+  },
+  {
+    "text": "team decided to manage all of these resources through terraform so managing all the dashboards alerts aggregation",
+    "start": "1267559",
+    "end": "1273559"
+  },
+  {
+    "text": "rules recording rules things like that and so we had to come up with a with a wave for teams to easily onboard",
+    "start": "1273559",
+    "end": "1280700"
+  },
+  {
+    "text": "um all of their different assets and then of course we had to give them the tools to make it easy to do so",
+    "start": "1280700",
+    "end": "1287860"
+  },
+  {
+    "text": "the final part is about timeline results and learnings",
+    "start": "1290000",
+    "end": "1295159"
+  },
+  {
+    "text": "let's say our timeline of the migration our journey began in q1 2020 that's the",
+    "start": "1295159",
+    "end": "1301760"
+  },
+  {
+    "text": "time that we decided to move away from Stacy and to our prompt years and then in Q2 2020 we started the",
+    "start": "1301760",
+    "end": "1309440"
+  },
+  {
+    "text": "migration of infrastructure and kubernetes metrics and it it finished in",
+    "start": "1309440",
+    "end": "1315440"
+  },
+  {
+    "text": "Q3 2020 during that phrase We migrated all the kubernetes and infrastructure",
+    "start": "1315440",
+    "end": "1322280"
+  },
+  {
+    "text": "metrics including like the Seattle weather metrics and notice water metrics and also on the AWS metrics",
+    "start": "1322280",
+    "end": "1331159"
+  },
+  {
+    "text": "um as I mentioned before we use a lot of exporters as them and we deployed the",
+    "start": "1331159",
+    "end": "1336500"
+  },
+  {
+    "text": "mattress collector as agent in all our kubernetes cluster for the services that",
+    "start": "1336500",
+    "end": "1343280"
+  },
+  {
+    "text": "is now deployed in kubernetes cluster for example like easy to instance deployed in easy to instances and also",
+    "start": "1343280",
+    "end": "1350659"
+  },
+  {
+    "text": "esa's clusters we deploy the mattress collector as I said car with a service",
+    "start": "1350659",
+    "end": "1356539"
+  },
+  {
+    "text": "to scrap their mattress automatically so starting from Q4 2020 we started",
+    "start": "1356539",
+    "end": "1364159"
+  },
+  {
+    "text": "migration of service and an application Matrix we finished all the metrics",
+    "start": "1364159",
+    "end": "1370580"
+  },
+  {
+    "text": "dashboards and alerts within one year for all the service teams then in Q4 2020 we deprecated the",
+    "start": "1370580",
+    "end": "1378080"
+  },
+  {
+    "text": "original Statue Pipeline and with only use some statistics Porters and cable",
+    "start": "1378080",
+    "end": "1383419"
+  },
+  {
+    "text": "lightweight of the statistic pipeline yeah cool so just uh taking a look at some of",
+    "start": "1383419",
+    "end": "1391159"
+  },
+  {
+    "text": "the numbers of this massive migration um so we started with more than 7 000 alerts 1500 dashboards and metrics for",
+    "start": "1391159",
+    "end": "1399260"
+  },
+  {
+    "text": "over 130 Services uh needless to say this was a massive collaboration across",
+    "start": "1399260",
+    "end": "1404960"
+  },
+  {
+    "text": "all teams and Engineers especially mstm the central observability team",
+    "start": "1404960",
+    "end": "1410480"
+  },
+  {
+    "text": "one year of post-migration um which also coincided with Hyper growth in doordash's business we now",
+    "start": "1410480",
+    "end": "1418220"
+  },
+  {
+    "text": "have over 27 000 alerts uh 2200 dashboards we're ingesting over 15",
+    "start": "1418220",
+    "end": "1424580"
+  },
+  {
+    "text": "million metrics per second and then post aggregation we're persisting uh just",
+    "start": "1424580",
+    "end": "1429980"
+  },
+  {
+    "text": "over 10 million metrics per second today so a couple of the learnings that we",
+    "start": "1429980",
+    "end": "1436820"
+  },
+  {
+    "text": "took away from um from this migration the first one is switching from from percentiles to",
+    "start": "1436820",
+    "end": "1443120"
+  },
+  {
+    "text": "histograms is tough this was you know not Not only was this a client-side",
+    "start": "1443120",
+    "end": "1448760"
+  },
+  {
+    "text": "change right where where we had to sort of teach Engineers about buckets and",
+    "start": "1448760",
+    "end": "1455000"
+  },
+  {
+    "text": "which buckets to select the appropriate number of buckets things like that but",
+    "start": "1455000",
+    "end": "1460039"
+  },
+  {
+    "text": "we also had to teach them about how to how to actually query it through promql",
+    "start": "1460039",
+    "end": "1465080"
+  },
+  {
+    "text": "um and also you know obviously along the way we wanted to teach them about some of the advantages right so now we could",
+    "start": "1465080",
+    "end": "1471620"
+  },
+  {
+    "text": "you know now engineering teams right could get accurate aggregations across",
+    "start": "1471620",
+    "end": "1476659"
+  },
+  {
+    "text": "uh you know across instances um next the instance label",
+    "start": "1476659",
+    "end": "1483980"
+  },
+  {
+    "text": "um is a important concern for overall volume as I mentioned before the",
+    "start": "1483980",
+    "end": "1489679"
+  },
+  {
+    "text": "instance label is one of those um is one of those super high cardinality labels that unfortunately",
+    "start": "1489679",
+    "end": "1495799"
+  },
+  {
+    "text": "gets added to every single uh Prometheus metric and this is to keep track of the",
+    "start": "1495799",
+    "end": "1501320"
+  },
+  {
+    "text": "unique metrics for the cumulative counters and histograms fortunately with",
+    "start": "1501320",
+    "end": "1506960"
+  },
+  {
+    "text": "roll-up rules um we can pre-aggregate that that instance",
+    "start": "1506960",
+    "end": "1512120"
+  },
+  {
+    "text": "label away and then safely store um you know a you know a lot less",
+    "start": "1512120",
+    "end": "1517880"
+  },
+  {
+    "text": "cardinality in the time series database yeah uh one of the important learnings",
+    "start": "1517880",
+    "end": "1524240"
+  },
+  {
+    "text": "is that from PRC is now friendly with shell lavender jobs so we use prompt",
+    "start": "1524240",
+    "end": "1529700"
+  },
+  {
+    "text": "Care's aggregation Gateway um for for this part of metrics and it",
+    "start": "1529700",
+    "end": "1534740"
+  },
+  {
+    "text": "could be dangerous because it's kind of like push model and that is thing that we want to avoid so we just limited the",
+    "start": "1534740",
+    "end": "1542240"
+  },
+  {
+    "text": "method to some special cases the last learning that listed here is",
+    "start": "1542240",
+    "end": "1547820"
+  },
+  {
+    "text": "that we really need to automate the monitoring onboarding process for teams",
+    "start": "1547820",
+    "end": "1553460"
+  },
+  {
+    "text": "so in doordash those steps are like first we provide the um the service",
+    "start": "1553460",
+    "end": "1558559"
+  },
+  {
+    "text": "teams with wikis which document how to like generate metrics um using the",
+    "start": "1558559",
+    "end": "1565100"
+  },
+  {
+    "text": "parameters native clients we give them some examples to follow um then after the service owner and the",
+    "start": "1565100",
+    "end": "1572120"
+  },
+  {
+    "text": "service team at the annotations in the kubernetes Manifest which means their metrics their service and jobs are ready",
+    "start": "1572120",
+    "end": "1579679"
+  },
+  {
+    "text": "for scrapping um after that we provide with we provide",
+    "start": "1579679",
+    "end": "1585559"
+  },
+  {
+    "text": "them with some um grafana dashboards graphene templates for them to use and",
+    "start": "1585559",
+    "end": "1590720"
+  },
+  {
+    "text": "copy from also in dollars we provide the alert tools for the services teams to use they",
+    "start": "1590720",
+    "end": "1598880"
+  },
+  {
+    "text": "can use that to generate the address automatically and we provide the alert template for some comment alerts for",
+    "start": "1598880",
+    "end": "1606320"
+  },
+  {
+    "text": "example like the kubernetes container Level Health we provided the alerts to",
+    "start": "1606320",
+    "end": "1612320"
+  },
+  {
+    "text": "uh to monitoring to monitor like the kubernetes container restart count CPU",
+    "start": "1612320",
+    "end": "1620539"
+  },
+  {
+    "text": "and memory utilizations all those of these metrics yeah",
+    "start": "1620539",
+    "end": "1625580"
+  },
+  {
+    "text": "awesome so yeah thanks for coming to our talk um I think we'll take a few questions now",
+    "start": "1625580",
+    "end": "1630860"
+  },
+  {
+    "text": "um and if you want to talk to myself or Emma or anyone from the chronosphere team uh we have a booth here at g15",
+    "start": "1630860",
+    "end": "1638299"
+  },
+  {
+    "text": "um I think we're giving away some pretty cool prizes today um we also created a video game uh just",
+    "start": "1638299",
+    "end": "1644299"
+  },
+  {
+    "text": "for this conference so you should uh stop by and see if you can uh see if you can beat our high score",
+    "start": "1644299",
+    "end": "1651700"
+  },
+  {
+    "text": "[Applause]",
+    "start": "1653800",
+    "end": "1662579"
+  },
+  {
+    "text": "yeah so my question is that you mentioned there are 2200 dashboards you",
+    "start": "1667640",
+    "end": "1673000"
+  },
+  {
+    "text": "why you maintain that many dashboards because you think that you have to standardize or have similar",
+    "start": "1673000",
+    "end": "1680779"
+  },
+  {
+    "text": "set of dashboards yeah so I mean",
+    "start": "1680779",
+    "end": "1686600"
+  },
+  {
+    "text": "I think a lot of those um I mean I think the like the original number",
+    "start": "1686600",
+    "end": "1692720"
+  },
+  {
+    "text": "um of I think it was like 1500 I think a lot of those are probably still just kicking around",
+    "start": "1692720",
+    "end": "1699080"
+  },
+  {
+    "text": "um and a lot of the you know a lot of the like Prometheus based ones um we probably don't have as many",
+    "start": "1699080",
+    "end": "1705500"
+  },
+  {
+    "text": "um which obviously you can you know tell it's probably about you know 600 700 or so",
+    "start": "1705500",
+    "end": "1711140"
+  },
+  {
+    "text": "um but you also have to remember like I mean doordash is a huge organization um I'm not sure exactly how many",
+    "start": "1711140",
+    "end": "1717380"
+  },
+  {
+    "text": "Engineers there are but I would guess probably in like the Thousand ish",
+    "start": "1717380",
+    "end": "1722720"
+  },
+  {
+    "text": "um and so you know you always have teams and you know Engineers that kind of go",
+    "start": "1722720",
+    "end": "1727760"
+  },
+  {
+    "text": "off make you know test dashboards or like you know personalized things um",
+    "start": "1727760",
+    "end": "1734059"
+  },
+  {
+    "text": "um but yeah um I don't know if Emma has any other comments about that yeah I think we have",
+    "start": "1734059",
+    "end": "1740360"
+  },
+  {
+    "text": "lots of dashboards there and yeah in different buckets and for each team like we have some like uh kubernetes",
+    "start": "1740360",
+    "end": "1747919"
+  },
+  {
+    "text": "container level matches for them to use but they also keep their own copy yeah",
+    "start": "1747919",
+    "end": "1754000"
+  },
+  {
+    "text": "yeah hi uh for someone who's just starting on this migration Journey what would be some mistakes that you would",
+    "start": "1755960",
+    "end": "1762440"
+  },
+  {
+    "text": "recommend that we can avoid I saw the learnings but would love some more detail there",
+    "start": "1762440",
+    "end": "1768500"
+  },
+  {
+    "text": "it's a good question um",
+    "start": "1768500",
+    "end": "1772360"
+  },
+  {
+    "text": "I would say I mean I I think the the biggest thing that and Emma could",
+    "start": "1774080",
+    "end": "1779600"
+  },
+  {
+    "text": "probably talk a little bit more from the Jordan side but I think the biggest thing that that we found to be very helpful is really working with one or",
+    "start": "1779600",
+    "end": "1787940"
+  },
+  {
+    "text": "two sort of like you know pilot teams um to sort of you know kind of get that",
+    "start": "1787940",
+    "end": "1794000"
+  },
+  {
+    "text": "that model out there um you know especially around I would say like the use of the Prometheus",
+    "start": "1794000",
+    "end": "1800360"
+  },
+  {
+    "text": "clients um I think having you know having a couple Services right that are using",
+    "start": "1800360",
+    "end": "1805700"
+  },
+  {
+    "text": "each of the different like Prometheus clients right like maybe of one go service one you know node service or",
+    "start": "1805700",
+    "end": "1811279"
+  },
+  {
+    "text": "something um and sort of you know getting them sort of fully across the line",
+    "start": "1811279",
+    "end": "1816740"
+  },
+  {
+    "text": "um at the beginning I think that can really help because that you sort of learn right a lot you know in that in",
+    "start": "1816740",
+    "end": "1822740"
+  },
+  {
+    "text": "that journey and then other teams can sort of you know tack on and and follow that",
+    "start": "1822740",
+    "end": "1828080"
+  },
+  {
+    "text": "uh yeah so from my perspective I feel like we really need to",
+    "start": "1828080",
+    "end": "1833419"
+  },
+  {
+    "text": "um set the common tax as soon as possible yeah it's difficult to change like if you have other set of common",
+    "start": "1833419",
+    "end": "1840679"
+  },
+  {
+    "text": "labels for example like we have the cost we have a cost cost origin like that we",
+    "start": "1840679",
+    "end": "1847039"
+  },
+  {
+    "text": "really get want to get rid of because we want to use a service app these two",
+    "start": "1847039",
+    "end": "1852460"
+  },
+  {
+    "text": "combinations to find the service uniquely yeah",
+    "start": "1852460",
+    "end": "1858940"
+  },
+  {
+    "text": "um yeah so basically you provide the wrong standard catalytic templates and everything but it's actually just for",
+    "start": "1863299",
+    "end": "1870860"
+  },
+  {
+    "text": "the first generation so like if the golden standard changes how do you like",
+    "start": "1870860",
+    "end": "1876279"
+  },
+  {
+    "text": "ensure that all the teams actually follow the updated gold standard that you've provided like for example like",
+    "start": "1876279",
+    "end": "1882620"
+  },
+  {
+    "text": "let's say that the cost of origin is like a new tag how can I make sure that all the team actually gonna make it",
+    "start": "1882620",
+    "end": "1888380"
+  },
+  {
+    "text": "inside the attack as well oh actually for example like the cost origin label they are generated from uh",
+    "start": "1888380",
+    "end": "1896419"
+  },
+  {
+    "text": "from our set automatically so in the mattress collector we have like uh some",
+    "start": "1896419",
+    "end": "1902600"
+  },
+  {
+    "text": "uh shell script to get like AWS and AWS region and don't ID and also the",
+    "start": "1902600",
+    "end": "1910340"
+  },
+  {
+    "text": "service name automatically set for them so they are not able to change that and",
+    "start": "1910340",
+    "end": "1915620"
+  },
+  {
+    "text": "we publish all the all these labels for them automatically yeah",
+    "start": "1915620",
+    "end": "1920659"
+  },
+  {
+    "text": "yeah I think that can avoid some mistakes especially some spelling mistakes from the service team",
+    "start": "1920659",
+    "end": "1928340"
+  },
+  {
+    "text": "yeah I think what we found and honestly to this gentleman's Point um I think having essential observability team sort",
+    "start": "1928340",
+    "end": "1935360"
+  },
+  {
+    "text": "of take lead um in this migration effort was super beneficial because because they sort of",
+    "start": "1935360",
+    "end": "1941000"
+  },
+  {
+    "text": "have a view right across the company and they can set those those standards in",
+    "start": "1941000",
+    "end": "1946039"
+  },
+  {
+    "text": "place early on um and so obviously things are going to change right in the future but the the",
+    "start": "1946039",
+    "end": "1951559"
+  },
+  {
+    "text": "more that you can eliminate you know the unknown at the beginning I think the the better",
+    "start": "1951559",
+    "end": "1957460"
+  },
+  {
+    "text": "um so I think in general you really want to look at what your scrape interval is",
+    "start": "1981740",
+    "end": "1986779"
+  },
+  {
+    "text": "um I think that's like a pretty good um that's a pretty good standard to look at right so if your scrape interval is",
+    "start": "1986779",
+    "end": "1993320"
+  },
+  {
+    "text": "30 seconds right having you know jobs under 30 seconds probably not going to work right because those jobs will uh",
+    "start": "1993320",
+    "end": "2000820"
+  },
+  {
+    "text": "will complete before you know Prometheus or the collectors can actually scrape them",
+    "start": "2000820",
+    "end": "2006279"
+  },
+  {
+    "text": "um so I think it I mean yeah it really depends um but I I like for me if I you know I'm",
+    "start": "2006279",
+    "end": "2013120"
+  },
+  {
+    "text": "just gonna say like a blanket statement I would say like the scrape interval is probably a good um sort of boundary",
+    "start": "2013120",
+    "end": "2020100"
+  },
+  {
+    "text": "see how",
+    "start": "2022659",
+    "end": "2025200"
+  },
+  {
+    "text": "no worries I I heard um yeah the question was uh do we have plans to correlate",
+    "start": "2043179",
+    "end": "2049179"
+  },
+  {
+    "text": "um uh metrics time series data with with traces um specifically around open Telemetry",
+    "start": "2049179",
+    "end": "2055780"
+  },
+  {
+    "text": "um so at chronosphere we actually just uh or last year we launched a tracing product where we do just this",
+    "start": "2055780",
+    "end": "2061780"
+  },
+  {
+    "text": "[Music] um I yeah I don't want to say like I can't",
+    "start": "2061780",
+    "end": "2067960"
+  },
+  {
+    "text": "really talk about doordash um but yes we we do have plans um and we we do have uh customers uh actively",
+    "start": "2067960",
+    "end": "2075760"
+  },
+  {
+    "text": "using that um and you know using it too correlate right between metrics and traces",
+    "start": "2075760",
+    "end": "2082559"
+  },
+  {
+    "text": "thank you everyone [Applause]",
+    "start": "2087339",
+    "end": "2092689"
+  }
+]

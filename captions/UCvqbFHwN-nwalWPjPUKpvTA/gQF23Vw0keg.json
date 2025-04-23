@@ -1,0 +1,1767 @@
+[
+  {
+    "text": "great thanks everyone for coming I am super super excited to give his talk I feel like for the past year and a half",
+    "start": "30",
+    "end": "5700"
+  },
+  {
+    "text": "I've been doing the conference circuit and singing the praises of service mesh and now we come here and there's like 20",
+    "start": "5700",
+    "end": "14009"
+  },
+  {
+    "text": "talks on service mesh so I don't feel like I have to do that talk anymore which is great so what we're gonna do",
+    "start": "14009",
+    "end": "19140"
+  },
+  {
+    "text": "today is I'm going to go into some of the kind of deep dive system internals of envoy so I apologize in advance if",
+    "start": "19140",
+    "end": "27689"
+  },
+  {
+    "text": "you don't know what envoy is this is probably not the talk for you and",
+    "start": "27689",
+    "end": "34010"
+  },
+  {
+    "text": "computer is frozen let me see yeah there it goes okay cool so just a real quick",
+    "start": "34010",
+    "end": "41340"
+  },
+  {
+    "text": "agenda I'm gonna go over kind of the overall goals of envoy and kind of why we actually started the project will do",
+    "start": "41340",
+    "end": "48420"
+  },
+  {
+    "text": "a high-level arch overview and then we're gonna dig deep into the threading model we'll talk about the hot restart",
+    "start": "48420",
+    "end": "54570"
+  },
+  {
+    "text": "capability which is the capability to restart envoy a full binary reload",
+    "start": "54570",
+    "end": "59640"
+  },
+  {
+    "text": "without dropping any connections we're gonna talk about stats which is pretty interesting and then all the plenty of",
+    "start": "59640",
+    "end": "65518"
+  },
+  {
+    "text": "time for doing QA so just from the 30-second version in case any of you",
+    "start": "65519",
+    "end": "71250"
+  },
+  {
+    "text": "hopped in here and you actually don't know what envoy is the envoy project goal is that the network should be",
+    "start": "71250",
+    "end": "76830"
+  },
+  {
+    "text": "transparent to applications so you know from a micro surfer perspective we're living in this world right now where",
+    "start": "76830",
+    "end": "83400"
+  },
+  {
+    "text": "lots of people are doing micro services but unfortunately they're still spending too much time not focusing on their",
+    "start": "83400",
+    "end": "90090"
+  },
+  {
+    "text": "actual business logic they're debugging network issues they're debugging infrastructure issues and it's a very",
+    "start": "90090",
+    "end": "96600"
+  },
+  {
+    "text": "confusing situation so we would like to you know make an abstract network for",
+    "start": "96600",
+    "end": "102150"
+  },
+  {
+    "text": "people so that they can write their applications and they can focus on their business logic so when we were",
+    "start": "102150",
+    "end": "107520"
+  },
+  {
+    "text": "originally uh you know doing the the envoy project plan this was back in 2015 and you know",
+    "start": "107520",
+    "end": "115560"
+  },
+  {
+    "text": "we were looking around obviously I was working at lift at the time and lift you know had started their micro service",
+    "start": "115560",
+    "end": "121619"
+  },
+  {
+    "text": "rollout and you know that was not going very well at the beginning of 2015 lift",
+    "start": "121619",
+    "end": "127170"
+  },
+  {
+    "text": "I think had a monolith you know it had like 30 different services written in Python",
+    "start": "127170",
+    "end": "133030"
+  },
+  {
+    "text": "at that time because of all of the typical problems in the microservices world you know the micro service rollout",
+    "start": "133030",
+    "end": "140650"
+  },
+  {
+    "text": "was basically aborted people were just having too much problems actually figuring out what was going on",
+    "start": "140650",
+    "end": "146260"
+  },
+  {
+    "text": "so for a non-void design goal perspective first thing is we weren't gonna do an actual library we're gonna",
+    "start": "146260",
+    "end": "152170"
+  },
+  {
+    "text": "do an out of process proxy that's because lift even at that time I already had multiple languages we had PHP we had",
+    "start": "152170",
+    "end": "158950"
+  },
+  {
+    "text": "Python I think there was like a single Java service at that time we were thinking about you know doing go you",
+    "start": "158950",
+    "end": "166239"
+  },
+  {
+    "text": "know so we knew that we didn't want to maintain a library for all of these languages we knew that you know from a",
+    "start": "166239",
+    "end": "173260"
+  },
+  {
+    "text": "long-term perspective particularly when we wanted to open source on boy I I knew at the time that we would be competing",
+    "start": "173260",
+    "end": "179080"
+  },
+  {
+    "text": "in horse race benchmarks against H a proxy engine X so you know we wanted to",
+    "start": "179080",
+    "end": "185140"
+  },
+  {
+    "text": "focus on doing a solution you know that was low latency high perf also wanted to",
+    "start": "185140",
+    "end": "190600"
+  },
+  {
+    "text": "try for developer productivity so at the beginning of 2015 that led us to choosing C++ if I were to choose today",
+    "start": "190600",
+    "end": "198160"
+  },
+  {
+    "text": "it's not completely clear that we would still use C++ but at the time that was a pretty clear decision envoy at its core",
+    "start": "198160",
+    "end": "205959"
+  },
+  {
+    "text": "is a l3 l4 filter architecture and that means that at its core it's a by proxy",
+    "start": "205959",
+    "end": "211780"
+  },
+  {
+    "text": "and that allows it to be used for multiple protocols which is pretty key so for example for today we use envoy",
+    "start": "211780",
+    "end": "218500"
+  },
+  {
+    "text": "for Redis we use it for HTTP we do it for MongoDB we're probably gonna do",
+    "start": "218500",
+    "end": "224440"
+  },
+  {
+    "text": "Kafka so you know from a low-level perspective we want to have a core that has a bunch of functionality but can",
+    "start": "224440",
+    "end": "230530"
+  },
+  {
+    "text": "actually be extended to do multiple protocols obviously a huge amount of the",
+    "start": "230530",
+    "end": "235660"
+  },
+  {
+    "text": "Internet is HTTP so we wanted a separate filter stack at that level so that",
+    "start": "235660",
+    "end": "241090"
+  },
+  {
+    "text": "people could write very interesting plug-in functionality up there we knew",
+    "start": "241090",
+    "end": "246790"
+  },
+  {
+    "text": "at the time back in 2015 the h2 was the future and at that time actually really",
+    "start": "246790",
+    "end": "252160"
+  },
+  {
+    "text": "no proxies supported you know full h2 proxying from an end-to-end perspective",
+    "start": "252160",
+    "end": "257310"
+  },
+  {
+    "text": "still today I think nginx only got that functionality in about the last month so",
+    "start": "257310",
+    "end": "263320"
+  },
+  {
+    "text": "it's taken a couple of years actually for most cease to kind of catch up to this h2 first perspective we'll talk about it",
+    "start": "263320",
+    "end": "270699"
+  },
+  {
+    "text": "more but you one of envoys kind of core tenets is obviously service config discovery we spend a huge amount of time",
+    "start": "270699",
+    "end": "277380"
+  },
+  {
+    "text": "on an ability to have an API to actually drive envoy config and that's mostly",
+    "start": "277380",
+    "end": "283000"
+  },
+  {
+    "text": "from operational experience seeing what it's like to actually deploy proxy and deploy configurations and then have to",
+    "start": "283000",
+    "end": "289330"
+  },
+  {
+    "text": "go through and deal with the operational mess of hopping things and like making sure the files get there and then files",
+    "start": "289330",
+    "end": "295870"
+  },
+  {
+    "text": "get corrupted it's it's a pretty crappy situation obviously we wanted to do you",
+    "start": "295870",
+    "end": "301389"
+  },
+  {
+    "text": "know a whole bunch of active and passive health checking advanced load balancing was really at the core so obviously load",
+    "start": "301389",
+    "end": "307720"
+  },
+  {
+    "text": "balancing rate-limiting circuit braking timeouts etc and you know I talked about",
+    "start": "307720",
+    "end": "314020"
+  },
+  {
+    "text": "it and most of my talks not this deep dive talk but really I would say the biggest goal of Envoy is actually",
+    "start": "314020",
+    "end": "319630"
+  },
+  {
+    "text": "observability and you know what you'll find in these kind of polyglot micro service architectures is that",
+    "start": "319630",
+    "end": "326169"
+  },
+  {
+    "text": "understanding and debugging what is going on is an incredibly difficult problem so you know having best-in-class",
+    "start": "326169",
+    "end": "332650"
+  },
+  {
+    "text": "like stat slogging tracing you know these are things that that really make it so that you can you can kind of",
+    "start": "332650",
+    "end": "338919"
+  },
+  {
+    "text": "understand the problems that are occurring other thing was you know what you'll find historically is that people",
+    "start": "338919",
+    "end": "345789"
+  },
+  {
+    "text": "would do things like deploy nginx at the edge but they would deploy H a proxy you know for their internal services service",
+    "start": "345789",
+    "end": "351400"
+  },
+  {
+    "text": "traffic and what you'll find is that ninety percent of what these proxies do are the same maybe even 95 or 99 percent",
+    "start": "351400",
+    "end": "358570"
+  },
+  {
+    "text": "they're all doing service discovery they're all doing load balancing you know there's very few logic at the edge",
+    "start": "358570",
+    "end": "364419"
+  },
+  {
+    "text": "that is different from what is done internally so from an operational agility perspective it was very important that",
+    "start": "364419",
+    "end": "370930"
+  },
+  {
+    "text": "we actually use the same code it's just a lot easier to operate the same code that you're running from your service",
+    "start": "370930",
+    "end": "376990"
+  },
+  {
+    "text": "proxy to your middle proxy to your edge proxy and hot restart was a it was a core goal again how it restart is the",
+    "start": "376990",
+    "end": "384099"
+  },
+  {
+    "text": "ability to actually restart envoy without dropping any connections and we'll talk about that more so here is a",
+    "start": "384099",
+    "end": "392380"
+  },
+  {
+    "text": "very high-level architecture diagram of envoy and you know unfortunately this is",
+    "start": "392380",
+    "end": "397719"
+  },
+  {
+    "text": "a short talk so I'd love to talk really at length about filters but it just don't have time but just from a",
+    "start": "397719",
+    "end": "404230"
+  },
+  {
+    "text": "very high-level perspective what you'll see here is that envoy you know kind of",
+    "start": "404230",
+    "end": "409510"
+  },
+  {
+    "text": "has a connection processing pipeline and obviously here I'm only showing kind of you know normal rest type traffic but",
+    "start": "409510",
+    "end": "417070"
+  },
+  {
+    "text": "you can kind of extend that to what it would look like for Redis or MongoDB or something else but what you'll see is",
+    "start": "417070",
+    "end": "422980"
+  },
+  {
+    "text": "that you know connections come in before connections are processed we have a couple of different types of filters",
+    "start": "422980",
+    "end": "428350"
+  },
+  {
+    "text": "within envoy so filters are extension points that people can write to actually modify functionality beyond the core so",
+    "start": "428350",
+    "end": "435760"
+  },
+  {
+    "text": "we have listener filters these are filters that operate before we make the actual connections and then once the",
+    "start": "435760",
+    "end": "442540"
+  },
+  {
+    "text": "connection is established then we have TCP or l3 l4 filters so this is where",
+    "start": "442540",
+    "end": "447550"
+  },
+  {
+    "text": "you would do your Redis or MongoDB or HTTP and then these create a chain of",
+    "start": "447550",
+    "end": "453430"
+  },
+  {
+    "text": "filters so if you've used libraries like neti or other similar libraries that",
+    "start": "453430",
+    "end": "458590"
+  },
+  {
+    "text": "allow you to compose different chains of filters it's a pretty powerful programming paradigm because you can do",
+    "start": "458590",
+    "end": "465340"
+  },
+  {
+    "text": "things like have an auth filter followed by a rate limit filter followed by a protocol sniffing filter and you can",
+    "start": "465340",
+    "end": "470590"
+  },
+  {
+    "text": "compose these filters in different ways that are that are quite interesting and then you know at that layer from an HTTP",
+    "start": "470590",
+    "end": "478540"
+  },
+  {
+    "text": "processing perspective we actually have an HTTP connection manager filter which is an l3 l4 filter that actually you",
+    "start": "478540",
+    "end": "485980"
+  },
+  {
+    "text": "know parses out the bytes and makes messages so things like headers body trailers and then once you're up at that",
+    "start": "485980",
+    "end": "492910"
+  },
+  {
+    "text": "layer then we have a separate set of filters that operate on those headers body trailers and that the HTTP layer",
+    "start": "492910",
+    "end": "499090"
+  },
+  {
+    "text": "can do things like again do auth or rate limiting or buffering but instead of operating at the byte level we're not",
+    "start": "499090",
+    "end": "505300"
+  },
+  {
+    "text": "operating at the HTTP message level so from a from a filter writer perspective",
+    "start": "505300",
+    "end": "510400"
+  },
+  {
+    "text": "it's a lot more natural and a lot easier to actually plug in functionality there once you get kind of from the front end",
+    "start": "510400",
+    "end": "518200"
+  },
+  {
+    "text": "of the proxy and you're about to you know do do your routing which is what most people are using on before we",
+    "start": "518200",
+    "end": "524200"
+  },
+  {
+    "text": "actually have a filter which is the router filter so that's your service router and then there's a whole separate",
+    "start": "524200",
+    "end": "529630"
+  },
+  {
+    "text": "portion of Envoy which is kind of this back-end which does all of the upstream our back-end or endpoint management and",
+    "start": "529630",
+    "end": "536370"
+  },
+  {
+    "text": "that's what we call the cluster manager so the cluster manager is the thing that basically knows about all of the sets of",
+    "start": "536370",
+    "end": "543330"
+  },
+  {
+    "text": "backends that envoy can eventually route to and so a cluster is basically a",
+    "start": "543330",
+    "end": "549270"
+  },
+  {
+    "text": "grouping of hosts so that would be your for example your location service or your user service or lyft your pricing",
+    "start": "549270",
+    "end": "555330"
+  },
+  {
+    "text": "service and then a cluster is composed of multiple backends so these are hosts",
+    "start": "555330",
+    "end": "561390"
+  },
+  {
+    "text": "so it's cluster manager to cluster two hosts so what you'll see from this diagram is that we have this connection",
+    "start": "561390",
+    "end": "567570"
+  },
+  {
+    "text": "processing pipeline and then there's a bunch of central functionality that is common to that entire pipeline so that",
+    "start": "567570",
+    "end": "573720"
+  },
+  {
+    "text": "stats that's admin so we allow people to kind of dump rich information from the",
+    "start": "573720",
+    "end": "579090"
+  },
+  {
+    "text": "box but it's very useful for my debugging perspective we have parallel managers so we have a cluster manager we",
+    "start": "579090",
+    "end": "586290"
+  },
+  {
+    "text": "have a listener manager these are the listeners that you know accept incoming traffic and set up all these filter",
+    "start": "586290",
+    "end": "592530"
+  },
+  {
+    "text": "stacks and then we have routes also and then at its core too we have again I",
+    "start": "592530",
+    "end": "598350"
+  },
+  {
+    "text": "don't have time to talk about it but we have a concept of the XDS or this is our discovery service API so these are",
+    "start": "598350",
+    "end": "605190"
+  },
+  {
+    "text": "things like listener discovery service cluster discovery service endpoint discovery service and this information",
+    "start": "605190",
+    "end": "612780"
+  },
+  {
+    "text": "gets fed into all of these managers and then that's how ongoing knows about all of the backend information so let's step",
+    "start": "612780",
+    "end": "620820"
+  },
+  {
+    "text": "back and before we kind of dive into what the threading model looks like you know we'll kind of talk about historical",
+    "start": "620820",
+    "end": "627630"
+  },
+  {
+    "text": "trends in this area and from a proxy perspective if you go back 15 or 20",
+    "start": "627630",
+    "end": "632910"
+  },
+  {
+    "text": "years you know the way that it was common to you know write networking software is you would have an operating",
+    "start": "632910",
+    "end": "639210"
+  },
+  {
+    "text": "system thread and then you have a connection per per thread and that's just how things were basically written",
+    "start": "639210",
+    "end": "644340"
+  },
+  {
+    "text": "back then and in the last at this point probably 15 years there's been a trend",
+    "start": "644340",
+    "end": "650310"
+  },
+  {
+    "text": "towards kind of what people loosely call C 10k there's some paper written in the early 2000s that kind of popularized",
+    "start": "650310",
+    "end": "656940"
+  },
+  {
+    "text": "this term and that's basically running 10,000 connections per box which now today 10,000 connections per box is kind",
+    "start": "656940",
+    "end": "663570"
+  },
+  {
+    "text": "of a joke but at that time you know that was like big big numbers and what is important to",
+    "start": "663570",
+    "end": "669660"
+  },
+  {
+    "text": "understand what still holds true today is that you really can't do connection per thread it just doesn't work like you",
+    "start": "669660",
+    "end": "676770"
+  },
+  {
+    "text": "know not to get too deep into operating systems but threads have stack there's context switching so if you're",
+    "start": "676770",
+    "end": "684090"
+  },
+  {
+    "text": "trying on a box you know have ten thousand twenty thousand five hundred thousand connections and you're doing a",
+    "start": "684090",
+    "end": "689580"
+  },
+  {
+    "text": "connection per thread you just can't do it like there's just not enough memory you're gonna waste a lot of time context",
+    "start": "689580",
+    "end": "694680"
+  },
+  {
+    "text": "switching from a CPU perspective so in the early 2000s the connection per thread kind of paradigm fell out of",
+    "start": "694680",
+    "end": "702540"
+  },
+  {
+    "text": "favor the unfortunate part of that is that connection per thread is very easy to program because everything is",
+    "start": "702540",
+    "end": "709050"
+  },
+  {
+    "text": "effectively synchronous and blocking so you let the operating system essentially schedule everything for you and that is",
+    "start": "709050",
+    "end": "716730"
+  },
+  {
+    "text": "from a reasoning perspective that is quite simple in the early two-thousands",
+    "start": "716730",
+    "end": "721950"
+  },
+  {
+    "text": "really started by nginx we move towards a a multiple connections per thread",
+    "start": "721950",
+    "end": "728460"
+  },
+  {
+    "text": "model and what that uses in is an async event loop and essentially now all of",
+    "start": "728460",
+    "end": "734880"
+  },
+  {
+    "text": "your logic has to be async and unlike synchronous programming which is very easy most programmers can kind of",
+    "start": "734880",
+    "end": "741150"
+  },
+  {
+    "text": "understand what's going on you block you get some type of error ASIC rhiness programming is very complicated things",
+    "start": "741150",
+    "end": "747570"
+  },
+  {
+    "text": "happen out of order you have to handle all these cases that can happen and it's quite complicated but in order to scale",
+    "start": "747570",
+    "end": "754850"
+  },
+  {
+    "text": "you know individual machines too high connection counts and high throughput this is basically the only way to do it",
+    "start": "754850",
+    "end": "762230"
+  },
+  {
+    "text": "there are other methods now that people are exploring around things like core routines and things like that which was",
+    "start": "762230",
+    "end": "768270"
+  },
+  {
+    "text": "super interesting and let's talk about that too but not not enough time but historically in the last again 10 to 15",
+    "start": "768270",
+    "end": "774690"
+  },
+  {
+    "text": "years we're now moving towards this highly async model so that takes us to",
+    "start": "774690",
+    "end": "780480"
+  },
+  {
+    "text": "envoy itself and the way the core of Envoy actually works and what we do in",
+    "start": "780480",
+    "end": "786630"
+  },
+  {
+    "text": "envoy is unlike nginx envoy is a single process so there is not like oh you know",
+    "start": "786630",
+    "end": "793500"
+  },
+  {
+    "text": "multiple processes on the box we do a single prob and we use different different threads",
+    "start": "793500",
+    "end": "800140"
+  },
+  {
+    "text": "within that process the reason that's done is mainly because coordinating",
+    "start": "800140",
+    "end": "805390"
+  },
+  {
+    "text": "complex tasks between threads is a lot simpler than doing it between processes and it's just from an operational",
+    "start": "805390",
+    "end": "812050"
+  },
+  {
+    "text": "perspective it's easier to manage one process than having to manage an array of processes with with a different",
+    "start": "812050",
+    "end": "817329"
+  },
+  {
+    "text": "process manager but one of the things that we do in Envoy is that there's a concept of a a main thread so this is",
+    "start": "817329",
+    "end": "824680"
+  },
+  {
+    "text": "kind of like your boot thread and the main thread hosts low throughput but",
+    "start": "824680",
+    "end": "830140"
+  },
+  {
+    "text": "highly important behavior so these are things like XDS fetches so going out to all of the discovery services or we have",
+    "start": "830140",
+    "end": "837459"
+  },
+  {
+    "text": "a concept called run time which is like loading feature flags from disk or doing stock flushes or admin server or just",
+    "start": "837459",
+    "end": "844750"
+  },
+  {
+    "text": "general process management like listening for for like signals and stuff like that so these are things that don't",
+    "start": "844750",
+    "end": "850420"
+  },
+  {
+    "text": "take much CPU you know so they're not very CPU intensive but we do them on one thread and one of the benefits of this",
+    "start": "850420",
+    "end": "857380"
+  },
+  {
+    "text": "is that none of this requires locking like it's effectively it's it's a lot simpler to reason about or even though",
+    "start": "857380",
+    "end": "863980"
+  },
+  {
+    "text": "it's asynchronous it's not like there's any kind of thread pool or a connection pool and you'll see that as a theme and",
+    "start": "863980",
+    "end": "869589"
+  },
+  {
+    "text": "envoy there are no there are no thread pools in an envoy at all and and the",
+    "start": "869589",
+    "end": "874750"
+  },
+  {
+    "text": "reason for that is that a synchronous programming is hard enough but when you couple thread pools and all the locking",
+    "start": "874750",
+    "end": "881199"
+  },
+  {
+    "text": "the com with thread pools with asynchronous programming it gets very very complicated so we have this split",
+    "start": "881199",
+    "end": "887019"
+  },
+  {
+    "text": "where we have a main thread which does a bunch of this low rate kind of important functionality and then what we do is",
+    "start": "887019",
+    "end": "893070"
+  },
+  {
+    "text": "based on the concurrency parameter we boot and worker threads and by default",
+    "start": "893070",
+    "end": "901720"
+  },
+  {
+    "text": "we run one worker thread for hardware thread on on your machine so if you have four Hardware cores we will boot for",
+    "start": "901720",
+    "end": "907930"
+  },
+  {
+    "text": "four workers and workers are the actual data plane so the workers host listeners",
+    "start": "907930",
+    "end": "913329"
+  },
+  {
+    "text": "that run accept they accept connections and that that entire kind of chart that I showed you before about going through",
+    "start": "913329",
+    "end": "919329"
+  },
+  {
+    "text": "that entire filter pipeline that all only happens on the workers and what",
+    "start": "919329",
+    "end": "925480"
+  },
+  {
+    "text": "what what this does and the reason that this is important is that this is what we call and embarrass the pair",
+    "start": "925480",
+    "end": "930860"
+  },
+  {
+    "text": "architecture there needs to be no coordination between the workers and basically what that means that there is",
+    "start": "930860",
+    "end": "937070"
+  },
+  {
+    "text": "no locking that's slight lie there's locking in certain cases but not in any high throughput cases so this allows",
+    "start": "937070",
+    "end": "944270"
+  },
+  {
+    "text": "envoy to scale to a massive number of course and you know for a proxy that was",
+    "start": "944270",
+    "end": "949460"
+  },
+  {
+    "text": "originally written say in the late 90s or in the early 2000s you know it's not that high core processing was uncommon",
+    "start": "949460",
+    "end": "957410"
+  },
+  {
+    "text": "but it wasn't super common whereas today you know most of the big cloud vendors they're running boxes that",
+    "start": "957410",
+    "end": "962600"
+  },
+  {
+    "text": "have 90 90 plus course so and they run servers like envoy that run on all 90",
+    "start": "962600",
+    "end": "968450"
+  },
+  {
+    "text": "cores so at that core account you actually really have to start thinking about what the actual locking looks like",
+    "start": "968450",
+    "end": "975280"
+  },
+  {
+    "text": "so since we're writing this in 2015 and it was pretty clear that you know this is the way the architectures are going",
+    "start": "975280",
+    "end": "981380"
+  },
+  {
+    "text": "we opted for this embarrassingly powerful Bera Singh lis parallel architecture one thing that I will point",
+    "start": "981380",
+    "end": "987980"
+  },
+  {
+    "text": "out is that which is kind of interesting I don't have too much time to actually go into but there are certain things",
+    "start": "987980",
+    "end": "993530"
+  },
+  {
+    "text": "particularly on Linux that make this difficult right because the way the way",
+    "start": "993530",
+    "end": "998720"
+  },
+  {
+    "text": "that this works is that if you're only gonna run you know one thread per hardware core it can't ever block if it",
+    "start": "998720",
+    "end": "1005380"
+  },
+  {
+    "text": "blocks you're basically and so there are operations and particularly in",
+    "start": "1005380",
+    "end": "1012460"
+  },
+  {
+    "text": "Linux where even though they're technically not blocking bait they actually block and one of those things",
+    "start": "1012460",
+    "end": "1017860"
+  },
+  {
+    "text": "is file i/o and you'll particularly get into situations in virtualized environments where when you tell the",
+    "start": "1017860",
+    "end": "1024610"
+  },
+  {
+    "text": "kernel for example to do a you know cache write or something like that we see this at lift all the time",
+    "start": "1024610",
+    "end": "1030850"
+  },
+  {
+    "text": "we're like the way that the Amazon EBS driver is written like it'll go through and it'll end up blocking and then like",
+    "start": "1030850",
+    "end": "1036760"
+  },
+  {
+    "text": "you're blocked right so that's obviously bad so there are certain cases where because of this we have to push",
+    "start": "1036760",
+    "end": "1042819"
+  },
+  {
+    "text": "functionality off to other threads so for fire flushing what we actually have to do is you know we'll have to",
+    "start": "1042820",
+    "end": "1049690"
+  },
+  {
+    "text": "basically put data onto a file flush thread so that it never blocks those data processing threads but again this",
+    "start": "1049690",
+    "end": "1056830"
+  },
+  {
+    "text": "architecture is designed to be massively parallel so the the next core concept",
+    "start": "1056830",
+    "end": "1063520"
+  },
+  {
+    "text": "before I kind of to how this is used is as a walking paradigm called RC use this stands for",
+    "start": "1063520",
+    "end": "1069309"
+  },
+  {
+    "text": "read copy update and you know this might be common to you or it might not be it's",
+    "start": "1069309",
+    "end": "1074980"
+  },
+  {
+    "text": "a pretty interesting thing it's used heavily within the Linux kernel it's a synchronization paradigm which",
+    "start": "1074980",
+    "end": "1082000"
+  },
+  {
+    "text": "was designed for very high court's and it's designed for read heavy write and",
+    "start": "1082000",
+    "end": "1088240"
+  },
+  {
+    "text": "frequent workloads and what this paradigm allows you to do is it allows you in the read in the repass to take no",
+    "start": "1088240",
+    "end": "1096250"
+  },
+  {
+    "text": "locks so you can actually spread data across many parallel kind of threads and",
+    "start": "1096250",
+    "end": "1101919"
+  },
+  {
+    "text": "you can read the data without requiring any any locks at all and it's super interesting and the way that this works",
+    "start": "1101919",
+    "end": "1108580"
+  },
+  {
+    "text": "which might not be very intuitive is you have some update process which I just",
+    "start": "1108580",
+    "end": "1115240"
+  },
+  {
+    "text": "show here and then say the update process makes new data and from a non-void perspective that new data might",
+    "start": "1115240",
+    "end": "1121029"
+  },
+  {
+    "text": "be new cluster information or like new route information or something like that instead of people that need to actually",
+    "start": "1121029",
+    "end": "1129130"
+  },
+  {
+    "text": "read that data instead of them acquiring a lock and then say you know reading what the current time is or like reading",
+    "start": "1129130",
+    "end": "1135309"
+  },
+  {
+    "text": "what the hosts are what ends up happening is that the updater will take that data which will be reference",
+    "start": "1135309",
+    "end": "1140679"
+  },
+  {
+    "text": "counted and then that will get posted over to the event loop that's running on every worker because remember every",
+    "start": "1140679",
+    "end": "1146559"
+  },
+  {
+    "text": "worker is fully async running its own event loop so that data gets posted over and then the key for RCU is that there's",
+    "start": "1146559",
+    "end": "1153789"
+  },
+  {
+    "text": "this thing called the quiescent period and basically what that means is that there are people that will use this data",
+    "start": "1153789",
+    "end": "1160210"
+  },
+  {
+    "text": "and the only time that you can update that data is when the people that are",
+    "start": "1160210",
+    "end": "1166090"
+  },
+  {
+    "text": "reading the data are quiescent or are not running and from an event loop perspective this is really anytime that",
+    "start": "1166090",
+    "end": "1173019"
+  },
+  {
+    "text": "an event in that loop is not running so what we end up doing is that this ref counted data which in C++ is a shared",
+    "start": "1173019",
+    "end": "1180070"
+  },
+  {
+    "text": "pointer basically is copied to all of the event loops and then it might be true that at the point that the event",
+    "start": "1180070",
+    "end": "1186429"
+  },
+  {
+    "text": "loop is actually running people are holding on to a shared pointer for example to a route table or something",
+    "start": "1186429",
+    "end": "1191440"
+  },
+  {
+    "text": "like that but then when the event loop comes back and it processes the message for this new route table",
+    "start": "1191440",
+    "end": "1197799"
+  },
+  {
+    "text": "it'll basically copy in that new route table any people that held the old route",
+    "start": "1197799",
+    "end": "1203499"
+  },
+  {
+    "text": "table will continue to hold it and it'll be ref counted but any new readers of that route table will get the new route",
+    "start": "1203499",
+    "end": "1209919"
+  },
+  {
+    "text": "table and that is all done without locking so it's a it's a it's a pretty cool thing I would encourage you to go",
+    "start": "1209919",
+    "end": "1216220"
+  },
+  {
+    "text": "look at the at the Wikipedia article how it's used in envoy I would still call it",
+    "start": "1216220",
+    "end": "1222009"
+  },
+  {
+    "text": "RC u but it's a little different than what the what the colonel does because the colonel has to do it with interrupts",
+    "start": "1222009",
+    "end": "1227320"
+  },
+  {
+    "text": "and a whole bunch of other complicated stuff but this is a this paradigm this",
+    "start": "1227320",
+    "end": "1232539"
+  },
+  {
+    "text": "locking paradigm is really pervasive in in Envoy so the next important concept",
+    "start": "1232539",
+    "end": "1239350"
+  },
+  {
+    "text": "is a TLS or thread local storage and like we talked about we have this",
+    "start": "1239350",
+    "end": "1244869"
+  },
+  {
+    "text": "massively parallel architecture and within this architecture you know we typically have two hosts thread local",
+    "start": "1244869",
+    "end": "1250809"
+  },
+  {
+    "text": "data and again that might be things like load balancer context or or local host",
+    "start": "1250809",
+    "end": "1256629"
+  },
+  {
+    "text": "context or you know local cluster manager or context there's all kinds of things that again in order to avoid",
+    "start": "1256629",
+    "end": "1263259"
+  },
+  {
+    "text": "locking this has to be spread and be embarrassingly parallel across all of the workers so the way that TLS works in",
+    "start": "1263259",
+    "end": "1271509"
+  },
+  {
+    "text": "Envoy is it's it's a little different than what you might be used to and it's",
+    "start": "1271509",
+    "end": "1276639"
+  },
+  {
+    "text": "because it has to be worker aware so in most languages you know there's some keyword that you can use you know to say",
+    "start": "1276639",
+    "end": "1283179"
+  },
+  {
+    "text": "like give me like a thread local variable you know that's typically some type of static variable that is thread local",
+    "start": "1283179",
+    "end": "1289440"
+  },
+  {
+    "text": "that doesn't really work here because what you'll see in a second is that we need the ability to use these threads",
+    "start": "1289440",
+    "end": "1296350"
+  },
+  {
+    "text": "local slots to actually accept our Cu data and then read that later so with a",
+    "start": "1296350",
+    "end": "1301749"
+  },
+  {
+    "text": "normal like operating system or language level thread local variable that doesn't actually give us the context of what we",
+    "start": "1301749",
+    "end": "1308259"
+  },
+  {
+    "text": "actually need so what we allow things to do is we allow them to allocate what we",
+    "start": "1308259",
+    "end": "1314289"
+  },
+  {
+    "text": "call TLS slots and this is just a vector of pointers and again this is like an",
+    "start": "1314289",
+    "end": "1319509"
+  },
+  {
+    "text": "arbitrary vector and you can imagine the different pieces of the system actually say you know I need a TLS slot to do",
+    "start": "1319509",
+    "end": "1325539"
+  },
+  {
+    "text": "something it's abstract and what you'll see in this picture is we have five different TLS slots the different",
+    "start": "1325539",
+    "end": "1331340"
+  },
+  {
+    "text": "things in the system have actually you know basically allocated and that live",
+    "start": "1331340",
+    "end": "1337010"
+  },
+  {
+    "text": "on the main thread and then what you'll have is that on each worker there's a parallel vector of those five slots and",
+    "start": "1337010",
+    "end": "1343760"
+  },
+  {
+    "text": "the way that it works is that we couple TLS and RCU such that when a process on",
+    "start": "1343760",
+    "end": "1350990"
+  },
+  {
+    "text": "the main thread let's say they're operating this picture on slot three and let's say that slot three contains a",
+    "start": "1350990",
+    "end": "1356270"
+  },
+  {
+    "text": "route table what will happen is that the updater will basically put the new route table which is reference counted in slot",
+    "start": "1356270",
+    "end": "1363530"
+  },
+  {
+    "text": "three it'll post to all of the workers and basically say update the thing that",
+    "start": "1363530",
+    "end": "1368570"
+  },
+  {
+    "text": "you have in slot three so you can see this post right and then basically on that worker which is doing all these",
+    "start": "1368570",
+    "end": "1375530"
+  },
+  {
+    "text": "event loops when a process needs to use the information it'll say give me the current value of slot three which again",
+    "start": "1375530",
+    "end": "1382640"
+  },
+  {
+    "text": "might be this route table or cluster information and this coupled together",
+    "start": "1382640",
+    "end": "1387890"
+  },
+  {
+    "text": "gives us this this kind of really strong kind of programming building block where",
+    "start": "1387890",
+    "end": "1393740"
+  },
+  {
+    "text": "we can't update data on the main thread we can send that over to all the workers",
+    "start": "1393740",
+    "end": "1398900"
+  },
+  {
+    "text": "where it'll be eventually consistent and eventually used but we don't have to acquire any locks which is which is",
+    "start": "1398900",
+    "end": "1405560"
+  },
+  {
+    "text": "pretty awesome so to put that all together let's take a look at you know",
+    "start": "1405560",
+    "end": "1411050"
+  },
+  {
+    "text": "from a concrete case of how envoy uses TLS and RC you to actually do cluster",
+    "start": "1411050",
+    "end": "1416060"
+  },
+  {
+    "text": "updates so again to refresh a cluster is a grouping of back-end so it's like the",
+    "start": "1416060",
+    "end": "1421070"
+  },
+  {
+    "text": "location service at at lyft so as I was saying before we have a cluster manager",
+    "start": "1421070",
+    "end": "1426380"
+  },
+  {
+    "text": "which manages all the clusters the cluster manager is getting inputs from different things so we have a health",
+    "start": "1426380",
+    "end": "1432650"
+  },
+  {
+    "text": "checker which might be doing active health checking we have a passive health checker which is doing outlier detection",
+    "start": "1432650",
+    "end": "1438820"
+  },
+  {
+    "text": "depending on our service discovery type we might be using DNS we might be using XDS so all of these signals are",
+    "start": "1438820",
+    "end": "1446180"
+  },
+  {
+    "text": "basically are basically coming into the cluster manager and when the cluster manager detects that a host set has",
+    "start": "1446180",
+    "end": "1452990"
+  },
+  {
+    "text": "changed so again a cluster manager cluster set of hosts let's say that a host becomes unhealthy or or host goes",
+    "start": "1452990",
+    "end": "1460010"
+  },
+  {
+    "text": "away the cluster manager on the main thread will compute the new set of hosts the new set of healthy and unhealthy",
+    "start": "1460010",
+    "end": "1467000"
+  },
+  {
+    "text": "bits it'll make a new array which is basically a reference counted kind of share share pointer of a vector and then",
+    "start": "1467000",
+    "end": "1474470"
+  },
+  {
+    "text": "it'll in its TLS slot it'll RC you post that to all of the workers right so the set you know step",
+    "start": "1474470",
+    "end": "1481310"
+  },
+  {
+    "text": "one is cluster manager we're getting to is health checker three is DNS then we post this new set over to the event loop",
+    "start": "1481310",
+    "end": "1489170"
+  },
+  {
+    "text": "on the worker the worker will again update that data in that slot right and",
+    "start": "1489170",
+    "end": "1495080"
+  },
+  {
+    "text": "thread local storage and then when the next event comes and has to do load balancing or has to make a decision",
+    "start": "1495080",
+    "end": "1500930"
+  },
+  {
+    "text": "based on that data it can acquire that information and then host that again without acquiring any blocks so this is",
+    "start": "1500930",
+    "end": "1508130"
+  },
+  {
+    "text": "like embarrassingly parallel and can scale to an almost infinite number of threads so moving on to hot restart so",
+    "start": "1508130",
+    "end": "1516950"
+  },
+  {
+    "text": "how it restart again is the ability for envoy to reload you know to do a full",
+    "start": "1516950",
+    "end": "1522110"
+  },
+  {
+    "text": "reload including a binary binary or configure reload without closing any connections and you know at this",
+    "start": "1522110",
+    "end": "1529940"
+  },
+  {
+    "text": "conference we often spend a lot of time talking about kubernetes and containers and like that's awesome and blue-green",
+    "start": "1529940",
+    "end": "1535730"
+  },
+  {
+    "text": "deploys most companies still have lots of things that don't run in kubernetes and that includes lyft you know and you",
+    "start": "1535730",
+    "end": "1543170"
+  },
+  {
+    "text": "know in the new kind of container world or in the new kubernetes world it's much",
+    "start": "1543170",
+    "end": "1548330"
+  },
+  {
+    "text": "more common to do what we call a a rolling deploy or a blue-green deploy and that's where you know if you want to",
+    "start": "1548330",
+    "end": "1554480"
+  },
+  {
+    "text": "run some new software you're gonna tell kubernetes to obviously spin up you know my new containers you're gonna do like a",
+    "start": "1554480",
+    "end": "1560690"
+  },
+  {
+    "text": "gradual traffic shift between the old containers or the new ones and you can roll back or roll forward and then when",
+    "start": "1560690",
+    "end": "1566510"
+  },
+  {
+    "text": "you're confident in your deploy you say kill all those old containers that's wonderful and I would love to have that",
+    "start": "1566510",
+    "end": "1572330"
+  },
+  {
+    "text": "and that's amazing but most companies still don't have that most companies are still stuck in a world where you know",
+    "start": "1572330",
+    "end": "1578660"
+  },
+  {
+    "text": "you have a bunch of software that runs in virtual machines or on bare metal and you know the ability you can't do this",
+    "start": "1578660",
+    "end": "1585680"
+  },
+  {
+    "text": "Bluegreen deploy because you don't you don't have like 100 other computers sitting around to spin up your software",
+    "start": "1585680",
+    "end": "1591860"
+  },
+  {
+    "text": "and update your load balancers and kind of do all those things so many companies are still stuck in this world where",
+    "start": "1591860",
+    "end": "1598419"
+  },
+  {
+    "text": "you might want to update envoy either binary or configs and if you were to have to do that you know with having to",
+    "start": "1598419",
+    "end": "1605320"
+  },
+  {
+    "text": "drain connections it would take a long time it would be very disruptive so the",
+    "start": "1605320",
+    "end": "1610840"
+  },
+  {
+    "text": "ability to restart without actually dropping any connections makes envoy deploys and some types of configuration",
+    "start": "1610840",
+    "end": "1617619"
+  },
+  {
+    "text": "changes like way way way simpler so this is a pretty important feature still for many different people so the the way",
+    "start": "1617619",
+    "end": "1625929"
+  },
+  {
+    "text": "that hot restart works is which is which is a little different kind of than the",
+    "start": "1625929",
+    "end": "1631389"
+  },
+  {
+    "text": "way that most systems do this is we basically allow two different processes",
+    "start": "1631389",
+    "end": "1637059"
+  },
+  {
+    "text": "of envoy to run at the same time and there's a shared memory region which",
+    "start": "1637059",
+    "end": "1643119"
+  },
+  {
+    "text": "mostly contains stats and I'm gonna talk about stats next but from an operational perspective obviously from stats you",
+    "start": "1643119",
+    "end": "1650440"
+  },
+  {
+    "text": "know we have counters we have gauges and we also have histograms particularly for",
+    "start": "1650440",
+    "end": "1655960"
+  },
+  {
+    "text": "gauges it is incredibly useful for the gauges to be consistent across hot",
+    "start": "1655960",
+    "end": "1661059"
+  },
+  {
+    "text": "restart and the reason that's useful is let's say that you have a gauge for the number of active connections if the",
+    "start": "1661059",
+    "end": "1667269"
+  },
+  {
+    "text": "gauge is only tracked in the new process when you HOT restart envoy if you were",
+    "start": "1667269",
+    "end": "1672399"
+  },
+  {
+    "text": "to have say a 15-minute drain time or an hour drain time your gauge will immediately go to zero even though",
+    "start": "1672399",
+    "end": "1678549"
+  },
+  {
+    "text": "you're box still potentially has a hundred thousand connections so from a monitoring perspective it's that's quite",
+    "start": "1678549",
+    "end": "1684009"
+  },
+  {
+    "text": "confusing so being able to share gauges and have consistent counters you know",
+    "start": "1684009",
+    "end": "1689320"
+  },
+  {
+    "text": "across these two processes it makes operations much easier so we we have",
+    "start": "1689320",
+    "end": "1694570"
+  },
+  {
+    "text": "this shared memory region where we allocate a bunch of backing memory for stats and I'll get into stats more more",
+    "start": "1694570",
+    "end": "1700509"
+  },
+  {
+    "text": "next and then we have a couple of locks that we use again not at the high throughput kind of date data path",
+    "start": "1700509",
+    "end": "1706480"
+  },
+  {
+    "text": "mechanism but you know for example if we have to allocate a stat in the shared",
+    "start": "1706480",
+    "end": "1712269"
+  },
+  {
+    "text": "memory region we have to use a lock also in share memory or for a certain type of access logging we're gonna have to",
+    "start": "1712269",
+    "end": "1718359"
+  },
+  {
+    "text": "acquire a shared memory lock or there's you know a few other things that kind of live in the shared memory region and",
+    "start": "1718359",
+    "end": "1725360"
+  },
+  {
+    "text": "in the way that it works is that when the new process starts up we have a very",
+    "start": "1725360",
+    "end": "1730640"
+  },
+  {
+    "text": "light way RPC protocol that runs over UNIX domain sockets where the two envoys",
+    "start": "1730640",
+    "end": "1736190"
+  },
+  {
+    "text": "will basically talk to each other and they'll ask each other things like what version are you like are we compatible",
+    "start": "1736190",
+    "end": "1741559"
+  },
+  {
+    "text": "and then they'll actually do socket passing so we'll pass sockets between",
+    "start": "1741559",
+    "end": "1746660"
+  },
+  {
+    "text": "the envoys and and we do that still so in for the past four or five years",
+    "start": "1746660",
+    "end": "1752770"
+  },
+  {
+    "text": "there's a way in linux where you can basically open a socket you know kind of",
+    "start": "1752770",
+    "end": "1758090"
+  },
+  {
+    "text": "multiple times so that you have to do this socket passing dance but as it turns out that code still drops",
+    "start": "1758090",
+    "end": "1764480"
+  },
+  {
+    "text": "connections in certain cases so if you want like fully droplets connection handling just have to do this dance of",
+    "start": "1764480",
+    "end": "1770720"
+  },
+  {
+    "text": "passing sockets over over this kind of over this low-level connection so what",
+    "start": "1770720",
+    "end": "1776480"
+  },
+  {
+    "text": "we do here against we have the shared memory region the envoy will boot up it'll you know allocate stats it'll",
+    "start": "1776480",
+    "end": "1782210"
+  },
+  {
+    "text": "attach to the existing shared memory region you know and then maybe it'll go through and kind of pass some sockets",
+    "start": "1782210",
+    "end": "1788780"
+  },
+  {
+    "text": "around and then you know the new envoy will basically tell the old one okay",
+    "start": "1788780",
+    "end": "1793940"
+  },
+  {
+    "text": "like I'm good I'm accepting traffic please go start draining and then based on the configuration of you know what",
+    "start": "1793940",
+    "end": "1800929"
+  },
+  {
+    "text": "will actually happen there you know there'll be some amount of drain time so 15 minutes hour two hours depending on",
+    "start": "1800929",
+    "end": "1807559"
+  },
+  {
+    "text": "what actually happens and then eventually the old envoy will shut down and this allows kind of this",
+    "start": "1807559",
+    "end": "1814790"
+  },
+  {
+    "text": "communication to happen without any any single process wrapper and that's actually key the way that this",
+    "start": "1814790",
+    "end": "1821809"
+  },
+  {
+    "text": "historically has been done is that typically a process will come up and it'll kind of build what we call like a",
+    "start": "1821809",
+    "end": "1828740"
+  },
+  {
+    "text": "little trampoline and then that will keep forking and exacting itself that",
+    "start": "1828740",
+    "end": "1834470"
+  },
+  {
+    "text": "does not work in containers because obviously the way the containers work is you have a process when the process dies",
+    "start": "1834470",
+    "end": "1839990"
+  },
+  {
+    "text": "the container goes away so if we want heart restart to work in a container world and even in containers there are",
+    "start": "1839990",
+    "end": "1845870"
+  },
+  {
+    "text": "people that want to use hot restart for various reasons because the only communication is over UNIX domain",
+    "start": "1845870",
+    "end": "1852740"
+  },
+  {
+    "text": "sockets and shared memory if you give your containers the capability to access shared memory and use domain sock",
+    "start": "1852740",
+    "end": "1859220"
+  },
+  {
+    "text": "this process will work over over normal containers which is pretty powerful so this is the first time that I know of",
+    "start": "1859220",
+    "end": "1865669"
+  },
+  {
+    "text": "that we've done something like this where it's kind of built for container container ready okay um check my time",
+    "start": "1865669",
+    "end": "1874159"
+  },
+  {
+    "text": "great so from from a stats perspective we have a couple of different things",
+    "start": "1874159",
+    "end": "1880130"
+  },
+  {
+    "text": "here and I think stats are interesting because they're obviously done at very high throughput so from a stats",
+    "start": "1880130",
+    "end": "1887270"
+  },
+  {
+    "text": "perspective we have what we call a store so this is kind of a holder of data so counters gauges and histograms we have a",
+    "start": "1887270",
+    "end": "1894679"
+  },
+  {
+    "text": "sink so these are a protocol adapter so Envoy was built from the get-go to support multiple stats backends so it",
+    "start": "1894679",
+    "end": "1901220"
+  },
+  {
+    "text": "doesn't only work with Prometheus like it'll work with stats D actually now have a G RPC metric service or we can",
+    "start": "1901220",
+    "end": "1906650"
+  },
+  {
+    "text": "push stats we have an admin server that can pull stats from so if I stats",
+    "start": "1906650",
+    "end": "1911690"
+  },
+  {
+    "text": "endpoint so Envoy can work in both a push mode and a pull mode so if you're using stats D you're gonna push if",
+    "start": "1911690",
+    "end": "1918350"
+  },
+  {
+    "text": "you're using Prometheus you're gonna pull and then one of the really interesting things that we have is a",
+    "start": "1918350",
+    "end": "1923840"
+  },
+  {
+    "text": "concept of a scope so a scope is a grouping of stats that together can",
+    "start": "1923840",
+    "end": "1929510"
+  },
+  {
+    "text": "basically be deleted and this this you wouldn't think that it's important but it ends up being incredibly important",
+    "start": "1929510",
+    "end": "1935929"
+  },
+  {
+    "text": "because when you're using shared memory and you have an envoy architecture where you can live reload clusters and",
+    "start": "1935929",
+    "end": "1943429"
+  },
+  {
+    "text": "listeners if you don't allow stats to be block deleted you will leak a ton of memory right because over time",
+    "start": "1943429",
+    "end": "1950030"
+  },
+  {
+    "text": "you're gonna update clusters you're going to delete clusters you're gonna update listeners you're gonna delete listeners so you need grouping of status",
+    "start": "1950030",
+    "end": "1957830"
+  },
+  {
+    "text": "that you can basically delete together so the way that stats work which is very",
+    "start": "1957830",
+    "end": "1964159"
+  },
+  {
+    "text": "interesting and again is it's been heavily tuned for performance mainly because envoy has a lot of stats and",
+    "start": "1964159",
+    "end": "1969880"
+  },
+  {
+    "text": "alter stats quite a bit is we have again",
+    "start": "1969880",
+    "end": "1975350"
+  },
+  {
+    "text": "using some of the concepts that we've talked about between RCU and TLS we have",
+    "start": "1975350",
+    "end": "1980900"
+  },
+  {
+    "text": "a mechanism where we have a kind of a global store for stats stores contain",
+    "start": "1980900",
+    "end": "1986210"
+  },
+  {
+    "text": "scopes and then depending on the type of data we either allocated from shared memory or from process",
+    "start": "1986210",
+    "end": "1992250"
+  },
+  {
+    "text": "memory so counters and gauges are allocated from shared memory histograms",
+    "start": "1992250",
+    "end": "1998670"
+  },
+  {
+    "text": "are allocated from processed memory the reason for this mainly is that histograms are a lot more complicated",
+    "start": "1998670",
+    "end": "2004580"
+  },
+  {
+    "text": "than counters and gauges and there is not as much operational benefit of",
+    "start": "2004580",
+    "end": "2009770"
+  },
+  {
+    "text": "having them in shared memory and consistent between restarts like doesn't matter that much if you have timing data",
+    "start": "2009770",
+    "end": "2014900"
+  },
+  {
+    "text": "that you lose from the old process and the way that this process works to keep",
+    "start": "2014900",
+    "end": "2020330"
+  },
+  {
+    "text": "it very high-performance is that you know it's all thread-local so basically if your thread or a worker",
+    "start": "2020330",
+    "end": "2027800"
+  },
+  {
+    "text": "and you're looking for stat will first actually look in a thread local cache of",
+    "start": "2027800",
+    "end": "2032900"
+  },
+  {
+    "text": "that stat and if the stat exists we just return it immediately without acquiring any locks and then that stack can be",
+    "start": "2032900",
+    "end": "2038990"
+  },
+  {
+    "text": "incremented if the stat does not exist in the cache it'll go back to the central store it'll look there if it's",
+    "start": "2038990",
+    "end": "2045950"
+  },
+  {
+    "text": "there it'll add to the cache and then basically return it if it's not on the central store then it'll go into a slow",
+    "start": "2045950",
+    "end": "2051230"
+  },
+  {
+    "text": "path and it will allocate it from shared memory or from process memory it'll store it in the central store and then",
+    "start": "2051230",
+    "end": "2057138"
+  },
+  {
+    "text": "it'll move it into the TLS cache and then from then forward it doesn't actually ever have to be accessed via",
+    "start": "2057139",
+    "end": "2062360"
+  },
+  {
+    "text": "via lock and the one interesting piece here is that because we delete scopes",
+    "start": "2062360",
+    "end": "2068990"
+  },
+  {
+    "text": "you have to have the ability to flush the cache so what will end up happening is that when a listener or a cluster",
+    "start": "2068990",
+    "end": "2075138"
+  },
+  {
+    "text": "gets destroyed on the main thread will basically post a message to all of the",
+    "start": "2075139",
+    "end": "2080570"
+  },
+  {
+    "text": "workers to say hey I don't need this cluster anymore I don't need this listener anymore go ahead and delete all",
+    "start": "2080570",
+    "end": "2086419"
+  },
+  {
+    "text": "of that cache data and that's how we basically keep things up to date without actually leaking any memory lastly and",
+    "start": "2086419",
+    "end": "2094010"
+  },
+  {
+    "text": "this is something that just got implemented and actually then got reverted and now I was a bit about to get added again is is TLS histograms and",
+    "start": "2094010",
+    "end": "2102320"
+  },
+  {
+    "text": "I'll go through this super quick cousin I think I'm basically out of time and",
+    "start": "2102320",
+    "end": "2107380"
+  },
+  {
+    "text": "what we do here from this perspective is we have kind of a parent histogram we",
+    "start": "2107380",
+    "end": "2114080"
+  },
+  {
+    "text": "have a TLS histogram that you know lives on every worker and then from the merge",
+    "start": "2114080",
+    "end": "2119750"
+  },
+  {
+    "text": "perspective what we actually do is we allow the ability for the history to accept values into a kind of a",
+    "start": "2119750",
+    "end": "2126590"
+  },
+  {
+    "text": "primary histogram and a backing histogram so the way that it works is that on the TLS worker it's flipping",
+    "start": "2126590",
+    "end": "2133400"
+  },
+  {
+    "text": "back and forth between histogram a and histogram B again requiring no locks and",
+    "start": "2133400",
+    "end": "2139369"
+  },
+  {
+    "text": "then during the merge process what actually happens is we post to all of the workers we tell it to flip the",
+    "start": "2139369",
+    "end": "2146600"
+  },
+  {
+    "text": "current histogram so that again no locking is needed then we can go back and if we're currently writing into",
+    "start": "2146600",
+    "end": "2153170"
+  },
+  {
+    "text": "histogram a then we can go we can merge all of the backing histogram B's without without any any locks so that is TLS",
+    "start": "2153170",
+    "end": "2161630"
+  },
+  {
+    "text": "histograms so in a quick summary from an envoy perspective you know we're biasing",
+    "start": "2161630",
+    "end": "2168890"
+  },
+  {
+    "text": "for developer productivity you know we would like to obviously you know have high throughput low-latency be want",
+    "start": "2168890",
+    "end": "2174619"
+  },
+  {
+    "text": "developers to be productive writing code it's an embarrassingly parallel architecture aiming this scaled a very",
+    "start": "2174619",
+    "end": "2181100"
+  },
+  {
+    "text": "high hardware thread counts we use a lot of our CU and TLS designed for",
+    "start": "2181100",
+    "end": "2187010"
+  },
+  {
+    "text": "containerized world and again try to have extensibility at every every different layer so thank you my normal",
+    "start": "2187010",
+    "end": "2195350"
+  },
+  {
+    "text": "plug for lift we aren't we're hiring so feel free to come grab me if you're interested in jobs love growing the",
+    "start": "2195350",
+    "end": "2201950"
+  },
+  {
+    "text": "envoy community i over am my time starting to talk but i'll be standing here and i can comment answer questions",
+    "start": "2201950",
+    "end": "2208820"
+  },
+  {
+    "text": "and thank you very much [Applause]",
+    "start": "2208820",
+    "end": "2213800"
+  },
+  {
+    "text": "[Music] [Applause]",
+    "start": "2214810",
+    "end": "2217449"
+  }
+]

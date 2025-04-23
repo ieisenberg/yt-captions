@@ -1,0 +1,2156 @@
+[
+  {
+    "start": "0",
+    "end": "64000"
+  },
+  {
+    "text": "hi everyone today we'll be talking a little bit about stateful services and how we at Netflix iterate on them my",
+    "start": "30",
+    "end": "7259"
+  },
+  {
+    "text": "name is joy Lynch and I'm a senior software engineer on the cloud database engineering team at Netflix I love every",
+    "start": "7259",
+    "end": "13980"
+  },
+  {
+    "text": "form of distributed system you can come up with I mostly work with databases like Cassandra elasticsearch zookeeper",
+    "start": "13980",
+    "end": "20430"
+  },
+  {
+    "text": "and then on the side I dabble with service meshes and today I would like to",
+    "start": "20430",
+    "end": "25650"
+  },
+  {
+    "text": "talk to you about four main things so I'm going to start with a little bit about Netflix kind of cloud philosophy",
+    "start": "25650",
+    "end": "31679"
+  },
+  {
+    "text": "how we try to approach deploying services into the AWS cloud then I'm",
+    "start": "31679",
+    "end": "37590"
+  },
+  {
+    "text": "going to talk about what makes stateful services particularly difficult and perhaps challenging to deploy to cloud",
+    "start": "37590",
+    "end": "44579"
+  },
+  {
+    "text": "environments and then I'll kind of get into in my opinion the fun part of the talk where we'll be talking about how do",
+    "start": "44579",
+    "end": "49680"
+  },
+  {
+    "text": "we actually solve these problems how do we manage state in the cloud and then I'll close with a couple of kind of like",
+    "start": "49680",
+    "end": "55410"
+  },
+  {
+    "text": "order of magnitude improvements we're like little kind like little changes can make big differences in how you manage state all right so let's get started",
+    "start": "55410",
+    "end": "63180"
+  },
+  {
+    "text": "with the cloud philosophy I Netflix's cloud philosophy is that the am I the Amazon machine machine image is the",
+    "start": "63180",
+    "end": "70500"
+  },
+  {
+    "start": "64000",
+    "end": "64000"
+  },
+  {
+    "text": "source of truth so we don't use configuration management we don't use many you know typical things that you",
+    "start": "70500",
+    "end": "77040"
+  },
+  {
+    "text": "might use as your source of truth instead we use the ami as a source of truth and there are kind of two pieces I",
+    "start": "77040",
+    "end": "82439"
+  },
+  {
+    "text": "know you can't read this but the two pieces are your base ami which has operating system information for example",
+    "start": "82439",
+    "end": "88829"
+  },
+  {
+    "text": "in this case a cassandra ami is based on a xenial base image and that comes with",
+    "start": "88829",
+    "end": "94439"
+  },
+  {
+    "text": "a bunch of kind of baked in defaults for us things like enhanced networking turned on you know good good stuff like",
+    "start": "94439",
+    "end": "100979"
+  },
+  {
+    "text": "that using a HTM VM type and then on top of that my team the CD team layers on",
+    "start": "100979",
+    "end": "107880"
+  },
+  {
+    "text": "all of the pieces of software which turn this base ami into a cassandra image and that's all the things that we layer on",
+    "start": "107880",
+    "end": "114390"
+  },
+  {
+    "text": "you might not be able to see it but the basic idea is things like specific kernels for example like our databases",
+    "start": "114390",
+    "end": "120420"
+  },
+  {
+    "text": "run very recent Linux kernels because they have significantly better IO schedulers I'm you know we might",
+    "start": "120420",
+    "end": "126479"
+  },
+  {
+    "text": "actually install like the database as well as like tooling to help us collect metrics or do state transfers so",
+    "start": "126479",
+    "end": "133760"
+  },
+  {
+    "text": "this is really great because if the if the ami is the source of truth then you've achieved immutability the ami is",
+    "start": "133760",
+    "end": "141490"
+  },
+  {
+    "start": "134000",
+    "end": "134000"
+  },
+  {
+    "text": "the state of the in of the instance to build new code you just build a new ami",
+    "start": "141490",
+    "end": "146660"
+  },
+  {
+    "text": "to deploy I mean you guys have all heard about Netflix as red-black ASG deploys with new AM eyes yes geez just out of",
+    "start": "146660",
+    "end": "153980"
+  },
+  {
+    "text": "scaling groups and aSG's just take care of it for you if something fails it spawns a new instance and this is like",
+    "start": "153980",
+    "end": "159590"
+  },
+  {
+    "text": "unicorns and rainbows right it's like pretty great except for that when you start looking at stateful instances I",
+    "start": "159590",
+    "end": "166070"
+  },
+  {
+    "text": "you know they have all the things that non stateful instances have like code like services different databases configuration our data stores or maybe",
+    "start": "166070",
+    "end": "173780"
+  },
+  {
+    "text": "like more heavily tuned at the OS level then then stateless instances might be we have tooling but what else what else",
+    "start": "173780",
+    "end": "181310"
+  },
+  {
+    "text": "do we have on our state flow census well we have a whole lot of mutable state and that mutable state kind of",
+    "start": "181310",
+    "end": "187820"
+  },
+  {
+    "text": "just throws that immutable am I out the window because the moment that you start making you know a certain chart of a",
+    "start": "187820",
+    "end": "193610"
+  },
+  {
+    "text": "database different from another shard then that becomes kind of a special instance and it's no longer based on the",
+    "start": "193610",
+    "end": "199459"
+  },
+  {
+    "text": "PMI so I like to say that I at Amazon or sorry Netflix when we moved to a",
+    "start": "199459",
+    "end": "205940"
+  },
+  {
+    "text": "service-oriented architecture we kind of just like threw all our state into a closet which is the the data tier and it",
+    "start": "205940",
+    "end": "213350"
+  },
+  {
+    "text": "didn't make the problem go away it just moved the problem from your applications to your data stores and to your to your",
+    "start": "213350",
+    "end": "219170"
+  },
+  {
+    "text": "stateful caching layers and this is a difficult because state is really heavy",
+    "start": "219170",
+    "end": "224810"
+  },
+  {
+    "text": "and what I mean by that is that when instances fail or when hard drives fail",
+    "start": "224810",
+    "end": "230530"
+  },
+  {
+    "text": "it's very difficult to move and recover the state that you had before and just",
+    "start": "230530",
+    "end": "236690"
+  },
+  {
+    "text": "to illustrate that I've made a little diagram here that kind of shows a couple of commonly used instances both for on",
+    "start": "236690",
+    "end": "244820"
+  },
+  {
+    "text": "disk storage and for in memory storage and this graph might be a little tricky but on the x-axis we've got essentially",
+    "start": "244820",
+    "end": "251540"
+  },
+  {
+    "text": "how much money that instance costs per gigabyte of memory on the instance so this is kind of just a normalized you",
+    "start": "251540",
+    "end": "257060"
+  },
+  {
+    "text": "know how much money am i spending print per gigabyte of memory and you can see that for example like the c5 the c5 d",
+    "start": "257060",
+    "end": "263419"
+  },
+  {
+    "text": "out there is like quite expensive per gigabyte because that's you know it's it's meant for compute versus like the x1 e6 teens",
+    "start": "263419",
+    "end": "270050"
+  },
+  {
+    "text": "which are made for large and memory data stores are very cheap per gigabyte and then the size of these circles or",
+    "start": "270050",
+    "end": "276889"
+  },
+  {
+    "text": "squares corresponds to the cost per gigabyte stored and what I'm trying to do there is show kind of that there are",
+    "start": "276889",
+    "end": "283850"
+  },
+  {
+    "text": "certain instances like d2 so the big purple blob is our d2 instances and they",
+    "start": "283850",
+    "end": "289100"
+  },
+  {
+    "text": "are very cheap per gigabyte you can store a lot of data on them but there's a trade-off and that trade-off is on the",
+    "start": "289100",
+    "end": "295310"
+  },
+  {
+    "text": "y-axis which is how long it takes to recover the state from that instance if it fails so this is a pretty simple",
+    "start": "295310",
+    "end": "302030"
+  },
+  {
+    "text": "calculation it's basically just take the amount of data and divide by the network bandwidth and you can see that a d2 if",
+    "start": "302030",
+    "end": "307160"
+  },
+  {
+    "text": "it fails might take you a day to recover that state compared to for example a c5 D where you can recover it on the order",
+    "start": "307160",
+    "end": "313220"
+  },
+  {
+    "text": "of 15 minutes and then like you're typically stateful instances like your I two's take six hours your i3 is take two",
+    "start": "313220",
+    "end": "319310"
+  },
+  {
+    "text": "hours and this is really what I mean by state is heavy it's this graph it's the",
+    "start": "319310",
+    "end": "324590"
+  },
+  {
+    "text": "idea that when you lose your instances it takes you a while to recover the",
+    "start": "324590",
+    "end": "329630"
+  },
+  {
+    "text": "state that you've lost and this really leads to another realization which is",
+    "start": "329630",
+    "end": "334700"
+  },
+  {
+    "start": "332000",
+    "end": "332000"
+  },
+  {
+    "text": "that stateful services are kind of just like different trade offs along the you know caches all the way down its caches",
+    "start": "334700",
+    "end": "341900"
+  },
+  {
+    "text": "all the way down starting with your application and the state that you store in your application might be in memory it's going to be very expensive and it's",
+    "start": "341900",
+    "end": "348979"
+  },
+  {
+    "text": "not going to terribly durable like those instances die frequently maybe you ought to scale them up and down using a lot of scaling groups and then from your app",
+    "start": "348979",
+    "end": "356479"
+  },
+  {
+    "text": "maybe use some type of distributed in memory store like et cache which is pictured here essentially just memcache",
+    "start": "356479",
+    "end": "362180"
+  },
+  {
+    "text": "and then on top of that you I you then move one layer down and again your cost",
+    "start": "362180",
+    "end": "368630"
+  },
+  {
+    "text": "is going down but your durability is going up so now you've hit a data store that stores its data and drives and then",
+    "start": "368630",
+    "end": "374030"
+  },
+  {
+    "text": "finally of course you know the the source of truth for all of Netflix if you will is the backups in s3 area these",
+    "start": "374030",
+    "end": "380360"
+  },
+  {
+    "text": "are these are where we get our durability from that's also the cheapest but there are additional trade-offs for",
+    "start": "380360",
+    "end": "387229"
+  },
+  {
+    "text": "example you're also trading off latency the cheaper and the more reliable and more durable storage tends to be slower",
+    "start": "387229",
+    "end": "394190"
+  },
+  {
+    "text": "so for example s3 is slower than drives the than hard drives that are slower than in memory but they're also more reliable so",
+    "start": "394190",
+    "end": "404000"
+  },
+  {
+    "start": "403000",
+    "end": "403000"
+  },
+  {
+    "text": "these understandings kind of help us understand what makes stateful service is different from stateless ones I in",
+    "start": "404000",
+    "end": "409639"
+  },
+  {
+    "text": "addition to them having state what that really means though is that every instance that accepts writes that",
+    "start": "409639",
+    "end": "414830"
+  },
+  {
+    "text": "accepts mutations is kind of a special snowflake and you have to deal with it you can't just let it die and just be",
+    "start": "414830",
+    "end": "421759"
+  },
+  {
+    "text": "like oh well we'll just launch a new instance from the AMI you have to be cognizant that your state matters the",
+    "start": "421759",
+    "end": "428509"
+  },
+  {
+    "text": "second thing is that we've seen that they have that stateful instances have many components for example they have",
+    "start": "428509",
+    "end": "434120"
+  },
+  {
+    "text": "the different data stores they have all those different packages and those different things require different",
+    "start": "434120",
+    "end": "440539"
+  },
+  {
+    "text": "iteration rates and that's going to be kind of the key for us dealing with stateful instances is that we don't have",
+    "start": "440539",
+    "end": "445669"
+  },
+  {
+    "text": "to throw away the state for a lot of these components so this leads me to how",
+    "start": "445669",
+    "end": "452180"
+  },
+  {
+    "text": "we're going to manage state so now that we kind of understand the problem we can start trying to tackle it how do we",
+    "start": "452180",
+    "end": "457789"
+  },
+  {
+    "text": "manage a state well the first strategy is don't manage state it's a really great idea we can just use a different",
+    "start": "457789",
+    "end": "464210"
+  },
+  {
+    "text": "closet and put all of our states somewhere else so I kind of consider Amazon GP to EBS gp2 and il-1 to be",
+    "start": "464210",
+    "end": "472340"
+  },
+  {
+    "text": "their own kind of closets in the sense of now your data store is stateless the",
+    "start": "472340",
+    "end": "477889"
+  },
+  {
+    "text": "state is handled by EBS you don't have to worry about it anymore if your instance dies and a new one comes up you",
+    "start": "477889",
+    "end": "483380"
+  },
+  {
+    "text": "just reattach the EBS volume it takes a few minutes and this is a very easy and",
+    "start": "483380",
+    "end": "488860"
+  },
+  {
+    "text": "accessible way to turn your stateful instances into stateless instances but",
+    "start": "488860",
+    "end": "495650"
+  },
+  {
+    "text": "there are some trade-offs and the biggest trade-off is performance so Amazon Instant State and things like a3s this",
+    "start": "495650",
+    "end": "502639"
+  },
+  {
+    "text": "this here is a latency graph of I three disk i/os you can see here that I'm running a tool called bio snoop which",
+    "start": "502639",
+    "end": "508490"
+  },
+  {
+    "text": "allows you to inspect every single IO against the drive and see how fast it is so a great tool I use it all the time",
+    "start": "508490",
+    "end": "513770"
+  },
+  {
+    "text": "and one thing that's amazing here is that Amazon a3 is an i3 4x large is achieving a median IO latency of 64",
+    "start": "513770",
+    "end": "521390"
+  },
+  {
+    "text": "microseconds that's insanely fast and in fact instance store these days like",
+    "start": "521390",
+    "end": "527570"
+  },
+  {
+    "text": "things like nvme instant store is often not the bottleneck in our systems anymore because it's so fast but EBS is",
+    "start": "527570",
+    "end": "535620"
+  },
+  {
+    "text": "slower EBS gp2 which i think is a fair comparison to instance SSDs is",
+    "start": "535620",
+    "end": "540630"
+  },
+  {
+    "text": "comparatively slow and it's about an order of magnitude slower so instead of 64 microseconds we're going to be",
+    "start": "540630",
+    "end": "546180"
+  },
+  {
+    "text": "talking about 800 microseconds which is still historically very fast but comparatively it is slow and so we have",
+    "start": "546180",
+    "end": "553500"
+  },
+  {
+    "text": "to be cognizant of this when we're designing our system so for example we might care a lot more about our OS cache",
+    "start": "553500",
+    "end": "559290"
+  },
+  {
+    "text": "hit rates on EBS packed instances then on ephemeral ones because if we start missing the OS cache we're going to be",
+    "start": "559290",
+    "end": "565830"
+  },
+  {
+    "text": "seeing millisecond latency 'z instead of 60 microsecond ones but EBS GP 2 also",
+    "start": "565830",
+    "end": "572130"
+  },
+  {
+    "text": "has positives so this is a diagram from a paper that we put out about the effect",
+    "start": "572130",
+    "end": "579720"
+  },
+  {
+    "text": "of a kind of cluster size and cassandra and the availability and I just wanted",
+    "start": "579720",
+    "end": "585630"
+  },
+  {
+    "text": "to call it this one graph because I think that it is a very important one to understand which is that when you use EBS and you make your stateful instances",
+    "start": "585630",
+    "end": "593520"
+  },
+  {
+    "text": "stateless you actually get significant availability games and the reason for that is because when an instance fails",
+    "start": "593520",
+    "end": "600000"
+  },
+  {
+    "text": "you don't have to wait that recovery time which is really kind of if you think about it in a replicated database",
+    "start": "600000",
+    "end": "605370"
+  },
+  {
+    "text": "where maybe you have three copies if you've lost one copy you're at risk right and so you want to minimize the",
+    "start": "605370",
+    "end": "611010"
+  },
+  {
+    "text": "risk iteration so here we can see that distribute databases like Cassandra on the y-axis we measure their outages as",
+    "start": "611010",
+    "end": "618270"
+  },
+  {
+    "text": "expected centuries between outages that's pretty cool that's something that is pretty unique to distribute databases",
+    "start": "618270",
+    "end": "624000"
+  },
+  {
+    "text": "but we can also see that the top line which is running with an EBS attached",
+    "start": "624000",
+    "end": "629340"
+  },
+  {
+    "text": "volume is almost one or even two orders of magnitude more reliable than then",
+    "start": "629340",
+    "end": "635040"
+  },
+  {
+    "text": "running on instance store and that purely just comes down to the math of recovery time if you're curious about",
+    "start": "635040",
+    "end": "641220"
+  },
+  {
+    "text": "the source of these now suppose I've left links in the in the in the bottom of the slide so you can go check it out if you don't if you want to see it for",
+    "start": "641220",
+    "end": "647820"
+  },
+  {
+    "text": "yourself so we've talked about how GP 2 has trade-offs I there's another option",
+    "start": "647820",
+    "end": "655230"
+  },
+  {
+    "start": "650000",
+    "end": "650000"
+  },
+  {
+    "text": "in the strategy 0 where we don't manage the state which is that we can use an even bigger closet so Amazon has a",
+    "start": "655230",
+    "end": "661260"
+  },
+  {
+    "text": "number of really great database-as-a-service options and that flicks absolutely makes",
+    "start": "661260",
+    "end": "666890"
+  },
+  {
+    "text": "use of these things like aurora things like dynamodb ElastiCache alright the state of someone else's problem they'll",
+    "start": "666890",
+    "end": "673580"
+  },
+  {
+    "text": "pick up the pager you don't have to and the only real trade-off is that you have to pay them for it and that leads me to",
+    "start": "673580",
+    "end": "680420"
+  },
+  {
+    "text": "kind of this checklist of questions too or should you run your own staged stateful services or should you make it",
+    "start": "680420",
+    "end": "685970"
+  },
+  {
+    "text": "Amazon's problem well if you need a specific datastore API that Amazon",
+    "start": "685970",
+    "end": "691190"
+  },
+  {
+    "text": "doesn't provide then perhaps you need to run your own datastore if you need to be under full control of the latency 8 SL",
+    "start": "691190",
+    "end": "697790"
+  },
+  {
+    "text": "O's or SLA is with that system then you're probably going to need to run your in datastore maybe you need to meet",
+    "start": "697790",
+    "end": "703490"
+  },
+  {
+    "text": "specific regulatory requirements have the end-to-end understanding of where your data is that it's encrypted at all",
+    "start": "703490",
+    "end": "708680"
+  },
+  {
+    "text": "times how it's encrypted things like that number four is a common one for Netflix at our scale you know the budget",
+    "start": "708680",
+    "end": "716390"
+  },
+  {
+    "text": "of paying someone else to solve the problem can actually be quite significant and this can often be a",
+    "start": "716390",
+    "end": "722690"
+  },
+  {
+    "text": "driving reason for you to run your own stateful services then finally I mean if you like enjoying debugging difficult",
+    "start": "722690",
+    "end": "729050"
+  },
+  {
+    "text": "distribute systems problems running stateful services is a great way to do that alright so now now that we've",
+    "start": "729050",
+    "end": "736730"
+  },
+  {
+    "text": "talked about the option which is not to manage State now let's talk about how we are going to manage state if we've",
+    "start": "736730",
+    "end": "741920"
+  },
+  {
+    "text": "decided we're going to so step one is isolating your state and what I mean by this is thinking about how you layout",
+    "start": "741920",
+    "end": "749090"
+  },
+  {
+    "start": "747000",
+    "end": "747000"
+  },
+  {
+    "text": "your ec2 instances in particular the vast majority of the info of the code or",
+    "start": "749090",
+    "end": "754910"
+  },
+  {
+    "text": "where the services that run on an instance are probably pretty stateless things like the actual database itself",
+    "start": "754910",
+    "end": "760310"
+  },
+  {
+    "text": "the Debian package the OS image the system packages background services these things can be changed without",
+    "start": "760310",
+    "end": "766610"
+  },
+  {
+    "text": "affecting the mutable state which is the really difficult problem so we want to",
+    "start": "766610",
+    "end": "771620"
+  },
+  {
+    "text": "try to keep those stateless components to one side and we want to keep the stateful components things like the actual mutable data maybe our log data",
+    "start": "771620",
+    "end": "777800"
+  },
+  {
+    "text": "that to a different slide and this will come in an important later when we're actually trying to like move the state",
+    "start": "777800",
+    "end": "783860"
+  },
+  {
+    "text": "around but the second thing that we have to do before we start deploying stable",
+    "start": "783860",
+    "end": "790640"
+  },
+  {
+    "text": "services is have a really good end-to-end test system and this really comes down to",
+    "start": "790640",
+    "end": "796040"
+  },
+  {
+    "text": "if you're going to manage stateful services I you have to be very careful that the changes that you're making aren't going to corrupt that state and",
+    "start": "796040",
+    "end": "803090"
+  },
+  {
+    "text": "the way that we do it at Netflix is we actually for every change for every change of a data store am I",
+    "start": "803090",
+    "end": "810770"
+  },
+  {
+    "text": "we actually spin that up in a real multi-region cluster typically six to twelve nodes I and we send real traffic",
+    "start": "810770",
+    "end": "817820"
+  },
+  {
+    "text": "at it with a tool called nd bench which is a benchmarking tool that Netflix open sourced and what that does is it allows",
+    "start": "817820",
+    "end": "824180"
+  },
+  {
+    "text": "us to exercise failure modes with real traffic load and then ensure that we're",
+    "start": "824180",
+    "end": "829400"
+  },
+  {
+    "text": "still meeting our SOS and RSL eyes and that's the last stage so we deploy and we test incremental e kind of taking",
+    "start": "829400",
+    "end": "836870"
+  },
+  {
+    "text": "incremental risk with our stateful service starting out in our test environment moving out piece by piece to",
+    "start": "836870",
+    "end": "842090"
+  },
+  {
+    "text": "production and the reason why I wanted to call this out is because I we spend a",
+    "start": "842090",
+    "end": "847700"
+  },
+  {
+    "text": "lot of time and Netflix when we manage stateful services making sure that we're not corrupting our users data and I",
+    "start": "847700",
+    "end": "854210"
+  },
+  {
+    "text": "think that a lot of and I think that that is one of the reasons that we've been able to do it so successfully in",
+    "start": "854210",
+    "end": "859520"
+  },
+  {
+    "text": "the cloud is that we have these pipelines and we've built this infrastructure alright so let's get down to the strategies so the first strategy",
+    "start": "859520",
+    "end": "865550"
+  },
+  {
+    "text": "from you for managing instances is to actually just mutate the instances in place so all of those things which",
+    "start": "865550",
+    "end": "871550"
+  },
+  {
+    "text": "aren't the state we can just change without replacing the instance and in",
+    "start": "871550",
+    "end": "877190"
+  },
+  {
+    "start": "876000",
+    "end": "876000"
+  },
+  {
+    "text": "order to do that we have to be cognizant of what we're doing so we have to make these mutations safe there are lots of",
+    "start": "877190",
+    "end": "883220"
+  },
+  {
+    "text": "ways to do this one commonly used way in industry is configuration management puppet chef these tools work they work",
+    "start": "883220",
+    "end": "889940"
+  },
+  {
+    "text": "really well and their industry standard at Netflix we take a different route we",
+    "start": "889940",
+    "end": "895040"
+  },
+  {
+    "text": "mostly do package upgrades because in our opinion Debian packages like and upgrading Debian packages is a very",
+    "start": "895040",
+    "end": "901520"
+  },
+  {
+    "text": "tried-and-true technique and one thing that we're starting to do more and more is actually using containers to kind of",
+    "start": "901520",
+    "end": "908000"
+  },
+  {
+    "text": "divvy up that stateful instance into smaller stateless ones that we can then replace as a unit containers are",
+    "start": "908000",
+    "end": "914330"
+  },
+  {
+    "text": "obviously less mature than puppet or sorry than configuration management or package upgrades but we believe that",
+    "start": "914330",
+    "end": "919430"
+  },
+  {
+    "text": "it's safer because you're actually like replacing whole components at once rather than putting your instance in",
+    "start": "919430",
+    "end": "927080"
+  },
+  {
+    "text": "like maybe an untested state why do we do this why do we mutate one word it's",
+    "start": "927080",
+    "end": "932959"
+  },
+  {
+    "start": "929000",
+    "end": "929000"
+  },
+  {
+    "text": "because of speed mutation of stateful instances is extremely fast we can upgrade our data stores in about an hour",
+    "start": "932959",
+    "end": "938809"
+  },
+  {
+    "text": "we can make configuration changes things like changing a Gemmell setting or we're assist control in a few seconds we can",
+    "start": "938809",
+    "end": "945379"
+  },
+  {
+    "text": "upgrade the operating system with a reboot in 15 minutes and we can do background process upgrades things like",
+    "start": "945379",
+    "end": "951589"
+  },
+  {
+    "text": "sidecars or metrics sidecars you know 30 seconds so super fast this means that",
+    "start": "951589",
+    "end": "956689"
+  },
+  {
+    "text": "our changes to do a whole cluster might take days rather than maybe hours exciting rather than maybe weeks or",
+    "start": "956689",
+    "end": "963769"
+  },
+  {
+    "text": "months if we actually had to move the state around but there's one type of change that we can't solve with",
+    "start": "963769",
+    "end": "969379"
+  },
+  {
+    "text": "mutations and that's when we want to change the hardware so if we want to change from I two's die 3s or I 3 is to",
+    "start": "969379",
+    "end": "975049"
+  },
+  {
+    "text": "m5 d S or m5 DS does e 1 DS you get the idea we can't do that with mutation",
+    "start": "975049",
+    "end": "980359"
+  },
+  {
+    "text": "because we can't just you know reboot the hardware into a different configuration so it's a serious drawback",
+    "start": "980359",
+    "end": "987459"
+  },
+  {
+    "text": "and at the end of the day mutations make up many of the ways the Netflix deploy",
+    "start": "987459",
+    "end": "993739"
+  },
+  {
+    "text": "software to stateful instances you know it's super easy it's fast it's tried-and-true",
+    "start": "993739",
+    "end": "998919"
+  },
+  {
+    "text": "and you know one thing is that if you try to concentrate on making it safe",
+    "start": "998919",
+    "end": "1004720"
+  },
+  {
+    "text": "it's it can be pretty safe that being said it completely violates the ami is a",
+    "start": "1004720",
+    "end": "1011859"
+  },
+  {
+    "text": "source of truth and this is a big problem for us in Netflix because we try to align more or less on the idea that",
+    "start": "1011859",
+    "end": "1017979"
+  },
+  {
+    "text": "the ami is the source of truth and that we don't have like random point mutations and transitions and states",
+    "start": "1017979",
+    "end": "1024459"
+  },
+  {
+    "text": "that are untested and we've actually run into this where we end up with like fleet drift where some part of the",
+    "start": "1024459",
+    "end": "1029889"
+  },
+  {
+    "text": "database is running one version and some part starting a different version and then somebody makes an assumption and before you know you've you've caused an",
+    "start": "1029889",
+    "end": "1036069"
+  },
+  {
+    "text": "outage or worse corrupted data so this this can be problematic but that doesn't",
+    "start": "1036069",
+    "end": "1041529"
+  },
+  {
+    "text": "mean that we don't use it I so I now for the rest of the talk about kind of building into these columns so I",
+    "start": "1041529",
+    "end": "1047409"
+  },
+  {
+    "text": "strategy there we talked about Netflix absolutely uses those EBS RDS DynamoDB",
+    "start": "1047409",
+    "end": "1053830"
+  },
+  {
+    "text": "s3 we make very heavy use of them but when we do run our databases almost all",
+    "start": "1053830",
+    "end": "1058869"
+  },
+  {
+    "text": "of our data stores are stateful instances we allow mutations on them for the reason of speed but there are other ways",
+    "start": "1058869",
+    "end": "1065950"
+  },
+  {
+    "text": "to manage state as well so the second strategy I want to talk about is migrating state with your clients so if",
+    "start": "1065950",
+    "end": "1072220"
+  },
+  {
+    "text": "you have a client of your stateful service you can move state using that client so in this example we've got a",
+    "start": "1072220",
+    "end": "1078010"
+  },
+  {
+    "text": "service micro macro I don't really care it's a service that's sending data to a",
+    "start": "1078010",
+    "end": "1083289"
+  },
+  {
+    "text": "in-memory cache in this case evie cache running an old am I so am i XYZ and we",
+    "start": "1083289",
+    "end": "1089620"
+  },
+  {
+    "start": "1089000",
+    "end": "1089000"
+  },
+  {
+    "text": "would like to upgrade it to a mi a-b-c in order to do that we follow a simple",
+    "start": "1089620",
+    "end": "1094960"
+  },
+  {
+    "text": "five-step process step one is we mirror rights between the old cache and the new",
+    "start": "1094960",
+    "end": "1099970"
+  },
+  {
+    "text": "one then we wait caches hopefully have a reasonable TTL on them we wait for the",
+    "start": "1099970",
+    "end": "1107320"
+  },
+  {
+    "start": "1102000",
+    "end": "1102000"
+  },
+  {
+    "text": "TTL and then at that point the data set in the new cluster should match the data",
+    "start": "1107320",
+    "end": "1112750"
+  },
+  {
+    "text": "set in the old cluster at that point we can start failing right reads over so I",
+    "start": "1112750",
+    "end": "1118630"
+  },
+  {
+    "start": "1115000",
+    "end": "1115000"
+  },
+  {
+    "text": "put a little asterisk here because in practice we don't do this but I really wish we did which is you can read from",
+    "start": "1118630",
+    "end": "1124899"
+  },
+  {
+    "text": "the old cluster as the source of truth and then you can check it against the content of the new cluster and then make",
+    "start": "1124899",
+    "end": "1130539"
+  },
+  {
+    "text": "sure they match in practice what we do is we fetch from the new cluster and then if we have a Miss we read from the",
+    "start": "1130539",
+    "end": "1135909"
+  },
+  {
+    "text": "old cluster finally once we're happy with the consistency of the data store we live launch reads from the new",
+    "start": "1135909",
+    "end": "1143110"
+  },
+  {
+    "start": "1138000",
+    "end": "1138000"
+  },
+  {
+    "text": "cluster running the new AMI and then at that point we're done we can retire the old cluster this is something that the",
+    "start": "1143110",
+    "end": "1149080"
+  },
+  {
+    "start": "1146000",
+    "end": "1146000"
+  },
+  {
+    "text": "cloud very it makes very easy because we can just make a new cache cluster move",
+    "start": "1149080",
+    "end": "1154090"
+  },
+  {
+    "text": "writes over and then tear down the old one something that's very unique to cloud cloud infrastructures so migrating",
+    "start": "1154090",
+    "end": "1161110"
+  },
+  {
+    "start": "1160000",
+    "end": "1160000"
+  },
+  {
+    "text": "stay at the client compared to for example mutations has some pros and cons one of the pros is that it's relatively",
+    "start": "1161110",
+    "end": "1167470"
+  },
+  {
+    "text": "easy to do and it works well for ephemeral data stores so things like caches search engines logs Kafka elastic",
+    "start": "1167470",
+    "end": "1174909"
+  },
+  {
+    "text": "search memcache but it has some cons too which is and some of you might have",
+    "start": "1174909",
+    "end": "1180130"
+  },
+  {
+    "text": "noticed it's not a hundred percent consistent what happens if an operation succeeds on one side but not on the",
+    "start": "1180130",
+    "end": "1185260"
+  },
+  {
+    "text": "other well then you have a little bit inconsistency and for caches search engines and logs this maybe isn't the",
+    "start": "1185260",
+    "end": "1190690"
+  },
+  {
+    "text": "biggest deal but it's hard to use it ephemeral data sorry for not ephemeral data things like persistent caches which",
+    "start": "1190690",
+    "end": "1198270"
+  },
+  {
+    "text": "is maybe an oxymoronic term but I'm curious how many of you guys have caches were if the cache failed your your",
+    "start": "1198270",
+    "end": "1205590"
+  },
+  {
+    "text": "application would fail a good number of you I mean it's absolutely true at Netflix as well I call those persistent",
+    "start": "1205590",
+    "end": "1211110"
+  },
+  {
+    "text": "caches because if you lose that state then your databases are going to have a bad day and you can't really use this",
+    "start": "1211110",
+    "end": "1217410"
+  },
+  {
+    "text": "technique for that instead what I we have to do is the next strategy alright you also can't use it obviously for",
+    "start": "1217410",
+    "end": "1223710"
+  },
+  {
+    "text": "sources of truth things like your source of truth data store via my sequel database or Cassandra database and this",
+    "start": "1223710",
+    "end": "1230429"
+  },
+  {
+    "text": "is legitimately more difficult than just like upgrading a Debian package so",
+    "start": "1230429",
+    "end": "1235860"
+  },
+  {
+    "text": "Netflix uses client state mutation for client mediated mutation for mostly",
+    "start": "1235860",
+    "end": "1242159"
+  },
+  {
+    "text": "ephemeral data things like caches search engines and logs but we typically don't use it for backwards compatible sources",
+    "start": "1242159",
+    "end": "1249570"
+  },
+  {
+    "text": "of truth all right so the final strategy that I want to talk about is migrating",
+    "start": "1249570",
+    "end": "1255090"
+  },
+  {
+    "text": "state at the server so we've talked about just changing the instances as they are we've talked about having your",
+    "start": "1255090",
+    "end": "1261179"
+  },
+  {
+    "text": "clients move the data for you the final strategy I want to talk about is just",
+    "start": "1261179",
+    "end": "1266850"
+  },
+  {
+    "text": "taking the state from one set of servers and putting it on the other ones in",
+    "start": "1266850",
+    "end": "1271890"
+  },
+  {
+    "text": "order to do that I want to walk through a similar example where we've got a service talking to a datastore in this",
+    "start": "1271890",
+    "end": "1278309"
+  },
+  {
+    "text": "case a Cassandra cluster running ami XYZ and the first thing we do is we use the",
+    "start": "1278309",
+    "end": "1285600"
+  },
+  {
+    "start": "1283000",
+    "end": "1283000"
+  },
+  {
+    "text": "capabilities of the cloud to just launch a whole mirror set of nodes so in this case we have three nodes in the old",
+    "start": "1285600",
+    "end": "1291659"
+  },
+  {
+    "text": "cluster node 1 node 2 and node 3 we launched 3 buddy nodes node 1 prime 2",
+    "start": "1291659",
+    "end": "1297690"
+  },
+  {
+    "text": "Prime and three prime and they're crucially running the new AMI and now we",
+    "start": "1297690",
+    "end": "1303090"
+  },
+  {
+    "text": "just kind of go through a kind of choreographed dance so we start by partitioning the app from node 1 a very",
+    "start": "1303090",
+    "end": "1309630"
+  },
+  {
+    "start": "1306000",
+    "end": "1306000"
+  },
+  {
+    "text": "effective way to partition an app from a datastore is to just stop the datastore and we move state from node 1 to node 1",
+    "start": "1309630",
+    "end": "1316740"
+  },
+  {
+    "text": "Prime as fast as we humanly can and after we've done that we can now promote",
+    "start": "1316740",
+    "end": "1323580"
+  },
+  {
+    "start": "1321000",
+    "end": "1321000"
+  },
+  {
+    "text": "node 1 prime into the foster and it can start taking reads and writes from the service and in the",
+    "start": "1323580",
+    "end": "1329410"
+  },
+  {
+    "text": "background we run consistency repair to make sure that any rights that may have happened in the meantime are repaired",
+    "start": "1329410",
+    "end": "1335590"
+  },
+  {
+    "text": "typically any distributed database which supports having a node fail will do this automatically for you because if nodes",
+    "start": "1335590",
+    "end": "1341650"
+  },
+  {
+    "text": "are failing then they can stop start and then repair themselves and then we",
+    "start": "1341650",
+    "end": "1347860"
+  },
+  {
+    "start": "1347000",
+    "end": "1347000"
+  },
+  {
+    "text": "simply repeat this process so we can I you know do this one by one node 1 and",
+    "start": "1347860",
+    "end": "1354760"
+  },
+  {
+    "text": "node 2 and at the end of the day we're going to end up with three nodes which are running the new ami have all of the",
+    "start": "1354760",
+    "end": "1361480"
+  },
+  {
+    "text": "state from the old nodes and are completely consistent so that's the",
+    "start": "1361480",
+    "end": "1367960"
+  },
+  {
+    "text": "final step we just kind of do a final consistency repair the strategy very much relies on your data store allowing",
+    "start": "1367960",
+    "end": "1374980"
+  },
+  {
+    "text": "single node failures and an important thing to note here is that we're very heavily leaning on our data store to",
+    "start": "1374980",
+    "end": "1381910"
+  },
+  {
+    "text": "ensure data fidelity so for example cassandra and other scalar data stores are kind of built for this type of",
+    "start": "1381910",
+    "end": "1388180"
+  },
+  {
+    "text": "operation but almost any data store can work in this way so migrating state of",
+    "start": "1388180",
+    "end": "1396430"
+  },
+  {
+    "start": "1395000",
+    "end": "1395000"
+  },
+  {
+    "text": "the server is pretty pretty great because it works for any distributed database it exploits the concept that a",
+    "start": "1396430",
+    "end": "1402250"
+  },
+  {
+    "text": "single node can fail at any time and one thing that that we really like at Netflix is that this exercises total",
+    "start": "1402250",
+    "end": "1408130"
+  },
+  {
+    "text": "chaos on your clients because the IPS are changing the nodes are moving around you're restarting your database how many",
+    "start": "1408130",
+    "end": "1414220"
+  },
+  {
+    "text": "of you guys out there have heard we can't restart the database if we do that Layton sees will go out nobody okay a",
+    "start": "1414220",
+    "end": "1420640"
+  },
+  {
+    "text": "couple people I hear that all the time we can't restart the database well a good way to make sure that you can restart the database is to restart your",
+    "start": "1420640",
+    "end": "1427390"
+  },
+  {
+    "text": "stateful services all the time when you're doing your upgrades but on the drawback side this system is pretty",
+    "start": "1427390",
+    "end": "1433180"
+  },
+  {
+    "text": "complicated requires complex orchestration and like I talked about earlier with those you know data gravity",
+    "start": "1433180",
+    "end": "1439920"
+  },
+  {
+    "text": "illustrations moving state is slow so moving all of that state from one instance to another take some time it's",
+    "start": "1439920",
+    "end": "1446290"
+  },
+  {
+    "text": "much faster or something like Amazon EBS or or where you can just attach the volume from one instance and attach it",
+    "start": "1446290",
+    "end": "1451780"
+  },
+  {
+    "text": "to the other but this also presents some performance challenges not only in terms",
+    "start": "1451780",
+    "end": "1456790"
+  },
+  {
+    "text": "of how fast you can do it but you just lost for example your OS caches so by moving from one set of",
+    "start": "1456790",
+    "end": "1462399"
+  },
+  {
+    "text": "hardware to the other you've completely lost your oh s page cache which is keeping hot blocks of your frequently",
+    "start": "1462399",
+    "end": "1468009"
+  },
+  {
+    "text": "accessed data in memory you've also now moved from old instances which I've run",
+    "start": "1468009",
+    "end": "1473379"
+  },
+  {
+    "text": "for a long time and have them like demonstrably worked really well to new instances which might have some hardware",
+    "start": "1473379",
+    "end": "1479620"
+  },
+  {
+    "text": "issues so you have to like think about these performance challenges when you're doing this all the time and then finally",
+    "start": "1479620",
+    "end": "1486009"
+  },
+  {
+    "text": "and this is really important this type of strategy requires that your data store be backwards compatible which if",
+    "start": "1486009",
+    "end": "1492399"
+  },
+  {
+    "text": "any of you guys have worked with like elastic search or Cassandra or other data stores they're not terribly backwards compatible all the time which",
+    "start": "1492399",
+    "end": "1499120"
+  },
+  {
+    "text": "naturally makes the strategy kind of problematic all right so to kind of",
+    "start": "1499120",
+    "end": "1505570"
+  },
+  {
+    "text": "summarize the strategies that we've talked about today we've started with the option of not managing state we've",
+    "start": "1505570",
+    "end": "1512019"
+  },
+  {
+    "text": "then kind of moved through mutating stateful instances to actually moving",
+    "start": "1512019",
+    "end": "1517539"
+  },
+  {
+    "text": "the state using clients and we've finished with moving the state using the server and we mostly use the last",
+    "start": "1517539",
+    "end": "1525190"
+  },
+  {
+    "text": "technique for sources of truth things like Cassandra things like persistent caches all right so now that we kind of",
+    "start": "1525190",
+    "end": "1532629"
+  },
+  {
+    "text": "understand the high-level ideas let's dive into some case studies of how we can we can you know take these basic",
+    "start": "1532629",
+    "end": "1538659"
+  },
+  {
+    "text": "ideas and we can really take it to 11 so the first thing I want to talk about is a problem that we frequently ran into",
+    "start": "1538659",
+    "end": "1545289"
+  },
+  {
+    "start": "1541000",
+    "end": "1541000"
+  },
+  {
+    "text": "with mutation which is that there's a lot of risk involved so in this example we have one ami which is you know",
+    "start": "1545289",
+    "end": "1552309"
+  },
+  {
+    "text": "running some standard stuff like metrics discovery but some things I want to point out it's running an older version",
+    "start": "1552309",
+    "end": "1557649"
+  },
+  {
+    "text": "of a datastore Cassander 2.1 it's running an older version of an operating system ubuntu trusty it has some sis",
+    "start": "1557649",
+    "end": "1564009"
+  },
+  {
+    "text": "controls things like or excessive sis if s settings like read ahead set 128 it's",
+    "start": "1564009",
+    "end": "1569409"
+  },
+  {
+    "text": "using upstart for all of its jobs it's not running F as trim that was a surprise for us I it's running a certain",
+    "start": "1569409",
+    "end": "1576129"
+  },
+  {
+    "text": "Network TC traffic control queuing discipline and it's using a deadline IO",
+    "start": "1576129",
+    "end": "1582070"
+  },
+  {
+    "text": "scheduler so we want to mutate that instance over to the instance on the",
+    "start": "1582070",
+    "end": "1587500"
+  },
+  {
+    "text": "right with ami ABC and some things that I want to call out are some particularly",
+    "start": "1587500",
+    "end": "1592720"
+  },
+  {
+    "text": "tricky parts of this mutation so for example we're trying to go from one version of a database to another that's",
+    "start": "1592720",
+    "end": "1598899"
+  },
+  {
+    "text": "fun we're trying to go from one version of an init system to another we're trying to go from upstart to system D",
+    "start": "1598899",
+    "end": "1604570"
+  },
+  {
+    "text": "we're trying to go from one set of well tested you know Lubuntu packages and trusty to another",
+    "start": "1604570",
+    "end": "1609909"
+  },
+  {
+    "text": "set of wealth has two packages and xenial and we're trying to change you",
+    "start": "1609909",
+    "end": "1615279"
+  },
+  {
+    "text": "know disk i/o schedulers and network i/o schedulers so I like to sit like how even do we do this like each one of",
+    "start": "1615279",
+    "end": "1620710"
+  },
+  {
+    "text": "these mutations is kind of like special case like in one case we're gonna go to a sysctl command in one case we're gonna",
+    "start": "1620710",
+    "end": "1626350"
+  },
+  {
+    "text": "go you know bring down the database wait a little bit bring it back up in another case we're gonna like maybe uninstall a",
+    "start": "1626350",
+    "end": "1631750"
+  },
+  {
+    "text": "Debian package reinstall it for something like upstart to system D like I mean how do you even do that",
+    "start": "1631750",
+    "end": "1637830"
+  },
+  {
+    "text": "live without without removing instance well i some of these are frankly",
+    "start": "1637830",
+    "end": "1646019"
+  },
+  {
+    "text": "impossible to do live without downtime things like moving your NIT process from",
+    "start": "1646019",
+    "end": "1651159"
+  },
+  {
+    "text": "upstart to system D that's gonna require us to reboot the instance at least and things like upgrading the database this",
+    "start": "1651159",
+    "end": "1656919"
+  },
+  {
+    "text": "was pretty scary and if we're trying to do that mutation along with all the other ones who knows what could happen",
+    "start": "1656919",
+    "end": "1663059"
+  },
+  {
+    "text": "but there might be some easy ones like you know switching queuing disciplines that's like an online operation that we",
+    "start": "1663059",
+    "end": "1668320"
+  },
+  {
+    "text": "can do pretty easily so what we did at Netflix was we looked at this problem we said okay well we know that in order to",
+    "start": "1668320",
+    "end": "1674889"
+  },
+  {
+    "text": "handle the hard problem so the hard problem is going from like upstart to systemd or from 2.1 cassandra to 3 doe",
+    "start": "1674889",
+    "end": "1680799"
+  },
+  {
+    "text": "cassandra we're gonna have to reboot the instance and so we did was we designed a way of rebooting the instance that where",
+    "start": "1680799",
+    "end": "1688869"
+  },
+  {
+    "text": "you would start running a my XYZ and then after a reboot you would be running",
+    "start": "1688869",
+    "end": "1694299"
+  },
+  {
+    "text": "the new ami let me explain how that works so as a simple three-step process how many of",
+    "start": "1694299",
+    "end": "1699789"
+  },
+  {
+    "text": "you guys are familiar with live CDs yeah I we essentially built a live CD for our",
+    "start": "1699789",
+    "end": "1705340"
+  },
+  {
+    "text": "for our AWS stateful instances and the way this works is we look up some metadata like which ami would be like to",
+    "start": "1705340",
+    "end": "1711879"
+  },
+  {
+    "text": "run in this case ABC we write that into a little in memory bootloader and then",
+    "start": "1711879",
+    "end": "1717159"
+  },
+  {
+    "text": "we reboot the am I actually the AWS ec2 instance into an in-memory",
+    "start": "1717159",
+    "end": "1723760"
+  },
+  {
+    "text": "which essentially is a live CD that goes to s3 gets the root volume for that am I",
+    "start": "1723760",
+    "end": "1729220"
+  },
+  {
+    "text": "and just blasts it on to the root volume then followed with a second reboot now",
+    "start": "1729220",
+    "end": "1735700"
+  },
+  {
+    "text": "our instance is running the new ami ABC it loads its data starts the database and we're good to go so we've been using",
+    "start": "1735700",
+    "end": "1744040"
+  },
+  {
+    "start": "1743000",
+    "end": "1743000"
+  },
+  {
+    "text": "the ami live upgrade technique to take our stateful instances where we don't want to lose the ephemeral drives",
+    "start": "1744040",
+    "end": "1750070"
+  },
+  {
+    "text": "alright and safely move from one tested ami to another and this is really great",
+    "start": "1750070",
+    "end": "1757600"
+  },
+  {
+    "text": "because we only ever run tested a mais that have gone through that pipeline that I talked about earlier there's no",
+    "start": "1757600",
+    "end": "1763809"
+  },
+  {
+    "text": "like partial States where like we're sort of kinda and am i ABC and sort of kinda and am i XYZ we're either running",
+    "start": "1763809",
+    "end": "1770200"
+  },
+  {
+    "text": "one known state or another there's no data transfer there's no IP change which means that the probability of corrupting",
+    "start": "1770200",
+    "end": "1777070"
+  },
+  {
+    "text": "data is very low and this can be done remarkably fast so in in production we",
+    "start": "1777070",
+    "end": "1783040"
+  },
+  {
+    "text": "can live upgrade a Mis and about 10 minutes per node the vast majority at that time is just",
+    "start": "1783040",
+    "end": "1788080"
+  },
+  {
+    "text": "the time it takes to write data to the root volume but there are some cons in",
+    "start": "1788080",
+    "end": "1793150"
+  },
+  {
+    "text": "particular there are probably better ways to achieve this goal so containers are a good way to do that",
+    "start": "1793150",
+    "end": "1798850"
+  },
+  {
+    "text": "however even with containers you couldn't for example change the underlying operating system we think put",
+    "start": "1798850",
+    "end": "1805809"
+  },
+  {
+    "text": "the more promising technique is something like active passive flashing the way that for example Chromebooks work or the way that you know core OS",
+    "start": "1805809",
+    "end": "1813160"
+  },
+  {
+    "text": "upgrades work where you kind of have to route volumes and then you can kind of like switch between them so we think",
+    "start": "1813160",
+    "end": "1819580"
+  },
+  {
+    "text": "that's probably maybe the next step of this technique and it obviously again doesn't work for instance type upgrades",
+    "start": "1819580",
+    "end": "1825429"
+  },
+  {
+    "text": "we can't magically turn the instance from an i to to an i3 just by rebooting it although amazon if you're listening",
+    "start": "1825429",
+    "end": "1831309"
+  },
+  {
+    "text": "that'd be pretty cool and finally it confuses your security team because all",
+    "start": "1831309",
+    "end": "1837940"
+  },
+  {
+    "text": "of the metadata about the instance is still saying it's running this old am i so like we get lots of notices from our",
+    "start": "1837940",
+    "end": "1843460"
+  },
+  {
+    "text": "security team being like hey you guys are running an ami from like a year and a half ago and we're like no no trust us it's actually not so that's kind of",
+    "start": "1843460",
+    "end": "1850929"
+  },
+  {
+    "text": "confusing something like active passive flashing or if ec2 mate is a native product then",
+    "start": "1850929",
+    "end": "1856029"
+  },
+  {
+    "text": "then then we wouldn't have that problem all right so am i alive upgrade has been hugely helpful to us to safely make",
+    "start": "1856029",
+    "end": "1861249"
+  },
+  {
+    "text": "mutations its how for example Netflix did the Ubuntu trusty to have been to",
+    "start": "1861249",
+    "end": "1866289"
+  },
+  {
+    "text": "xenial upgrade just a few months ago alright so the next problem that I want",
+    "start": "1866289",
+    "end": "1872649"
+  },
+  {
+    "text": "to talk about is when you are moving state around or rebooting your instances for your am I live upgrade your OS page",
+    "start": "1872649",
+    "end": "1879729"
+  },
+  {
+    "text": "cache gets completely eliminated so the OS page cache is this it's what most of",
+    "start": "1879729",
+    "end": "1886989"
+  },
+  {
+    "text": "your memory on an instance is probably being used for when you're running a stateful instance so in this case we have a Java program in this case running",
+    "start": "1886989",
+    "end": "1892539"
+  },
+  {
+    "text": "Cassandra it's using 12 gigs of memory on the instance a hundred gigs of memory is being used for the OS page cache",
+    "start": "1892539",
+    "end": "1898179"
+  },
+  {
+    "text": "which is caching the most frequently used blocks of your underlying ephemeral drives and in a healthy state a database",
+    "start": "1898179",
+    "end": "1905139"
+  },
+  {
+    "text": "is doing almost all of its operations against blocks of data that are cached on the page cache typically if you're",
+    "start": "1905139",
+    "end": "1910570"
+  },
+  {
+    "text": "missing the page cache more than like a few percentage then your performance will be quite poor and your customers",
+    "start": "1910570",
+    "end": "1917139"
+  },
+  {
+    "text": "will be set so this is a problem because any time that you reboot or replace an",
+    "start": "1917139",
+    "end": "1922509"
+  },
+  {
+    "text": "instance so using any of the techniques that we're talking about if you used the ami upgrade and reboot it or if you migrate State to new instances then",
+    "start": "1922509",
+    "end": "1930429"
+  },
+  {
+    "text": "you're going to lose your cache and this is really problematic because you're very fast p99 Layton sees now spike and",
+    "start": "1930429",
+    "end": "1936580"
+  },
+  {
+    "text": "you might cause an incident so that's no good so what can we do about it well seems pretty straightforward we can warm",
+    "start": "1936580",
+    "end": "1943749"
+  },
+  {
+    "start": "1942000",
+    "end": "1942000"
+  },
+  {
+    "text": "the caches and there's an excellent tool written by a netflix engineer Josh Snyder called happy cache which does",
+    "start": "1943749",
+    "end": "1949059"
+  },
+  {
+    "text": "exactly this so when you're running the old am i you can dump the metadata about",
+    "start": "1949059",
+    "end": "1954629"
+  },
+  {
+    "text": "which blocks of files are cached it relies on the min course that's call if",
+    "start": "1954629",
+    "end": "1960039"
+  },
+  {
+    "text": "you're curious this happens very fast it takes about two minutes to generate the dump file which is just metadata so it",
+    "start": "1960039",
+    "end": "1966339"
+  },
+  {
+    "text": "doesn't contain any sensitive information the only thing that it contains is these blocks of these files are hot nos cache then you can reboot",
+    "start": "1966339",
+    "end": "1974139"
+  },
+  {
+    "text": "replaced your heart just desire you then take that happy cache dump file and you",
+    "start": "1974139",
+    "end": "1981249"
+  },
+  {
+    "text": "put it on the new instance or in the case of an ami upgrade it's already there I all you have to do now is do happy cache load which goes at full",
+    "start": "1981249",
+    "end": "1987759"
+  },
+  {
+    "text": "bandwidth of your draw switch on modern ec2 instances is exceedingly fast I think for our I 3 8x",
+    "start": "1987759",
+    "end": "1995430"
+  },
+  {
+    "text": "large instances we can we can fully freshen the cache cache in a few minutes which is totally worth it because your P",
+    "start": "1995430",
+    "end": "2002630"
+  },
+  {
+    "text": "99 s don't suffer when you start your data store in step 3 your data store comes up as if it had never gone down",
+    "start": "2002630",
+    "end": "2008890"
+  },
+  {
+    "text": "and your clients are never the wiser that under the hood you have completely replaced the hardware out from",
+    "start": "2008890",
+    "end": "2014990"
+  },
+  {
+    "text": "underneath them so this is a crucial tool that we rely heavily on in production to ensure that when we're",
+    "start": "2014990",
+    "end": "2020030"
+  },
+  {
+    "text": "removing state from one instance to the other we can do so performant ly and quickly all right so let's keep going",
+    "start": "2020030",
+    "end": "2029120"
+  },
+  {
+    "start": "2028000",
+    "end": "2028000"
+  },
+  {
+    "text": "let's keep talking about more fun problems I so now we're we're we you",
+    "start": "2029120",
+    "end": "2034670"
+  },
+  {
+    "text": "know we're doing these live I and my upgrades and we're you know keeping the caches warm we're making sure that we don't have any performance impact and",
+    "start": "2034670",
+    "end": "2040970"
+  },
+  {
+    "text": "now we hit this really annoying problem which is that when you're running at scale the naive algorithm doesn't work so well",
+    "start": "2040970",
+    "end": "2048280"
+  },
+  {
+    "text": "so on the left here you see a 12 node",
+    "start": "2048280",
+    "end": "2053929"
+  },
+  {
+    "text": "cluster which if we do one note at a time with a foreigner gig data set it takes about 20 minutes for 400 gigs to",
+    "start": "2053929",
+    "end": "2060679"
+  },
+  {
+    "text": "transfer with I three Forex lectures so doing one note at a time with this process of replacing instances might",
+    "start": "2060679",
+    "end": "2068090"
+  },
+  {
+    "text": "take you four hours not so bad you know you start in the morning go get coffee take for our coffee break come back and",
+    "start": "2068090",
+    "end": "2074020"
+  },
+  {
+    "text": "you've gotten new instances but when you get to higher skills like maybe 300",
+    "start": "2074020",
+    "end": "2080270"
+  },
+  {
+    "text": "nodes across three three regions so 100 nodes per region with 400 gigs if you",
+    "start": "2080270",
+    "end": "2085700"
+  },
+  {
+    "text": "just do one note at a time then it's going to take you four days to upgrade that cluster and this is a problem",
+    "start": "2085700",
+    "end": "2092510"
+  },
+  {
+    "text": "because what if the upgrade is crucial to for example your your streaming working what if in green Netflix others",
+    "start": "2092510",
+    "end": "2099710"
+  },
+  {
+    "text": "are at your door because they can't stream well four days is a long time to go without Netflix so this is a problem",
+    "start": "2099710",
+    "end": "2105860"
+  },
+  {
+    "text": "and we have to solve it so how did we solve it well the cloud makes it pretty",
+    "start": "2105860",
+    "end": "2111560"
+  },
+  {
+    "start": "2109000",
+    "end": "2109000"
+  },
+  {
+    "text": "easy because you can exploit massive parallelism so I had Netflix we back up",
+    "start": "2111560",
+    "end": "2118580"
+  },
+  {
+    "text": "our databases we even restore them sometimes I and it turns out that the ability to",
+    "start": "2118580",
+    "end": "2126430"
+  },
+  {
+    "text": "restore your database can be really helpful when you want to migrate state from one to another so if instead of",
+    "start": "2126430",
+    "end": "2132960"
+  },
+  {
+    "text": "taking one note at a time and following that algorithm if like take the note out move the state put it back if instead we",
+    "start": "2132960",
+    "end": "2139960"
+  },
+  {
+    "text": "could say hey we have the entire data set in s3 as of like a minute ago because we're doing continuous backups",
+    "start": "2139960",
+    "end": "2146260"
+  },
+  {
+    "text": "so we can just spin up 300 nodes and have them all pull down their backups",
+    "start": "2146260",
+    "end": "2151780"
+  },
+  {
+    "text": "from like you know five minutes ago and if you you know write write this system",
+    "start": "2151780",
+    "end": "2157980"
+  },
+  {
+    "text": "properly you can get the entire data set of any scale data store restored and",
+    "start": "2157980",
+    "end": "2164620"
+  },
+  {
+    "text": "about the time it takes to do one node in the old system so that's where this 20 minute comes in so the time to",
+    "start": "2164620",
+    "end": "2170890"
+  },
+  {
+    "text": "replace these these instances now takes about seven minutes per node just to restart the database plus 20 minutes for",
+    "start": "2170890",
+    "end": "2178870"
+  },
+  {
+    "text": "the initial download and this is amazing because it means that you are going to go from this four days to a few hours or",
+    "start": "2178870",
+    "end": "2186430"
+  },
+  {
+    "text": "if you push the parallelism all the way so hopefully if you're deploying a distribute database in the Amazon you",
+    "start": "2186430",
+    "end": "2193120"
+  },
+  {
+    "text": "have availability zone tolerance hopefully you can deal with one easy failing well a good way to make sure",
+    "start": "2193120",
+    "end": "2199240"
+  },
+  {
+    "text": "that you can deal with one easy failing is to take the entire AZ down when you're replacing it with a new set of",
+    "start": "2199240",
+    "end": "2205690"
+  },
+  {
+    "text": "hardware so if you do entire AZ's at once which may be you know your mileage",
+    "start": "2205690",
+    "end": "2212050"
+  },
+  {
+    "text": "might vary but if you take down an entire AZ's at once using this process you can replace a data store that used",
+    "start": "2212050",
+    "end": "2217690"
+  },
+  {
+    "text": "to take four days in about 50 minutes so that's even better than the naive",
+    "start": "2217690",
+    "end": "2222850"
+  },
+  {
+    "text": "algorithm on the 12 node cluster and one of the nice things about this type of algorithm is that it's it doesn't it",
+    "start": "2222850",
+    "end": "2229390"
+  },
+  {
+    "text": "scales kind of sub linearly in the sense of because you're doing all of the data recovery in parallel all at once you",
+    "start": "2229390",
+    "end": "2235660"
+  },
+  {
+    "text": "don't have to you don't have to kind of pay that cost for each node so yeah with",
+    "start": "2235660",
+    "end": "2242830"
+  },
+  {
+    "text": "this you know kind of simple realization that we've got our datastore backups and we can use them I you can have multiple",
+    "start": "2242830",
+    "end": "2248470"
+  },
+  {
+    "text": "orders of magnitude faster upgrades of your stateful instances and the cloud very uniquely enables this because",
+    "start": "2248470",
+    "end": "2255070"
+  },
+  {
+    "text": "Amazon s3 is one of the most impressive stateful systems I ever liked it I've seen it do",
+    "start": "2255070",
+    "end": "2260350"
+  },
+  {
+    "text": "absolutely insane bandwidth - - you see - alright but let's say you start doing",
+    "start": "2260350",
+    "end": "2266859"
+  },
+  {
+    "start": "2266000",
+    "end": "2266000"
+  },
+  {
+    "text": "this and everything's wonderful and then you run in to this you know somewhat frustrating problem which is that you",
+    "start": "2266859",
+    "end": "2274480"
+  },
+  {
+    "text": "know you can you can download all that data and you can throw it on your hard drives but do you actually know that",
+    "start": "2274480",
+    "end": "2280660"
+  },
+  {
+    "text": "that data is the data that was on the old instance well the only way to know is to check and here I've kind of put",
+    "start": "2280660",
+    "end": "2289030"
+  },
+  {
+    "text": "together a little bit of an example where we have a node with 800 gigabytes",
+    "start": "2289030",
+    "end": "2294130"
+  },
+  {
+    "text": "of data you can see that mostly it's one large file although most of the files are small and we're just trying to get a",
+    "start": "2294130",
+    "end": "2303460"
+  },
+  {
+    "text": "checksum of all the data so if you just kind of naively paralyse on files here a little bit of sprinkle a little bit of X",
+    "start": "2303460",
+    "end": "2309580"
+  },
+  {
+    "text": "args on there and and you can hash all your data in an hour and 22 minutes well",
+    "start": "2309580",
+    "end": "2316660"
+  },
+  {
+    "text": "that's really slow especially if we're trying to replace our instances in a few minutes well if each one takes an hour",
+    "start": "2316660",
+    "end": "2323619"
+  },
+  {
+    "text": "and 22 minutes to verify you know we're gonna be around here all year waiting for our data to verify so how do you",
+    "start": "2323619",
+    "end": "2329859"
+  },
+  {
+    "text": "solve this problem well historically we've solve this problem by just not checking but we decided that that was a",
+    "start": "2329859",
+    "end": "2337060"
+  },
+  {
+    "text": "bad idea so now we check and in order to solve the problem we started with well",
+    "start": "2337060",
+    "end": "2343570"
+  },
+  {
+    "text": "what is the problem so I ran it went and I ran H top that's what I saw can",
+    "start": "2343570",
+    "end": "2349810"
+  },
+  {
+    "text": "anybody identify what resource we are running out of we're running out of CPU",
+    "start": "2349810",
+    "end": "2355530"
+  },
+  {
+    "text": "sha-256 is a you know CPU intensive hash function and in fact most cryptographic",
+    "start": "2355530",
+    "end": "2361570"
+  },
+  {
+    "text": "hash functions are going to be quite slow we can confirm the suspicion that it's CPU bound and not anything else",
+    "start": "2361570",
+    "end": "2366880"
+  },
+  {
+    "text": "bound by looking at the drives so here I'm running an i/o stack command which",
+    "start": "2366880",
+    "end": "2372070"
+  },
+  {
+    "text": "shows us what kind of throughput we're getting I 3 and the AMIA drives should be able to get a lot more throughput",
+    "start": "2372070",
+    "end": "2378550"
+  },
+  {
+    "text": "than this this is pitiful 400 megabytes per second when we're running all 16 cores like come on we're gonna be here",
+    "start": "2378550",
+    "end": "2385630"
+  },
+  {
+    "text": "all week like there's no there's no this is not good and then when we drive when we when we reduced to a single core shock 2:56 is",
+    "start": "2385630",
+    "end": "2392980"
+  },
+  {
+    "text": "only able to get 166 megabytes per second which is you have 800 gigabytes of data like it's gonna take hours this",
+    "start": "2392980",
+    "end": "2399700"
+  },
+  {
+    "text": "is no good so the solution to this might seem pretty straightforward",
+    "start": "2399700",
+    "end": "2405010"
+  },
+  {
+    "text": "the solution is to use a better hashing function so there's a great hash written by by Yann collet he's also the author",
+    "start": "2405010",
+    "end": "2412960"
+  },
+  {
+    "text": "of the LZ for compression algorithm called X X hash and with X X hash using the same naive parallelize paralyzation",
+    "start": "2412960",
+    "end": "2420000"
+  },
+  {
+    "text": "instead of an hour and 20 minutes hashing all that data takes 12 minutes and the reason that it's so much faster",
+    "start": "2420000",
+    "end": "2427690"
+  },
+  {
+    "text": "is because xx hash can actually push an ec2 instance to its disk throughput",
+    "start": "2427690",
+    "end": "2435970"
+  },
+  {
+    "text": "limit as opposed to being limited by CPU now we're limited by the nvme drives which amazingly on a knife through 4x",
+    "start": "2435970",
+    "end": "2442540"
+  },
+  {
+    "text": "large is pushing four gigabytes per second which means that if we do a little bit of intelligence on instead of",
+    "start": "2442540",
+    "end": "2450040"
+  },
+  {
+    "text": "just doing a you know find pipe to X args if we do like a little bit of intelligence with like using a bit of a",
+    "start": "2450040",
+    "end": "2455200"
+  },
+  {
+    "text": "Merkel tree we can hash that 800 gigs in about four minutes because we can get",
+    "start": "2455200",
+    "end": "2460360"
+  },
+  {
+    "text": "four gigabytes per second the entire time this benchmark was kind of throttled by that single process hashing",
+    "start": "2460360",
+    "end": "2466360"
+  },
+  {
+    "text": "that single file whereas if we split that file up and then hash each one in parallel and then combine it into a",
+    "start": "2466360",
+    "end": "2472660"
+  },
+  {
+    "text": "resulting hash then we can get that four gigabytes per second hole the whole time",
+    "start": "2472660",
+    "end": "2477820"
+  },
+  {
+    "text": "but it's not a typo that has gigabytes per second not gigabits nvme drives are so amazingly fast that it's almost never",
+    "start": "2477820",
+    "end": "2486220"
+  },
+  {
+    "text": "your bottleneck these days all right so we've gone through a couple of examples of how we can get order of",
+    "start": "2486220",
+    "end": "2492850"
+  },
+  {
+    "text": "magnitude improvements with like relatively minor changes I just want to wrap up by kind of going back to the",
+    "start": "2492850",
+    "end": "2500680"
+  },
+  {
+    "text": "overview of the talk so we have many strategies and each one of these strategies we can apply you know",
+    "start": "2500680",
+    "end": "2506320"
+  },
+  {
+    "text": "relatively simple straightforward optimizations to take them from something that might take you know",
+    "start": "2506320",
+    "end": "2511600"
+  },
+  {
+    "text": "months or weeks to something that takes a few minutes and just to reiterate not",
+    "start": "2511600",
+    "end": "2517060"
+  },
+  {
+    "text": "managing state is again a very viable option it's often the right choice especially",
+    "start": "2517060",
+    "end": "2522300"
+  },
+  {
+    "text": "if you don't have the engineering resources to devote to some of these systems but if you do want a managed",
+    "start": "2522300",
+    "end": "2528030"
+  },
+  {
+    "text": "state then you have three main options you can mutate it if you mutate it make sure you make it safe make sure that you",
+    "start": "2528030",
+    "end": "2534480"
+  },
+  {
+    "text": "avoid drifts otherwise you're gonna have a very bad outage on your hand if you",
+    "start": "2534480",
+    "end": "2539730"
+  },
+  {
+    "text": "need to actually migrate the state from one set of hardware to the other you can deal with clients the only thing to be wary of here is of course consistency",
+    "start": "2539730",
+    "end": "2546300"
+  },
+  {
+    "text": "and coordinating with your clients is going to be the key and then finally you",
+    "start": "2546300",
+    "end": "2551460"
+  },
+  {
+    "text": "can migrate state using the server this is by far the safest option but it also",
+    "start": "2551460",
+    "end": "2558380"
+  },
+  {
+    "text": "takes a little bit of trickery in order to make it quick to do and perform it",
+    "start": "2558380",
+    "end": "2564540"
+  },
+  {
+    "text": "for your clients so if that thank you guys very much I'd be happy to take any questions down",
+    "start": "2564540",
+    "end": "2571740"
+  },
+  {
+    "text": "here at the end [Applause]",
+    "start": "2571740",
+    "end": "2580930"
+  }
+]

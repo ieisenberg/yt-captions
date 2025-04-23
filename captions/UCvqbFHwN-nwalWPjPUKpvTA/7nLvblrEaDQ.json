@@ -1,0 +1,1797 @@
+[
+  {
+    "text": "welcome to kubecon North America today Kong and David will be going",
+    "start": "0",
+    "end": "6899"
+  },
+  {
+    "text": "through this migration from single node kubernetes control print to Edge a production uh over to you David and Kong",
+    "start": "6899",
+    "end": "15780"
+  },
+  {
+    "text": "for housekeeping q a will be at the end so please raise your hand and we'll come back to you",
+    "start": "15780",
+    "end": "21600"
+  },
+  {
+    "text": "thank you",
+    "start": "21600",
+    "end": "24199"
+  },
+  {
+    "text": "software engineers at databricks and we're going to be talking about our experience migrating from a single node",
+    "start": "31500",
+    "end": "38399"
+  },
+  {
+    "text": "kubernetes control plane to a highly available control plane in production at",
+    "start": "38399",
+    "end": "43559"
+  },
+  {
+    "text": "databricks so uh briefly the outline of the talk is",
+    "start": "43559",
+    "end": "49020"
+  },
+  {
+    "text": "that first I'll talk about uh how we use kubernetes at databricks I'll talk about the non-ha control plane architecture",
+    "start": "49020",
+    "end": "55559"
+  },
+  {
+    "text": "that we used for many years uh then I'll discuss the ha control plane architecture that we moved to and how it",
+    "start": "55559",
+    "end": "63000"
+  },
+  {
+    "text": "handles different kinds of failures then Kong is going to talk about the migration process we use to move from",
+    "start": "63000",
+    "end": "69659"
+  },
+  {
+    "text": "the non-ha control plane to the ha control plane and then we'll wrap up",
+    "start": "69659",
+    "end": "75000"
+  },
+  {
+    "text": "with a discussion of some of the modifications we made to our day two",
+    "start": "75000",
+    "end": "80460"
+  },
+  {
+    "text": "processes to accommodate the ha control plane",
+    "start": "80460",
+    "end": "85399"
+  },
+  {
+    "text": "so the as a brief overview of what databricks is the databricks product is a SAS data platform that runs on the",
+    "start": "85619",
+    "end": "92159"
+  },
+  {
+    "text": "public clouds we call it the databricks lake house platform and it's a unified",
+    "start": "92159",
+    "end": "97320"
+  },
+  {
+    "text": "platform that serves many Enterprise data use cases such as data warehousing",
+    "start": "97320",
+    "end": "102780"
+  },
+  {
+    "text": "data engineering data science streaming and machine learning",
+    "start": "102780",
+    "end": "107939"
+  },
+  {
+    "text": "the service operates at a very large scale we have many thousands of customers and the aggregate workload",
+    "start": "107939",
+    "end": "114060"
+  },
+  {
+    "text": "that we manage is very large we launch more than 10 million VMS per day across",
+    "start": "114060",
+    "end": "119220"
+  },
+  {
+    "text": "Azure AWS and gcp and our customers use the platform to process many exabytes of",
+    "start": "119220",
+    "end": "126119"
+  },
+  {
+    "text": "data so this slide shows the high-level",
+    "start": "126119",
+    "end": "131160"
+  },
+  {
+    "text": "architecture of the databricks platform it consists of a control plane that runs in databricks owned Cloud accounts and a",
+    "start": "131160",
+    "end": "138840"
+  },
+  {
+    "text": "per customer data plane that runs in the customer's cloud account so you can see in the left hand box some",
+    "start": "138840",
+    "end": "146099"
+  },
+  {
+    "text": "of the services that constitute the databricks control plane these are multi-tenant services that run on",
+    "start": "146099",
+    "end": "151800"
+  },
+  {
+    "text": "kubernetes clusters and then the right hand box shows the data plane for One customer which",
+    "start": "151800",
+    "end": "158340"
+  },
+  {
+    "text": "consists of cloud storage and the compute that does all of the data processing",
+    "start": "158340",
+    "end": "163680"
+  },
+  {
+    "text": "for historical reasons on gcp the data plane runs on kubernetes but on AWS and",
+    "start": "163680",
+    "end": "169620"
+  },
+  {
+    "text": "Azure it runs on VMS that are not managed by kubernetes but that's the data plane this talk is",
+    "start": "169620",
+    "end": "175260"
+  },
+  {
+    "text": "about the control plane all of which runs on kubernetes so the databricks product gives",
+    "start": "175260",
+    "end": "182340"
+  },
+  {
+    "text": "customers the experience of a single unified system spanning the three clouds but under the covers the control plane",
+    "start": "182340",
+    "end": "189660"
+  },
+  {
+    "text": "is built from per Cloud region kubernetes clusters um databricks is currently available in",
+    "start": "189660",
+    "end": "195720"
+  },
+  {
+    "text": "more than 60 regions across three clouds and we have at least one kubernetes cluster per region to host the",
+    "start": "195720",
+    "end": "202140"
+  },
+  {
+    "text": "databricks control plane services now databricks was a very early adopter",
+    "start": "202140",
+    "end": "207239"
+  },
+  {
+    "text": "of kubernetes the company adopted kubernetes in 2015 which was before all three Cloud providers had managed",
+    "start": "207239",
+    "end": "214019"
+  },
+  {
+    "text": "kubernetes services so we built our own tools to deploy and manage clusters",
+    "start": "214019",
+    "end": "219540"
+  },
+  {
+    "text": "directly on top of cloud provider VMS we've recently also started using cloud",
+    "start": "219540",
+    "end": "225239"
+  },
+  {
+    "text": "provider managed kubernetes clusters for certain services but this talk is about",
+    "start": "225239",
+    "end": "230459"
+  },
+  {
+    "text": "our self-managed kubernetes clusters in these 60 regions and we're still primarily using the the self-managed",
+    "start": "230459",
+    "end": "237360"
+  },
+  {
+    "text": "Clusters even though we're starting to adopt a cloud provider manage kubernetes",
+    "start": "237360",
+    "end": "242900"
+  },
+  {
+    "text": "um so this slide shows the non-aha cluster architecture that we had been using it's a very standard architecture",
+    "start": "243480",
+    "end": "250200"
+  },
+  {
+    "text": "that most people who are running kubernetes on the cloud are using whether they're doing it self-managed or",
+    "start": "250200",
+    "end": "255959"
+  },
+  {
+    "text": "using cloud provider kubernetes the control plane pods run on a single VM",
+    "start": "255959",
+    "end": "261000"
+  },
+  {
+    "text": "and we use cloud provider block storage for the etcd storage there's also a boot",
+    "start": "261000",
+    "end": "267240"
+  },
+  {
+    "text": "disk that's that's not shown here the only part of this architecture that's uh",
+    "start": "267240",
+    "end": "272699"
+  },
+  {
+    "text": "kind of maybe a little different than you normally see is that we have two separate IP addresses for the VM and",
+    "start": "272699",
+    "end": "279840"
+  },
+  {
+    "text": "therefore for the API server there's a public IP and a private IP the private",
+    "start": "279840",
+    "end": "285780"
+  },
+  {
+    "text": "IP for the API server is used for the cubelets and the workloads like the pods",
+    "start": "285780",
+    "end": "292259"
+  },
+  {
+    "text": "that are running on the worker nodes to talk to the API server and the",
+    "start": "292259",
+    "end": "298380"
+  },
+  {
+    "text": "public IP is used by external clients like Cube control and crcicd system to",
+    "start": "298380",
+    "end": "305880"
+  },
+  {
+    "text": "talk to the API server so the problem with this architecture is",
+    "start": "305880",
+    "end": "311580"
+  },
+  {
+    "text": "that if the control plane VM fails then the workloads will continue running but",
+    "start": "311580",
+    "end": "316620"
+  },
+  {
+    "text": "the cluster essentially remains static so like the cluster Auto scaler can't scale nodes up and down because the",
+    "start": "316620",
+    "end": "323160"
+  },
+  {
+    "text": "cluster Auto scalar runs on the worker nodes but needs to talk to the control plane same thing with horizontal pod",
+    "start": "323160",
+    "end": "330300"
+  },
+  {
+    "text": "Auto scaling the horizontal pod Auto scaler runs on the worker nodes and needs to talk to the control plane so if",
+    "start": "330300",
+    "end": "336180"
+  },
+  {
+    "text": "the control plane's down it can't do anything if if a pod fails or node fails",
+    "start": "336180",
+    "end": "341400"
+  },
+  {
+    "text": "the Pod can't be rescheduled to another node and if a pod fails or a node fails",
+    "start": "341400",
+    "end": "347400"
+  },
+  {
+    "text": "and it's part of a cluster IP service then the um the endpoints won't be updated for any of the services that",
+    "start": "347400",
+    "end": "354600"
+  },
+  {
+    "text": "it's a member of so this is not good and so the solution to that is that use an",
+    "start": "354600",
+    "end": "361560"
+  },
+  {
+    "text": "ha control plane a highly available control plane and the idea is to replicate the control plane VMS across",
+    "start": "361560",
+    "end": "368580"
+  },
+  {
+    "text": "multiple cloud zones so the control plane can continue functioning when",
+    "start": "368580",
+    "end": "373680"
+  },
+  {
+    "text": "there is a VM or cloud provider Zone failure this is a kind of a picture of the",
+    "start": "373680",
+    "end": "379320"
+  },
+  {
+    "text": "architecture that we use it's similar to the approach used by Cube atom cops and",
+    "start": "379320",
+    "end": "384539"
+  },
+  {
+    "text": "some other kubernetes tools except that we have two load balancers and I'm going to walk through each of the components",
+    "start": "384539",
+    "end": "390180"
+  },
+  {
+    "text": "here and then at some point we'll come to the load balancers and I'll describe what we're what we're doing with those",
+    "start": "390180",
+    "end": "398300"
+  },
+  {
+    "text": "so as I mentioned the foundation of the ha control plane is three replicas of",
+    "start": "398340",
+    "end": "403740"
+  },
+  {
+    "text": "the single node control plane so three VMS spread across three Cloud zones instead of just one VM in one zone",
+    "start": "403740",
+    "end": "412440"
+  },
+  {
+    "text": "the three API servers run as a stateless load balance service where any replica",
+    "start": "412440",
+    "end": "417960"
+  },
+  {
+    "text": "can handle any API request and they're all active at the same time and each API server replica reads and",
+    "start": "417960",
+    "end": "426539"
+  },
+  {
+    "text": "writes its local at CD replica which brings us to etcd so there's three",
+    "start": "426539",
+    "end": "432360"
+  },
+  {
+    "text": "at CD replicas one in each VM and these three at CD replicas form a cluster with",
+    "start": "432360",
+    "end": "438600"
+  },
+  {
+    "text": "one leader and two followers and the reads and writes are always are always served by the leader so if an API",
+    "start": "438600",
+    "end": "446819"
+  },
+  {
+    "text": "server is local at CD is a follower and that API server tries to write to NCD then that CD replica will forward the",
+    "start": "446819",
+    "end": "453960"
+  },
+  {
+    "text": "right to the leader which then commits it and then um sends the acknowledgment back to the API server uh well back to",
+    "start": "453960",
+    "end": "461160"
+  },
+  {
+    "text": "the SCD replica on the API server and then back to the API server and same thing for reads",
+    "start": "461160",
+    "end": "467460"
+  },
+  {
+    "text": "um uh if the API server is running on the Node with an SCD follower then when",
+    "start": "467460",
+    "end": "473340"
+  },
+  {
+    "text": "the API server does a read that follower will forward the read to the leader and then uh forward the response back to the",
+    "start": "473340",
+    "end": "479940"
+  },
+  {
+    "text": "API server this is to ensure a consistency for reads",
+    "start": "479940",
+    "end": "485400"
+  },
+  {
+    "text": "the scheduler and controller manager in this architecture are Master elected so",
+    "start": "485400",
+    "end": "490800"
+  },
+  {
+    "text": "all of the replicas are always running but only one is doing work at any given time so this is a little different from",
+    "start": "490800",
+    "end": "497520"
+  },
+  {
+    "text": "how the API server worked if you remember I mentioned that the API server all three replicas are always able to",
+    "start": "497520",
+    "end": "503639"
+  },
+  {
+    "text": "handle requests they're essentially like identical to one another in their behavior whereas the scheduler and",
+    "start": "503639",
+    "end": "509580"
+  },
+  {
+    "text": "controller manager only one is actively doing work at any given time and there's",
+    "start": "509580",
+    "end": "514680"
+  },
+  {
+    "text": "a lease mechanism that allows one of the standby schedulers or controller managers to take over if the active",
+    "start": "514680",
+    "end": "522060"
+  },
+  {
+    "text": "leaseholder fails and then lastly we replaced the public",
+    "start": "522060",
+    "end": "528420"
+  },
+  {
+    "text": "and private IP interfaces from the single control plane VM uh in that",
+    "start": "528420",
+    "end": "533519"
+  },
+  {
+    "text": "non-ha setup that I showed you at the beginning with public and internal multi-zone load balancers but the",
+    "start": "533519",
+    "end": "539820"
+  },
+  {
+    "text": "philosophy is still the same the worker node cubelets and the services running on the worker nodes talk to the API",
+    "start": "539820",
+    "end": "546120"
+  },
+  {
+    "text": "server through the internal load balancer and external clients like the CI CD system or an engineer using Cube",
+    "start": "546120",
+    "end": "553440"
+  },
+  {
+    "text": "control talk to the API server through the public IP",
+    "start": "553440",
+    "end": "558740"
+  },
+  {
+    "text": "so the main failure modes that this architecture addresses is a single VM failing or a single Cloud Zone failing",
+    "start": "560279",
+    "end": "567480"
+  },
+  {
+    "text": "so let's talk about what happens uh in in those scenarios so the load balancers will notice that",
+    "start": "567480",
+    "end": "574080"
+  },
+  {
+    "text": "the VM has become unreachable and will stop routing requests to that API server but they'll continue to Route requests",
+    "start": "574080",
+    "end": "581279"
+  },
+  {
+    "text": "to the API servers in the zones that are still up so those are the green arrows showing the load balancers routing",
+    "start": "581279",
+    "end": "587580"
+  },
+  {
+    "text": "requests to the VMS or zones that are that are still still up um if the active scheduler was in the",
+    "start": "587580",
+    "end": "594839"
+  },
+  {
+    "text": "failed Zone then one of the other two schedulers will become the active scheduler and same thing with the controller manager of the active",
+    "start": "594839",
+    "end": "600779"
+  },
+  {
+    "text": "controller manager was in the failed Zone on the failed VM then one of the other two controller managers will",
+    "start": "600779",
+    "end": "607080"
+  },
+  {
+    "text": "become the active controller manager and then lastly if the FCD leader was in",
+    "start": "607080",
+    "end": "612779"
+  },
+  {
+    "text": "the failed Zone then one of the other two at CD replicas will become the leader",
+    "start": "612779",
+    "end": "618660"
+  },
+  {
+    "text": "and so this setup brings the theoretical availability of the control plane from Two and a Half nines with a single VM",
+    "start": "618660",
+    "end": "625980"
+  },
+  {
+    "text": "control plane that's like the typical uh VM SLA from a cloud provider two and a",
+    "start": "625980",
+    "end": "631680"
+  },
+  {
+    "text": "half nines to four nines with this ha control plane",
+    "start": "631680",
+    "end": "637399"
+  },
+  {
+    "text": "so unfortunately although the system can tolerate one VM failure or one Cloud Zone failure I can't tolerate two",
+    "start": "638580",
+    "end": "644160"
+  },
+  {
+    "text": "simultaneous zone or VM failures because the SCD cluster requires a quorum of two",
+    "start": "644160",
+    "end": "650100"
+  },
+  {
+    "text": "healthy replicas so if you have two simultaneous failures the clients can still reach the API",
+    "start": "650100",
+    "end": "656220"
+  },
+  {
+    "text": "server in the one healthy zone at the network level because the load balancers will forward the requests to that one",
+    "start": "656220",
+    "end": "661860"
+  },
+  {
+    "text": "remaining node but that API server won't respond to read or write requests",
+    "start": "661860",
+    "end": "667980"
+  },
+  {
+    "text": "because etcd won't process the request because of the lack of a quorum",
+    "start": "667980",
+    "end": "673320"
+  },
+  {
+    "text": "um now you could tolerate two simultaneous failures by running five control plane replicas instead of three",
+    "start": "673320",
+    "end": "678540"
+  },
+  {
+    "text": "but Cloud providers generally don't have five zones in each region so that wouldn't help tolerate multiple Zone",
+    "start": "678540",
+    "end": "685140"
+  },
+  {
+    "text": "failures and so we decided it really wasn't worth the the cost that uh to have five five replicas",
+    "start": "685140",
+    "end": "692300"
+  },
+  {
+    "text": "and the last component that we haven't covered are the load balancers so if the and what happens if they fail so if the",
+    "start": "692519",
+    "end": "698459"
+  },
+  {
+    "text": "public load balancer fails then external clients won't be able to connect to the API servers so for example a client",
+    "start": "698459",
+    "end": "705420"
+  },
+  {
+    "text": "can't create new workloads or roll out a new version of a workload or anything else that external clients typically do",
+    "start": "705420",
+    "end": "711540"
+  },
+  {
+    "text": "when they talk to the API server but already running workloads will continue",
+    "start": "711540",
+    "end": "716579"
+  },
+  {
+    "text": "to run and all the dynamic behaviors that I talked about earlier like pod rescheduling and auto scaling those will",
+    "start": "716579",
+    "end": "722160"
+  },
+  {
+    "text": "all continue to work and if the internal load balancer fails",
+    "start": "722160",
+    "end": "727800"
+  },
+  {
+    "text": "then the opposite is true in that case external clients can still do operations on the API server like creating and",
+    "start": "727800",
+    "end": "734940"
+  },
+  {
+    "text": "updating workloads but the API server will stop seeing the heartbeats from the nodes there's like no communication on",
+    "start": "734940",
+    "end": "740880"
+  },
+  {
+    "text": "the communication with the nodes is cut off and the node controller actually won't evict pods in this scenario",
+    "start": "740880",
+    "end": "747000"
+  },
+  {
+    "text": "there's like a special case in the node controller where if it sees all the nodes die at the same time it won't try",
+    "start": "747000",
+    "end": "752160"
+  },
+  {
+    "text": "to move pods around but all right so so the the workloads will",
+    "start": "752160",
+    "end": "757980"
+  },
+  {
+    "text": "continue to run even though uh the nodes have stopped heartbeating but the dynamic behaviors like pod rescheduling",
+    "start": "757980",
+    "end": "764220"
+  },
+  {
+    "text": "uh and auto scaling won't happen and then lastly if the entire Cloud",
+    "start": "764220",
+    "end": "770639"
+  },
+  {
+    "text": "region fails then the ha control plane architecture can't help because the control plane VMS all run in a single",
+    "start": "770639",
+    "end": "777000"
+  },
+  {
+    "text": "region in theory you can run the same architecture where you spread the three control plane nodes across regions and",
+    "start": "777000",
+    "end": "783420"
+  },
+  {
+    "text": "use like a multi-region cloud load balancer and then tolerate region",
+    "start": "783420",
+    "end": "788820"
+  },
+  {
+    "text": "failure but because our control planes are per region we set this up as replicated within a region instead of",
+    "start": "788820",
+    "end": "795540"
+  },
+  {
+    "text": "across regions so now that I've described the ha control plane architecture Kong is going",
+    "start": "795540",
+    "end": "802680"
+  },
+  {
+    "text": "to talk about how we migrated our production servers from the single node architecture to the AHA architecture all",
+    "start": "802680",
+    "end": "809639"
+  },
+  {
+    "text": "while the Clusters continued to serve user traffic",
+    "start": "809639",
+    "end": "813920"
+  },
+  {
+    "text": "yes thanks Debbie so in the context of migration we know the Niha control plane",
+    "start": "814740",
+    "end": "820620"
+  },
+  {
+    "text": "so it has the closet State stored in the ICD and then they had to interface as",
+    "start": "820620",
+    "end": "826260"
+  },
+  {
+    "text": "the two IPS for the single control plan VM to serve the the API to access the",
+    "start": "826260",
+    "end": "834000"
+  },
+  {
+    "text": "mutated class state and then we want to change the architecture from Knight h8 to ha the",
+    "start": "834000",
+    "end": "841079"
+  },
+  {
+    "text": "class State needs to be still the original class data in the Iha and then the interface to exercise the control",
+    "start": "841079",
+    "end": "848760"
+  },
+  {
+    "text": "plan should not be changed so basically we want to migrate the control plane and of all the workload as David mentioned",
+    "start": "848760",
+    "end": "855300"
+  },
+  {
+    "text": "during the whole migration we wanted the workloads to keep at keep up and running we don't want that workload get affected",
+    "start": "855300",
+    "end": "862380"
+  },
+  {
+    "text": "in our case we have a production cluster across 60 regions so basically the required level",
+    "start": "862380",
+    "end": "870060"
+  },
+  {
+    "text": "requirements is to migrate the control plane without affecting the production workloads so we defined the requirements",
+    "start": "870060",
+    "end": "876540"
+  },
+  {
+    "text": "as follows so our workloads should keep on running during migration and no client reconfiguration also the micro",
+    "start": "876540",
+    "end": "883860"
+  },
+  {
+    "text": "the migration across the fleet should be automated and this should support both",
+    "start": "883860",
+    "end": "889920"
+  },
+  {
+    "text": "zero forward and roll back",
+    "start": "889920",
+    "end": "893300"
+  },
+  {
+    "text": "with this high level requirement before I share how we designed our migration process I want to step back a little bit",
+    "start": "895079",
+    "end": "901860"
+  },
+  {
+    "text": "to think about what are the most important things when we do the migration what we want to protect with",
+    "start": "901860",
+    "end": "909300"
+  },
+  {
+    "text": "the first priority and what we are migrating so from architecture we discussed before",
+    "start": "909300",
+    "end": "914940"
+  },
+  {
+    "text": "we can see in a kubernetes control plane it has a Cloud State in the ICD and so",
+    "start": "914940",
+    "end": "921240"
+  },
+  {
+    "text": "from that ha to h a basically is a move from one ICD node to three ICD column",
+    "start": "921240",
+    "end": "926940"
+  },
+  {
+    "text": "and also the class State served by API server the interface doesn't change",
+    "start": "926940",
+    "end": "931980"
+  },
+  {
+    "text": "basic change from IP to IPS to to load balancers and then the class date will keep",
+    "start": "931980",
+    "end": "938579"
+  },
+  {
+    "text": "mutating as far as like the control plane server metrics for example the controller manager can mutated the class",
+    "start": "938579",
+    "end": "944579"
+  },
+  {
+    "text": "date during the reconciling the resources also couplet from worker can report no",
+    "start": "944579",
+    "end": "951060"
+  },
+  {
+    "text": "status so that the class date for the node will be mutated",
+    "start": "951060",
+    "end": "957300"
+  },
+  {
+    "text": "meanwhile the port the workload can also talk the API server like those operators can change the class data as well",
+    "start": "957300",
+    "end": "964260"
+  },
+  {
+    "text": "so we can see actually during the migration we have control plan we have workers and then we have workload so",
+    "start": "964260",
+    "end": "970079"
+  },
+  {
+    "text": "basically we want to protect the workloads so that means the class States need to be safe we want to migrate that",
+    "start": "970079",
+    "end": "975959"
+  },
+  {
+    "text": "to BHA but we don't want to break the workload so with this keep in mind we designed",
+    "start": "975959",
+    "end": "982680"
+  },
+  {
+    "text": "our migration into three phases and for each phase actually to include multiple steps and I want to Echo back a little",
+    "start": "982680",
+    "end": "990120"
+  },
+  {
+    "text": "bit you know what things we want to protect most again so basically we want to protect workload that means during",
+    "start": "990120",
+    "end": "995399"
+  },
+  {
+    "text": "the multiple step migration process any single step can fail in that field we",
+    "start": "995399",
+    "end": "1001220"
+  },
+  {
+    "text": "want that the workload still be protected and then it will just roll back or fix that and move forward and do",
+    "start": "1001220",
+    "end": "1006920"
+  },
+  {
+    "text": "the migration again so then here we designed the three phases the first phase basically to get",
+    "start": "1006920",
+    "end": "1013160"
+  },
+  {
+    "text": "the cluster state from the Niah control plan in particular is in the ICD meanwhile because we want to protect",
+    "start": "1013160",
+    "end": "1020240"
+  },
+  {
+    "text": "workloads we will shut down all the traffic to the control plane this is similar as like the downtime when we",
+    "start": "1020240",
+    "end": "1027319"
+  },
+  {
+    "text": "held non-ha control plan the next step we want to migrate the cluster state to",
+    "start": "1027319",
+    "end": "1032839"
+  },
+  {
+    "text": "the ha control plan so basically like to just we'll cover the details so high level ideas",
+    "start": "1032839",
+    "end": "1039079"
+  },
+  {
+    "text": "basically replica one icd23 and then somehow make it work for the ha control",
+    "start": "1039079",
+    "end": "1044418"
+  },
+  {
+    "text": "plan so here is follow the same Principle as the phase one it's multiple steps and a",
+    "start": "1044419",
+    "end": "1050299"
+  },
+  {
+    "text": "single step can fail we want to protect workload so basically we will shut down the traffic to the control plan to make sure",
+    "start": "1050299",
+    "end": "1056900"
+  },
+  {
+    "text": "the classes will not get mutated so it's consistent workloads just keep on running it's decorated a little bit as",
+    "start": "1056900",
+    "end": "1062600"
+  },
+  {
+    "text": "David mentioned here the horizontal scaling and the workout scaling cannot work but the workload is still keep on",
+    "start": "1062600",
+    "end": "1069140"
+  },
+  {
+    "text": "running and the last phase when we confirm everything works fine then we will reopen the traffic this means like",
+    "start": "1069140",
+    "end": "1076100"
+  },
+  {
+    "text": "a traffic from the public interface so the CI CD can do the deployment as well as the internal interface like the",
+    "start": "1076100",
+    "end": "1083240"
+  },
+  {
+    "text": "Kublai can report no status Google controller manager can start to reconcile resources so after the last",
+    "start": "1083240",
+    "end": "1090260"
+  },
+  {
+    "text": "phase we will have a ha control plan with fully up and running so now let's talk about each phase",
+    "start": "1090260",
+    "end": "1098000"
+  },
+  {
+    "text": "as the first phase based the high level idea we want to get the cluster state from the ha in a safe way",
+    "start": "1098000",
+    "end": "1106039"
+  },
+  {
+    "text": "so in the night HX control plan basis this is a you know a diagram in a single",
+    "start": "1106039",
+    "end": "1113000"
+  },
+  {
+    "text": "VM it has ICD has a couple control plan components the first thing before",
+    "start": "1113000",
+    "end": "1118820"
+  },
+  {
+    "text": "actually we get to the state we want to make sure the state is static at that point so the first step is we mute we",
+    "start": "1118820",
+    "end": "1126200"
+  },
+  {
+    "text": "shut down all the control plane parts it and then so from the second step for the",
+    "start": "1126200",
+    "end": "1133940"
+  },
+  {
+    "text": "first phase basically we want to build a snapshot the input we can use for the",
+    "start": "1133940",
+    "end": "1139220"
+  },
+  {
+    "text": "second phase because at this moment workloads will not get affected but just get decorative in terms of the dynamic",
+    "start": "1139220",
+    "end": "1145400"
+  },
+  {
+    "text": "change so here we use one ICD utility tool to take snapshot from ICD data folder while",
+    "start": "1145400",
+    "end": "1152000"
+  },
+  {
+    "text": "we use the ICD control here basically for ICD actually it has two types of",
+    "start": "1152000",
+    "end": "1157100"
+  },
+  {
+    "text": "information once the data there are actually the coral member information when we change from",
+    "start": "1157100",
+    "end": "1162200"
+  },
+  {
+    "text": "not actually ICD to haicd the data is the one we want to keep but the current",
+    "start": "1162200",
+    "end": "1167780"
+  },
+  {
+    "text": "member information we want to you know to change that from one node to multiple",
+    "start": "1167780",
+    "end": "1172940"
+  },
+  {
+    "text": "nodes and the next step is we shut down the uh",
+    "start": "1172940",
+    "end": "1178460"
+  },
+  {
+    "text": "the single node control plane to release IPS as we mentioned basically ICD the",
+    "start": "1178460",
+    "end": "1183980"
+  },
+  {
+    "text": "cluster state in ICT definitely is the one we want to keep and then we use it for the ha control plane also the two",
+    "start": "1183980",
+    "end": "1189799"
+  },
+  {
+    "text": "interface the eyepiece we will review that for the load balancers",
+    "start": "1189799",
+    "end": "1195220"
+  },
+  {
+    "text": "so what the snapshot file we use for the ICD control is in the ICD desk and then",
+    "start": "1195620",
+    "end": "1203059"
+  },
+  {
+    "text": "we just use and the last step is we use the cloud snap tool basically to take a",
+    "start": "1203059",
+    "end": "1208820"
+  },
+  {
+    "text": "snapshot so that when we create new disk for the ha control plane we can just create the data disk from the snapshot",
+    "start": "1208820",
+    "end": "1218299"
+  },
+  {
+    "text": "so with this now we get everything prepared to be reused for the ha control plan you can see actually this is a",
+    "start": "1218299",
+    "end": "1224360"
+  },
+  {
+    "text": "multiple step process and every step it can fail it can feel due to some implementation bug it can fail due to",
+    "start": "1224360",
+    "end": "1230900"
+  },
+  {
+    "text": "you know transition the cloud provider failure and so on",
+    "start": "1230900",
+    "end": "1235299"
+  },
+  {
+    "text": "foreign",
+    "start": "1245059",
+    "end": "1247960"
+  },
+  {
+    "text": "[Music] as a second phase now we have the input",
+    "start": "1254600",
+    "end": "1261500"
+  },
+  {
+    "text": "as a class state from the 90 control plane also we held IPS release so that",
+    "start": "1261500",
+    "end": "1266840"
+  },
+  {
+    "text": "we can use at this moment the workload is still keep up and running but just get degraded so the second phase is to",
+    "start": "1266840",
+    "end": "1275120"
+  },
+  {
+    "text": "basically to bootstrap the HF control plane but I want to emphasize again basically we will not start the traffic",
+    "start": "1275120",
+    "end": "1281799"
+  },
+  {
+    "text": "the high level idea is to keep the class state to be consistent for the whole migration process because it will take",
+    "start": "1281799",
+    "end": "1288620"
+  },
+  {
+    "text": "you know from 10 minutes to 30 minutes and every single step can fail so the first step is to build the three",
+    "start": "1288620",
+    "end": "1295640"
+  },
+  {
+    "text": "control plan VM and then the data disk is from the snapshot we took before from",
+    "start": "1295640",
+    "end": "1302120"
+  },
+  {
+    "text": "the you know 980 control plane and then the second step for in this",
+    "start": "1302120",
+    "end": "1308179"
+  },
+  {
+    "text": "phase is to build you know the too low balancer and then the IP from the for the two low",
+    "start": "1308179",
+    "end": "1314179"
+  },
+  {
+    "text": "bouncers is the original Ip from the nihas uh single node control plane",
+    "start": "1314179",
+    "end": "1320299"
+  },
+  {
+    "text": "but at this moment we don't want to still serve the traffic so that we create a load balancer but we",
+    "start": "1320299",
+    "end": "1327740"
+  },
+  {
+    "text": "don't open the traffic to access the API server as a last step now we have the old Cloud",
+    "start": "1327740",
+    "end": "1334700"
+  },
+  {
+    "text": "resources right deployed but actually ICD as I mentioned",
+    "start": "1334700",
+    "end": "1339860"
+  },
+  {
+    "text": "before there are two sides for the ICD one is the data the other is the column the data is there but even we use the",
+    "start": "1339860",
+    "end": "1346760"
+  },
+  {
+    "text": "snapshot to create new SD disk the column cannot build yet so we use the the tool called LCD control restore",
+    "start": "1346760",
+    "end": "1355340"
+  },
+  {
+    "text": "so the basically we start to rebuild the new column with for the three nodes",
+    "start": "1355340",
+    "end": "1361580"
+  },
+  {
+    "text": "till here now actually we do have a h8 control plane keep up running but one",
+    "start": "1361580",
+    "end": "1367400"
+  },
+  {
+    "text": "thing is because we didn't restart the Google controller manager and then we didn't open the traffic from the two",
+    "start": "1367400",
+    "end": "1374419"
+  },
+  {
+    "text": "load balancer so basically the workload the worker side can still not talk to the the control plan yet but the control",
+    "start": "1374419",
+    "end": "1380900"
+  },
+  {
+    "text": "plan itself is isolated up and running so as a last phase we will just reopen",
+    "start": "1380900",
+    "end": "1388100"
+  },
+  {
+    "text": "the traffic because we confirmed the h8 control plan is bring up as we expected",
+    "start": "1388100",
+    "end": "1394940"
+  },
+  {
+    "text": "so during the whole migration process we can see in each phase it has multiple steps and the principle for each phase",
+    "start": "1394940",
+    "end": "1401720"
+  },
+  {
+    "text": "basically is to correctly get the snapshot and then to protect workloads by you know only when we are ready to",
+    "start": "1401720",
+    "end": "1409159"
+  },
+  {
+    "text": "make sure the whole control planes is operating and then we reopen the traffic so that this actually make the low back",
+    "start": "1409159",
+    "end": "1415640"
+  },
+  {
+    "text": "much easier so before phase three we can just roll back you know by redeploy the knowledge",
+    "start": "1415640",
+    "end": "1421580"
+  },
+  {
+    "text": "Cloud resources the IC disk SS class of state is not you know muted at all and",
+    "start": "1421580",
+    "end": "1427940"
+  },
+  {
+    "text": "after phase three let's say you know we migrate to ha can jumpling after say a",
+    "start": "1427940",
+    "end": "1433159"
+  },
+  {
+    "text": "couple days the class state will keep will be mutated in that case we'll follow the same principle to get the",
+    "start": "1433159",
+    "end": "1439760"
+  },
+  {
+    "text": "class data from the h8 control plane and then do a snapshot and then from that snapshot to rebuild a new IC test for",
+    "start": "1439760",
+    "end": "1447080"
+  },
+  {
+    "text": "the 9h8 control plane and you know build a single node ICD card so basically the same the same principle will be applied",
+    "start": "1447080",
+    "end": "1453860"
+  },
+  {
+    "text": "for both row back and row forward so lastly actually I want to share one",
+    "start": "1453860",
+    "end": "1460760"
+  },
+  {
+    "text": "lesson we learned from one of the outage we caused by one inconsistent class",
+    "start": "1460760",
+    "end": "1467240"
+  },
+  {
+    "text": "stated during the migration so as I explained in the previous migration process we can see to protect",
+    "start": "1467240",
+    "end": "1475580"
+  },
+  {
+    "text": "the class state is the most important thing for the whole migration process especially keep being the class that is",
+    "start": "1475580",
+    "end": "1481940"
+  },
+  {
+    "text": "consistent in the phase three we mentioned actually we just restart",
+    "start": "1481940",
+    "end": "1488840"
+  },
+  {
+    "text": "the controller manager and reopen the traffic actually during the outage",
+    "start": "1488840",
+    "end": "1496480"
+  },
+  {
+    "text": "so in in the last phase of migration we had one back in the code so what we",
+    "start": "1505220",
+    "end": "1513620"
+  },
+  {
+    "text": "basically try to restart code controller manager and reopen the load balancer",
+    "start": "1513620",
+    "end": "1519320"
+  },
+  {
+    "text": "traffic at the same time but for some reason the it took much longer than we",
+    "start": "1519320",
+    "end": "1524720"
+  },
+  {
+    "text": "expected to reopen the low low balancer traffic so that there",
+    "start": "1524720",
+    "end": "1530480"
+  },
+  {
+    "text": "is one there was one state coupon controller manager is up and running but the load balancer",
+    "start": "1530480",
+    "end": "1536960"
+  },
+  {
+    "text": "is still closed then what will happen so basic Google controller manager can talk to API server to start reconcile",
+    "start": "1536960",
+    "end": "1543500"
+  },
+  {
+    "text": "resources but for workers they cannot they use the load balancer the couplets",
+    "start": "1543500",
+    "end": "1550039"
+  },
+  {
+    "text": "using the load balancer to talk to control plan API server to report its no status",
+    "start": "1550039",
+    "end": "1555940"
+  },
+  {
+    "text": "oh actually something else is not healthy because it hasn't reported for a while so the",
+    "start": "1555940",
+    "end": "1562340"
+  },
+  {
+    "text": "service controller inside Google controller manager start get kick in and then start to remove some of the nodes",
+    "start": "1562340",
+    "end": "1568279"
+  },
+  {
+    "text": "from the load balancer for the services actually if we keep we got alerted",
+    "start": "1568279",
+    "end": "1573500"
+  },
+  {
+    "text": "immediately if we keep the state longer it will like you know the some nodes will even get removed from cluster this",
+    "start": "1573500",
+    "end": "1580640"
+  },
+  {
+    "text": "is one lessons we learned that the keep the cluster State consistent is really important for the migration home",
+    "start": "1580640",
+    "end": "1586640"
+  },
+  {
+    "text": "migration process so because the migraine process you know it's when we do the migration across",
+    "start": "1586640",
+    "end": "1593720"
+  },
+  {
+    "text": "different regions the behavior and the cloud provides transition failure could",
+    "start": "1593720",
+    "end": "1599240"
+  },
+  {
+    "text": "cause outage like this so from the license we can see actually",
+    "start": "1599240",
+    "end": "1604640"
+  },
+  {
+    "text": "it's really important to protect the class date to be consistent during the whole process so finally if I use one sentence to",
+    "start": "1604640",
+    "end": "1611480"
+  },
+  {
+    "text": "summarize the migration I would say ha control plane migration is really about the class State migration and the",
+    "start": "1611480",
+    "end": "1617179"
+  },
+  {
+    "text": "keeping class State consistent is critical to make sure workloads not get affected so now let me hand back to David talk",
+    "start": "1617179",
+    "end": "1624440"
+  },
+  {
+    "text": "about our day two after migration to AJ control plan",
+    "start": "1624440",
+    "end": "1629559"
+  },
+  {
+    "text": "thanks Kong um so the last topic we're going to cover before we wrap up is how",
+    "start": "1631940",
+    "end": "1637279"
+  },
+  {
+    "text": "we adapted some of our day two processes for the ha control plane so one process that we modified was how",
+    "start": "1637279",
+    "end": "1644960"
+  },
+  {
+    "text": "we upgrade the control plane to New kubernetes versions so previously the first step of this process was that we'd",
+    "start": "1644960",
+    "end": "1651260"
+  },
+  {
+    "text": "run a set of cluster level precondition checks like verifying that all the API objects in the API server are compatible",
+    "start": "1651260",
+    "end": "1658279"
+  },
+  {
+    "text": "with the new kubernetes version and checking to make sure the control plane is at the same kubernetes version as the",
+    "start": "1658279",
+    "end": "1664700"
+  },
+  {
+    "text": "worker nodes so for the ha control plane we extended the control plane version check to make",
+    "start": "1664700",
+    "end": "1671000"
+  },
+  {
+    "text": "sure all of the control plane nodes are at the same kubernetes version as each other before we start the upgrade",
+    "start": "1671000",
+    "end": "1676580"
+  },
+  {
+    "text": "because it would be bad if they start off in in different versions so if the cluster level precondition",
+    "start": "1676580",
+    "end": "1682279"
+  },
+  {
+    "text": "checks pass then we start the upgrade of the first control plane node we run some",
+    "start": "1682279",
+    "end": "1687559"
+  },
+  {
+    "text": "precondition checks like making sure all three control plane nodes are up this is important because one of the benefits of",
+    "start": "1687559",
+    "end": "1693740"
+  },
+  {
+    "text": "the ha control plane architecture is that you can take down one of the nodes for a kubernetes version upgrade and",
+    "start": "1693740",
+    "end": "1699799"
+  },
+  {
+    "text": "still continue to serve user traffic because you only need two of the nodes to be up in order to serve the the users",
+    "start": "1699799",
+    "end": "1705559"
+  },
+  {
+    "text": "but if you don't start off with all three control plane nodes up then when",
+    "start": "1705559",
+    "end": "1711080"
+  },
+  {
+    "text": "you take one down then you you lose that because then there will be zero or one nodes up so in order to prevent users",
+    "start": "1711080",
+    "end": "1717440"
+  },
+  {
+    "text": "from experiencing downtime we make sure all three are up before we do a version",
+    "start": "1717440",
+    "end": "1722779"
+  },
+  {
+    "text": "upgrade on one of them so then we uh shut down the VM that we're going to upgrade we create a new",
+    "start": "1722779",
+    "end": "1730100"
+  },
+  {
+    "text": "VM at the new with the new kubernetes control plane version um and deploy everything on it and then",
+    "start": "1730100",
+    "end": "1736520"
+  },
+  {
+    "text": "lastly we run some validation tests to make sure that the upgrade was successful we already had some",
+    "start": "1736520",
+    "end": "1741799"
+  },
+  {
+    "text": "validation tests we were running when we had the single node control plane architecture and the one we added for the ha control plane is ensuring that",
+    "start": "1741799",
+    "end": "1749480"
+  },
+  {
+    "text": "traffic is going through all three API servers successfully and approximately",
+    "start": "1749480",
+    "end": "1754640"
+  },
+  {
+    "text": "balanced evenly um and if any of the validation tests fail then we automatically roll back the",
+    "start": "1754640",
+    "end": "1760520"
+  },
+  {
+    "text": "upgrade um but assuming they pass then we repeat the same process for the second control",
+    "start": "1760520",
+    "end": "1766039"
+  },
+  {
+    "text": "plane node in the cluster and then finally for the third control plane node and then if the validation test pass",
+    "start": "1766039",
+    "end": "1771260"
+  },
+  {
+    "text": "there we move on to the next cluster and repeat the same process upgrading one note at a time and running the",
+    "start": "1771260",
+    "end": "1777620"
+  },
+  {
+    "text": "preconditioned checks and the validation tests after each each node and then so",
+    "start": "1777620",
+    "end": "1783860"
+  },
+  {
+    "text": "on through all of the Clusters in the fleet the second day two process that we",
+    "start": "1783860",
+    "end": "1789740"
+  },
+  {
+    "text": "modified when we moved to the ha control plane was how we measured and monitored API server availability",
+    "start": "1789740",
+    "end": "1796940"
+  },
+  {
+    "text": "um the reason why quantifying API server availability is a little more complicated with the ha control plane",
+    "start": "1796940",
+    "end": "1802100"
+  },
+  {
+    "text": "than with a single node control plane is that with h a control plane if one API server is down then there's no user",
+    "start": "1802100",
+    "end": "1808460"
+  },
+  {
+    "text": "visible impact so the first approach we considered is shown on this slide and the idea was to",
+    "start": "1808460",
+    "end": "1814700"
+  },
+  {
+    "text": "use the success rate of actual API requests to compute availability so we have a Prometheus agent running in",
+    "start": "1814700",
+    "end": "1821659"
+  },
+  {
+    "text": "the cluster that talks directly to the API servers and scrapes the API server request total Prometheus metric from the",
+    "start": "1821659",
+    "end": "1828919"
+  },
+  {
+    "text": "API server's metrics endpoint this API server requests total metric for those who aren't familiar with it it records",
+    "start": "1828919",
+    "end": "1834919"
+  },
+  {
+    "text": "the total number of API requests received by or processed by the API server broken down by various categories",
+    "start": "1834919",
+    "end": "1841279"
+  },
+  {
+    "text": "including the HTTP Response Code so we can know which requests are successful and which return errors",
+    "start": "1841279",
+    "end": "1847580"
+  },
+  {
+    "text": "and then we compute the availability as the number of requests that return a successful HTTP Response Code across all",
+    "start": "1847580",
+    "end": "1854720"
+  },
+  {
+    "text": "API servers divided by the total number of requests processed by all the API servers",
+    "start": "1854720",
+    "end": "1860179"
+  },
+  {
+    "text": "so the downside of this approach is that if two API servers are down or the load balancer is down then this metric will",
+    "start": "1860179",
+    "end": "1867559"
+  },
+  {
+    "text": "give you a non-zero availability even though the end user is going to see",
+    "start": "1867559",
+    "end": "1873980"
+  },
+  {
+    "text": "Zero availability because the cluster isn't accessible when when two or more",
+    "start": "1873980",
+    "end": "1880039"
+  },
+  {
+    "text": "of the API servers are down or the load balancer is down so the second approach we considered was",
+    "start": "1880039",
+    "end": "1887059"
+  },
+  {
+    "text": "to have the Prometheus agent periodically just probe the API server's metrics endpoints to see whether the API",
+    "start": "1887059",
+    "end": "1893539"
+  },
+  {
+    "text": "servers are alive and then we Define availability as the number of times this probe gets a response divided by the",
+    "start": "1893539",
+    "end": "1899179"
+  },
+  {
+    "text": "total number of probes and the probing is done through the load balancer so it reflects the user visible downtime but",
+    "start": "1899179",
+    "end": "1905600"
+  },
+  {
+    "text": "this approach has a downside of not reflecting the internal API server errors like the first approach did",
+    "start": "1905600",
+    "end": "1912860"
+  },
+  {
+    "text": "so the approach we ultimately chose is a combination of the two we use the same fraction from the first approach which",
+    "start": "1912860",
+    "end": "1919100"
+  },
+  {
+    "text": "was the total number of successful API requests divided by the total number of API requests processed but we also do",
+    "start": "1919100",
+    "end": "1926240"
+  },
+  {
+    "text": "the probing that I described in the second approach and we multiply the fraction from the first approach by zero",
+    "start": "1926240",
+    "end": "1932720"
+  },
+  {
+    "text": "if the probing approach shows that the user is not getting a response because two or more API servers are down or the",
+    "start": "1932720",
+    "end": "1938960"
+  },
+  {
+    "text": "load balancer is down and so this way we end up with an availability number that reflects API",
+    "start": "1938960",
+    "end": "1944960"
+  },
+  {
+    "text": "server errors and also scenarios where the API servers are down from the user perspective",
+    "start": "1944960",
+    "end": "1951740"
+  },
+  {
+    "text": "so to wrap up I'll just Briefly summarize how the various aspects of our overall design allowed us to meet the",
+    "start": "1951740",
+    "end": "1957440"
+  },
+  {
+    "text": "requirements that Kong mentioned earlier so we have the requirement that all the",
+    "start": "1957440",
+    "end": "1962659"
+  },
+  {
+    "text": "workloads running on the cluster must continue to run during migration and the way we accomplished that was to snapshot",
+    "start": "1962659",
+    "end": "1968899"
+  },
+  {
+    "text": "the single node.cd and clone the disk to create the two new replicas so that the cluster state after the migration was",
+    "start": "1968899",
+    "end": "1974600"
+  },
+  {
+    "text": "exactly the same as the cluster State before the migration we had the requirement that there should",
+    "start": "1974600",
+    "end": "1980059"
+  },
+  {
+    "text": "be no requirement for a client reconfiguration we didn't want to have to change any of the configuration of the cubelets or the workloads or",
+    "start": "1980059",
+    "end": "1986899"
+  },
+  {
+    "text": "external clients that are talking to the API server and so to accomplish that we reuse the same IP addresses from the VM",
+    "start": "1986899",
+    "end": "1995360"
+  },
+  {
+    "text": "in the single node control plane architecture as the load balancer IP addresses so the internal and external",
+    "start": "1995360",
+    "end": "2001419"
+  },
+  {
+    "text": "VM IP addresses became the internal and external load balancer IPA addresses and",
+    "start": "2001419",
+    "end": "2007179"
+  },
+  {
+    "text": "then um uh we had the third requirement that the per cluster migration and rollback",
+    "start": "2007179",
+    "end": "2013179"
+  },
+  {
+    "text": "should be automated and safe so we accomplished that by having a migration script that automatically rolls back",
+    "start": "2013179",
+    "end": "2019299"
+  },
+  {
+    "text": "upon failure by not making any state mutations until the ha control plane is",
+    "start": "2019299",
+    "end": "2025240"
+  },
+  {
+    "text": "up and running um Kong talked a lot about that so that we could do safe rollback and ensuring",
+    "start": "2025240",
+    "end": "2030279"
+  },
+  {
+    "text": "that the cubelets have heartbeated before the controller manager is re-enabled so the controller manager",
+    "start": "2030279",
+    "end": "2036220"
+  },
+  {
+    "text": "doesn't come up after this like Kong mentioned 10 to 30 minute process see that the nodes haven't heartbeated and",
+    "start": "2036220",
+    "end": "2042580"
+  },
+  {
+    "text": "then tried to remove them as load balancer back ends or do do something else and consider them down",
+    "start": "2042580",
+    "end": "2049060"
+  },
+  {
+    "text": "and then lastly we have the requirement that the migration across the fleet should be automated and safe so to",
+    "start": "2049060",
+    "end": "2054460"
+  },
+  {
+    "text": "accomplish that we used a pipeline for migration and uh check these preconditions and post conditions for",
+    "start": "2054460",
+    "end": "2060700"
+  },
+  {
+    "text": "each cluster before moving on uh to to the next cluster um and I'll skip this since we're",
+    "start": "2060700",
+    "end": "2066460"
+  },
+  {
+    "text": "running low on time this is just summarizing the availability metric that we talked about a minute ago and the",
+    "start": "2066460",
+    "end": "2072220"
+  },
+  {
+    "text": "additional benefit of the h8 control plane doesn't just give you high availability it also lets you tolerate",
+    "start": "2072220",
+    "end": "2077858"
+  },
+  {
+    "text": "um sorry it also lets you continue to serve user traffic unaffected during a",
+    "start": "2077859",
+    "end": "2083560"
+  },
+  {
+    "text": "kubernetes control plane version update because you can tolerate one node being down at a time",
+    "start": "2083560",
+    "end": "2089679"
+  },
+  {
+    "text": "so thanks uh we appreciate I appreciate your attention um and uh we're happy to take questions",
+    "start": "2089679",
+    "end": "2095020"
+  },
+  {
+    "text": "in the few minutes uh that are left",
+    "start": "2095020",
+    "end": "2099540"
+  },
+  {
+    "text": "thanks David and Kong aye [Applause]",
+    "start": "2100180",
+    "end": "2105670"
+  },
+  {
+    "text": "we are on time so if you have questions you can come and you can ask",
+    "start": "2106320",
+    "end": "2112060"
+  },
+  {
+    "text": "yep [Music]",
+    "start": "2112060",
+    "end": "2119460"
+  },
+  {
+    "text": "uh thanks for the talk um I have two questions so did you have to over provision your clusters",
+    "start": "2120640",
+    "end": "2127720"
+  },
+  {
+    "text": "um to account for the 10 to 13 minutes that you guys were migrating and it they were statically stable",
+    "start": "2127720",
+    "end": "2134380"
+  },
+  {
+    "text": "um so that you know if if more if more sort of traffic comes in you you can handle that load the second one was did",
+    "start": "2134380",
+    "end": "2141820"
+  },
+  {
+    "text": "you change the instance types as you moved from single node to uh cluster",
+    "start": "2141820",
+    "end": "2148599"
+  },
+  {
+    "text": "yeah for your first question actually before the migration our cluster already held the Hat the Headroom pause because",
+    "start": "2148599",
+    "end": "2154660"
+  },
+  {
+    "text": "we are using class or scalar for the even during that control architecture so",
+    "start": "2154660",
+    "end": "2161260"
+  },
+  {
+    "text": "so we didn't do especially to add new nodes when we migrate from 9j to h a but",
+    "start": "2161260",
+    "end": "2167740"
+  },
+  {
+    "text": "because the process actually usually take about 10 minutes when we automate that the outage I mentioned actually that's one case because like the Google",
+    "start": "2167740",
+    "end": "2175240"
+  },
+  {
+    "text": "controller manual get key get kicking so sorry what's your second question",
+    "start": "2175240",
+    "end": "2181900"
+  },
+  {
+    "text": "oh yeah so for control plan basically uh it's a CPU Spike and then for the Knight",
+    "start": "2181900",
+    "end": "2187480"
+  },
+  {
+    "text": "control actually it's a more CPU Spike than the h8 control plane so as the",
+    "start": "2187480",
+    "end": "2192640"
+  },
+  {
+    "text": "first phase we didn't change the instance Tab and then now because the h8 control has been loaded for all",
+    "start": "2192640",
+    "end": "2198099"
+  },
+  {
+    "text": "production uh clusters we are looking at tuning the instant actually together download a bit",
+    "start": "2198099",
+    "end": "2203740"
+  },
+  {
+    "text": "we will take our last question both for",
+    "start": "2203740",
+    "end": "2209980"
+  },
+  {
+    "text": "the nation reusing IP address both for the public side and the private side and",
+    "start": "2209980",
+    "end": "2218200"
+  },
+  {
+    "text": "there are load balances that that have you put three IP addresses instead of",
+    "start": "2218200",
+    "end": "2223300"
+  },
+  {
+    "text": "one how did you manage those scenarios where the load balancer would require an IP",
+    "start": "2223300",
+    "end": "2230020"
+  },
+  {
+    "text": "address per Zone which means it's not one it's three how",
+    "start": "2230020",
+    "end": "2235420"
+  },
+  {
+    "text": "did you cover for such situation did you have such situation and if you did how did you come up with sausage yeah I",
+    "start": "2235420",
+    "end": "2241420"
+  },
+  {
+    "text": "think it's slightly different from each Club Rider in terms of whether a load balancer can should have multiple IP in",
+    "start": "2241420",
+    "end": "2248380"
+  },
+  {
+    "text": "a single zone or cross it's just single IP Coral different zone for AWS and",
+    "start": "2248380",
+    "end": "2253480"
+  },
+  {
+    "text": "Azure is a single IP and then you can deploy a low balance across different zones for AWS it requires a different IP",
+    "start": "2253480",
+    "end": "2260140"
+  },
+  {
+    "text": "in different Zone but for the lb is it a little bit implementation detail it has a zoom known DS and the original DS for",
+    "start": "2260140",
+    "end": "2267520"
+  },
+  {
+    "text": "us because the",
+    "start": "2267520",
+    "end": "2270420"
+  },
+  {
+    "text": "is the actual benefit so we use the Zone on DS to first so for the two actual IP",
+    "start": "2272940",
+    "end": "2281560"
+  },
+  {
+    "text": "we are not using it yet but after we fully migrate ha we're using it",
+    "start": "2281560",
+    "end": "2287460"
+  },
+  {
+    "text": "okay yeah thanks and if you have other questions feel free to come up and ask us",
+    "start": "2288640",
+    "end": "2294180"
+  }
+]

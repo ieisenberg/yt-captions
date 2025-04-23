@@ -1,0 +1,1397 @@
+[
+  {
+    "text": "uh so I'm uh I'm Ryan Haly i work at NVIDIA this is my colleague Olay Patel",
+    "start": "880",
+    "end": "6319"
+  },
+  {
+    "text": "um and like I said we're going to be talking about the Kubernetes control",
+    "start": "6319",
+    "end": "11920"
+  },
+  {
+    "text": "plane so the the story to think about here is GPUs are being released every",
+    "start": "11920",
+    "end": "18320"
+  },
+  {
+    "text": "you know one to two years they're getting more and more powerful and so more powerful means",
+    "start": "18320",
+    "end": "25920"
+  },
+  {
+    "text": "theoretically we can support more workloads more workloads means we can",
+    "start": "25920",
+    "end": "31119"
+  },
+  {
+    "text": "have more secrets more volumes more objects and all this is pressure on the",
+    "start": "31119",
+    "end": "36960"
+  },
+  {
+    "text": "API server right so we can do all these things and what we want to do is we want",
+    "start": "36960",
+    "end": "43680"
+  },
+  {
+    "text": "to make sure our control plane our Kubernetes control plane is still running so we did an experiment where we",
+    "start": "43680",
+    "end": "49360"
+  },
+  {
+    "text": "wanted to as a a bare metal provider um someone who runs on bare metal Kubernetes we wanted to see if we could",
+    "start": "49360",
+    "end": "57879"
+  },
+  {
+    "text": "scale the compute independently of the control plane so this experiment what we",
+    "start": "57879",
+    "end": "65360"
+  },
+  {
+    "text": "had in mind is we would take our control plane and we'd say okay let's have a fixed set of memory and CPU and let's",
+    "start": "65360",
+    "end": "72799"
+  },
+  {
+    "text": "scale up our compute and let's see what happens um so we keep control plane",
+    "start": "72799",
+    "end": "78640"
+  },
+  {
+    "text": "resources constant and we want to see how it performs so it went perfect",
+    "start": "78640",
+    "end": "85320"
+  },
+  {
+    "text": "right not exactly i like this title incidents incidents incidents so there's a few things that",
+    "start": "85320",
+    "end": "92000"
+  },
+  {
+    "text": "went wrong uh we're going to talk about three of them i'm going to talk about the first one um the first one uh first",
+    "start": "92000",
+    "end": "99360"
+  },
+  {
+    "text": "big thing we encountered a large number of list calls to secrets would lead to",
+    "start": "99360",
+    "end": "107119"
+  },
+  {
+    "text": "control plane outages and these aren't ordinary secrets let me tell",
+    "start": "107119",
+    "end": "114360"
+  },
+  {
+    "text": "you can I go to the next slide here there we go okay",
+    "start": "114360",
+    "end": "119960"
+  },
+  {
+    "text": "um we noticed that in our environment if we have a lot of secrets",
+    "start": "119960",
+    "end": "127759"
+  },
+  {
+    "text": "we can run into uh an oom specifically if we do list calls to the API",
+    "start": "127759",
+    "end": "135400"
+  },
+  {
+    "text": "server and so these secrets like I said they're not quite the ordinary secret they're not like a base 64 encoded",
+    "start": "135400",
+    "end": "141120"
+  },
+  {
+    "text": "string that's like a few hundred bytes they're 0.2 megabytes each they're pretty large and we have 5,000 of these",
+    "start": "141120",
+    "end": "148480"
+  },
+  {
+    "text": "things so think about that in terms of CD storage so we haved storing these",
+    "start": "148480",
+    "end": "154800"
+  },
+  {
+    "text": "things that's okay but now when you do a list call think about all that",
+    "start": "154800",
+    "end": "160000"
+  },
+  {
+    "text": "information that needs to go into the API server into the cache and think about how much memory that consumes and",
+    "start": "160000",
+    "end": "166400"
+  },
+  {
+    "text": "so if we do two concurrent list calls we can get a ton of this stuff built up in the cache and we can run out of memory",
+    "start": "166400",
+    "end": "173680"
+  },
+  {
+    "text": "in the API server uh so this is a big problem for us and you can kind of see it in the picture on the right uh when",
+    "start": "173680",
+    "end": "179519"
+  },
+  {
+    "text": "we do these list calls it was pretty obvious um that we would just it would and you know we'd lose all our metrics",
+    "start": "179519",
+    "end": "184879"
+  },
+  {
+    "text": "for the API server okay so what was the what was our",
+    "start": "184879",
+    "end": "191599"
+  },
+  {
+    "text": "solution how do we deal with this well we used API priority and fairness to help us uh API priority and",
+    "start": "191599",
+    "end": "199040"
+  },
+  {
+    "text": "fairness um if you don't know much about it at a high level it's this idea that you can have uh specific REST calls made",
+    "start": "199040",
+    "end": "206959"
+  },
+  {
+    "text": "to the API server they can be given certain levels of priority so think of",
+    "start": "206959",
+    "end": "212959"
+  },
+  {
+    "text": "like the API server as a shared resource we want to make sure that your patch requests your put requests your list",
+    "start": "212959",
+    "end": "218879"
+  },
+  {
+    "text": "requests can all get there and they all have a fair shot of reaching the API server to process those things so you",
+    "start": "218879",
+    "end": "225280"
+  },
+  {
+    "text": "can use API priority fairness to say well we only want to allow two",
+    "start": "225280",
+    "end": "230560"
+  },
+  {
+    "text": "concurrent list calls to be executed and this was really helpful for us um it",
+    "start": "230560",
+    "end": "235599"
+  },
+  {
+    "text": "actually is what solved our problem and what kept us within the safe area of memory you know we wouldn't want to go",
+    "start": "235599",
+    "end": "241360"
+  },
+  {
+    "text": "over two um so we would make that a part of our um um our API priority and",
+    "start": "241360",
+    "end": "248000"
+  },
+  {
+    "text": "fairness policy and this is what would save us right with this all these many secrets and how they're constructed we",
+    "start": "248000",
+    "end": "253519"
+  },
+  {
+    "text": "needed to use API parity and fairness to protect ourselves so this is great",
+    "start": "253519",
+    "end": "259280"
+  },
+  {
+    "text": "significantly reduced ours um and and was able to get through the problem um and if you want to learn more about API",
+    "start": "259280",
+    "end": "265600"
+  },
+  {
+    "text": "prote's actually a talk unfortunately it's given at the same time as this one but the QR code's there if you want to",
+    "start": "265600",
+    "end": "271520"
+  },
+  {
+    "text": "um you know watch the recording afterwards it'll go through in detail in much more detail about how API priority",
+    "start": "271520",
+    "end": "276960"
+  },
+  {
+    "text": "and fairness works but this worked great for us it protected our API server so that was problem number one la is going",
+    "start": "276960",
+    "end": "283840"
+  },
+  {
+    "text": "to take us through the next two",
+    "start": "283840",
+    "end": "287880"
+  },
+  {
+    "text": "thanks Ryan um in the next few set of slides I'm going to continue talking about the",
+    "start": "289120",
+    "end": "296240"
+  },
+  {
+    "text": "problems that we hit at scale and some of the fine-tuning techniques that",
+    "start": "296240",
+    "end": "302400"
+  },
+  {
+    "text": "helped us to solve those problems so you can see uh the graph here which is API",
+    "start": "302400",
+    "end": "309680"
+  },
+  {
+    "text": "server memory utilization you can see between 6 and 800 hours there is a gap",
+    "start": "309680",
+    "end": "317440"
+  },
+  {
+    "text": "uh that gap is an API server restart the more interesting thing about",
+    "start": "317440",
+    "end": "323680"
+  },
+  {
+    "text": "that is after the restart API server API servers came back with 30 40% uh less",
+    "start": "323680",
+    "end": "331759"
+  },
+  {
+    "text": "memory utilization we actually saw this consistently happen",
+    "start": "331759",
+    "end": "337120"
+  },
+  {
+    "text": "in our fleet that anytime we would restart rolling restart API server uh it",
+    "start": "337120",
+    "end": "343520"
+  },
+  {
+    "text": "would come up with um less memory utilization even if the workload uh on",
+    "start": "343520",
+    "end": "349840"
+  },
+  {
+    "text": "that cluster was same it would end up come up with uh less memory utilization",
+    "start": "349840",
+    "end": "355680"
+  },
+  {
+    "text": "so we started wondering is there a chance to you know optimize some of the",
+    "start": "355680",
+    "end": "361680"
+  },
+  {
+    "text": "um uh way garbage collection happen is the memory you know not being garbage",
+    "start": "361680",
+    "end": "368000"
+  },
+  {
+    "text": "collected fast enough so that's where we started looking at go",
+    "start": "368000",
+    "end": "373479"
+  },
+  {
+    "text": "GC goc is a uh go u is a go runtime uh",
+    "start": "373479",
+    "end": "381280"
+  },
+  {
+    "text": "construct that can help uh user control how aggressive the Go garbage",
+    "start": "381280",
+    "end": "388240"
+  },
+  {
+    "text": "collector is so let's see how it works using an",
+    "start": "388240",
+    "end": "393600"
+  },
+  {
+    "text": "example so let's assume that the Go binary is running with 100 megabyte of",
+    "start": "393600",
+    "end": "399840"
+  },
+  {
+    "text": "allocated objects right now so it's using 100 megabytes and the Go GC value",
+    "start": "399840",
+    "end": "405520"
+  },
+  {
+    "text": "is set at 100 so what this means is go go runtime will wait for 100% of",
+    "start": "405520",
+    "end": "415840"
+  },
+  {
+    "text": "new allocation which means it will wait for the memory utilization to reach to",
+    "start": "415840",
+    "end": "421840"
+  },
+  {
+    "text": "200 mgabytes before it triggers the garbage collection",
+    "start": "421840",
+    "end": "427759"
+  },
+  {
+    "text": "you can see on the right if you set go GC to 50 the go uh garbage collection will be",
+    "start": "427759",
+    "end": "435840"
+  },
+  {
+    "text": "triggered when the utilization reaches 150 so comparing both of them we can",
+    "start": "435840",
+    "end": "442400"
+  },
+  {
+    "text": "clearly see that setting go GC to 50 made go uh garbage collection more",
+    "start": "442400",
+    "end": "448960"
+  },
+  {
+    "text": "aggressive we actually noticed this um after the finetuning that the rate of uh go GC",
+    "start": "448960",
+    "end": "457880"
+  },
+  {
+    "text": "cycles doubled when goc was set to 50 not just that the amount of uh memory",
+    "start": "457880",
+    "end": "467360"
+  },
+  {
+    "text": "or bytes released also increased and the live heap utilization of API server went",
+    "start": "467360",
+    "end": "475759"
+  },
+  {
+    "text": "down so we then uh experimented with all the components in the control plane and as a",
+    "start": "475759",
+    "end": "482879"
+  },
+  {
+    "text": "result you can see in the graph each of the component has a sharp decrease in",
+    "start": "482879",
+    "end": "488479"
+  },
+  {
+    "text": "the memory utilization and over time it stays that way so even during peak",
+    "start": "488479",
+    "end": "495360"
+  },
+  {
+    "text": "utilization we saw that the memory utilization was uh made more efficient",
+    "start": "495360",
+    "end": "501360"
+  },
+  {
+    "text": "by this simple fine-tuning technique",
+    "start": "501360",
+    "end": "506120"
+  },
+  {
+    "text": "go GC is a very uh flexible uh parameter underneath the hoods it's a",
+    "start": "507199",
+    "end": "514320"
+  },
+  {
+    "text": "trade-off between CPU and memory in our case we traded off because we were",
+    "start": "514320",
+    "end": "520479"
+  },
+  {
+    "text": "memory constrainted uh we traded off some CPU with uh efficient memory",
+    "start": "520479",
+    "end": "526440"
+  },
+  {
+    "text": "utilization conversely depending on the environment uh one could easily trade",
+    "start": "526440",
+    "end": "533120"
+  },
+  {
+    "text": "off u memory for CPU in fact I have a reference uh from a",
+    "start": "533120",
+    "end": "539680"
+  },
+  {
+    "text": "blog uh from Uber uh they have done exactly opposite of what we have done",
+    "start": "539680",
+    "end": "546800"
+  },
+  {
+    "text": "where um they tuned the uh go GC value so that they would have lower CPU",
+    "start": "546800",
+    "end": "554080"
+  },
+  {
+    "text": "utilization but higher uh memory which is okay for their environment",
+    "start": "554080",
+    "end": "561120"
+  },
+  {
+    "text": "so go GC is a flexible um tunable highly recommended if there is a trade-off to",
+    "start": "561120",
+    "end": "568240"
+  },
+  {
+    "text": "be made between CPU memory it is one of the things that can help with any uh go",
+    "start": "568240",
+    "end": "573760"
+  },
+  {
+    "text": "program and since kubernetes and the control plane is uh go uh we use it",
+    "start": "573760",
+    "end": "579680"
+  },
+  {
+    "text": "effectively in in the control plane moving on uh the second problem",
+    "start": "579680",
+    "end": "587200"
+  },
+  {
+    "text": "that we started observing in our fleet is that again we're looking at the API",
+    "start": "587200",
+    "end": "593440"
+  },
+  {
+    "text": "server memory utilization graph and you can see that the blue",
+    "start": "593440",
+    "end": "599320"
+  },
+  {
+    "text": "instance is at a much higher API server memory utilization than the green one in",
+    "start": "599320",
+    "end": "606800"
+  },
+  {
+    "text": "fact the skew is big enough uh that it started creating problems for us what",
+    "start": "606800",
+    "end": "613360"
+  },
+  {
+    "text": "kind of problem right so as Ryan mentioned if let's say a list",
+    "start": "613360",
+    "end": "619839"
+  },
+  {
+    "text": "request storm comes in when this queue exists in the control plane the chances",
+    "start": "619839",
+    "end": "626320"
+  },
+  {
+    "text": "of the blue API server uh getting killed becomes much higher because it is",
+    "start": "626320",
+    "end": "633279"
+  },
+  {
+    "text": "consistently above average uh memory utilization compared to the other",
+    "start": "633279",
+    "end": "638440"
+  },
+  {
+    "text": "two so in an unfortunate event let's say a list storm comes in and the blue API",
+    "start": "638440",
+    "end": "645959"
+  },
+  {
+    "text": "servers all of its connections are now uh load balanced between yellow and",
+    "start": "645959",
+    "end": "652800"
+  },
+  {
+    "text": "green and since yellow is not much far off in terms of memory utilization the",
+    "start": "652800",
+    "end": "658480"
+  },
+  {
+    "text": "chances of it oming are much higher as all the workload all the requests from",
+    "start": "658480",
+    "end": "664480"
+  },
+  {
+    "text": "blue get transferred to uh yellow and green so again this few minutes we would",
+    "start": "664480",
+    "end": "671839"
+  },
+  {
+    "text": "observe that the yellow API server would and then eventually because both of them",
+    "start": "671839",
+    "end": "677920"
+  },
+  {
+    "text": "are not serving any requests now the blue and yellow the green API server",
+    "start": "677920",
+    "end": "683440"
+  },
+  {
+    "text": "would then not be able to handle the entire uh clusters workload and it would",
+    "start": "683440",
+    "end": "688800"
+  },
+  {
+    "text": "kill uh as well so we started seeing these kinds of cascading failures uh in",
+    "start": "688800",
+    "end": "695279"
+  },
+  {
+    "text": "our stack it was so bad that we actually had to set up alerts that anytime there",
+    "start": "695279",
+    "end": "701360"
+  },
+  {
+    "text": "is a memory skew have to go in there and take certain actions to make sure",
+    "start": "701360",
+    "end": "707240"
+  },
+  {
+    "text": "um you know it got healed but this was a big problem for us and we wanted to see",
+    "start": "707240",
+    "end": "713040"
+  },
+  {
+    "text": "how we can um solve it so in digging more uh about this problem",
+    "start": "713040",
+    "end": "719600"
+  },
+  {
+    "text": "we learned that anytime there was a skew in memory utilization uh there was also",
+    "start": "719600",
+    "end": "725040"
+  },
+  {
+    "text": "a skew in haroxy and API server connection so HA proxy in our",
+    "start": "725040",
+    "end": "730639"
+  },
+  {
+    "text": "environment is just a front end which acts as a load balancer for all the incoming traffic to API server and it",
+    "start": "730639",
+    "end": "738000"
+  },
+  {
+    "text": "started to see lot of skews so you can see in the graph that the a the",
+    "start": "738000",
+    "end": "744079"
+  },
+  {
+    "text": "connections on two API servers are you know in in the order of thousands and",
+    "start": "744079",
+    "end": "749519"
+  },
+  {
+    "text": "the third one is just at at 37 right so there's a big skew in the connection and",
+    "start": "749519",
+    "end": "755360"
+  },
+  {
+    "text": "what that meant is that the rate at which each API server serves request is",
+    "start": "755360",
+    "end": "762480"
+  },
+  {
+    "text": "drastically different uh you can see in the graph the the green API server is",
+    "start": "762480",
+    "end": "767920"
+  },
+  {
+    "text": "serving much more uh number and at a higher rate uh of requests than than the",
+    "start": "767920",
+    "end": "774079"
+  },
+  {
+    "text": "blue one this means that because the load is different on each API server",
+    "start": "774079",
+    "end": "780560"
+  },
+  {
+    "text": "um the memory utilization um will turn out to be different right so all of",
+    "start": "780560",
+    "end": "786480"
+  },
+  {
+    "text": "these were symptoms of of the same problem uh so we started to think about how to",
+    "start": "786480",
+    "end": "794639"
+  },
+  {
+    "text": "solve this problem right and the most obvious uh intuitive feeling is are we",
+    "start": "794639",
+    "end": "800480"
+  },
+  {
+    "text": "doing load balancing correctly uh in front of API server we actually",
+    "start": "800480",
+    "end": "806160"
+  },
+  {
+    "text": "experimented with many different load balancing configurations and none of them seem to have helped here so what",
+    "start": "806160",
+    "end": "814120"
+  },
+  {
+    "text": "helped uh we discovered a flag called goaway chance parameter in API server",
+    "start": "814120",
+    "end": "820880"
+  },
+  {
+    "text": "and we noticed that configuring that uh appropriately helped remove this uh",
+    "start": "820880",
+    "end": "827360"
+  },
+  {
+    "text": "problem of SKUs uh in API server so how does it it work so when we think about",
+    "start": "827360",
+    "end": "834639"
+  },
+  {
+    "text": "requests HTTP requests that are sent from a client to API server uh",
+    "start": "834639",
+    "end": "839920"
+  },
+  {
+    "text": "underneath the hoods they are working on established TCP connections and these",
+    "start": "839920",
+    "end": "846079"
+  },
+  {
+    "text": "connections are long lived so think of these connection as pipes that are",
+    "start": "846079",
+    "end": "851199"
+  },
+  {
+    "text": "established and think of the requests as buckets of water that can flow up and",
+    "start": "851199",
+    "end": "856639"
+  },
+  {
+    "text": "down uh these pipes but once these connections are established there's no",
+    "start": "856639",
+    "end": "861920"
+  },
+  {
+    "text": "real way uh for you to you know tear them down so load balancing uh helps you",
+    "start": "861920",
+    "end": "868000"
+  },
+  {
+    "text": "in creating new connections in in a fair way but once this skew is introduced it",
+    "start": "868000",
+    "end": "874480"
+  },
+  {
+    "text": "doesn't do anything to you know tear those connection connections down uh and bring up new connections so this is",
+    "start": "874480",
+    "end": "881839"
+  },
+  {
+    "text": "where the goaway chance parameter comes in where it probabilistically takes some",
+    "start": "881839",
+    "end": "888800"
+  },
+  {
+    "text": "uh established connections uh in the pool and sends a go away uh TCP message",
+    "start": "888800",
+    "end": "895920"
+  },
+  {
+    "text": "what this means is it tears down the connection uh gracefully and allows the client to recreate the connection",
+    "start": "895920",
+    "end": "903600"
+  },
+  {
+    "text": "hopefully going through the load balancer again and and getting a better",
+    "start": "903600",
+    "end": "908800"
+  },
+  {
+    "text": "balanced traffic what we observed is after configuring",
+    "start": "908800",
+    "end": "914160"
+  },
+  {
+    "text": "this in our API server environment even if a skew exists like",
+    "start": "914160",
+    "end": "920000"
+  },
+  {
+    "text": "in the graph below within 15 minutes uh the skew will automatically recover",
+    "start": "920000",
+    "end": "926240"
+  },
+  {
+    "text": "itself because this will give u the API server enough chance to send goaways to",
+    "start": "926240",
+    "end": "932959"
+  },
+  {
+    "text": "those uh existing connections and create new ones",
+    "start": "932959",
+    "end": "938600"
+  },
+  {
+    "text": "unfortunately not a lot of documentation for this parameter exists so I have a",
+    "start": "938639",
+    "end": "943680"
+  },
+  {
+    "text": "pull request which has a really nice uh description of of the problem and how uh",
+    "start": "943680",
+    "end": "950000"
+  },
+  {
+    "text": "uh how go away chance parameter solves it this in fact could be used not just",
+    "start": "950000",
+    "end": "955839"
+  },
+  {
+    "text": "in the the Kubernetes API server but a similar implementation can can be used",
+    "start": "955839",
+    "end": "961040"
+  },
+  {
+    "text": "in any uh server or or any uh component",
+    "start": "961040",
+    "end": "966160"
+  },
+  {
+    "text": "that is uh doing server side processing and and load balancing in front of it",
+    "start": "966160",
+    "end": "975040"
+  },
+  {
+    "text": "uh after after configuring this particular parameter we saw that there",
+    "start": "975040",
+    "end": "980160"
+  },
+  {
+    "text": "were no cascading failures in our stack anymore so this particular uh",
+    "start": "980160",
+    "end": "985360"
+  },
+  {
+    "text": "configuration helped a lot in in removing the control plane failures and",
+    "start": "985360",
+    "end": "991440"
+  },
+  {
+    "text": "serving GPU capacity consistently over time",
+    "start": "991440",
+    "end": "997480"
+  },
+  {
+    "text": "so you know running into these kinds of very u very rare uh scale issues we",
+    "start": "997959",
+    "end": "1007519"
+  },
+  {
+    "text": "constantly you know thought what is it with our environment that is creating",
+    "start": "1007519",
+    "end": "1013360"
+  },
+  {
+    "text": "these kinds of scaling issues right and over time we have learned that we moved",
+    "start": "1013360",
+    "end": "1019199"
+  },
+  {
+    "text": "our compute platform from a legacy homegrown uh cloud to a cloudnative",
+    "start": "1019199",
+    "end": "1026798"
+  },
+  {
+    "text": "uh uh computing platform and in that move u there were some mistakes uh that",
+    "start": "1026799",
+    "end": "1033038"
+  },
+  {
+    "text": "we made one of them was we put a large amount of data in in secret um as",
+    "start": "1033039",
+    "end": "1040280"
+  },
+  {
+    "text": "configuration or or certificates for our workload and that meant that a lot of uh",
+    "start": "1040280",
+    "end": "1047120"
+  },
+  {
+    "text": "lot of time is taken for lot of time and effort is taken both of both at API",
+    "start": "1047120",
+    "end": "1053039"
+  },
+  {
+    "text": "server as well as the client side to you know encode decode that YAML just a lot",
+    "start": "1053039",
+    "end": "1058720"
+  },
+  {
+    "text": "of YAML in in the workload then the second mistake was that the client which orchestrates this",
+    "start": "1058720",
+    "end": "1066720"
+  },
+  {
+    "text": "uh GPU capacity workload across the cluster it it works with both legacy as",
+    "start": "1066720",
+    "end": "1072720"
+  },
+  {
+    "text": "well as the cloudnative environment and because of that it had to make periodic",
+    "start": "1072720",
+    "end": "1078320"
+  },
+  {
+    "text": "list calls uh against our workloads and we know that list calls against API",
+    "start": "1078320",
+    "end": "1084080"
+  },
+  {
+    "text": "servers are again a scalability issue so both of these mistakes combined",
+    "start": "1084080",
+    "end": "1090559"
+  },
+  {
+    "text": "caused a lot of challenges and all of these fine-tuning techniques uh that uh",
+    "start": "1090559",
+    "end": "1096480"
+  },
+  {
+    "text": "that were discussed in this uh presentation helped us live with these",
+    "start": "1096480",
+    "end": "1101520"
+  },
+  {
+    "text": "challenges for a sustained amount of time so big shout out to the Kubernetes community for you know having such a",
+    "start": "1101520",
+    "end": "1108720"
+  },
+  {
+    "text": "robust uh ecosystem where these kinds of techniques can be found and implemented",
+    "start": "1108720",
+    "end": "1114960"
+  },
+  {
+    "text": "in an easy way you know talking about future the future",
+    "start": "1114960",
+    "end": "1121679"
+  },
+  {
+    "text": "is seems to be very bright on this front uh big shout out to SIG API machinery u",
+    "start": "1121679",
+    "end": "1129520"
+  },
+  {
+    "text": "there are at least three initiatives uh and there are much more not listed here",
+    "start": "1129520",
+    "end": "1135120"
+  },
+  {
+    "text": "but these are the initiatives that will really really help uh scale the control",
+    "start": "1135120",
+    "end": "1141520"
+  },
+  {
+    "text": "plane in in a you know non-trivial way going forward so very excited about the",
+    "start": "1141520",
+    "end": "1148320"
+  },
+  {
+    "text": "new changes coming um for for the control",
+    "start": "1148320",
+    "end": "1153279"
+  },
+  {
+    "text": "plane talking about the future uh there is a big change coming for our stack as",
+    "start": "1154039",
+    "end": "1159600"
+  },
+  {
+    "text": "well which is we're going to transition from the current implementation which is",
+    "start": "1159600",
+    "end": "1165280"
+  },
+  {
+    "text": "serving GPU capacity using device plugins uh to DRRA uh this change is big enough that",
+    "start": "1165280",
+    "end": "1174160"
+  },
+  {
+    "text": "uh we wanted to do some kind of a power and scale testing of the control plane",
+    "start": "1174160",
+    "end": "1180120"
+  },
+  {
+    "text": "before you know taking this change in production so in the next set of slides",
+    "start": "1180120",
+    "end": "1185600"
+  },
+  {
+    "text": "I'll be talking a little bit about what this change looks like and some of the uh perf and scale uh tests and their",
+    "start": "1185600",
+    "end": "1192640"
+  },
+  {
+    "text": "numbers uh that we ran but before we get into that quickly talking about what the",
+    "start": "1192640",
+    "end": "1199200"
+  },
+  {
+    "text": "current stack looks like on the control plane we have um API server controller",
+    "start": "1199200",
+    "end": "1205039"
+  },
+  {
+    "text": "manager and the scheduleuler the normal uh Kubernetes stuff but we have one more",
+    "start": "1205039",
+    "end": "1210240"
+  },
+  {
+    "text": "component which is called the topo aare scheduleuler this scheduleuler does um",
+    "start": "1210240",
+    "end": "1215679"
+  },
+  {
+    "text": "numa alignment for our workloads so so the workloads that we are running are not just um uh GPU workloads but because",
+    "start": "1215679",
+    "end": "1223760"
+  },
+  {
+    "text": "because they are high sensitive high performance workload we need to do uh NUMA alignment for that with with the",
+    "start": "1223760",
+    "end": "1230720"
+  },
+  {
+    "text": "right um CPU nodes and topoare scheduleuler needs to be in the control",
+    "start": "1230720",
+    "end": "1236799"
+  },
+  {
+    "text": "plane to do to do this u scheduling for uh you know numa",
+    "start": "1236799",
+    "end": "1242360"
+  },
+  {
+    "text": "alignment on the on the worker nodes we have device plug plugins that do the the",
+    "start": "1242360",
+    "end": "1249039"
+  },
+  {
+    "text": "GPU allocations but along with that we have an NFD topology updater this this",
+    "start": "1249039",
+    "end": "1255679"
+  },
+  {
+    "text": "actually feeds the numa topology information into the control plane which is then acted upon by a topo",
+    "start": "1255679",
+    "end": "1262799"
+  },
+  {
+    "text": "scheduleuler so this is the stack on the left that we have now uh and then in the",
+    "start": "1262799",
+    "end": "1268760"
+  },
+  {
+    "text": "future moving to DRA we we should be able to get rid of the topo awareuler",
+    "start": "1268760",
+    "end": "1275440"
+  },
+  {
+    "text": "because the DRRA API is rich enough to do numa alignment just default right out",
+    "start": "1275440",
+    "end": "1282240"
+  },
+  {
+    "text": "of the box by the cubeuler so we'll be removing the topo",
+    "start": "1282240",
+    "end": "1288480"
+  },
+  {
+    "text": "scheduleuler from the control plane as well as the uh uh NFD topology updator",
+    "start": "1288480",
+    "end": "1294400"
+  },
+  {
+    "text": "from from the worker nodes and that will leave us with just the DR plugins for our workloads and and cubeuler uh in the",
+    "start": "1294400",
+    "end": "1302320"
+  },
+  {
+    "text": "control plane um we actually did a deep dive about this whole uh orchestration",
+    "start": "1302320",
+    "end": "1309039"
+  },
+  {
+    "text": "in uh cubecon in Salt Lake City um I encourage you guys to uh to check that",
+    "start": "1309039",
+    "end": "1314880"
+  },
+  {
+    "text": "out it has much more uh detail about how our stack um like what kind of problems",
+    "start": "1314880",
+    "end": "1321440"
+  },
+  {
+    "text": "we faced with uh device plugins and how DRRA helps us uh solve",
+    "start": "1321440",
+    "end": "1326760"
+  },
+  {
+    "text": "those but uh you know focusing on the control plane scalability in order to",
+    "start": "1326760",
+    "end": "1333440"
+  },
+  {
+    "text": "you know scale test uh this we we wanted to find a easier and a cheaper way to",
+    "start": "1333440",
+    "end": "1340559"
+  },
+  {
+    "text": "scale test it um that's where uh we use uh quark quark is uh kubernetes without",
+    "start": "1340559",
+    "end": "1349039"
+  },
+  {
+    "text": "uh cublet and basically it's a simulation tool which can help you uh",
+    "start": "1349039",
+    "end": "1355280"
+  },
+  {
+    "text": "create fake nodes in the cluster as well as fake pods and then uh that that",
+    "start": "1355280",
+    "end": "1361200"
+  },
+  {
+    "text": "creates um uh additional pressure in the control plane and uh you know we run the",
+    "start": "1361200",
+    "end": "1367919"
+  },
+  {
+    "text": "scale test using that um there are actually couple of talks uh where we're",
+    "start": "1367919",
+    "end": "1374240"
+  },
+  {
+    "text": "talking about quark much more in detail um encourage you guys to check that out",
+    "start": "1374240",
+    "end": "1379840"
+  },
+  {
+    "text": "and you know uh see if uh Quark can be can be",
+    "start": "1379840",
+    "end": "1385159"
+  },
+  {
+    "text": "helpful so so with Quark talking a little bit about the scale test so we",
+    "start": "1385159",
+    "end": "1390559"
+  },
+  {
+    "text": "had 132 uh cluster we had quark installed and we would scale from zero",
+    "start": "1390559",
+    "end": "1396320"
+  },
+  {
+    "text": "to 4,000 uh workloads and we would do that for topo aware scheduleuler and DRA",
+    "start": "1396320",
+    "end": "1402159"
+  },
+  {
+    "text": "and compare certain metrics right so the first metric metric we compared is the",
+    "start": "1402159",
+    "end": "1408000"
+  },
+  {
+    "text": "scheduling latency on the left you can see the topo and on the right you see",
+    "start": "1408000",
+    "end": "1413440"
+  },
+  {
+    "text": "the DRuler we found out that topo scheduleuler is twice as more uh",
+    "start": "1413440",
+    "end": "1420400"
+  },
+  {
+    "text": "latencydriven as uh the DRA scheduleuler um so this metric was a win uh we are",
+    "start": "1420400",
+    "end": "1429280"
+  },
+  {
+    "text": "okay to you know take this into production the second metric was uh",
+    "start": "1429280",
+    "end": "1435039"
+  },
+  {
+    "text": "memory utilization so in this slide you see the topoare um scheduleuler memory",
+    "start": "1435039",
+    "end": "1442039"
+  },
+  {
+    "text": "usage but along with that too we also have cubeuler running in the control",
+    "start": "1442039",
+    "end": "1447600"
+  },
+  {
+    "text": "plane so the real memory utilization in control plane is the sum of both and we",
+    "start": "1447600",
+    "end": "1453840"
+  },
+  {
+    "text": "saw that at scale it was around uh 1.3 GB but with DRA it was around a gigabyte",
+    "start": "1453840",
+    "end": "1463279"
+  },
+  {
+    "text": "so again 30% uh memory saving um with DRA again this",
+    "start": "1463279",
+    "end": "1469760"
+  },
+  {
+    "text": "is a metric that uh uh checked us really checked us checked out for us really",
+    "start": "1469760",
+    "end": "1475120"
+  },
+  {
+    "text": "nicely the third metric we looked at was the effect of all of this orchestration on",
+    "start": "1475120",
+    "end": "1482080"
+  },
+  {
+    "text": "API server and again on the top you can see that the topo scheduleuler impact on",
+    "start": "1482080",
+    "end": "1488159"
+  },
+  {
+    "text": "API server it the API server was at around five uh gigabytes and on the",
+    "start": "1488159",
+    "end": "1494080"
+  },
+  {
+    "text": "bottom you see the uh impact of DRA orchestration it was well under um again",
+    "start": "1494080",
+    "end": "1501360"
+  },
+  {
+    "text": "like a 20% um better memory footprint in terms of how aggressive it is with API",
+    "start": "1501360",
+    "end": "1508559"
+  },
+  {
+    "text": "server so all of these three metrics u gave us a good initial reading with",
+    "start": "1508559",
+    "end": "1515559"
+  },
+  {
+    "text": "simulation that the new uh DRRA uh stack",
+    "start": "1515559",
+    "end": "1520720"
+  },
+  {
+    "text": "is going to be you know much better for us not just they are going to solve like",
+    "start": "1520720",
+    "end": "1526240"
+  },
+  {
+    "text": "uh uh conceptual problems but also in terms of perf and scale it'll be uh uh",
+    "start": "1526240",
+    "end": "1532559"
+  },
+  {
+    "text": "you know efficiency improvement",
+    "start": "1532559",
+    "end": "1536000"
+  },
+  {
+    "text": "Okay I'm going to summarize a little bit here so what are the takeaways so we went through this",
+    "start": "1542440",
+    "end": "1548480"
+  },
+  {
+    "text": "journey uh at Nvidia and like I said our goal was we wanted to have a fixed size control",
+    "start": "1548480",
+    "end": "1555279"
+  },
+  {
+    "text": "plane and we wanted to see it scale independently of compute right we're assuming that GPUs are getting more",
+    "start": "1555279",
+    "end": "1561279"
+  },
+  {
+    "text": "powerful which means more workloads we want to see how that could work right",
+    "start": "1561279",
+    "end": "1566640"
+  },
+  {
+    "text": "you sometimes you unplug your GPUs you put in new ones we want to see what this would look like um so to summarize like",
+    "start": "1566640",
+    "end": "1573440"
+  },
+  {
+    "text": "in our our journey is that you know we found that we made some mistakes architecturally along the way and we",
+    "start": "1573440",
+    "end": "1578640"
+  },
+  {
+    "text": "learned a bunch of things you know our journey was from a non-cloudnative word world to a cloud native world so there",
+    "start": "1578640",
+    "end": "1584400"
+  },
+  {
+    "text": "were some things we had to learn um but it's cool we were able to get through it we were able to figure it out um you",
+    "start": "1584400",
+    "end": "1590640"
+  },
+  {
+    "text": "know we still run with all these secrets today we still run with these sides of secrets and it was great that we were",
+    "start": "1590640",
+    "end": "1595919"
+  },
+  {
+    "text": "able to find uh this great support from the community to actually pull this off um and it was cool to see like all these",
+    "start": "1595919",
+    "end": "1602240"
+  },
+  {
+    "text": "things that these tunables that Allay mentioned they all have different effects you know based on your use case and your environment um so it's",
+    "start": "1602240",
+    "end": "1609360"
+  },
+  {
+    "text": "something to check out you know as as you um are are running into something like this perhaps in your control plane",
+    "start": "1609360",
+    "end": "1615440"
+  },
+  {
+    "text": "that there's a lot of things that you can do a lot of things that you can do to to possibly help your your scale your memory usage your CPU usage u um and",
+    "start": "1615440",
+    "end": "1622799"
+  },
+  {
+    "text": "save some of uh uh yourself from possibly having some OS and um and",
+    "start": "1622799",
+    "end": "1628240"
+  },
+  {
+    "text": "finally you know we're really excited about what the the Kubernetes community has ahead um they've done some really great work in scale and performance um a",
+    "start": "1628240",
+    "end": "1635679"
+  },
+  {
+    "text": "lot of the stuff like list streams and and a bunch of um upcoming stuff that we're going to get in the new Kubernetes releases later this year that we're",
+    "start": "1635679",
+    "end": "1641600"
+  },
+  {
+    "text": "going to roll out um will actually make a lot of these problems go away for us um we we probably wouldn't have hit them",
+    "start": "1641600",
+    "end": "1647039"
+  },
+  {
+    "text": "at all if if we had um some of the latest tech in Kubernetes so that's also",
+    "start": "1647039",
+    "end": "1652080"
+  },
+  {
+    "text": "really exciting and then finally with DRA a really exciting feature that probably everyone is aware of you know",
+    "start": "1652080",
+    "end": "1657200"
+  },
+  {
+    "text": "we're also really excited to use it um really flexible way to allocate devices um something that we're going to",
+    "start": "1657200",
+    "end": "1663200"
+  },
+  {
+    "text": "evaluate a lot um and be rolling out into our production zones very very soon so very important for us um and LA is",
+    "start": "1663200",
+    "end": "1670400"
+  },
+  {
+    "text": "going to be doing a lot of scale and performance work in that community okay uh we'll take",
+    "start": "1670400",
+    "end": "1676840"
+  },
+  {
+    "text": "questions thank you everybody",
+    "start": "1676840",
+    "end": "1681158"
+  },
+  {
+    "text": "[Applause]",
+    "start": "1684040",
+    "end": "1687960"
+  },
+  {
+    "text": "there's a microphone right in the middle of the",
+    "start": "1689440",
+    "end": "1693278"
+  },
+  {
+    "text": "room quick question is it common to use HTTP2 in front of",
+    "start": "1705799",
+    "end": "1713120"
+  },
+  {
+    "text": "API server uh yeah uh",
+    "start": "1713120",
+    "end": "1718760"
+  },
+  {
+    "text": "so for like the request side of it it is HTTP2 there are other long-standing",
+    "start": "1718760",
+    "end": "1725679"
+  },
+  {
+    "text": "things like log and uh XC which use other protocols but yeah it's mostly",
+    "start": "1725679",
+    "end": "1732080"
+  },
+  {
+    "text": "HTTP2 okay i'm I'm confessing uh I'm a big fan of classic Engine X and HTTP1",
+    "start": "1732080",
+    "end": "1740240"
+  },
+  {
+    "text": "wherever possible meaning shortlived connections or maybe sometimes like slightly longer",
+    "start": "1740240",
+    "end": "1748320"
+  },
+  {
+    "text": "lived connections but I think your example has just confirmed that when you have really persistent connections it's",
+    "start": "1748320",
+    "end": "1754240"
+  },
+  {
+    "text": "not always uh to your advantage so I think the big one is the watch semantics",
+    "start": "1754240",
+    "end": "1761200"
+  },
+  {
+    "text": "the watch most of the watchers that get set up need a persistent connection to you",
+    "start": "1761200",
+    "end": "1767520"
+  },
+  {
+    "text": "know send uh events to the clients and it would be really hard to I mean I",
+    "start": "1767520",
+    "end": "1774240"
+  },
+  {
+    "text": "would imagine it would be really hard to implement something like that with HTTP1",
+    "start": "1774240",
+    "end": "1779440"
+  },
+  {
+    "text": "do you also send them to go away i'm sorry those long live watcher",
+    "start": "1779440",
+    "end": "1785679"
+  },
+  {
+    "text": "connections are they also affected by go away that's a great question so the existing connections will not be uh",
+    "start": "1785679",
+    "end": "1793440"
+  },
+  {
+    "text": "affected by go away it's actually mentioned in that PR description it will only the new connections that are set up",
+    "start": "1793440",
+    "end": "1800320"
+  },
+  {
+    "text": "will be impacted by the goway uh configuration thanks",
+    "start": "1800320",
+    "end": "1807600"
+  }
+]

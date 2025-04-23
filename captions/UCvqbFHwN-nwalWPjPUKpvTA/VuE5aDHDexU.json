@@ -1,0 +1,1843 @@
+[
+  {
+    "start": "0",
+    "end": "57000"
+  },
+  {
+    "text": "so hello folks this is going to be about cortex or how to performance tuned",
+    "start": "30",
+    "end": "5819"
+  },
+  {
+    "text": "cortex for scale how many of you know what cortex is okay so you're in the",
+    "start": "5819",
+    "end": "11759"
+  },
+  {
+    "text": "right room how many if you are already using cortex nice you're gonna love this",
+    "start": "11759",
+    "end": "17340"
+  },
+  {
+    "text": "talk so this is the cortex deep dive I've actually changed the title a bunch",
+    "start": "17340",
+    "end": "23369"
+  },
+  {
+    "text": "of times on my slides and in the end I ended up with every way we need washed our cortex or how to make sure your",
+    "start": "23369",
+    "end": "29730"
+  },
+  {
+    "text": "cortex will scale with your usage so a little bit about me I'm Gautham I'm",
+    "start": "29730",
+    "end": "35250"
+  },
+  {
+    "text": "actually I started as a Prometheus maintainer and then I started working on cortex and refine elapsed and now I'm a",
+    "start": "35250",
+    "end": "41520"
+  },
+  {
+    "text": "cortex maintainer and I also co-author Loki along with Tom Loki just hit one",
+    "start": "41520",
+    "end": "47190"
+  },
+  {
+    "text": "point over which is amazing and Loki is also built on top of cortex so whatever",
+    "start": "47190",
+    "end": "52230"
+  },
+  {
+    "text": "I am saying for cortex also applies to Loki so that's nice so how many of you",
+    "start": "52230",
+    "end": "58559"
+  },
+  {
+    "start": "57000",
+    "end": "160000"
+  },
+  {
+    "text": "are familiar with this very simple diagram look small looks simple right",
+    "start": "58559",
+    "end": "65280"
+  },
+  {
+    "text": "it's not but I spent my last 15 to 18",
+    "start": "65280",
+    "end": "70470"
+  },
+  {
+    "text": "months being on call for this beast and it's actually quite easy to tame and",
+    "start": "70470",
+    "end": "75930"
+  },
+  {
+    "text": "that's what I'm going to talk about so this is the architecture of cortex so I'm just gonna like I'm not going to do",
+    "start": "75930",
+    "end": "83340"
+  },
+  {
+    "text": "all the components and all the ways it can break all the ways you can tame this but I'm gonna give you a framework on",
+    "start": "83340",
+    "end": "89280"
+  },
+  {
+    "text": "how you can fix things if you're running cortex or in general any system that is a database or a distributed database so",
+    "start": "89280",
+    "end": "97650"
+  },
+  {
+    "text": "for those of you who are not familiar cortex is a horizontally scalable distributed multi-tenant version of",
+    "start": "97650",
+    "end": "103229"
+  },
+  {
+    "text": "Prometheus it has all the buzzwords and so the beauty of cortex is its",
+    "start": "103229",
+    "end": "111619"
+  },
+  {
+    "text": "configurability so if you actually do cortex help how many lines do you think",
+    "start": "111619",
+    "end": "117210"
+  },
+  {
+    "text": "are printed can someone take a rough guess it's there on the screen but yeah",
+    "start": "117210",
+    "end": "123479"
+  },
+  {
+    "text": "it actually prints thousand and five lines that's about like 500 flags",
+    "start": "123479",
+    "end": "129590"
+  },
+  {
+    "text": "so again this means you can tune every single piece of cortex individually and",
+    "start": "129660",
+    "end": "134820"
+  },
+  {
+    "text": "we have a bunch of compostable components that actually so essentially we have a caching component that has",
+    "start": "134820",
+    "end": "140550"
+  },
+  {
+    "text": "memcache radius in memory on disk and then you can use the same cache component in six different places so",
+    "start": "140550",
+    "end": "147390"
+  },
+  {
+    "text": "that's like 60 or 70 flags right there so there's a bunch of things that you can configure it in cortex and I",
+    "start": "147390",
+    "end": "153240"
+  },
+  {
+    "text": "actually wanted to control minus minus help and you scroll through for like 30 minutes",
+    "start": "153240",
+    "end": "158510"
+  },
+  {
+    "text": "but yeah so I'm gonna actually tackle two things the right path and the read path and how to actually make sure you",
+    "start": "158510",
+    "end": "165600"
+  },
+  {
+    "start": "160000",
+    "end": "512000"
+  },
+  {
+    "text": "were configuring cortex for you for scale so the right path so if you can",
+    "start": "165600",
+    "end": "174690"
+  },
+  {
+    "text": "see this see my pointer so essentially Prometheus writes to something called the gateway that does",
+    "start": "174690",
+    "end": "179940"
+  },
+  {
+    "text": "authentication that adds the tenant idea tenant header sends it to the distributor the distributor sends it to",
+    "start": "179940",
+    "end": "185280"
+  },
+  {
+    "text": "the industry the injector actually takes all these samples individual samples builds that builds them up into bigger",
+    "start": "185280",
+    "end": "190590"
+  },
+  {
+    "text": "chunks and then writes it into BigTable GCS and and a cache so this is this is a",
+    "start": "190590",
+    "end": "197370"
+  },
+  {
+    "text": "small subset of the right path that you see and I'm just gonna cover this bit of the right path now so again suddenly",
+    "start": "197370",
+    "end": "206340"
+  },
+  {
+    "text": "you're operating cortex and suddenly you get paged saying the rights are failing or Prometheus is failing to write data",
+    "start": "206340",
+    "end": "212250"
+  },
+  {
+    "text": "or the Prometheus remote write is falling behind it's just not able to write fast enough so what do I do",
+    "start": "212250",
+    "end": "218250"
+  },
+  {
+    "text": "so I've been again this is like this is my playbook for being on call for cortex",
+    "start": "218250",
+    "end": "223410"
+  },
+  {
+    "text": "I get page four writes I go to something called the cortex on its dashboard which is actually based on the read method so",
+    "start": "223410",
+    "end": "230959"
+  },
+  {
+    "text": "let me see if my so how many of you have",
+    "start": "230959",
+    "end": "238050"
+  },
+  {
+    "text": "heard of the read method so read method is this method of how to instrument your",
+    "start": "238050",
+    "end": "244110"
+  },
+  {
+    "text": "distributed applications especially if they're RPC systems so it says you need to track your request errors and",
+    "start": "244110",
+    "end": "250380"
+  },
+  {
+    "text": "duration so again as I said we have a gateway this is the cortex component",
+    "start": "250380",
+    "end": "255780"
+  },
+  {
+    "text": "that talks to the distributor that talks to a net CD that oxygen in gesture the in gesture rights to memcachedb BigTable",
+    "start": "255780",
+    "end": "262450"
+  },
+  {
+    "text": "and stuff like that so essentially this is like a tiered application where a talks to me talks to C talks to D and you have the QPS and the latency on the",
+    "start": "262450",
+    "end": "270040"
+  },
+  {
+    "text": "occupation on the left and latency on the right the beauty of this is if something goes to red for example you see the gateways red 500s are being",
+    "start": "270040",
+    "end": "276940"
+  },
+  {
+    "text": "thrown distributor is red but the injection is green so immediately you can understand the distributor is what",
+    "start": "276940",
+    "end": "283510"
+  },
+  {
+    "text": "is throwing these letters and that you need to look at the distributor distributor logs not the ingest of logs",
+    "start": "283510",
+    "end": "290530"
+  },
+  {
+    "text": "so again the same thing applies for latency you're seeing okay that's like 40 milliseconds later in C on rights",
+    "start": "290530",
+    "end": "296080"
+  },
+  {
+    "text": "right it's a super quick there's a 40 millisecond agency on the distributor and the industry is only having a 5",
+    "start": "296080",
+    "end": "304540"
+  },
+  {
+    "text": "millisecond latency which means the distributorship what is adding the latency so if you actually have distributed systems if you can build",
+    "start": "304540",
+    "end": "311650"
+  },
+  {
+    "text": "these very consistent templated and dashboards that will actually give you at one glance what is wrong with your",
+    "start": "311650",
+    "end": "317950"
+  },
+  {
+    "text": "system what is right with your system so this is a cortex right dashboard where we have everything tiered so one thing",
+    "start": "317950",
+    "end": "324880"
+  },
+  {
+    "text": "is everything that I'm talking about here is open source I just open sources",
+    "start": "324880",
+    "end": "330010"
+  },
+  {
+    "text": "today morning I'm going to give you I'm going to walk you through how you can get these own dashboards and alerts for you or if you're running cortex and the",
+    "start": "330010",
+    "end": "338470"
+  },
+  {
+    "text": "next thing is okay everything is green but just slow so we have a SLO of one second 99.9% of our writes need to pass",
+    "start": "338470",
+    "end": "348190"
+  },
+  {
+    "text": "within one second and if I'm seeing okay suddenly something is being limited or like I'm being rate limited or I'm just",
+    "start": "348190",
+    "end": "355900"
+  },
+  {
+    "text": "seeing high latency I have a scaling dashboard and the scaling dashboard is super important because we run cortex as",
+    "start": "355900",
+    "end": "362110"
+  },
+  {
+    "text": "a service and initially I set up a cortex provision date blah blah blah and then the sales team went ahead and",
+    "start": "362110",
+    "end": "368740"
+  },
+  {
+    "text": "signed up a bunch of customers and I forgot to upgrade my cortex or like scale it up and everything started to",
+    "start": "368740",
+    "end": "374200"
+  },
+  {
+    "text": "slow down things started to own so I built this dashboard that does two things one is workload based scaling and",
+    "start": "374200",
+    "end": "380830"
+  },
+  {
+    "text": "the other is resource based scaling so we'll talk a little space scaling which is the obvious one essentially there are",
+    "start": "380830",
+    "end": "386620"
+  },
+  {
+    "text": "twelve replicas but if you look at the CPU usage and CPU request you need thirty replicas so I can just take a",
+    "start": "386620",
+    "end": "393160"
+  },
+  {
+    "text": "take one look at this dashboard and see okay I know exactly what is wrong here and the other thing is this is our dev",
+    "start": "393160",
+    "end": "399130"
+  },
+  {
+    "text": "system this is our dev namespace so it's intentionally under provisioned",
+    "start": "399130",
+    "end": "404250"
+  },
+  {
+    "text": "similarly there we have this were closed work load based scaling so if you are familiar with cortex do you have this in",
+    "start": "404250",
+    "end": "409660"
+  },
+  {
+    "text": "gesture component for example and the interest component stores the recent 6 to 12 hours of data that",
+    "start": "409660",
+    "end": "415780"
+  },
+  {
+    "text": "so essentially you send all the samples to the in gesture it batches them up to 6 into 6 hour chunks and then writes the",
+    "start": "415780",
+    "end": "421930"
+  },
+  {
+    "text": "chunk through big table or dynamo DB just to reduce Reaper write amplification and to have compression",
+    "start": "421930",
+    "end": "427570"
+  },
+  {
+    "text": "and everything so we actually limit the number of active cities and in gesture can do because we notice that regardless",
+    "start": "427570",
+    "end": "434530"
+  },
+  {
+    "text": "of 6 hours or 12 hours the memory being used by an in gesture is dependent on the number of active cities it has and",
+    "start": "434530",
+    "end": "439780"
+  },
+  {
+    "text": "we limit the amount of active cities to 1 million to one and half million cities but it's all dependent on your on your",
+    "start": "439780",
+    "end": "447010"
+  },
+  {
+    "text": "use case and how tightly you want to run your system so because the recent data is in the in jesters the courier's also",
+    "start": "447010",
+    "end": "453370"
+  },
+  {
+    "text": "hit the in jesters so for their queries and this means if this if the in gesture has two miniseries the in gesture will",
+    "start": "453370",
+    "end": "459910"
+  },
+  {
+    "text": "add some latency to your queries if the industry is just managing smaller number of cities its the queries are going to",
+    "start": "459910",
+    "end": "466510"
+  },
+  {
+    "text": "be quicker and even during rollouts we need to actually transfer this live in",
+    "start": "466510",
+    "end": "471850"
+  },
+  {
+    "text": "mem data toward to the new ingest so that came up so that we don't partially flush things so the transfers are also",
+    "start": "471850",
+    "end": "478360"
+  },
+  {
+    "text": "faster having said that you need to get comfortable with a number and then stick to that number so we Brian from V works",
+    "start": "478360",
+    "end": "484900"
+  },
+  {
+    "text": "he runs the cortex with 4 million series with 64 gig ram while we run it at 1",
+    "start": "484900",
+    "end": "490240"
+  },
+  {
+    "text": "million Series with 16 gig ram so these are all trade-off that you need to make but just make sure that you're scaling",
+    "start": "490240",
+    "end": "496660"
+  },
+  {
+    "text": "along with usage so the moment you tell your users hey we have this cool system called cortex you can send all your",
+    "start": "496660",
+    "end": "502690"
+  },
+  {
+    "text": "matrix here they'll be stored forever people will send you a ton of matrix so make sure that you have alerts",
+    "start": "502690",
+    "end": "509140"
+  },
+  {
+    "text": "on all of this and then make sure you can scale so you can't just stare at",
+    "start": "509140",
+    "end": "514450"
+  },
+  {
+    "start": "512000",
+    "end": "690000"
+  },
+  {
+    "text": "dashboards all day you need to actually make sure that your paged for this so we",
+    "start": "514450",
+    "end": "521289"
+  },
+  {
+    "text": "have alerts for everything so essentially the other thing we do is we make sure we catch the recent two days",
+    "start": "521290",
+    "end": "526870"
+  },
+  {
+    "text": "of data in memory in cassadee so that most of your queries are going to be on the recent two days",
+    "start": "526870",
+    "end": "532720"
+  },
+  {
+    "text": "so if you open a - mode it's going to be last 24 hours law or last 48 hours and most - pores are just last one are so we",
+    "start": "532720",
+    "end": "540160"
+  },
+  {
+    "text": "noticed that 99.9% of our queries are actually only looking at the recent two",
+    "start": "540160",
+    "end": "546550"
+  },
+  {
+    "text": "days of data it's the rare query over 30 days that looks at the older data so we wanted to make sure that everything is",
+    "start": "546550",
+    "end": "552610"
+  },
+  {
+    "text": "in cache so it's super fast and also it reduces the load on the remote system like GCS or BigTable so we have a alert",
+    "start": "552610",
+    "end": "559899"
+  },
+  {
+    "text": "that says okay based on this time series and these many chunks being generated you need these many mem caches do you",
+    "start": "559899",
+    "end": "565689"
+  },
+  {
+    "text": "have enough do you have like are you sure you're only running at most 1.5",
+    "start": "565689",
+    "end": "572410"
+  },
+  {
+    "text": "active time series per ingested and stuff like that so the good thing is the",
+    "start": "572410",
+    "end": "577509"
+  },
+  {
+    "text": "first three alerts are actually warning alerts so you don't get paste so I get a slack notification whoever gets who's on",
+    "start": "577509",
+    "end": "583540"
+  },
+  {
+    "text": "call there's a there's a channel though it's the duty of on call to keep a look at that channel and make sure that if",
+    "start": "583540",
+    "end": "589240"
+  },
+  {
+    "text": "there's too many warning alerts to go debug to go scale-up so all this care the on-call person takes care of it but",
+    "start": "589240",
+    "end": "597939"
+  },
+  {
+    "text": "the last one is actually a paging alert let me just remove this let me see if",
+    "start": "597939",
+    "end": "607389"
+  },
+  {
+    "text": "that works so the last alert is actually cortex memory cortex hitting its memory",
+    "start": "607389",
+    "end": "615759"
+  },
+  {
+    "text": "limits that because so this is a paging",
+    "start": "615759",
+    "end": "623889"
+  },
+  {
+    "text": "alert because again as I said the recent six hours of data is in memory in the in gesture and we don't want the investors",
+    "start": "623889",
+    "end": "629709"
+  },
+  {
+    "text": "to own so if suddenly somebody is sending to me too many metrics and the interest in memory is just growing we",
+    "start": "629709",
+    "end": "635920"
+  },
+  {
+    "text": "get we get paid saying okay the industry memory is growing you might have data loss the next thing is we also have SLO",
+    "start": "635920",
+    "end": "644740"
+  },
+  {
+    "text": "sand SLS and SL eyes for everything including our read and writes so you",
+    "start": "644740",
+    "end": "649959"
+  },
+  {
+    "text": "should watch beyond stock on how to do SL loss right so we have our six our error budget one our error budget and",
+    "start": "649959",
+    "end": "656850"
+  },
+  {
+    "text": "budget so we have all this error but it's written down and s ellos are public it's just that our queries should be",
+    "start": "656850",
+    "end": "664430"
+  },
+  {
+    "text": "99.9% of our query should be faster than 2.5 seconds and successful and 99.9% of",
+    "start": "664430",
+    "end": "671069"
+  },
+  {
+    "text": "our write should be successful and more than slower than one second so we have all these SLO based or alerts so if",
+    "start": "671069",
+    "end": "678870"
+  },
+  {
+    "text": "something is wrong in the right path I'll get alerted within 15 minutes and then I can go take a look at my my",
+    "start": "678870",
+    "end": "685290"
+  },
+  {
+    "text": "writes dashboard and then I can start debugging things by looking at logs or traces and stuff like that so this is actually the easy bits the",
+    "start": "685290",
+    "end": "693930"
+  },
+  {
+    "start": "690000",
+    "end": "786000"
+  },
+  {
+    "text": "right path how do I get access to all these nice alerts so we actually open",
+    "start": "693930",
+    "end": "699060"
+  },
+  {
+    "text": "sourced our JSON at in the morning so",
+    "start": "699060",
+    "end": "704480"
+  },
+  {
+    "text": "yes so this repo has actually the JSON",
+    "start": "704480",
+    "end": "709560"
+  },
+  {
+    "text": "it for generating all the amell's for deployments the JSON it only currently",
+    "start": "709560",
+    "end": "715380"
+  },
+  {
+    "text": "supports the GCS or BigTable and Cassandra backends not the Olympius back-end what we are going to add the",
+    "start": "715380",
+    "end": "721500"
+  },
+  {
+    "text": "AWS back and remove some graph on a specific bits and then put it into the cortex project open source and if you",
+    "start": "721500",
+    "end": "727829"
+  },
+  {
+    "text": "want to look at the alerts it's in the cortex mixin so the readme has instructions on how you can generate",
+    "start": "727829",
+    "end": "733139"
+  },
+  {
+    "text": "these alerts but again these are our windows so it's like if you like again",
+    "start": "733139",
+    "end": "741420"
+  },
+  {
+    "text": "there's this nice blog on how to do alerting on SLO so we use that blog and say our latency threshold is 2.4 seconds",
+    "start": "741420",
+    "end": "748800"
+  },
+  {
+    "text": "for read and then we have a bunch of alerts like if the in gestation haldi it's a critical alert critical alert",
+    "start": "748800",
+    "end": "755339"
+  },
+  {
+    "text": "pages flushes are being stuck the pages but if requests are failing for 15",
+    "start": "755339",
+    "end": "760949"
+  },
+  {
+    "text": "minutes we have warnings so things like that so we have both warning and",
+    "start": "760949",
+    "end": "766050"
+  },
+  {
+    "text": "critical alerts and warnings don't page but it's the job of the on-call person to keep an eye on that so all of this is",
+    "start": "766050",
+    "end": "773519"
+  },
+  {
+    "text": "open source all of this you can get so go get some alerts and monitoring and also check out the nice way of how to",
+    "start": "773519",
+    "end": "780180"
+  },
+  {
+    "text": "package dashboards allow it's recording rules and the amyl together in the form of JSON if you're not familiar with it",
+    "start": "780180",
+    "end": "785750"
+  },
+  {
+    "text": "so we recently hired an HDD outage we had an outage for two hours where we",
+    "start": "785750",
+    "end": "792960"
+  },
+  {
+    "start": "786000",
+    "end": "836000"
+  },
+  {
+    "text": "just couldn't accept rights that's because I actually suddenly decided it didn't have a leader and the funny thing",
+    "start": "792960",
+    "end": "798390"
+  },
+  {
+    "text": "is I as I said we have this nice dashboard that was talking to the Gateway talking to the distributor",
+    "start": "798390",
+    "end": "804030"
+  },
+  {
+    "text": "talking to the HCD we recently added eight CD but did not forgot to add this panel in the in the dashboard so when",
+    "start": "804030",
+    "end": "811440"
+  },
+  {
+    "text": "rights were failing we had no clue why they were failing but that's why you do post-mortem so that you can fix your",
+    "start": "811440",
+    "end": "816540"
+  },
+  {
+    "text": "mistakes and now we actually have the panel let me see where that other dashboard is so if you look at it during",
+    "start": "816540",
+    "end": "823860"
+  },
+  {
+    "text": "the time of the outage we just couldn't write stuff and our it CD just became read everywhere so yep we make mistakes",
+    "start": "823860",
+    "end": "832830"
+  },
+  {
+    "text": "but we do post mortems and we fix them so that's the right path the read path",
+    "start": "832830",
+    "end": "838860"
+  },
+  {
+    "start": "836000",
+    "end": "980000"
+  },
+  {
+    "text": "is trickier because the read path is",
+    "start": "838860",
+    "end": "844680"
+  },
+  {
+    "text": "super tricky because there's just too many components and the tricky part is",
+    "start": "844680",
+    "end": "849720"
+  },
+  {
+    "text": "the queries vary in size sometimes somebody sends a query that worries a million time series over 50 days of data",
+    "start": "849720",
+    "end": "855810"
+  },
+  {
+    "text": "and that's bound to be slow and then there's other queries that like that's life you can't make it any faster than",
+    "start": "855810",
+    "end": "862110"
+  },
+  {
+    "text": "20 seconds I mean we are trying to but you don't want to be paced for that on the other hand if somebody sends a",
+    "start": "862110",
+    "end": "868470"
+  },
+  {
+    "text": "simple query that just looks at one time series about five days of data if that is taking ten seconds you want to be paged for that so we don't have a good",
+    "start": "868470",
+    "end": "875130"
+  },
+  {
+    "text": "way to page on the size of the query and latency so we page for everything and",
+    "start": "875130",
+    "end": "880290"
+  },
+  {
+    "text": "turns out we are fast enough quick enough so that we are really paced like",
+    "start": "880290",
+    "end": "885570"
+  },
+  {
+    "text": "I'm on call right now I think I'm actually one call in the Indian timezone",
+    "start": "885570",
+    "end": "890700"
+  },
+  {
+    "text": "so I'm not on call right now I'm on call tonight but yeah if you look at the read path you get a graph on a sense a query",
+    "start": "890700",
+    "end": "897600"
+  },
+  {
+    "text": "to the query front and the query front and talks to the courier the courier talks to in gesture the databases and a",
+    "start": "897600",
+    "end": "902970"
+  },
+  {
+    "text": "bunch of caches so this is the reads dashboard I just want to quickly walk",
+    "start": "902970",
+    "end": "909210"
+  },
+  {
+    "text": "you through the Reeves dashboard but once you have the reads dashboard so it's like the Gateway the query",
+    "start": "909210",
+    "end": "914220"
+  },
+  {
+    "text": "front-end the caches and then the courier and stuff like that is the same thing so for debugging",
+    "start": "914220",
+    "end": "923040"
+  },
+  {
+    "text": "queries like this in a distributed system especially something that is latency sensitive you need the right",
+    "start": "923040",
+    "end": "928680"
+  },
+  {
+    "text": "tools and I found Jaeger to be super-powerful so first thing is you need your dashboards and you need your",
+    "start": "928680",
+    "end": "934949"
+  },
+  {
+    "text": "alerts to tell you something is wrong but to actually debug what is wrong you need Jaeger and I really really like",
+    "start": "934949",
+    "end": "940740"
+  },
+  {
+    "text": "Jaeger and it's also simple simple to configure Jaeger in to cortex you just need to add a bunch of environment",
+    "start": "940740",
+    "end": "947250"
+  },
+  {
+    "text": "variables like these three internet variables are needed actually only the first one is needed but we do dynamic",
+    "start": "947250",
+    "end": "953579"
+  },
+  {
+    "text": "sampling and we add some extra metadata to each of our containers so we add a bunch of extra flags and this is a",
+    "start": "953579",
+    "end": "960120"
+  },
+  {
+    "text": "variable that we import and we just added to our container wherever required so if you in your so again there's",
+    "start": "960120",
+    "end": "966240"
+  },
+  {
+    "text": "instructions on how to use the JSON it but if you just set the cottage egoriy agent host automatically all your cortex",
+    "start": "966240",
+    "end": "971910"
+  },
+  {
+    "text": "deployments will be sending traces to Jaeger again JSON it is cool but if you're not using JSON it just said these",
+    "start": "971910",
+    "end": "977959"
+  },
+  {
+    "text": "environment variables so again graph on",
+    "start": "977959",
+    "end": "983490"
+  },
+  {
+    "start": "980000",
+    "end": "1394000"
+  },
+  {
+    "text": "a talks to the query front-end / different talks the courier courier talks to the data sources caches and a",
+    "start": "983490",
+    "end": "988529"
+  },
+  {
+    "text": "bunch of things so it's a complex system so I get I'm assuming I'm getting paged now for query latency so I'm just going",
+    "start": "988529",
+    "end": "995970"
+  },
+  {
+    "text": "to see walk you through the dashboards that I take a look at first is the cortex reads dashboard well let that",
+    "start": "995970",
+    "end": "1004519"
+  },
+  {
+    "text": "loads let me load the others also yeah",
+    "start": "1004519",
+    "end": "1012279"
+  },
+  {
+    "text": "the cortex reads dashboard so this is like the Gateway or the front-end the courier they ingest memcache lookups",
+    "start": "1012279",
+    "end": "1020120"
+  },
+  {
+    "text": "and BigTable so this over the last 24 hours are actually intentionally did a",
+    "start": "1020120",
+    "end": "1025160"
+  },
+  {
+    "text": "huge query that took a long time 1 and 1/2 minute and this won't immediately",
+    "start": "1025160",
+    "end": "1030589"
+  },
+  {
+    "text": "page me with this because it's just one query you don't want to be paged for a single query if I consistently do these",
+    "start": "1030589",
+    "end": "1036290"
+  },
+  {
+    "text": "queries and it consistently so that's when I will get paged that's when I will exhaust my error budget and I'll get",
+    "start": "1036290",
+    "end": "1043100"
+  },
+  {
+    "text": "paged I'll be like ok so the gateway is seeing one and half minute latency the front-end is seeing one enough minute",
+    "start": "1043100",
+    "end": "1048950"
+  },
+  {
+    "text": "latency so it's probably not the front end or not the Gateway caches ok",
+    "start": "1048950",
+    "end": "1054700"
+  },
+  {
+    "text": "cassia's are quite quick the query is seeing significant latency one minute so the front-end is adding 500 500",
+    "start": "1054700",
+    "end": "1061090"
+  },
+  {
+    "text": "milliseconds of latency the in gesture is also kind of slow so the query er",
+    "start": "1061090",
+    "end": "1066880"
+  },
+  {
+    "text": "makes several calls to the in gesture so it's kind of hard to see where the latency is coming from and in the end we",
+    "start": "1066880",
+    "end": "1073420"
+  },
+  {
+    "text": "can see that big table itself is taking 21 seconds average to respond to each lookup so it probably means BigTable is",
+    "start": "1073420",
+    "end": "1081460"
+  },
+  {
+    "text": "overloaded but that's because I know that exactly why BigTable is overloaded and stuff because I'm I've been doing",
+    "start": "1081460",
+    "end": "1087280"
+  },
+  {
+    "text": "this for 18 months just with one look I can tame this so this is the reads dashboard that can end up at a high",
+    "start": "1087280",
+    "end": "1093430"
+  },
+  {
+    "text": "level tells me what is what is slow the good thing is you should all for those of you who have not heard of the read",
+    "start": "1093430",
+    "end": "1099250"
+  },
+  {
+    "text": "method you should go check out the read method because that tells you how to build these consistent templated dashboards and then I have the cortex",
+    "start": "1099250",
+    "end": "1108670"
+  },
+  {
+    "text": "queries dashboard that actually tell me tells me exactly a higher level data",
+    "start": "1108670",
+    "end": "1114550"
+  },
+  {
+    "text": "about the queries that are being run ok so suddenly I see that my query queue had 60 60 things piling up which",
+    "start": "1114550",
+    "end": "1121150"
+  },
+  {
+    "text": "probably means that is what that was significant so we saw that the front-end",
+    "start": "1121150",
+    "end": "1126460"
+  },
+  {
+    "text": "was having one and half minute latency but the queries were her career was having one minute latency so the 500",
+    "start": "1126460",
+    "end": "1132040"
+  },
+  {
+    "text": "milliseconds was being added by the query so that's a so that's how you can figure things out and you can see okay",
+    "start": "1132040",
+    "end": "1138370"
+  },
+  {
+    "text": "my friend end cache hit rate is super high I'm seeing a bunch of cache misses cache hits so you can see how different",
+    "start": "1138370",
+    "end": "1145780"
+  },
+  {
+    "text": "caches are performing how the churn rate is and a bunch of query related things",
+    "start": "1145780",
+    "end": "1152200"
+  },
+  {
+    "text": "that actually helps you understand is are these queries big or are these queries slow you can see that most",
+    "start": "1152200",
+    "end": "1157660"
+  },
+  {
+    "text": "queries are only taking ten twenty thousand chunks a query but currently there was a query that was taking 190",
+    "start": "1157660",
+    "end": "1164380"
+  },
+  {
+    "text": "Cait songs probably there was a huge cache miss in the chunk cache and that is causing extra load on the big table",
+    "start": "1164380",
+    "end": "1170860"
+  },
+  {
+    "text": "so again this is another dashboard that helps me figure things out and in the end I also have a memcache dashboard",
+    "start": "1170860",
+    "end": "1179580"
+  },
+  {
+    "text": "that tells me exactly what the eviction rate is commander it is what's the latency memory being used in all of that",
+    "start": "1179580",
+    "end": "1188220"
+  },
+  {
+    "text": "so I use these three dashboards to kind of understand at a high level what is going on and if I can figure out at one",
+    "start": "1188590",
+    "end": "1194740"
+  },
+  {
+    "text": "glance if that doesn't work and usually it doesn't I use Jaeger",
+    "start": "1194740",
+    "end": "1200789"
+  },
+  {
+    "text": "sorry about that",
+    "start": "1206920",
+    "end": "1210190"
+  },
+  {
+    "text": "so how many of you are familiar with Jaeger already how many of you are",
+    "start": "1212580",
+    "end": "1218790"
+  },
+  {
+    "text": "seeing Jaeger for the first time in action okay so you're gonna love this demo so I'm just gonna pick a service",
+    "start": "1218790",
+    "end": "1224220"
+  },
+  {
+    "text": "the cortex pony front end and I'm gonna say I want the API prom this is the",
+    "start": "1224220",
+    "end": "1230640"
+  },
+  {
+    "text": "query endpoint and I want to see all the requests that took more than one second the mint duration is one second and I'm",
+    "start": "1230640",
+    "end": "1237510"
+  },
+  {
+    "text": "seeing a bunch of requests so let me look at this one that took 30 seconds so",
+    "start": "1237510",
+    "end": "1242520"
+  },
+  {
+    "text": "let me zoom in a little bit and then expand this so this is a live demo again",
+    "start": "1242520",
+    "end": "1247680"
+  },
+  {
+    "text": "I have a perfect trace before but let's see why this query is taking 37 seconds",
+    "start": "1247680",
+    "end": "1253560"
+  },
+  {
+    "text": "hopefully the demo gods gods are with me so you can see that most of the latency",
+    "start": "1253560",
+    "end": "1260430"
+  },
+  {
+    "text": "is being introduced by the prompt queue eval function in this and if I look at",
+    "start": "1260430",
+    "end": "1266130"
+  },
+  {
+    "text": "the prompt queue level function so the",
+    "start": "1266130",
+    "end": "1272190"
+  },
+  {
+    "text": "other problem with Jaeger is when it's overloaded it drops traces so it dropped a bunch of traces that is not telling me how much each function call is so that's",
+    "start": "1272190",
+    "end": "1279750"
+  },
+  {
+    "text": "a good thing because I actually have example perfect trace already ready the",
+    "start": "1279750",
+    "end": "1287940"
+  },
+  {
+    "text": "demo is not with me this time but yes so I can see that this particular query it",
+    "start": "1287940",
+    "end": "1293190"
+  },
+  {
+    "text": "took 16 seconds let me see if the cache there was a hit or not okay he tried to look at look if this has been requested",
+    "start": "1293190",
+    "end": "1299670"
+  },
+  {
+    "text": "before there was a cache miss so it tried to bend into the retry middleware",
+    "start": "1299670",
+    "end": "1305670"
+  },
+  {
+    "text": "and then we have this taking 16 seconds if you look at it prompt you'll prepare",
+    "start": "1305670",
+    "end": "1313500"
+  },
+  {
+    "text": "function is taking super it's super quick but the prompt you'll see restored",
+    "start": "1313500",
+    "end": "1318720"
+  },
+  {
+    "text": "gate function is taking 14 seconds let me see why it is taking 14 seconds so",
+    "start": "1318720",
+    "end": "1324060"
+  },
+  {
+    "text": "this a function called gate chunk rough riffs that is taking 12 seconds and then",
+    "start": "1324060",
+    "end": "1329790"
+  },
+  {
+    "text": "there's a bunch of functions so in this function you can see that something is",
+    "start": "1329790",
+    "end": "1335700"
+  },
+  {
+    "text": "taking 12 seconds out of that you can see that most of the function is being done by this query Paytas function that's taking 11 seconds if I expand",
+    "start": "1335700",
+    "end": "1342390"
+  },
+  {
+    "text": "that I can see and a little bit more that BigTable is",
+    "start": "1342390",
+    "end": "1348260"
+  },
+  {
+    "text": "actually taking seven or eight seconds to respond to each query each a table lookup I mean each row lookup and that",
+    "start": "1348260",
+    "end": "1355220"
+  },
+  {
+    "text": "is adding a significant delay to my latency so I can go back look at BigTable see that it's under provision",
+    "start": "1355220",
+    "end": "1361820"
+  },
+  {
+    "text": "and then provision BigTable so this way by using Jager by getting alerted by my alerts missing is a loss I look at",
+    "start": "1361820",
+    "end": "1369050"
+  },
+  {
+    "text": "dashboards to end of try to figure out what's wrong and if it's not clear I then use Jager to kind of just dive into",
+    "start": "1369050",
+    "end": "1376160"
+  },
+  {
+    "text": "exactly what's wrong so I spent seven or eight months just like in a query optimization",
+    "start": "1376160",
+    "end": "1381740"
+  },
+  {
+    "text": "optimization sprint so I made sure that your the code is instrumented with the right functions so that for an operator",
+    "start": "1381740",
+    "end": "1389030"
+  },
+  {
+    "text": "it's easy to figure out what's wrong so again if you're on the read path the",
+    "start": "1389030",
+    "end": "1396620"
+  },
+  {
+    "start": "1394000",
+    "end": "1442000"
+  },
+  {
+    "text": "things that you need to look out for are your cache is doing well is your your back-end source doing well and if both",
+    "start": "1396620",
+    "end": "1403940"
+  },
+  {
+    "text": "of them are doing well you probably are only running 10 queries to handle 200 queries per second you just need to make",
+    "start": "1403940",
+    "end": "1410000"
+  },
+  {
+    "text": "sure that you're not queuing up your queries you're scaling things up again use the scaling dashboard to scale things up so let you see okay so that's",
+    "start": "1410000",
+    "end": "1421070"
+  },
+  {
+    "text": "the read path debugging right path debugging and the in the end cortex is a multi-line system so we run one big",
+    "start": "1421070",
+    "end": "1427190"
+  },
+  {
+    "text": "cluster for all our us customers and one big cluster for all our EU customers and",
+    "start": "1427190",
+    "end": "1433540"
+  },
+  {
+    "text": "the idea is one customer should not DDoS everyone else just make sure that you",
+    "start": "1433540",
+    "end": "1438680"
+  },
+  {
+    "text": "limit everything so again there's a bunch of limits but the idea is you keep",
+    "start": "1438680",
+    "end": "1445550"
+  },
+  {
+    "start": "1442000",
+    "end": "1532000"
+  },
+  {
+    "text": "the default limits super low so essentially we're on cortex as a hosted",
+    "start": "1445550",
+    "end": "1450770"
+  },
+  {
+    "text": "Promethea service and if you sign up you get super low limits so only a small prometheus will be able to send data to",
+    "start": "1450770",
+    "end": "1457550"
+  },
+  {
+    "text": "it but the moment you hit these limits we get an alert and then we reach out to you we understand your use case or and",
+    "start": "1457550",
+    "end": "1464180"
+  },
+  {
+    "text": "we will tell you okay it's going to cost you this much are you ready for us and then I so then I increase his limits",
+    "start": "1464180",
+    "end": "1469940"
+  },
+  {
+    "text": "or increase increase the tenant's limits so there's a bunch of limits that you need to take care of one is what is the",
+    "start": "1469940",
+    "end": "1476150"
+  },
+  {
+    "text": "samples per second at each distributor can and what is the number of maximum series",
+    "start": "1476150",
+    "end": "1481230"
+  },
+  {
+    "text": "that each injector should have per user and sometimes somebody has a histogram",
+    "start": "1481230",
+    "end": "1486690"
+  },
+  {
+    "text": "that sends us like 300 400 thousand matrix for a single metric name and we",
+    "start": "1486690",
+    "end": "1492960"
+  },
+  {
+    "text": "don't want that that's usually a bad practice and we want to tell our user say we're limiting this because this is a bad practice are you sure so that's",
+    "start": "1492960",
+    "end": "1499950"
+  },
+  {
+    "text": "the max series per metric and then there's some query level limits that you",
+    "start": "1499950",
+    "end": "1505440"
+  },
+  {
+    "text": "need to use or when you're querying you need to make sure that they're not querying 100 million time series or like 5 million times the views over 30 days",
+    "start": "1505440",
+    "end": "1512070"
+  },
+  {
+    "text": "of data you need to make sure that they are not moving all the queries for everyone else so there's a bunch of query limits so again a bunch of these",
+    "start": "1512070",
+    "end": "1518789"
+  },
+  {
+    "text": "flags that you saw in cortex they're all they're all they're like 30 percent of them are just limits because we want to",
+    "start": "1518789",
+    "end": "1525480"
+  },
+  {
+    "text": "make sure that one user cannot DDoS everyone else but we also want to be super flexible for me and use cases we",
+    "start": "1525480",
+    "end": "1530490"
+  },
+  {
+    "text": "will see that so again I said make sure",
+    "start": "1530490",
+    "end": "1536010"
+  },
+  {
+    "text": "that every single user has a default low limit but make sure you increase that thing so cortex is able to limit",
+    "start": "1536010",
+    "end": "1543779"
+  },
+  {
+    "text": "overwrite the limits per user and how it like again we use JSON add to template this out because we have hundreds of",
+    "start": "1543779",
+    "end": "1550440"
+  },
+  {
+    "text": "users and we don't want to set every one of them by hand so we have this overrides variable that you can just add",
+    "start": "1550440",
+    "end": "1556830"
+  },
+  {
+    "text": "okay initially everyone is a small user by default and suddenly okay they say okay we have two Prometheus's or we have",
+    "start": "1556830",
+    "end": "1562890"
+  },
+  {
+    "text": "a high cardinality Prometheus we graduate them to a medium user we just add it to this variable and there's a",
+    "start": "1562890",
+    "end": "1568919"
+  },
+  {
+    "text": "config map that's updated that cortex takes up this is all at runtime and you can see that you can make them a medium",
+    "start": "1568919",
+    "end": "1575309"
+  },
+  {
+    "text": "user but also give them specific configuration for example we had a user with a specific use case that required",
+    "start": "1575309",
+    "end": "1581399"
+  },
+  {
+    "text": "the user to send metrics with 40 label names like our default is 20 for a good",
+    "start": "1581399",
+    "end": "1587940"
+  },
+  {
+    "text": "reason and then there was this user trying to send everything in a cubed et sanitation in this metric for a good",
+    "start": "1587940",
+    "end": "1595350"
+  },
+  {
+    "text": "reason so we reached out to them and told them we are dropping this metric because it's too many labels and then they explained that to us and then this",
+    "start": "1595350",
+    "end": "1601080"
+  },
+  {
+    "text": "actually like you can see how easy it is a it is for us operators to manage this",
+    "start": "1601080",
+    "end": "1607169"
+  },
+  {
+    "text": "complexity we're like ok he's a big user but he access extra extra limit added that is overridden and",
+    "start": "1607169",
+    "end": "1614279"
+  },
+  {
+    "text": "stuff like that and if you actually look at the config map it looks like this for",
+    "start": "1614279",
+    "end": "1619470"
+  },
+  {
+    "text": "user 29 this is a these are the limits and stuff like that so how do we do that tearing so we have these variables again",
+    "start": "1619470",
+    "end": "1626789"
+  },
+  {
+    "text": "all of this is open source in the JSON it you I think if you are going to have",
+    "start": "1626789",
+    "end": "1631860"
+  },
+  {
+    "text": "teams or tens of teams using cortex in your organization make sure that you",
+    "start": "1631860",
+    "end": "1638340"
+  },
+  {
+    "text": "have some kind of manageable config management like you don't want to spend three days to do or something small so",
+    "start": "1638340",
+    "end": "1645389"
+  },
+  {
+    "text": "we have this tier small user medium user big user and if you have a lot of money you're a super user yep and that is",
+    "start": "1645389",
+    "end": "1654809"
+  },
+  {
+    "start": "1653000",
+    "end": "1726000"
+  },
+  {
+    "text": "actually not the end of the things so there's a bunch of query limits how many",
+    "start": "1654809",
+    "end": "1659879"
+  },
+  {
+    "text": "of you attended tom's talk yesterday on blazing fast from ql nice ok so that's a",
+    "start": "1659879",
+    "end": "1666809"
+  },
+  {
+    "text": "significant portion so I highlighted something like this because when I first found it it totally blew my mind and",
+    "start": "1666809",
+    "end": "1673860"
+  },
+  {
+    "text": "then I was like who did this magic and turns out it was me long back long while",
+    "start": "1673860",
+    "end": "1678960"
+  },
+  {
+    "text": "back so there's the same limit which is max query length 744 odds of seven days and max query lines 500 500 days certain",
+    "start": "1678960",
+    "end": "1686759"
+  },
+  {
+    "text": "two different deployments so what is happening what is this max query length so the max period so when you get a",
+    "start": "1686759",
+    "end": "1692460"
+  },
+  {
+    "text": "range query or when you add a prompt ql query it is the length of the data that you look at so that if it's like rate",
+    "start": "1692460",
+    "end": "1698669"
+  },
+  {
+    "text": "three minutes or like rate five minutes in an instant query it's five minutes of data if it's red five minutes over 30",
+    "start": "1698669",
+    "end": "1705899"
+  },
+  {
+    "text": "days in a range query it's five minutes thirty days plus five minutes of data so",
+    "start": "1705899",
+    "end": "1711509"
+  },
+  {
+    "text": "that's the max query length and you want to make sure that a single user doesn't query too much but you also want to make",
+    "start": "1711509",
+    "end": "1718080"
+  },
+  {
+    "text": "sure hey they're storing 13 months of data in context they want they should be able to query it back of course so how",
+    "start": "1718080",
+    "end": "1723750"
+  },
+  {
+    "text": "do you do this so turns out these are two different query workloads arrange",
+    "start": "1723750",
+    "end": "1731820"
+  },
+  {
+    "text": "request that takes over 90 days for rate five minutes is actually quite simple to do while rate over 90 days is hard to do",
+    "start": "1731820",
+    "end": "1739649"
+  },
+  {
+    "text": "because in a single window you need to look at all the 90 days of data while in fact with the rate",
+    "start": "1739649",
+    "end": "1745669"
+  },
+  {
+    "text": "with the first example you actually only look at five minutes and then five minutes and then five minutes and then five minutes so the memory requirement",
+    "start": "1745669",
+    "end": "1751669"
+  },
+  {
+    "text": "the CPU requirements are quite low but for the other one is super high so you want to be able to limit your your users",
+    "start": "1751669",
+    "end": "1758599"
+  },
+  {
+    "text": "to only do maybe like 30 over 30 days give me the increase over the last month so that I can do some building but also",
+    "start": "1758599",
+    "end": "1765109"
+  },
+  {
+    "text": "be able to do give me a rate five minutes over the last 13 months because",
+    "start": "1765109",
+    "end": "1770869"
+  },
+  {
+    "text": "I'm storing that in months of data so to enable that we have the free front end so what the peripheral ten does is when",
+    "start": "1770869",
+    "end": "1777379"
+  },
+  {
+    "start": "1772000",
+    "end": "1808000"
+  },
+  {
+    "text": "you have a 30-day request it splits it up into 31 day requests and runs it in parallel so that the queries are much",
+    "start": "1777379",
+    "end": "1783409"
+  },
+  {
+    "text": "faster so if you actually compare cortex v or vanilla Prometheus cortex is much",
+    "start": "1783409",
+    "end": "1788899"
+  },
+  {
+    "text": "faster one because we do caching to be grossly massively paralyze your queries if you actually send a year long query",
+    "start": "1788899",
+    "end": "1795440"
+  },
+  {
+    "text": "it's actually run in parallel for three in like in 365 different 20 years if you",
+    "start": "1795440",
+    "end": "1801049"
+  },
+  {
+    "text": "have them but it skewed because we don't have 365 queriers so now in the in the",
+    "start": "1801049",
+    "end": "1808779"
+  },
+  {
+    "text": "querier if you set the maximum query length to be seven days and in the query",
+    "start": "1808779",
+    "end": "1814729"
+  },
+  {
+    "text": "front-end if you set it to be 500 days it makes sense because the query find trend will let you do a query over a",
+    "start": "1814729",
+    "end": "1820700"
+  },
+  {
+    "text": "year it'll split it up into smaller parts and sends the smaller part down to the query er but in the courrier if you",
+    "start": "1820700",
+    "end": "1826909"
+  },
+  {
+    "text": "have a 32 or 90 day you don't want to own the queriers so you can only look back only seven days does it make sense",
+    "start": "1826909",
+    "end": "1834909"
+  },
+  {
+    "text": "so we are making sure the limit on the query R and on the query front end is different that allows you to do long",
+    "start": "1834909",
+    "end": "1840109"
+  },
+  {
+    "text": "queries but not super intense queries you also want to have cardinality limit on the query sometimes people send like",
+    "start": "1840109",
+    "end": "1847549"
+  },
+  {
+    "text": "5 million time series and they want to query all of them back together and that will in your career so there's this",
+    "start": "1847549",
+    "end": "1852950"
+  },
+  {
+    "text": "cardinality limit and max samples that you need to look out for and after that",
+    "start": "1852950",
+    "end": "1858619"
+  },
+  {
+    "text": "you also have caching so these are two important things that we did so this is",
+    "start": "1858619",
+    "end": "1863799"
+  },
+  {
+    "text": "one thing is because all the recent data is in the in jester's you also need to query the in jesters and the query the",
+    "start": "1863799",
+    "end": "1870619"
+  },
+  {
+    "text": "query the store and then merge those two two things in the in the queriers",
+    "start": "1870619",
+    "end": "1877029"
+  },
+  {
+    "text": "and we actually have hundreds of QPS and every single query was actually going to",
+    "start": "1877029",
+    "end": "1882189"
+  },
+  {
+    "text": "the in gesture that means the in gesture was locking up because it was always trying to select the data and stuff like",
+    "start": "1882189",
+    "end": "1887229"
+  },
+  {
+    "text": "that so the in gesture was adding a lot of latency to the query query layer so",
+    "start": "1887229",
+    "end": "1892239"
+  },
+  {
+    "text": "we decided okay but a lot of these queries don't need to look at the in gesture because the interest only has",
+    "start": "1892239",
+    "end": "1897579"
+  },
+  {
+    "text": "recent data and these queries are old based on the dashboards because again remember we are always splitting things",
+    "start": "1897579",
+    "end": "1902889"
+  },
+  {
+    "text": "up into one day queries so if somebody opens a 30 day dashboard and has five",
+    "start": "1902889",
+    "end": "1909129"
+  },
+  {
+    "text": "panels the first five queries will look at the in gesture and the other 29 queries will not look at the in jester's",
+    "start": "1909129",
+    "end": "1914259"
+  },
+  {
+    "text": "but you need to tell the courier's how much data the in gesture has so we have",
+    "start": "1914259",
+    "end": "1919929"
+  },
+  {
+    "text": "six are chunks so we set it to 12 hours just in case so anything any query that's older than 12 hours will not hit",
+    "start": "1919929",
+    "end": "1927249"
+  },
+  {
+    "text": "the in gesture the other thing is we do a lot of index caching so the indexes in BigTable Cassandra DynamoDB you name it",
+    "start": "1927249",
+    "end": "1934149"
+  },
+  {
+    "text": "and it's it's a lot of data we do a lot of index caching but caching the index is actually quite hard because you cache",
+    "start": "1934149",
+    "end": "1941529"
+  },
+  {
+    "text": "the index and then you write write to the datastore again which means the index the cache is invalidated so we",
+    "start": "1941529",
+    "end": "1947349"
+  },
+  {
+    "text": "used to do a lot of jumping to make sure that we can make the cache is fresh and",
+    "start": "1947349",
+    "end": "1952899"
+  },
+  {
+    "text": "stuff but once we did that we still couldn't cash for more than fifteen minutes so if the same query is run in",
+    "start": "1952899",
+    "end": "1959679"
+  },
+  {
+    "text": "in less than fifteen minutes it used to hit the cache for the index but now we have another flag that is",
+    "start": "1959679",
+    "end": "1966309"
+  },
+  {
+    "text": "added that says we know that any index that is older than 36 arts is stale index that it's never going to be",
+    "start": "1966309",
+    "end": "1972189"
+  },
+  {
+    "text": "written - so just cache that forever so if you actually cache that and reduce the loader injustice your queries are",
+    "start": "1972189",
+    "end": "1978939"
+  },
+  {
+    "text": "going to be really really fast so that actually made a lot of check a lot of difference so yep in summary make sure",
+    "start": "1978939",
+    "end": "1989679"
+  },
+  {
+    "start": "1987000",
+    "end": "2160000"
+  },
+  {
+    "text": "you have the right alerts and dashboards that help you when you get paged and don't get paged for every single thing",
+    "start": "1989679",
+    "end": "1996219"
+  },
+  {
+    "text": "make them all or I can make 99% of the alerts warning alerts we paste only on s",
+    "start": "1996219",
+    "end": "2001589"
+  },
+  {
+    "text": "ellos we pasted on like some very critical things like a 3d master it really mark master not X",
+    "start": "2001589",
+    "end": "2008400"
+  },
+  {
+    "text": "like it's really not having a leader for five minutes that should be a paging",
+    "start": "2008400",
+    "end": "2013440"
+  },
+  {
+    "text": "alert so just make sure the number of things that page is extremely low but there are things that you should look at",
+    "start": "2013440",
+    "end": "2018690"
+  },
+  {
+    "text": "we make them all warning alerts and so we do at the fauna we do weekly on call",
+    "start": "2018690",
+    "end": "2024540"
+  },
+  {
+    "text": "so I'm on call for a week and while I'm on call half my job is to clean up clean up the conflict do this tech tip clean",
+    "start": "2024540",
+    "end": "2030690"
+  },
+  {
+    "text": "up and I keep a look on this warning alerts and make sure that I mean they don't fire anymore again have proper",
+    "start": "2030690",
+    "end": "2039750"
+  },
+  {
+    "text": "esta loss and I love these SLO alerts because once we move to s ellos everything changed because we have stricter celos now before we used to",
+    "start": "2039750",
+    "end": "2046650"
+  },
+  {
+    "text": "page for every random thing whenever somebody opens a big dashboard we get you get paged but now only if the 99.9%",
+    "start": "2046650",
+    "end": "2053639"
+  },
+  {
+    "text": "ID of the requests are slower than 2.5 seconds I get page and that's super rare now with all the caching that we do",
+    "start": "2053640",
+    "end": "2061370"
+  },
+  {
+    "text": "scale up with the usage again this is a",
+    "start": "2061370",
+    "end": "2066510"
+  },
+  {
+    "text": "mistake a lot of people make they forget to scale their clusters up but just keep on onboarding teams and once they have",
+    "start": "2066510",
+    "end": "2072780"
+  },
+  {
+    "text": "an onboarding team's onboarding document teams on board themselves and they don't even tell the operators which is good but you need to",
+    "start": "2072780",
+    "end": "2079050"
+  },
+  {
+    "text": "make sure that you scale up your cluster along with that Jagr is amazing it saved my life before",
+    "start": "2079050",
+    "end": "2085440"
+  },
+  {
+    "text": "Jaeger people basically guessing looking at the stars and guessing okay this might be slow because of this we had no",
+    "start": "2085440",
+    "end": "2091950"
+  },
+  {
+    "text": "context but now and then we used to deploy something add a bunch of matrix it used to be marginally faster but we",
+    "start": "2091950",
+    "end": "2098370"
+  },
+  {
+    "text": "it didn't fix anything you're like okay we are at point three percent faster that's nice but now with Jaeger I know",
+    "start": "2098370",
+    "end": "2106800"
+  },
+  {
+    "text": "exactly what is slow or which function is slow but even while doing that just don't add yogurt traces everywhere like",
+    "start": "2106800",
+    "end": "2114500"
+  },
+  {
+    "text": "have them at higher level functions and only if that function is flow like if you can't debug things then go to a",
+    "start": "2114500",
+    "end": "2119610"
+  },
+  {
+    "text": "lower one because again or like traces are explained if expensive just don't",
+    "start": "2119610",
+    "end": "2124890"
+  },
+  {
+    "text": "have too many spans or every single function called in there and then don't",
+    "start": "2124890",
+    "end": "2130440"
+  },
+  {
+    "text": "forget to limit stuff this is a multi grand environment and yeah just make",
+    "start": "2130440",
+    "end": "2136200"
+  },
+  {
+    "text": "sure everyone has the right limits and also have a framework to make sure that managing this limiting",
+    "start": "2136200",
+    "end": "2142130"
+  },
+  {
+    "text": "figuration is easy like for us we have tears instead of individual limits for each tenant we have tears and we have",
+    "start": "2142130",
+    "end": "2149180"
+  },
+  {
+    "text": "like hundreds of customers that yeah I like the current conflict management solution that we have all of that is",
+    "start": "2149180",
+    "end": "2154790"
+  },
+  {
+    "text": "open source by the way so you can use it directly or you can look at it and you can build your own so any questions yeah",
+    "start": "2154790",
+    "end": "2165410"
+  },
+  {
+    "start": "2160000",
+    "end": "2310000"
+  },
+  {
+    "text": "I want to see if we have a mic oh yeah",
+    "start": "2165410",
+    "end": "2172430"
+  },
+  {
+    "text": "so good question so we have a scaling dashboard why not auto scale right yep",
+    "start": "2172430",
+    "end": "2178340"
+  },
+  {
+    "text": "the thing is the injector is a stateful component and auto scaling it is not trivial but it's a work in progress we",
+    "start": "2178340",
+    "end": "2184700"
+  },
+  {
+    "text": "are working on auto scaling the in gesture so the idea is the injector has six hours of data in memory and when a",
+    "start": "2184700",
+    "end": "2191000"
+  },
+  {
+    "text": "new in gesture comes up it transfers the six hours of data into that and then it it dies and stuff so that you don't put",
+    "start": "2191000",
+    "end": "2197480"
+  },
+  {
+    "text": "extraordinary load because you need to flush a million series or four million series and each series has six different",
+    "start": "2197480",
+    "end": "2205180"
+  },
+  {
+    "text": "rows that need to be so you need to do six million writes if you want to like kill ingest so this process is kind of",
+    "start": "2205180",
+    "end": "2212330"
+  },
+  {
+    "text": "fragile and you can only do it one at a time it's a pain having said that we are",
+    "start": "2212330",
+    "end": "2218870"
+  },
+  {
+    "text": "working on fixing that right now so there's a PR open that fixes this once that is there you can auto scale good",
+    "start": "2218870",
+    "end": "2224600"
+  },
+  {
+    "text": "question yep",
+    "start": "2224600",
+    "end": "2227200"
+  },
+  {
+    "text": "query run time so the okay that's a good question so we don't use remote read so",
+    "start": "2231839",
+    "end": "2238060"
+  },
+  {
+    "text": "people directly query cortex so they just set their data source in graph",
+    "start": "2238060",
+    "end": "2243760"
+  },
+  {
+    "text": "honor to be the cortex endpoint that we give them with authentication so they'd never there's like there's no Prometheus",
+    "start": "2243760",
+    "end": "2249400"
+  },
+  {
+    "text": "on the query path any other questions",
+    "start": "2249400",
+    "end": "2258960"
+  },
+  {
+    "text": "yep you have to shout",
+    "start": "2258960",
+    "end": "2263400"
+  },
+  {
+    "text": "okay so good question so the act so we have cortex and then we have a",
+    "start": "2270600",
+    "end": "2276510"
+  },
+  {
+    "text": "Prometheus scraping this cortex that's doing or alerting and then we have a global alert manager cluster or in two",
+    "start": "2276510",
+    "end": "2283530"
+  },
+  {
+    "text": "different maybe three or four different clusters they serve this indictment at each that is talking to each other that",
+    "start": "2283530",
+    "end": "2289350"
+  },
+  {
+    "text": "so we have a global or minor cluster and this Prometheus is sending alerts to that alert manager and that's that's paging us any other questions cool thank",
+    "start": "2289350",
+    "end": "2307350"
+  },
+  {
+    "text": "you [Applause]",
+    "start": "2307350",
+    "end": "2312190"
+  }
+]

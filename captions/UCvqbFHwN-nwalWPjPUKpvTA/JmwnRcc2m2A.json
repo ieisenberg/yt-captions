@@ -1,0 +1,1545 @@
+[
+  {
+    "start": "0",
+    "end": "137000"
+  },
+  {
+    "text": "hello everyone my name is irik and i'm one of the main maintainers on cubers and before we start",
+    "start": "0",
+    "end": "7600"
+  },
+  {
+    "text": "here are a bunch of links that are relevant to this talk if you're interested me sources slides i go by clocks on",
+    "start": "7600",
+    "end": "13840"
+  },
+  {
+    "text": "github or this thing here on twitter but today i am primarily here to talk",
+    "start": "13840",
+    "end": "19520"
+  },
+  {
+    "text": "about the kubernetes api some of the generic assumptions and invariants that kubernetes wants to maintain",
+    "start": "19520",
+    "end": "24960"
+  },
+  {
+    "text": "look at how these invariants are put in place how they're enforced and how reliable they are",
+    "start": "24960",
+    "end": "30800"
+  },
+  {
+    "text": "we're also going to talk about how to model the kubernetes api in rust using generics and see what that gives us in",
+    "start": "30800",
+    "end": "36960"
+  },
+  {
+    "text": "terms of consistency and finally we're going to talk about some abstractions about this rust api",
+    "start": "36960",
+    "end": "43440"
+  },
+  {
+    "text": "that ultimately lets you write lightweight controllers so we're going to look at what",
+    "start": "43440",
+    "end": "50160"
+  },
+  {
+    "text": "kubernetes actually provides these are going to be our main sources and we're going to start by digging into",
+    "start": "50160",
+    "end": "55280"
+  },
+  {
+    "text": "the arguably most important file of all api machineries meta types because this",
+    "start": "55280",
+    "end": "60399"
+  },
+  {
+    "text": "file really has everything that you associate with a kubernetes object like every object has a kind and a version from type meta that is flattened",
+    "start": "60399",
+    "end": "66880"
+  },
+  {
+    "text": "into the root object every object has object meta this is the core metadata everyone thinks about this",
+    "start": "66880",
+    "end": "72799"
+  },
+  {
+    "text": "is a simplified view i've hidden all the read-only properties i've hidden all the annotation because everything is optional",
+    "start": "72799",
+    "end": "78320"
+  },
+  {
+    "text": "but every object must have metadata and it must look like this so all these great things in here like owner references labels",
+    "start": "78320",
+    "end": "84799"
+  },
+  {
+    "text": "annotations finalizers also manage fields that can go in there and if they are",
+    "start": "84799",
+    "end": "90000"
+  },
+  {
+    "text": "then they are standardized there's also listable types lists for when you want a collection of items",
+    "start": "90000",
+    "end": "96640"
+  },
+  {
+    "text": "this actually returns a different metadata which is not relevant right now and but more importantly there's a",
+    "start": "96640",
+    "end": "102159"
+  },
+  {
+    "text": "dynamic collection item there for items so that you can use put whatever",
+    "start": "102159",
+    "end": "107360"
+  },
+  {
+    "text": "inside of here at runtime then we got all the stuff for api",
+    "start": "107360",
+    "end": "113119"
+  },
+  {
+    "text": "parameters get options list options as shown delete options patch options",
+    "start": "113119",
+    "end": "118399"
+  },
+  {
+    "text": "basically all the parameters that the api accept are encapsulated into constructs in this root file",
+    "start": "118399",
+    "end": "124159"
+  },
+  {
+    "text": "you also got all the error responses for the api you got label selectors that sit inside the list option so there's a",
+    "start": "124159",
+    "end": "129360"
+  },
+  {
+    "text": "generic way of doing filtering and there's also api resource struct for standardizing all the meta information",
+    "start": "129360",
+    "end": "135120"
+  },
+  {
+    "text": "about a resource and how people can use it and so that all of this and more in",
+    "start": "135120",
+    "end": "140319"
+  },
+  {
+    "text": "basically 300 lines of code so i'm being very positive about this file but",
+    "start": "140319",
+    "end": "145599"
+  },
+  {
+    "text": "it's really because of this file and the complete cons the consistency and complete adoption of everything in this",
+    "start": "145599",
+    "end": "150640"
+  },
+  {
+    "text": "file that kubernetes feels so consistent and it's also why we can make",
+    "start": "150640",
+    "end": "155680"
+  },
+  {
+    "text": "generic assumptions on other languages now writing structs is one thing how do",
+    "start": "155680",
+    "end": "161920"
+  },
+  {
+    "text": "we ensure that these structures are consistently reused across all the kubernetes let's look at client code for contrast",
+    "start": "161920",
+    "end": "169519"
+  },
+  {
+    "text": "so here are the typed api methods in client code this is just interface you can see these old getters updaters",
+    "start": "169599",
+    "end": "175040"
+  },
+  {
+    "text": "patches replacers etc for deployment and so all the actual implementation here ends up being about",
+    "start": "175040",
+    "end": "181280"
+  },
+  {
+    "text": "a 200 line file you can go look at any other object like pod and you can see there's basically the same story",
+    "start": "181280",
+    "end": "187360"
+  },
+  {
+    "text": "the only thing that really changes between here is the second argument the object that we're acting on along",
+    "start": "187360",
+    "end": "192400"
+  },
+  {
+    "text": "with some sub resources at the bottom so there's a 200 line file for every object and there's a lot of object in",
+    "start": "192400",
+    "end": "199280"
+  },
+  {
+    "text": "kubernetes so how could this possibly be consistent the answer is in the header like all of",
+    "start": "199280",
+    "end": "204480"
+  },
+  {
+    "text": "this is generated and this might seem obvious to you like you you'd have to enforce some of these",
+    "start": "204480",
+    "end": "209519"
+  },
+  {
+    "text": "assumptions for them to stick but it's still kind of crazy like you got all this you got all this glue to basically",
+    "start": "209519",
+    "end": "214959"
+  },
+  {
+    "text": "generate this code manually to you're basically doing manual generics it is consistent sure for each kind the",
+    "start": "214959",
+    "end": "220879"
+  },
+  {
+    "text": "specific structure are specialized via external code generation and the generated source has to be",
+    "start": "220879",
+    "end": "226239"
+  },
+  {
+    "text": "present somewhere and it's just this repo but you've got a lot of code that crucial code that's in here",
+    "start": "226239",
+    "end": "232080"
+  },
+  {
+    "text": "like this the client api is in here uh there's also not only is it a client api file for each type there's also",
+    "start": "232080",
+    "end": "238159"
+  },
+  {
+    "text": "informers for every object this client setup for each group and as a result like client go is more than a hundred",
+    "start": "238159",
+    "end": "244640"
+  },
+  {
+    "text": "thousand lines of code and that's without rendering uh and i'm not",
+    "start": "244640",
+    "end": "249760"
+  },
+  {
+    "text": "here to really try and pass judgment at this this is uh clunko is still great like the fact that everything looks the same in here",
+    "start": "249760",
+    "end": "256079"
+  },
+  {
+    "text": "uh and that it takes advantage of api machinery consistently is what enables qcl to provide such a consistent",
+    "start": "256079",
+    "end": "261919"
+  },
+  {
+    "text": "interface even if the language makes it hard for you to do so uh amusingly there is this five minute",
+    "start": "261919",
+    "end": "267360"
+  },
+  {
+    "text": "clip from kubecon barcelona on the keynote uh that actually talks about this particular thing and also matches my",
+    "start": "267360",
+    "end": "272880"
+  },
+  {
+    "text": "motivations for writing some of the stuff that's coming up here later uh but don't ever have time for that so i'm gonna go on to the",
+    "start": "272880",
+    "end": "279280"
+  },
+  {
+    "text": "documented api concepts instead so here so there is meant to be a",
+    "start": "279280",
+    "end": "285919"
+  },
+  {
+    "text": "consistency between api endpoints and objects so this is how that would look it's",
+    "start": "285919",
+    "end": "292160"
+  },
+  {
+    "text": "probably displayed on the apa concepts under kubernetes website though here is where things start to",
+    "start": "292160",
+    "end": "297919"
+  },
+  {
+    "text": "break down a little bit because this url scheme does not hold for pods nodes namespaces services pvcs",
+    "start": "297919",
+    "end": "304639"
+  },
+  {
+    "text": "oh where am i going or any other type in the core v1 list",
+    "start": "304639",
+    "end": "310560"
+  },
+  {
+    "text": "because all of those types have a different url presumably for legacy reasons and that url starts with api rather than apis and",
+    "start": "310560",
+    "end": "317840"
+  },
+  {
+    "text": "the group is missing so this is a relatively minor inconsistency because we can just special case this one empty group or",
+    "start": "317840",
+    "end": "324720"
+  },
+  {
+    "text": "core but it is still kind of awkward the second concept api concept is watch",
+    "start": "324720",
+    "end": "331919"
+  },
+  {
+    "text": "events so that's what you get when you perform a watch call on any list endpoint",
+    "start": "331919",
+    "end": "338479"
+  },
+  {
+    "text": "this is how that looks basically this is a two line response i have split it for the presentation",
+    "start": "338479",
+    "end": "343759"
+  },
+  {
+    "text": "you'll get a chunk response typically one line per chunk but you'll have to buffer yourself because",
+    "start": "343759",
+    "end": "350880"
+  },
+  {
+    "text": "each of the objects are embedded here can exceed the mtu and frequently does so but when you have a complete line",
+    "start": "350880",
+    "end": "356960"
+  },
+  {
+    "text": "then you can parse the inner object as the type you actually want and all apis use this concept and it is",
+    "start": "356960",
+    "end": "363120"
+  },
+  {
+    "text": "consistent the source for it looks like this and you'll find more of this runtime dynamic objects in there that",
+    "start": "363120",
+    "end": "369280"
+  },
+  {
+    "text": "handles different types so that's how kubernetes does some of these core things and",
+    "start": "369280",
+    "end": "375280"
+  },
+  {
+    "text": "i've actually covered all the concepts and main api consistencies that i want to be talking about a lot of it was the",
+    "start": "375280",
+    "end": "380720"
+  },
+  {
+    "text": "code generation a lot of it was done with dynamic types so i'm going to be moving on to things from rus point of view now",
+    "start": "380720",
+    "end": "387520"
+  },
+  {
+    "start": "386000",
+    "end": "789000"
+  },
+  {
+    "text": "so like in the go code i'm going to be simplifying slightly for readability but most of the stuff here in is going to be from qbrs but",
+    "start": "387520",
+    "end": "394400"
+  },
+  {
+    "text": "first we're going to start out with a project by arnov singh aka arnavian because that",
+    "start": "394400",
+    "end": "400000"
+  },
+  {
+    "text": "project k8s open api is really the linchpin that makes any generics possible",
+    "start": "400000",
+    "end": "405600"
+  },
+  {
+    "text": "not only does it generates the rust structures from open api schemas it also factors out some of the",
+    "start": "405600",
+    "end": "411840"
+  },
+  {
+    "text": "consistency into a few traits that is then implemented for all these structures",
+    "start": "411840",
+    "end": "417199"
+  },
+  {
+    "text": "so a huge shout out to him like for what i believe is just his side project i really cannot thank him enough so his",
+    "start": "417199",
+    "end": "423919"
+  },
+  {
+    "text": "first trait is basically resource and the rust rate is that's the ldr of the behavior that",
+    "start": "423919",
+    "end": "431440"
+  },
+  {
+    "text": "you can implement for a type and then later you can use the trait as a constraint in function signatures",
+    "start": "431440",
+    "end": "437280"
+  },
+  {
+    "text": "and i say behavior because you can't put dynamic data in there but you are allowed to put static associated",
+    "start": "437280",
+    "end": "444000"
+  },
+  {
+    "text": "constants which is what this is so we can use this to map an api to",
+    "start": "444000",
+    "end": "449599"
+  },
+  {
+    "text": "where on the api it lives the second trait i want to cover is",
+    "start": "449599",
+    "end": "454960"
+  },
+  {
+    "text": "metadata which really is just a getter or a generic way to grab metadata",
+    "start": "454960",
+    "end": "460800"
+  },
+  {
+    "text": "that is consistent across all objects because even if kubernetes always puts metadata on the same key",
+    "start": "460800",
+    "end": "466639"
+  },
+  {
+    "text": "we can't really guarantee that so we need some indirection and traits are the way for that",
+    "start": "466639",
+    "end": "472720"
+  },
+  {
+    "text": "this is how that would look it's slightly simplified because kubernetes open api distinguishes between listable",
+    "start": "472720",
+    "end": "477840"
+  },
+  {
+    "text": "types and list meta that uses less matter but everything else uses object matter and we from qbrs point of view",
+    "start": "477840",
+    "end": "485199"
+  },
+  {
+    "text": "only really do stuff on top of objects that have object meta so we're hiding a few details here",
+    "start": "485199",
+    "end": "492319"
+  },
+  {
+    "text": "uh but with these two root rates we can start and build a dynamic api so you get kind of how it",
+    "start": "492319",
+    "end": "498000"
+  },
+  {
+    "text": "gonna work so this uh struct here it's got all the same information as the resource rate",
+    "start": "498000",
+    "end": "504720"
+  },
+  {
+    "text": "but it also has got a dynamic namespace property as well as all of these being strings so you can instantiate this at runtime from an",
+    "start": "504720",
+    "end": "511199"
+  },
+  {
+    "text": "arbitrary object so while you can fill it in completely manually",
+    "start": "511199",
+    "end": "517919"
+  },
+  {
+    "text": "there is this nice thing now about the existing open api struct we can actually just provide a blanket constructor with one trade constraint uh that would",
+    "start": "517919",
+    "end": "524959"
+  },
+  {
+    "text": "look like this uh for a namespace resource so we have all the data so if this thing",
+    "start": "524959",
+    "end": "532560"
+  },
+  {
+    "text": "implements a trade so we just copy all of that when constraining by it and as a result the resource type",
+    "start": "532560",
+    "end": "538720"
+  },
+  {
+    "text": "is not generic uh we just use the trade constraints in the in the constructor so with this",
+    "start": "538720",
+    "end": "546000"
+  },
+  {
+    "text": "information and this easy way to create resources we can now start thinking about how to hit every object's",
+    "start": "546000",
+    "end": "552000"
+  },
+  {
+    "text": "api endpoint so i'm going to make a very simplified url mapper something that will let us",
+    "start": "552000",
+    "end": "557200"
+  },
+  {
+    "text": "hit basically every url endpoint in kubernetes",
+    "start": "557200",
+    "end": "562640"
+  },
+  {
+    "text": "uh so this is this is that uh it's gonna handle",
+    "start": "562640",
+    "end": "569200"
+  },
+  {
+    "text": "it's gonna match the api convention for for resources and it's gonna handle that awkward",
+    "start": "569200",
+    "end": "576320"
+  },
+  {
+    "text": "empty group case that i talked about earlier however it is slightly awkward we haven't got all the",
+    "start": "576320",
+    "end": "582160"
+  },
+  {
+    "text": "information i really would like in the in the trade at the moment so you can see the resource line actually got a",
+    "start": "582160",
+    "end": "588240"
+  },
+  {
+    "text": "load-bearing pluralization in there uh because we only have the kind uh so yeah that's not really a great",
+    "start": "588240",
+    "end": "595200"
+  },
+  {
+    "text": "phrase to use about software architecture but uh let alone things that i'm designing but here we are",
+    "start": "595200",
+    "end": "602000"
+  },
+  {
+    "text": "ultimately uh with a url mapper in place we can hit pretty much anything and this we can",
+    "start": "602000",
+    "end": "608000"
+  },
+  {
+    "text": "start making a dynamic api so we're going to focus on create for",
+    "start": "608000",
+    "end": "614720"
+  },
+  {
+    "text": "basic crud so this is how crate would look it takes a post parameter",
+    "start": "614720",
+    "end": "619920"
+  },
+  {
+    "text": "struct which is analogous to the type in types that go uh it also takes some binary data makes",
+    "start": "619920",
+    "end": "624959"
+  },
+  {
+    "text": "query parameters from post parameters and prepares a request you must then execute the request yourself",
+    "start": "624959",
+    "end": "631040"
+  },
+  {
+    "text": "so this should be pretty similar to how another language client would do it you get some bytes go through url mapper",
+    "start": "631040",
+    "end": "636560"
+  },
+  {
+    "text": "make an http call response you get response bytes and you have to deal with serialization yourself",
+    "start": "636560",
+    "end": "641760"
+  },
+  {
+    "text": "but that's not really what we want to be doing like we don't want to be manually keeping track and mapping uh resources to",
+    "start": "641760",
+    "end": "648800"
+  },
+  {
+    "text": "serialization formats we want what we really want is an automatic serialization detailization system some",
+    "start": "648800",
+    "end": "655360"
+  },
+  {
+    "text": "kind of mechanism that is generic over k that is aware of the underlying structure resource",
+    "start": "655360",
+    "end": "662079"
+  },
+  {
+    "text": "so for that uh we're gonna make our first truly generic type the api and this is",
+    "start": "662079",
+    "end": "669360"
+  },
+  {
+    "text": "a wrapper around resource with an http client handle inside of it along with an empty marker of what type",
+    "start": "669360",
+    "end": "676560"
+  },
+  {
+    "text": "it's for because we don't actually store any data 4k",
+    "start": "676560",
+    "end": "681680"
+  },
+  {
+    "text": "in here so this is just a marker for the type system we need to specify what type this api is for anyway so it may as well",
+    "start": "681680",
+    "end": "688240"
+  },
+  {
+    "text": "be when we instantiate an api uh so we can make an api namespace here",
+    "start": "688240",
+    "end": "693760"
+  },
+  {
+    "text": "by referencing resource namespace i'm not going to show that but this constructor would not take any anything ready to k so",
+    "start": "693760",
+    "end": "702000"
+  },
+  {
+    "text": "it's really when we construct we have to tell the type system that it's really for pod here so that's what",
+    "start": "702000",
+    "end": "707040"
+  },
+  {
+    "text": "this magic syntax on the left of the equality sign is it's a type hint",
+    "start": "707040",
+    "end": "711839"
+  },
+  {
+    "text": "so now that we have an api uh we can't do anything with it so let's generalize create",
+    "start": "715279",
+    "end": "721440"
+  },
+  {
+    "text": "and this is where all the funky rust and flags start coming in this is what a generic implementation over a type k for a type",
+    "start": "721440",
+    "end": "728399"
+  },
+  {
+    "text": "that is also generic over k comes in this is what that looks like here k also is constrained by",
+    "start": "728399",
+    "end": "734880"
+  },
+  {
+    "text": "three traits it needs to implement and the methods create also further constraints k",
+    "start": "734880",
+    "end": "739920"
+  },
+  {
+    "text": "by an additional trait serialize so you can see that the body of a crate is basically just using the serialized",
+    "start": "739920",
+    "end": "745760"
+  },
+  {
+    "text": "rate turning that data into json uh passing it to a client that is done",
+    "start": "745760",
+    "end": "751680"
+  },
+  {
+    "text": "executing the request and the result is deserialized into the type k",
+    "start": "751680",
+    "end": "757600"
+  },
+  {
+    "text": "because create actually uh takes an object at the same object as it will return",
+    "start": "757600",
+    "end": "764800"
+  },
+  {
+    "text": "so by using generics and constraints on k we have actually implemented this client go like api method across all",
+    "start": "764800",
+    "end": "771200"
+  },
+  {
+    "text": "types with just a blanket implementation so that's really great it's good success",
+    "start": "771200",
+    "end": "776720"
+  },
+  {
+    "text": "story but unfortunately this is not going to help us for absolutely everything i mean it's going to let us populate the api",
+    "start": "776720",
+    "end": "782880"
+  },
+  {
+    "text": "but i'm gonna i would be lying if i said we didn't need code generation",
+    "start": "782880",
+    "end": "789760"
+  },
+  {
+    "start": "789000",
+    "end": "839000"
+  },
+  {
+    "text": "so uh yeah code generation does happen in rust but uh contrast it is a required part of",
+    "start": "789760",
+    "end": "796160"
+  },
+  {
+    "text": "cargo build to execute and the system that does this is called procedural macros or proc macros for",
+    "start": "796160",
+    "end": "801279"
+  },
+  {
+    "text": "short i like to describe them as compile time decorators because they're just these cute little things you put inside of",
+    "start": "801279",
+    "end": "806800"
+  },
+  {
+    "text": "in front of your structs or your functions or as ways to customize your",
+    "start": "806800",
+    "end": "813839"
+  },
+  {
+    "text": "so the interface of them end up being super compelling although they can be slightly tricky to write the first time around but the benefit is",
+    "start": "813839",
+    "end": "820880"
+  },
+  {
+    "text": "really like the this because of the first class support for code generation",
+    "start": "820880",
+    "end": "826800"
+  },
+  {
+    "text": "this whole class of errors where you are operating on a stale version of generated code is now eliminated the compiler disallows",
+    "start": "826800",
+    "end": "833600"
+  },
+  {
+    "text": "that possibility you don't have to write a hapki make file with all of your stuff inside of it that glues this together and so this is",
+    "start": "833600",
+    "end": "840880"
+  },
+  {
+    "start": "839000",
+    "end": "886000"
+  },
+  {
+    "text": "the example that pretty much everyone sees in was the first time uh surrey fantastic serialization library it",
+    "start": "840880",
+    "end": "846880"
+  },
+  {
+    "text": "if you slap these two things in front of a struct then your struct will now implement serialize and deserialize and",
+    "start": "846880",
+    "end": "851920"
+  },
+  {
+    "text": "you can convert it between various serialization formats you can customize it further with struct",
+    "start": "851920",
+    "end": "857519"
+  },
+  {
+    "text": "level or field level attributes in practice you end up writing much of the same gunk slash",
+    "start": "857519",
+    "end": "863279"
+  },
+  {
+    "text": "annotations as you would with goes json encoding to like distinguish casings of your code",
+    "start": "863279",
+    "end": "870000"
+  },
+  {
+    "text": "and disk format uh but you there's there's a lot of safety in in having this be top level code like",
+    "start": "870000",
+    "end": "877519"
+  },
+  {
+    "text": "this actually goes through proper rosco to transform it into ros code and there's real good error handling telling",
+    "start": "877519",
+    "end": "882720"
+  },
+  {
+    "text": "you where everything com came from at least if the proc macro is written well so we can actually make our own",
+    "start": "882720",
+    "end": "888959"
+  },
+  {
+    "start": "886000",
+    "end": "1000000"
+  },
+  {
+    "text": "derivables as well and so i'm going to be showcasing cube's custom resource brock macro",
+    "start": "888959",
+    "end": "894800"
+  },
+  {
+    "text": "here we are telling uh rust to derive custom resource on",
+    "start": "894800",
+    "end": "900160"
+  },
+  {
+    "text": "fuseback and we're telling uh cube that uh the various attributes that this derived type is going to have",
+    "start": "900160",
+    "end": "907360"
+  },
+  {
+    "text": "like we're telling it the resource parameters group version and kind and it's then going to go and the proc",
+    "start": "907360",
+    "end": "913279"
+  },
+  {
+    "text": "macro is then going to create all the code around the custom resource that we're going to need and there's",
+    "start": "913279",
+    "end": "918800"
+  },
+  {
+    "text": "i've showed two lines of attributes here but there's really tons more available we've actually tried to mimic a bunch of the cube builder",
+    "start": "918800",
+    "end": "924959"
+  },
+  {
+    "text": "setup for deriving custom resources so there's a whole slew of things there",
+    "start": "924959",
+    "end": "930320"
+  },
+  {
+    "text": "for customizing how your crd looks but what this actually ends up doing it creates a food type",
+    "start": "930320",
+    "end": "936639"
+  },
+  {
+    "text": "it attaches this spec that you have here onto the food type it attaches the status type onto the food type if you have one",
+    "start": "936639",
+    "end": "942160"
+  },
+  {
+    "text": "i have specified one here it attaches metadata type meta it also makes a convenience constructor",
+    "start": "942160",
+    "end": "947600"
+  },
+  {
+    "text": "and a crd method to grab to generate a siri so if you wanted to start using",
+    "start": "947600",
+    "end": "953040"
+  },
+  {
+    "text": "foo now as a custom resource and query the kubernetes api against it you really can just post the crd up to",
+    "start": "953040",
+    "end": "959360"
+  },
+  {
+    "text": "kubernetes with an api of custom resource definition type and grab the crd from foo in line two",
+    "start": "959360",
+    "end": "966240"
+  },
+  {
+    "text": "post it up and then you can make another api of type foo",
+    "start": "966240",
+    "end": "972000"
+  },
+  {
+    "text": "and basically make new instances with your convenience constructor and start posting those ideally you",
+    "start": "972000",
+    "end": "979040"
+  },
+  {
+    "text": "would want to error handle a new server side apply here uh maybe wait for the api server to",
+    "start": "979040",
+    "end": "984079"
+  },
+  {
+    "text": "understand this new type typically takes a few seconds but once you've done that yeah that's this is meant to be an",
+    "start": "984079",
+    "end": "990160"
+  },
+  {
+    "text": "illustrative example we've only really covered api creates here as well so",
+    "start": "990160",
+    "end": "996639"
+  },
+  {
+    "text": "i'm going to dig a little deeper into some of the more advanced methods in particular watch because watch",
+    "start": "996639",
+    "end": "1004880"
+  },
+  {
+    "start": "1000000",
+    "end": "1105000"
+  },
+  {
+    "text": "we'll need to talk about watch events first and that's the type that maps nicely onto the one in api machinery that contain the dynamic",
+    "start": "1004880",
+    "end": "1011600"
+  },
+  {
+    "text": "runtime object in rust watch events can be packed into a fully generic",
+    "start": "1011600",
+    "end": "1016720"
+  },
+  {
+    "text": "num for a fully typed one which is great we also got some sort the annotation here is to",
+    "start": "1016720",
+    "end": "1022000"
+  },
+  {
+    "text": "tell at sorry that the values in the enum variants go on the object key and the inum variant name go into a tag",
+    "start": "1022000",
+    "end": "1028319"
+  },
+  {
+    "text": "key so this uh and the tag key is also sent under and received as",
+    "start": "1028319",
+    "end": "1034558"
+  },
+  {
+    "text": "uppercase um that is to match the convention and go for constants",
+    "start": "1034559",
+    "end": "1041760"
+  },
+  {
+    "text": "so you'd expect that a watch endpoint on api would return some form of watch events",
+    "start": "1041760",
+    "end": "1048880"
+  },
+  {
+    "text": "in the signature and indeed it does a line further in the signature uh",
+    "start": "1048880",
+    "end": "1054080"
+  },
+  {
+    "text": "unfortunately it's perhaps more intimidating than at first you would have thought you see",
+    "start": "1054080",
+    "end": "1059679"
+  },
+  {
+    "text": "the words impulse stream in there which is a rust constraint that says that a return type must implement the stream",
+    "start": "1059679",
+    "end": "1064840"
+  },
+  {
+    "text": "trade the stream trade being something that's basically an asynchronous iterator",
+    "start": "1064840",
+    "end": "1070320"
+  },
+  {
+    "text": "so you are able to iterate or over iterate over a stream but you have to await each new element",
+    "start": "1070320",
+    "end": "1075840"
+  },
+  {
+    "text": "uh the element being the item here uh as in the watch event that can fail uh so",
+    "start": "1075840",
+    "end": "1082640"
+  },
+  {
+    "text": "you got a stream of watch event results but on top of that the stream is also",
+    "start": "1082640",
+    "end": "1088240"
+  },
+  {
+    "text": "wrapped in a result because the http result can request can fail so that has to succeed",
+    "start": "1088240",
+    "end": "1093840"
+  },
+  {
+    "text": "before you can even start streaming and so that's why you got this fairly chunky type uh",
+    "start": "1093840",
+    "end": "1098880"
+  },
+  {
+    "text": "it it kind of looks hard to use immediately and i've not even talked about the",
+    "start": "1098880",
+    "end": "1103919"
+  },
+  {
+    "text": "corner cases here and boy are there corner cases uh so we",
+    "start": "1103919",
+    "end": "1109120"
+  },
+  {
+    "start": "1105000",
+    "end": "1283000"
+  },
+  {
+    "text": "gotta not only uh the document thing is like you gotta track resource version that's the first thing uh these are these",
+    "start": "1109120",
+    "end": "1115760"
+  },
+  {
+    "text": "integers that get passed on via cd and you must pass these on for every watch call to tell kubernetes where you",
+    "start": "1115760",
+    "end": "1121919"
+  },
+  {
+    "text": "left off i kind of hid them from you they're actually part of the signature of watch here uh but uh i was sneaky and use the two",
+    "start": "1121919",
+    "end": "1127760"
+  },
+  {
+    "text": "character variable name but it's there it's required",
+    "start": "1127760",
+    "end": "1133200"
+  },
+  {
+    "text": "and the annoying thing about these resource versions you've got to treat them as these opaque things and",
+    "start": "1133200",
+    "end": "1139200"
+  },
+  {
+    "text": "sometimes they're just stale if you are sometimes you'll just get 410 gone as a",
+    "start": "1139200",
+    "end": "1145120"
+  },
+  {
+    "text": "response back on a watch in kubernetes and if you're building a state cache like a reflector",
+    "start": "1145120",
+    "end": "1150160"
+  },
+  {
+    "text": "then what you have to do is basically relist get the entire state back for every object in the system",
+    "start": "1150160",
+    "end": "1155600"
+  },
+  {
+    "text": "for that type if you get the synchronized and before watch bookmarks this was super likely to happen",
+    "start": "1155600",
+    "end": "1163039"
+  },
+  {
+    "text": "uh particularly on slow moving namespaces and partly as a consequence of this if you",
+    "start": "1163039",
+    "end": "1168559"
+  },
+  {
+    "text": "are relying on removed events well that's now purely a best effort thing because what happens",
+    "start": "1168559",
+    "end": "1174559"
+  },
+  {
+    "text": "if your app crashes what happens if you get desynchronized in between an event being deleted like that event is lost if you've",
+    "start": "1174559",
+    "end": "1182320"
+  },
+  {
+    "text": "tried to initialize a watch from a zero resource version which is what you do on the uh which is",
+    "start": "1182320",
+    "end": "1188240"
+  },
+  {
+    "text": "what you can do that at least you'll get an event for every existing item but for deleted items",
+    "start": "1188240",
+    "end": "1193280"
+  },
+  {
+    "text": "you'll never get that event again so that's not great watch calls also cannot",
+    "start": "1193280",
+    "end": "1200400"
+  },
+  {
+    "text": "stay open for more than five minutes so you have to keep issuing this watch call for at least that frequency or",
+    "start": "1200400",
+    "end": "1205840"
+  },
+  {
+    "text": "you'll get more errors and finally just a share data use that you can get out of watch",
+    "start": "1205840",
+    "end": "1211760"
+  },
+  {
+    "text": "like on every change including the status object if you've looked at nodes for instance",
+    "start": "1211760",
+    "end": "1217679"
+  },
+  {
+    "text": "like last i checked node status contained structs inside and for",
+    "start": "1217679",
+    "end": "1223039"
+  },
+  {
+    "text": "conditions and each of the conditions would have a last updated timestamp",
+    "start": "1223039",
+    "end": "1228240"
+  },
+  {
+    "text": "and every few seconds this one of these conduct conditions would be",
+    "start": "1228240",
+    "end": "1233360"
+  },
+  {
+    "text": "updated even though like the boolean never changed they would the timestamp would still be",
+    "start": "1233360",
+    "end": "1238400"
+  },
+  {
+    "text": "there so if you're subscribing to notes you'll get this whole hecking object every",
+    "start": "1238400",
+    "end": "1243840"
+  },
+  {
+    "text": "every few seconds it's a huge amount of io and you can you can hide some of this from the user of course but this is still networked so anyone",
+    "start": "1243840",
+    "end": "1250880"
+  },
+  {
+    "text": "who's writing a controller type solution on top of watch is gonna need some heavy abstractions uh",
+    "start": "1250880",
+    "end": "1258240"
+  },
+  {
+    "text": "so what would such an abstraction do well uh we first got a list and then",
+    "start": "1258240",
+    "end": "1265520"
+  },
+  {
+    "text": "from that point we gotta watch continuously but no longer and for five minutes we gotta propagate all the user errors",
+    "start": "1265520",
+    "end": "1271600"
+  },
+  {
+    "text": "we got a real list on desync errors possibly losing events keep track of resource versions",
+    "start": "1271600",
+    "end": "1277280"
+  },
+  {
+    "text": "and still somehow encapsulate it all in one live stream so this is absolutely not trivial and that's why",
+    "start": "1277280",
+    "end": "1284559"
+  },
+  {
+    "text": "i'm so happy about cube runtime so a huge thank you to mild maintainer tio",
+    "start": "1284559",
+    "end": "1289760"
+  },
+  {
+    "text": "he basically wrote this entire crate to figure out an entirely stream based solution for not only",
+    "start": "1289760",
+    "end": "1295039"
+  },
+  {
+    "text": "watchers but also reflectors and controllers and because these objects are just this",
+    "start": "1295039",
+    "end": "1300640"
+  },
+  {
+    "text": "rust native concept of a stream they end up being possible to manipulate in very standard ways",
+    "start": "1300640",
+    "end": "1306880"
+  },
+  {
+    "text": "like you can store them easily pass them around extend integrate instrument tests like we've not even gotten fully",
+    "start": "1306880",
+    "end": "1312799"
+  },
+  {
+    "text": "around to showcase nor proof of concept all of this properly and so caveat this does have rough edges",
+    "start": "1312799",
+    "end": "1319039"
+  },
+  {
+    "text": "uh but it's definitely the best evolution point so far for a controller on time and rust",
+    "start": "1319039",
+    "end": "1325360"
+  },
+  {
+    "text": "so i'm gonna be covering quickly how these three objects work uh and i'm gonna start with watchers",
+    "start": "1325360",
+    "end": "1333200"
+  },
+  {
+    "start": "1331000",
+    "end": "1414000"
+  },
+  {
+    "text": "and funnily enough watchers actually end up being one of the more advanced of the three uh and that's",
+    "start": "1333200",
+    "end": "1339840"
+  },
+  {
+    "text": "entirely due to all the corner cases in watch that i spoke about internally we actually model it with a",
+    "start": "1339840",
+    "end": "1345039"
+  },
+  {
+    "text": "finite state machine and we are using something akin to a state transformer if you feel",
+    "start": "1345039",
+    "end": "1350320"
+  },
+  {
+    "text": "familiar with that term to pass around the state which is the enum shown above and",
+    "start": "1350320",
+    "end": "1356640"
+  },
+  {
+    "text": "the actual watch events which is the ultimate thing that we want to return",
+    "start": "1356640",
+    "end": "1361840"
+  },
+  {
+    "text": "so sometimes the watcher is actually going to be giving you a whole chunk of items which is what happens during your",
+    "start": "1362480",
+    "end": "1368000"
+  },
+  {
+    "text": "relist generally you want to be working with a flattened version of the stream that watcher is outputting",
+    "start": "1368000",
+    "end": "1373039"
+  },
+  {
+    "text": "so we have some helpers for that but this is the internal machinery if you want to use it suppose you want",
+    "start": "1373039",
+    "end": "1379039"
+  },
+  {
+    "text": "to subscribe to added or modified events for config maps in some namespace then this is how that would look",
+    "start": "1379039",
+    "end": "1385360"
+  },
+  {
+    "text": "line 4 here being the crucial one you create a watcher on the configmap api",
+    "start": "1385360",
+    "end": "1390480"
+  },
+  {
+    "text": "and then you apply our helper to flatten and filter for only the applied events and this",
+    "start": "1390480",
+    "end": "1396640"
+  },
+  {
+    "text": "is now going to handle all the watch complexity for you this loop should run forever and the",
+    "start": "1396640",
+    "end": "1403200"
+  },
+  {
+    "text": "fact that there's also an unflattened stream that we can work with means that any state store that we build",
+    "start": "1403200",
+    "end": "1409440"
+  },
+  {
+    "text": "on top of a watcher will always have some data even during a relist",
+    "start": "1409440",
+    "end": "1414559"
+  },
+  {
+    "start": "1414000",
+    "end": "1533000"
+  },
+  {
+    "text": "and that's why that's there so let's talk about a state store because that is what a reflector is",
+    "start": "1414559",
+    "end": "1422320"
+  },
+  {
+    "text": "meant to be like it's a it's something that builds on top of a watcher by recording objects in a store",
+    "start": "1422320",
+    "end": "1428000"
+  },
+  {
+    "text": "as events pass through so when watch events happen we either insert replace or remove",
+    "start": "1428000",
+    "end": "1434400"
+  },
+  {
+    "text": "objects from a store and then we pass these events unmodified just straight through so it's a slightly",
+    "start": "1434400",
+    "end": "1441200"
+  },
+  {
+    "text": "complicated signature here for all this you need a store which i'm not defined but it's really just a hashmap of object",
+    "start": "1441200",
+    "end": "1447440"
+  },
+  {
+    "text": "reference to kubernetes objects you're also going to need the unflattened stream from the watcher",
+    "start": "1447440",
+    "end": "1453039"
+  },
+  {
+    "text": "which is w but ultimately this ends up just being this one line",
+    "start": "1453039",
+    "end": "1458080"
+  },
+  {
+    "text": "intercept on the watcher stream so it's a really nice conceptual thing",
+    "start": "1458080",
+    "end": "1464159"
+  },
+  {
+    "text": "to use a reflector you just make a writer and a watcher combine the two and then you can you can",
+    "start": "1464960",
+    "end": "1471200"
+  },
+  {
+    "text": "use the reflector just as a watcher in the last three lines in fact those three lines are identical",
+    "start": "1471200",
+    "end": "1476720"
+  },
+  {
+    "text": "to the first example uh but the more important part is the three lines in the center so you not only do you have to create a",
+    "start": "1476720",
+    "end": "1483679"
+  },
+  {
+    "text": "writer but you can also create a reader from this writer and this reader you can pass along",
+    "start": "1483679",
+    "end": "1488960"
+  },
+  {
+    "text": "to as state to a web framework like to expose it because this thing can be",
+    "start": "1488960",
+    "end": "1494640"
+  },
+  {
+    "text": "cloned because what's not cloneable is the writer",
+    "start": "1494640",
+    "end": "1500640"
+  },
+  {
+    "text": "because it's kind of unsound to have multiple things writing into the same store so this is illegal and by illegal and to",
+    "start": "1500640",
+    "end": "1506880"
+  },
+  {
+    "text": "clarify i don't mean it's a documentation convention i mean it's actually a compiler rust's move semantics makes the writer",
+    "start": "1506880",
+    "end": "1513200"
+  },
+  {
+    "text": "effectively disappear into the reflector and because it's not cloneable there's nothing else you have to do for this",
+    "start": "1513200",
+    "end": "1518400"
+  },
+  {
+    "text": "you you can only have one writer and that's one of those great guarantees you get that you get from this language that i'm",
+    "start": "1518400",
+    "end": "1524320"
+  },
+  {
+    "text": "super happy with so i'm going to be moving on to the final object that builds on top of these",
+    "start": "1524320",
+    "end": "1530240"
+  },
+  {
+    "text": "two and that is the controller and a controller is a system that",
+    "start": "1530240",
+    "end": "1536000"
+  },
+  {
+    "start": "1533000",
+    "end": "1667000"
+  },
+  {
+    "text": "reconciles a root object or a custom resource along with a child object that it",
+    "start": "1536000",
+    "end": "1541679"
+  },
+  {
+    "text": "may own or many child objects and then it's going to call a reconcile function when anything related changes",
+    "start": "1541679",
+    "end": "1547760"
+  },
+  {
+    "text": "so the controller's job is just combining input streams from these various objects",
+    "start": "1547760",
+    "end": "1552960"
+  },
+  {
+    "text": "debouncing reconcile requests scheduling retries and it's up to you as the application",
+    "start": "1552960",
+    "end": "1558480"
+  },
+  {
+    "text": "developer to make sure that the world is in the correct state uh when you build a reconciler so when you get a reconcile request",
+    "start": "1558480",
+    "end": "1564640"
+  },
+  {
+    "text": "you have to reconcile the root object and anything related to it that you own uh so there's a builder pattern to",
+    "start": "1564640",
+    "end": "1573039"
+  },
+  {
+    "text": "create a controller here and that uh should remind you quite a bit of controller runtime it's in fact heavily",
+    "start": "1573039",
+    "end": "1578960"
+  },
+  {
+    "text": "inspired by it and we even got some help from some of the maintainers on it uh so this here actually ends up being a",
+    "start": "1578960",
+    "end": "1585200"
+  },
+  {
+    "text": "completely sufficient main for running a controller this example tries to make",
+    "start": "1585200",
+    "end": "1592240"
+  },
+  {
+    "text": "a controller for a configmap generator which is a custom resource that is meant to control a config map",
+    "start": "1592240",
+    "end": "1598480"
+  },
+  {
+    "text": "and ensure that the generator's state matches a configmap state",
+    "start": "1598480",
+    "end": "1603840"
+  },
+  {
+    "text": "and i showed you earlier how to derive a custom resource from a struct earlier so the only remaining bits here is how",
+    "start": "1604320",
+    "end": "1609679"
+  },
+  {
+    "text": "to provide an error handling policy and a reconciler function that will be called with the context that you define",
+    "start": "1609679",
+    "end": "1616000"
+  },
+  {
+    "text": "so i'm going to dig into the reconciler here because that's this is the signature of",
+    "start": "1616000",
+    "end": "1622159"
+  },
+  {
+    "text": "the reconciler you have to define this it has to be an async function that returns a reconciler object if it succeeds",
+    "start": "1622159",
+    "end": "1628240"
+  },
+  {
+    "text": "and in the interest of not obscuring the slide this function is where you would typically grab a",
+    "start": "1628240",
+    "end": "1633440"
+  },
+  {
+    "text": "client or an api from the context and start making api calls to kubernetes to ensure that the corresponding config",
+    "start": "1633440",
+    "end": "1639120"
+  },
+  {
+    "text": "map is up to date with the config map generator uh maybe you also want to write",
+    "start": "1639120",
+    "end": "1644399"
+  },
+  {
+    "text": "something to the stator subject to indicate what happened or like how far along you got maybe it's a last modified timestamp something that's not",
+    "start": "1644399",
+    "end": "1651520"
+  },
+  {
+    "text": "extremely noisy yeah maybe i'm being a bit hand wave is this cheating like how do you build",
+    "start": "1651520",
+    "end": "1657360"
+  },
+  {
+    "text": "controllers just build controllers but this is we are designing your",
+    "start": "1657360",
+    "end": "1662720"
+  },
+  {
+    "text": "reconcile here and this is really where all your business logic resides i just want to emphasize that",
+    "start": "1662720",
+    "end": "1667760"
+  },
+  {
+    "start": "1667000",
+    "end": "1705000"
+  },
+  {
+    "text": "and all of the advice from controller building from controller runtime or queue builder generally applies here and there's tons",
+    "start": "1667760",
+    "end": "1674159"
+  },
+  {
+    "text": "of good talks on getting this stuff right in general the tldrs that reconcile need",
+    "start": "1674159",
+    "end": "1680000"
+  },
+  {
+    "text": "to be item potent it needs to be able to resume and the places fail as in if parts of it",
+    "start": "1680000",
+    "end": "1685120"
+  },
+  {
+    "text": "that succeeded then it should just keep going and follow on in the next iteration uh you should use server side apply to",
+    "start": "1685120",
+    "end": "1692320"
+  },
+  {
+    "text": "have lesser cases you should use finalizers or owner reference to garbage collect because as",
+    "start": "1692320",
+    "end": "1698159"
+  },
+  {
+    "text": "i said you cannot rely on removed events reliably so that's",
+    "start": "1698159",
+    "end": "1704399"
+  },
+  {
+    "text": "the general gist but we do have some complete examples here there's two repos controller rs which is",
+    "start": "1704399",
+    "end": "1710960"
+  },
+  {
+    "start": "1705000",
+    "end": "1811000"
+  },
+  {
+    "text": "a controller for a custom resource foo uh that lives inside of actics it's got tracing it's got custom metrics",
+    "start": "1710960",
+    "end": "1717279"
+  },
+  {
+    "text": "uh three files about 250 to 300 lines and then there's a version rs which is a more lightweight",
+    "start": "1717279",
+    "end": "1722880"
+  },
+  {
+    "text": "deployment reflector that exposes its reader through actics and that's a single line file",
+    "start": "1722880",
+    "end": "1728720"
+  },
+  {
+    "text": "100 lines uh so ultimately we don't really want to be doing a bunch of scaffolding here like what kabul you're",
+    "start": "1728720",
+    "end": "1733760"
+  },
+  {
+    "text": "saying we want you to just choose your own dependencies do you need a web framework yeah pick one it's a pretty it's pretty",
+    "start": "1733760",
+    "end": "1740640"
+  },
+  {
+    "text": "good practice to expose metrics so at least a simple web server would be useful here uh you probably want some observability",
+    "start": "1740640",
+    "end": "1747279"
+  },
+  {
+    "text": "tooling uh tracing ecosystem in particular is really solid for this you can just slap on a hash instrument proc macro and",
+    "start": "1747279",
+    "end": "1754240"
+  },
+  {
+    "text": "add your favorite tracing subscriber sentry is great for error reporting",
+    "start": "1754240",
+    "end": "1759600"
+  },
+  {
+    "text": "prometheus great is great for custom metrics so i can highly recommend all of these but beyond that uh yeah you just have to",
+    "start": "1759600",
+    "end": "1767120"
+  },
+  {
+    "text": "investigate this is really all that i'm going to be talking about for cube so i i've been talking for some time i",
+    "start": "1767120",
+    "end": "1773039"
+  },
+  {
+    "text": "hope this has been helpful uh source for all this is in the link all of this is published on create style slides are available uh the api crate",
+    "start": "1773039",
+    "end": "1779840"
+  },
+  {
+    "text": "that i'm talking about has is has been reasonably stable but cube runtime is still very new so anyone who's willing to get",
+    "start": "1779840",
+    "end": "1786240"
+  },
+  {
+    "text": "their hands dirty help is appreciated uh if you are using it changes are documented in our change log so please",
+    "start": "1786240",
+    "end": "1791279"
+  },
+  {
+    "text": "check that and pin your versions also i want to thank bible and health who i work for they do great things for",
+    "start": "1791279",
+    "end": "1796720"
+  },
+  {
+    "text": "kubernetes in the healthcare space and they are also great in their commitment to open source",
+    "start": "1796720",
+    "end": "1801919"
+  },
+  {
+    "text": "and have been particularly encouraging with respect to this talk so big thank you to those guys as well but that's really it so um thank you",
+    "start": "1801919",
+    "end": "1808559"
+  },
+  {
+    "text": "very much for listening to this and goodbye",
+    "start": "1808559",
+    "end": "1812960"
+  }
+]

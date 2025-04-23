@@ -1,0 +1,1658 @@
+[
+  {
+    "start": "0",
+    "end": "63000"
+  },
+  {
+    "text": "thank you all for coming my name is Ethan and I'm going to be talking about how we're signing and verifying",
+    "start": "0",
+    "end": "6899"
+  },
+  {
+    "text": "container images in a kubernetes environment a datadog so this is a talk about datadog's",
+    "start": "6899",
+    "end": "13380"
+  },
+  {
+    "text": "internal infrastructure but this infrastructure ultimately supports the datadoc product which is a an",
+    "start": "13380",
+    "end": "19560"
+  },
+  {
+    "text": "observability and security platform we run at a very high scale and I have a",
+    "start": "19560",
+    "end": "24600"
+  },
+  {
+    "text": "few numbers on this on this slide to illustrate that but the important thing to remember for this talk is that we run",
+    "start": "24600",
+    "end": "31019"
+  },
+  {
+    "text": "on self-hosted kubernetes so you have hundreds of clusters tens of thousands of nodes and hundreds of thousands of",
+    "start": "31019",
+    "end": "37500"
+  },
+  {
+    "text": "pods so the solution that we we designed for signing and verifying images needs to",
+    "start": "37500",
+    "end": "43860"
+  },
+  {
+    "text": "work at that scale but about me my name is Ethan I'm a",
+    "start": "43860",
+    "end": "49079"
+  },
+  {
+    "text": "senior software engineer at datadog where I've been working on infrastructure security for about four",
+    "start": "49079",
+    "end": "54239"
+  },
+  {
+    "text": "years now so if you have any questions um about the talk feel free to approach",
+    "start": "54239",
+    "end": "59340"
+  },
+  {
+    "text": "me afterwards or you can reach me at the address on this slide",
+    "start": "59340",
+    "end": "64100"
+  },
+  {
+    "start": "63000",
+    "end": "63000"
+  },
+  {
+    "text": "so why should we care about signing and verifying images on the slide I have a simplified model",
+    "start": "64619",
+    "end": "70619"
+  },
+  {
+    "text": "of what an internal software supply chain looks like targeting a kubernetes environment",
+    "start": "70619",
+    "end": "76080"
+  },
+  {
+    "text": "so it has all the components you'd expect Version Control CI CD container registry",
+    "start": "76080",
+    "end": "82979"
+  },
+  {
+    "text": "and then the various components of kubernetes but as as an organization matures each of",
+    "start": "82979",
+    "end": "90360"
+  },
+  {
+    "text": "these stages is often served by multiple sub services and as the complexity grows",
+    "start": "90360",
+    "end": "96119"
+  },
+  {
+    "text": "this means that you have more surface area that you need to secure and each of these stages is is a target",
+    "start": "96119",
+    "end": "102659"
+  },
+  {
+    "text": "for malicious code injection so an attacker could inject a malicious payload at any stage",
+    "start": "102659",
+    "end": "108840"
+  },
+  {
+    "text": "in this Pipeline and that might reach prod eventually allowing that code to",
+    "start": "108840",
+    "end": "114299"
+  },
+  {
+    "text": "run even if the attacker doesn't have direct production access so what signing and verifying images",
+    "start": "114299",
+    "end": "120780"
+  },
+  {
+    "text": "gets us is a guarantee of provenance so if we sign an image in CI and then",
+    "start": "120780",
+    "end": "127259"
+  },
+  {
+    "text": "verify it in one or more Downstream systems what this provides us is a guarantee",
+    "start": "127259",
+    "end": "133560"
+  },
+  {
+    "text": "from the perspective of the verifier that the image that it's handling is bid for bit the same as the image",
+    "start": "133560",
+    "end": "139800"
+  },
+  {
+    "text": "that was built and signed in continuous integration so the overall goal is to push signing",
+    "start": "139800",
+    "end": "146459"
+  },
+  {
+    "text": "as far as possible to the left as close to build time as possible and push verification as far as possible to the",
+    "start": "146459",
+    "end": "152099"
+  },
+  {
+    "text": "right as close to run time as possible to to extend the scope of the Integrity guarantee",
+    "start": "152099",
+    "end": "158160"
+  },
+  {
+    "text": "of that signature in the past there have been a variety of",
+    "start": "158160",
+    "end": "163620"
+  },
+  {
+    "start": "160000",
+    "end": "160000"
+  },
+  {
+    "text": "approaches to assigning container images but the ones that have achieved the best adoption all have an architectural",
+    "start": "163620",
+    "end": "170819"
+  },
+  {
+    "text": "architecture pretty similar to the one I've drawn on this slide um",
+    "start": "170819",
+    "end": "176340"
+  },
+  {
+    "text": "so the common property is that the registry that's used to store application images is also used to store",
+    "start": "176340",
+    "end": "182940"
+  },
+  {
+    "text": "signature metadata and this is made possible because registry is following the oci",
+    "start": "182940",
+    "end": "189300"
+  },
+  {
+    "text": "specification are actually able to store data that's not what you would normally think of as a container image as long as",
+    "start": "189300",
+    "end": "196379"
+  },
+  {
+    "text": "it fits the spec you can store essentially any kind of blob including signature metadata",
+    "start": "196379",
+    "end": "202440"
+  },
+  {
+    "text": "the signing itself signing and verifying itself is achieved through public key cryptography so the signing client uses",
+    "start": "202440",
+    "end": "209519"
+  },
+  {
+    "text": "a private key to generate a signature and then a corresponding public key is used by the verifier to to verify that",
+    "start": "209519",
+    "end": "216239"
+  },
+  {
+    "text": "signature but the way in which you distribute public keys to the verifier is is",
+    "start": "216239",
+    "end": "222180"
+  },
+  {
+    "text": "largely left to the the implementer there's really no standard route of trust to to connect the signer to the",
+    "start": "222180",
+    "end": "229319"
+  },
+  {
+    "text": "verifier and there probably never will be because each organization is going to have its",
+    "start": "229319",
+    "end": "234840"
+  },
+  {
+    "text": "own uh its own threat model and its own um preferred way of handling secrets",
+    "start": "234840",
+    "end": "240840"
+  },
+  {
+    "text": "so I've spoken generalities here but um but two um two systems that you might",
+    "start": "240840",
+    "end": "247019"
+  },
+  {
+    "text": "have heard of that uh that have this high level design are uh six doors",
+    "start": "247019",
+    "end": "253080"
+  },
+  {
+    "text": "cosine and notary V2 and the system that we've we've built a datadog also has this high level design",
+    "start": "253080",
+    "end": "261620"
+  },
+  {
+    "start": "261000",
+    "end": "261000"
+  },
+  {
+    "text": "so we're using this the container registry as a storage for Signature metadata and this stands in contrast to",
+    "start": "262199",
+    "end": "269699"
+  },
+  {
+    "text": "some of the earlier approaches that used a more traditional databases so there's a few interesting things to say about",
+    "start": "269699",
+    "end": "274800"
+  },
+  {
+    "text": "this first I think the success of this this design is largely because",
+    "start": "274800",
+    "end": "281240"
+  },
+  {
+    "text": "container Registries aren't a new runtime dependency and this makes the uh",
+    "start": "281240",
+    "end": "286740"
+  },
+  {
+    "text": "the system easier to adopt and more reliable because there's fewer few moving parts and you don't have to for",
+    "start": "286740",
+    "end": "293759"
+  },
+  {
+    "text": "example manage yet another database um but at data dog one of the reasons that using the registry for storing",
+    "start": "293759",
+    "end": "302220"
+  },
+  {
+    "text": "signature metadata was a particularly good idea for us is it allowed us to build on an existing replication platform",
+    "start": "302220",
+    "end": "308820"
+  },
+  {
+    "text": "so we run a number of isolated data centers and by Design there are very few",
+    "start": "308820",
+    "end": "314580"
+  },
+  {
+    "text": "systems that are able to transfer data between these data centers and notably one of those is the registry",
+    "start": "314580",
+    "end": "320580"
+  },
+  {
+    "text": "because we need to be able to build an image in the build Data Center and transfer that image to all the runtime",
+    "start": "320580",
+    "end": "327419"
+  },
+  {
+    "text": "data centers where it will eventually run so by pushing signature metadata to the",
+    "start": "327419",
+    "end": "334440"
+  },
+  {
+    "text": "same registry we get to reuse the same replication mechanism to distribute that",
+    "start": "334440",
+    "end": "339600"
+  },
+  {
+    "text": "those signatures everywhere that the verifiers will need them",
+    "start": "339600",
+    "end": "344300"
+  },
+  {
+    "text": "it's important to note though that taking advantage of this this fact doesn't come for free",
+    "start": "345000",
+    "end": "351960"
+  },
+  {
+    "text": "because we're replicating signatures to all the same places that images will run",
+    "start": "351960",
+    "end": "357419"
+  },
+  {
+    "text": "um we're doubling both the replication load and also the number of stored images so you definitely need to be mindful of",
+    "start": "357419",
+    "end": "364080"
+  },
+  {
+    "text": "any registry quotas that you may need to comply with before you start signing images",
+    "start": "364080",
+    "end": "371060"
+  },
+  {
+    "text": "so we discussed storage but what do the signatures actually look like",
+    "start": "372300",
+    "end": "377820"
+  },
+  {
+    "text": "the format that we developed at data log is Loosely based on six stores cosine format",
+    "start": "377820",
+    "end": "383520"
+  },
+  {
+    "text": "but before we dive into the specifics I want to give a quick caveat and why we ended up building our own",
+    "start": "383520",
+    "end": "389880"
+  },
+  {
+    "text": "uh it's almost always a best practice to um to use an open standard when it comes to",
+    "start": "389880",
+    "end": "395460"
+  },
+  {
+    "text": "cryptographic designs especially if you need interoperability such as if you're um signing images that will be",
+    "start": "395460",
+    "end": "401759"
+  },
+  {
+    "text": "distributed in an open source setting however at the time that we implemented all this cosine was still pretty new and",
+    "start": "401759",
+    "end": "408780"
+  },
+  {
+    "text": "there was no raining standard yet for signing images the sign and verify operations of cosine",
+    "start": "408780",
+    "end": "415440"
+  },
+  {
+    "text": "at the time were only available in a CLI and we knew that we would need to override a lot of the uh",
+    "start": "415440",
+    "end": "421680"
+  },
+  {
+    "text": "loadable functionality of those operations for compatibility with our internal systems",
+    "start": "421680",
+    "end": "427620"
+  },
+  {
+    "text": "so I know that there's a lot of ongoing work in the six door Community to build these low-level libraries that expose",
+    "start": "427620",
+    "end": "434880"
+  },
+  {
+    "text": "these these components in a modular way so if we were start if we were to start again today",
+    "start": "434880",
+    "end": "440280"
+  },
+  {
+    "text": "it's pretty likely that cosine would have worked for us out of the box",
+    "start": "440280",
+    "end": "445099"
+  },
+  {
+    "start": "445000",
+    "end": "445000"
+  },
+  {
+    "text": "so I'm going to describe the signature format from from inside out so at the very core is the signature",
+    "start": "446099",
+    "end": "452940"
+  },
+  {
+    "text": "payload and this is what we're trying to protect the format that we that we ended up",
+    "start": "452940",
+    "end": "459240"
+  },
+  {
+    "text": "using is the oci descriptor which contains the digest of the uh the signed",
+    "start": "459240",
+    "end": "465660"
+  },
+  {
+    "text": "image the media type and the content content size um additionally there's a key value map",
+    "start": "465660",
+    "end": "472199"
+  },
+  {
+    "text": "available called annotations and we use that to store and also sign the the timestamp as",
+    "start": "472199",
+    "end": "479099"
+  },
+  {
+    "text": "well as a number of claims about the identity the internal service identity",
+    "start": "479099",
+    "end": "484680"
+  },
+  {
+    "text": "of the the signer so that payload is signed using the",
+    "start": "484680",
+    "end": "491419"
+  },
+  {
+    "start": "488000",
+    "end": "488000"
+  },
+  {
+    "text": "ad25519 algorithm in hashicorp Vault and that signature is wrapped up in a",
+    "start": "491419",
+    "end": "498180"
+  },
+  {
+    "text": "signing envelope using the dead simple signing envelope spec so this is a spec that was developed for",
+    "start": "498180",
+    "end": "504419"
+  },
+  {
+    "text": "the tough and Toto projects also cncf projects and what the specification gets",
+    "start": "504419",
+    "end": "510599"
+  },
+  {
+    "text": "us is a data structure that combines the payload with a number of signatures",
+    "start": "510599",
+    "end": "517680"
+  },
+  {
+    "text": "as well as a standards spec and um ready to go libraries for",
+    "start": "517680",
+    "end": "523979"
+  },
+  {
+    "text": "for building these envelopes and um uh and verifying them",
+    "start": "523979",
+    "end": "532339"
+  },
+  {
+    "text": "so to um to store these envelopes and a signature that we can push to a registry",
+    "start": "533100",
+    "end": "539519"
+  },
+  {
+    "text": "we combine them into an oci image manifest where each layer represents uh",
+    "start": "539519",
+    "end": "545399"
+  },
+  {
+    "text": "one envelope for one key and we annotate each layer with the key ID which is just a fingerprint of the",
+    "start": "545399",
+    "end": "552300"
+  },
+  {
+    "text": "public key for easy lookup during verification",
+    "start": "552300",
+    "end": "556940"
+  },
+  {
+    "start": "557000",
+    "end": "557000"
+  },
+  {
+    "text": "so that's the um that's essentially the data structure",
+    "start": "558240",
+    "end": "563580"
+  },
+  {
+    "text": "that you know takes the place of a container image so we need to push that to the registry and the uh the location that we push",
+    "start": "563580",
+    "end": "570779"
+  },
+  {
+    "text": "that that signature artifact to is a transformation of the location of the artifact that's",
+    "start": "570779",
+    "end": "577380"
+  },
+  {
+    "text": "being signed so we we add a prefix to the repository path",
+    "start": "577380",
+    "end": "583080"
+  },
+  {
+    "text": "and we convert the shaw 256 Digest into a tag",
+    "start": "583080",
+    "end": "588600"
+  },
+  {
+    "text": "and this is a little bit different than the the or the approach that cosine takes in that we we add this this repository",
+    "start": "588600",
+    "end": "596459"
+  },
+  {
+    "text": "prefix and what this gets us is a dedicated registry quota",
+    "start": "596459",
+    "end": "601560"
+  },
+  {
+    "text": "uh on on these signature images independent from the quotas imposed upon the signed images",
+    "start": "601560",
+    "end": "608220"
+  },
+  {
+    "text": "this gives us just a little bit of isolation in terms of you know the volume of of images pushed versus",
+    "start": "608220",
+    "end": "613860"
+  },
+  {
+    "text": "signatures pushed so to produce these signatures we've chosen to encapsulate signing in uh in a",
+    "start": "613860",
+    "end": "621839"
+  },
+  {
+    "start": "616000",
+    "end": "616000"
+  },
+  {
+    "text": "service so at a high level we're pushing handling of cues and signature metadata",
+    "start": "621839",
+    "end": "627019"
+  },
+  {
+    "text": "behind in an RPC service um that is that is uh you know more",
+    "start": "627019",
+    "end": "633000"
+  },
+  {
+    "text": "hardened than than uh CI is so",
+    "start": "633000",
+    "end": "638519"
+  },
+  {
+    "text": "jobs in CI that are building assigning images use a Thin Client to send an authenticated RPC to the signing service",
+    "start": "638519",
+    "end": "644820"
+  },
+  {
+    "text": "over TLS and then the service responds to that by",
+    "start": "644820",
+    "end": "650399"
+  },
+  {
+    "text": "building the payload using a hash report Vault to actually sign it and then",
+    "start": "650399",
+    "end": "655560"
+  },
+  {
+    "text": "wrapping it up in this in the metadata format that I just described and pushing that back to the registry",
+    "start": "655560",
+    "end": "662120"
+  },
+  {
+    "start": "662000",
+    "end": "662000"
+  },
+  {
+    "text": "The Thin Client that CI jobs are actually using is a a CLI that we call DD sign looks",
+    "start": "662820",
+    "end": "669839"
+  },
+  {
+    "text": "pretty similar to cosine if you've used that um but we've designed it to be simple have a extremely stable API and uh",
+    "start": "669839",
+    "end": "679200"
+  },
+  {
+    "text": "additionally easy to integrate into many CI pipelines so there's not many options here to configure",
+    "start": "679200",
+    "end": "684959"
+  },
+  {
+    "text": "essentially to use it you just call it DD sign and then to be uh",
+    "start": "684959",
+    "end": "690060"
+  },
+  {
+    "text": "a reference of the image that you'd like to assign including a digest so you know you're signing you know exactly one",
+    "start": "690060",
+    "end": "695220"
+  },
+  {
+    "text": "image um and we also have helpers for specific types of image builds to make",
+    "start": "695220",
+    "end": "702720"
+  },
+  {
+    "text": "integration especially easy so for Docker built images we have an option that pulls the digest directly",
+    "start": "702720",
+    "end": "708899"
+  },
+  {
+    "text": "from the local Docker Damon and CI so you don't need to write complicated shell scripts to do that and we also",
+    "start": "708899",
+    "end": "716040"
+  },
+  {
+    "text": "have a custom bazel rule that we use to assign bazelbuilt images",
+    "start": "716040",
+    "end": "721860"
+  },
+  {
+    "text": "and this approach of having a signing service and then a thin client in CI has",
+    "start": "721860",
+    "end": "727320"
+  },
+  {
+    "text": "has worked really well for us and I'm going to touch on a couple of the reasons why we particularly like it",
+    "start": "727320",
+    "end": "734959"
+  },
+  {
+    "start": "734000",
+    "end": "734000"
+  },
+  {
+    "text": "so first compared to if CI jobs were signing directly with Azure Court vault",
+    "start": "735420",
+    "end": "741000"
+  },
+  {
+    "text": "we have much better control of key usage and we get richer audit logs",
+    "start": "741000",
+    "end": "746399"
+  },
+  {
+    "text": "so on the side I have an example of what it might look like if we are signing directly in CI",
+    "start": "746399",
+    "end": "751980"
+  },
+  {
+    "text": "with hash report vault without the signing service and the Vault audit logs although",
+    "start": "751980",
+    "end": "758279"
+  },
+  {
+    "text": "they're you know solid in terms of the payload they only contain an hmac of the sine data which",
+    "start": "758279",
+    "end": "765360"
+  },
+  {
+    "text": "is opaque and hard to interpret we can't for example filter them in in",
+    "start": "765360",
+    "end": "771720"
+  },
+  {
+    "text": "after these logs are collected based on the signed artifact reference or something like that",
+    "start": "771720",
+    "end": "779000"
+  },
+  {
+    "text": "so in contrast when the key usage and metadata handling is pushed behind a service",
+    "start": "779639",
+    "end": "786180"
+  },
+  {
+    "text": "we can now apply a lease lease privileges principles to the CI jobs",
+    "start": "786180",
+    "end": "792720"
+  },
+  {
+    "text": "that are requesting the signing this means that they don't need direct signing access involved and they don't",
+    "start": "792720",
+    "end": "797820"
+  },
+  {
+    "text": "need to have direct access to push a signature metadata to the registry",
+    "start": "797820",
+    "end": "804779"
+  },
+  {
+    "text": "they only need to express their intention to sign the artifact to the signing service and then the",
+    "start": "804779",
+    "end": "810899"
+  },
+  {
+    "text": "hardened signing API takes care of the rest as an example of the kind of audit logs",
+    "start": "810899",
+    "end": "817260"
+  },
+  {
+    "text": "that we can get out of this uh we um we have identifiers available for",
+    "start": "817260",
+    "end": "823200"
+  },
+  {
+    "text": "the CI jobs that are requesting the signing and also parsed out fields of the of the assigned artifact for easy",
+    "start": "823200",
+    "end": "830339"
+  },
+  {
+    "text": "filtering another benefit of signing in a service",
+    "start": "830339",
+    "end": "835980"
+  },
+  {
+    "start": "832000",
+    "end": "832000"
+  },
+  {
+    "text": "is that it encapsulates most of the complexity of signing behind a single deployment that we can dynamically",
+    "start": "835980",
+    "end": "841620"
+  },
+  {
+    "text": "update updating clients in CI is an incredibly tedious and time consuming process",
+    "start": "841620",
+    "end": "847980"
+  },
+  {
+    "text": "especially when you consider that there are many branches some of which might be behind the trunk and you can't update",
+    "start": "847980",
+    "end": "853139"
+  },
+  {
+    "text": "those directly Etc so we really don't want to have to update clients in CI frequently",
+    "start": "853139",
+    "end": "859740"
+  },
+  {
+    "text": "as an example of a big change that we're able to make without touching clients in CI at all",
+    "start": "859740",
+    "end": "868040"
+  },
+  {
+    "text": "we introduced we introduced a deduplication feature in image signing so we were",
+    "start": "868200",
+    "end": "875160"
+  },
+  {
+    "text": "looking for a way to reduce the load that we're putting on the registry caused by signing images",
+    "start": "875160",
+    "end": "881279"
+  },
+  {
+    "text": "and pushing those metadata to the registry and we found that uh",
+    "start": "881279",
+    "end": "886380"
+  },
+  {
+    "text": "only about three percent of the image signing requests that we are receiving were for brand new images and we think",
+    "start": "886380",
+    "end": "893100"
+  },
+  {
+    "text": "this is because our reproducible builds were were I mean rebuilding the same",
+    "start": "893100",
+    "end": "898380"
+  },
+  {
+    "text": "image at different points in time so by changing the logic of handling an",
+    "start": "898380",
+    "end": "904740"
+  },
+  {
+    "text": "image signature request to First verify or attempt to verify",
+    "start": "904740",
+    "end": "909800"
+  },
+  {
+    "text": "signatures for the current key set and only if that verification fails you know",
+    "start": "909800",
+    "end": "915120"
+  },
+  {
+    "text": "produce another signature by introducing this this logic we were able to divert most of the the",
+    "start": "915120",
+    "end": "922980"
+  },
+  {
+    "text": "registry load to the read path which is much less expensive so this was a this is a huge performance and reliability",
+    "start": "922980",
+    "end": "929220"
+  },
+  {
+    "text": "benefit to to image signing additionally",
+    "start": "929220",
+    "end": "935220"
+  },
+  {
+    "text": "um in this design Key Management is also completely transparent to clients so you",
+    "start": "935220",
+    "end": "941699"
+  },
+  {
+    "text": "can do things like rotate keys without updating CI and to some extent Vault provides this",
+    "start": "941699",
+    "end": "947880"
+  },
+  {
+    "text": "abstracted key management but we found that we needed to implement several features on top of",
+    "start": "947880",
+    "end": "953220"
+  },
+  {
+    "text": "the features available in fault for example if we need to sign with multiple",
+    "start": "953220",
+    "end": "958320"
+  },
+  {
+    "text": "keys in one signing request",
+    "start": "958320",
+    "end": "962600"
+  },
+  {
+    "text": "so that's about all I have time to say about image signing so no one to verification",
+    "start": "964019",
+    "end": "971880"
+  },
+  {
+    "text": "so if you have to consider um or if you only have one uh if you have",
+    "start": "971880",
+    "end": "977639"
+  },
+  {
+    "text": "to choose one point in your software supply chain to verify signatures there's a bit of a trade-off that you",
+    "start": "977639",
+    "end": "984120"
+  },
+  {
+    "text": "need to consider and that is the earlier you sign pardon me the earlier you verify an image",
+    "start": "984120",
+    "end": "990540"
+  },
+  {
+    "text": "the faster you're able to get developers feedback so you can for example stop a deploy",
+    "start": "990540",
+    "end": "996120"
+  },
+  {
+    "text": "before it even starts if there's a benign image signature verification",
+    "start": "996120",
+    "end": "1001160"
+  },
+  {
+    "text": "issue rather than stopping at mid-deploy and requiring a rollback",
+    "start": "1001160",
+    "end": "1006380"
+  },
+  {
+    "text": "in contrast the closer to run time you verify signature",
+    "start": "1006380",
+    "end": "1013040"
+  },
+  {
+    "text": "the better security properties you get because the Integrity of that image is guaranteed over more systems and The",
+    "start": "1013040",
+    "end": "1019720"
+  },
+  {
+    "text": "Trusted compute base after uh verification is much smaller",
+    "start": "1019720",
+    "end": "1025280"
+  },
+  {
+    "text": "so ideally you would verify in multiple spots to get the best of both worlds both fast developer feedback as well as",
+    "start": "1025280",
+    "end": "1032600"
+  },
+  {
+    "text": "better security the typical recommendation that you'll",
+    "start": "1032600",
+    "end": "1037699"
+  },
+  {
+    "text": "see in open source for image verification is to do so in the kubernetes control plane using admission",
+    "start": "1037699",
+    "end": "1044839"
+  },
+  {
+    "text": "controllers but at data dog we made the choice to to verify at the no level within the",
+    "start": "1044839",
+    "end": "1051020"
+  },
+  {
+    "text": "container runtime with supplemental pre-deployed checks for that that fast developer feedback",
+    "start": "1051020",
+    "end": "1059260"
+  },
+  {
+    "start": "1058000",
+    "end": "1058000"
+  },
+  {
+    "text": "so to explain why we opted against using kubernetes and Mission workbooks for image verification we need to understand",
+    "start": "1059660",
+    "end": "1066500"
+  },
+  {
+    "text": "how they work so in Mission web hooks basically allow you to write custom piece of code custom",
+    "start": "1066500",
+    "end": "1072620"
+  },
+  {
+    "text": "pieces of code and run that code to determine whether creating updating or",
+    "start": "1072620",
+    "end": "1077960"
+  },
+  {
+    "text": "deleting kubernetes API resources is allowable and there are several kinds of of",
+    "start": "1077960",
+    "end": "1084919"
+  },
+  {
+    "text": "admission about books but the typical choice for this kind of problem is the validating admission web hook type",
+    "start": "1084919",
+    "end": "1092720"
+  },
+  {
+    "text": "the important thing to realize here is that the latency of of the code that you're running in a web",
+    "start": "1092720",
+    "end": "1098900"
+  },
+  {
+    "text": "Hook is added to the Baseline latency of handling an API server response",
+    "start": "1098900",
+    "end": "1104360"
+  },
+  {
+    "text": "and this is because the API server blocks on a web hook through return its response before",
+    "start": "1104360",
+    "end": "1111440"
+  },
+  {
+    "text": "returning its own response and in the large clusters that we're running a datadog",
+    "start": "1111440",
+    "end": "1118220"
+  },
+  {
+    "text": "um we're really careful about avoiding introducing back pressure on the API",
+    "start": "1118220",
+    "end": "1123799"
+  },
+  {
+    "text": "servers so the latency goal that we have for admission web hooks is about 10",
+    "start": "1123799",
+    "end": "1130340"
+  },
+  {
+    "text": "milliseconds at the P99 unfortunately though image extinguisher verification is an online",
+    "start": "1130340",
+    "end": "1136580"
+  },
+  {
+    "text": "or somewhat online process since it has to talk to the registry and this is quite hard to fit into that",
+    "start": "1136580",
+    "end": "1143360"
+  },
+  {
+    "text": "latency budget in practice the latencies we see for image verification are actually closer to 200 milliseconds at",
+    "start": "1143360",
+    "end": "1149419"
+  },
+  {
+    "text": "the median so this on its own is enough for us to rule out emission web hooks as a",
+    "start": "1149419",
+    "end": "1155059"
+  },
+  {
+    "text": "solution here but another disadvantage of the approach is that using the registry for Signature",
+    "start": "1155059",
+    "end": "1161179"
+  },
+  {
+    "text": "metadata introduces a new cluster level dependency",
+    "start": "1161179",
+    "end": "1166520"
+  },
+  {
+    "text": "so whereas previously the registry was only a dependency at the node level for for pulling images",
+    "start": "1166520",
+    "end": "1173299"
+  },
+  {
+    "text": "it's now on the hot path of the control plane so this has this has some pretty serious reliability",
+    "start": "1173299",
+    "end": "1180679"
+  },
+  {
+    "text": "um reliability or changes the properties for reliability",
+    "start": "1180679",
+    "end": "1186740"
+  },
+  {
+    "text": "so one workaround that you could consider here is using a different kind of admission",
+    "start": "1186740",
+    "end": "1192200"
+  },
+  {
+    "text": "World Book the image policy web hook and this is this is one that has built-in uh caching and",
+    "start": "1192200",
+    "end": "1199760"
+  },
+  {
+    "text": "retry features so for example it would touch around intermittent verification",
+    "start": "1199760",
+    "end": "1204799"
+  },
+  {
+    "text": "failures but we're not very comfortable relying so heavily on essential cash like this",
+    "start": "1204799",
+    "end": "1211340"
+  },
+  {
+    "text": "to meet our Baseline performance goals because if that cash were to be cleared for any reason the API server could be",
+    "start": "1211340",
+    "end": "1218419"
+  },
+  {
+    "text": "put into a a state of metastable failure where it's it's unable to keep up with",
+    "start": "1218419",
+    "end": "1224780"
+  },
+  {
+    "text": "the request volume necessary to rebuild that cache and get back to its get back to its normal operation",
+    "start": "1224780",
+    "end": "1232899"
+  },
+  {
+    "start": "1233000",
+    "end": "1233000"
+  },
+  {
+    "text": "so the alternate design that we chose was to verify image signatures in containerdy",
+    "start": "1233419",
+    "end": "1239780"
+  },
+  {
+    "text": "so as a refresher for the architecture here uh containerdes it's one level below the kublet and receives commands",
+    "start": "1239780",
+    "end": "1246200"
+  },
+  {
+    "text": "from the kublet like create container or start container over the container runtime interface or CRI",
+    "start": "1246200",
+    "end": "1253880"
+  },
+  {
+    "text": "so container D is the process ultimately responsible for resolving an image Digest",
+    "start": "1253880",
+    "end": "1259580"
+  },
+  {
+    "text": "pulling that image from the registry and unpacking it to disk to actually run the image containerdy",
+    "start": "1259580",
+    "end": "1266960"
+  },
+  {
+    "text": "defers to a lower level runtime like like run C over a shim layer",
+    "start": "1266960",
+    "end": "1272120"
+  },
+  {
+    "text": "so the obvious place to integrate image verification into this flow is right after resolving the digest and right",
+    "start": "1272120",
+    "end": "1278660"
+  },
+  {
+    "text": "before pulling the image this is pretty much as close as we can get to runtime as possible so we",
+    "start": "1278660",
+    "end": "1284419"
+  },
+  {
+    "text": "minimize the trusted compute base after signature verification",
+    "start": "1284419",
+    "end": "1289299"
+  },
+  {
+    "text": "at datadog we truly believe that the container runtime is the most appropriate place to do image verification",
+    "start": "1289880",
+    "end": "1297200"
+  },
+  {
+    "text": "so we're pretty excited to see momentum pick up around this discussion in open source",
+    "start": "1297200",
+    "end": "1302419"
+  },
+  {
+    "text": "for example cryo and Kata container run times I think as of recently both have",
+    "start": "1302419",
+    "end": "1307640"
+  },
+  {
+    "text": "support for verifying six door signatures on pull but a data dog we use containerdy so",
+    "start": "1307640",
+    "end": "1313760"
+  },
+  {
+    "text": "we've taken the initiative to contribute these features Upstream",
+    "start": "1313760",
+    "end": "1318919"
+  },
+  {
+    "text": "the basic approach is to add an image verification plug-in system to container d",
+    "start": "1318919",
+    "end": "1324620"
+  },
+  {
+    "text": "so users of containerd can supply custom bits of code that container D would call to determine",
+    "start": "1324620",
+    "end": "1331640"
+  },
+  {
+    "text": "whether pulling an image is okay so if the plugin returns a response",
+    "start": "1331640",
+    "end": "1336919"
+  },
+  {
+    "text": "saying the image is okay or the signature is verified for example uh continuity would continue the image",
+    "start": "1336919",
+    "end": "1343820"
+  },
+  {
+    "text": "pull as usual whereas if the plugin returns a response saying that the image is not okay",
+    "start": "1343820",
+    "end": "1349880"
+  },
+  {
+    "text": "container D would bubble up a an image pull error to the couplet so because uh",
+    "start": "1349880",
+    "end": "1356120"
+  },
+  {
+    "text": "the kublet sees an image verification error as a type of image pull error",
+    "start": "1356120",
+    "end": "1361760"
+  },
+  {
+    "text": "this means that we benefit from all of the features in kubernetes for for",
+    "start": "1361760",
+    "end": "1366919"
+  },
+  {
+    "text": "pulling images reliably so for example at the node level we have the the",
+    "start": "1366919",
+    "end": "1372860"
+  },
+  {
+    "text": "kublics image pull retry Loop which in our case would retry and retry to patch around",
+    "start": "1372860",
+    "end": "1380120"
+  },
+  {
+    "text": "intermittent verification failures and we also have the Pod feature of",
+    "start": "1380120",
+    "end": "1385400"
+  },
+  {
+    "text": "image pull policies which allows us to Cache image",
+    "start": "1385400",
+    "end": "1390559"
+  },
+  {
+    "text": "verifications at the node level so if a container has to restart for example",
+    "start": "1390559",
+    "end": "1395780"
+  },
+  {
+    "text": "you wouldn't need to do a second image verification Additionally the latency concerns that",
+    "start": "1395780",
+    "end": "1401900"
+  },
+  {
+    "text": "we had in the context of admission web hooks are not applicable here because image pull or image pulls are expected",
+    "start": "1401900",
+    "end": "1408799"
+  },
+  {
+    "text": "to be slow images are quite large sometimes and all these systems are built that in mind",
+    "start": "1408799",
+    "end": "1415460"
+  },
+  {
+    "text": "an important thing to note though is that the only reason we're able to pursue this architecture at datadog is",
+    "start": "1415460",
+    "end": "1420860"
+  },
+  {
+    "text": "because we're self-hosting kubernetes um so we have access to all these these",
+    "start": "1420860",
+    "end": "1426860"
+  },
+  {
+    "text": "low-level components on the Node so if you wanted to implement an architecture like this using a managed",
+    "start": "1426860",
+    "end": "1433460"
+  },
+  {
+    "text": "kubernetes cluster Cloud providers would need to expose this this kind of image",
+    "start": "1433460",
+    "end": "1438799"
+  },
+  {
+    "text": "verification configuration at a higher level but we're pretty hopeful that industry will",
+    "start": "1438799",
+    "end": "1444500"
+  },
+  {
+    "text": "move in this direction eventually so we've been running a temporary Fork",
+    "start": "1444500",
+    "end": "1450020"
+  },
+  {
+    "text": "of container D with an implementation of this idea implemented and we're working",
+    "start": "1450020",
+    "end": "1455480"
+  },
+  {
+    "text": "with the maintainers of container d to get these features into the 2.0 release so if you're interested in",
+    "start": "1455480",
+    "end": "1461780"
+  },
+  {
+    "text": "following along I have the link to the tracking issue here there are some PRS there but just note",
+    "start": "1461780",
+    "end": "1467480"
+  },
+  {
+    "text": "that the implementation details were not yet finalized",
+    "start": "1467480",
+    "end": "1473200"
+  },
+  {
+    "start": "1473000",
+    "end": "1473000"
+  },
+  {
+    "text": "so this slide shows the developer's perspective on on the image verification system",
+    "start": "1474080",
+    "end": "1480919"
+  },
+  {
+    "text": "so if you try to run a pod that has all find images everything works as usual",
+    "start": "1480919",
+    "end": "1486200"
+  },
+  {
+    "text": "whereas if there's any unsigned image in a pod the Pod is put",
+    "start": "1486200",
+    "end": "1491780"
+  },
+  {
+    "text": "into an image pull error state and developers can get full details on on the issue",
+    "start": "1491780",
+    "end": "1497960"
+  },
+  {
+    "text": "using pod events and because this is a new intentionally confusing error for",
+    "start": "1497960",
+    "end": "1504260"
+  },
+  {
+    "text": "developers to see we've made sure to make the error messages as friendly as possible and also included an inline",
+    "start": "1504260",
+    "end": "1509720"
+  },
+  {
+    "text": "Wiki link for for support and escalation",
+    "start": "1509720",
+    "end": "1514360"
+  },
+  {
+    "start": "1514000",
+    "end": "1514000"
+  },
+  {
+    "text": "so the last thing that we need to talk about for image verification is how we're Distributing the config for",
+    "start": "1515659",
+    "end": "1521240"
+  },
+  {
+    "text": "verification to the node so in order to verify an image signature",
+    "start": "1521240",
+    "end": "1527120"
+  },
+  {
+    "text": "the containerd plugin needs several pieces of information first it needs a trusted public key set",
+    "start": "1527120",
+    "end": "1534799"
+  },
+  {
+    "text": "and this this is dynamic if you consider key rotations a second it needs a verification mode",
+    "start": "1534799",
+    "end": "1543020"
+  },
+  {
+    "text": "so we need the ability to put the system into either audit mode where it's only checking but",
+    "start": "1543020",
+    "end": "1548659"
+  },
+  {
+    "text": "not blocking anything blocking mode where it would reject images that aren't signed or a disabled",
+    "start": "1548659",
+    "end": "1554659"
+  },
+  {
+    "text": "mode to disable the entire system and additionally we'd like to configure this that it made a relatively granular level",
+    "start": "1554659",
+    "end": "1561440"
+  },
+  {
+    "text": "so we can be in different modes in different parts of our infrastructure and finally we need to distribute an",
+    "start": "1561440",
+    "end": "1567260"
+  },
+  {
+    "text": "image digest revocation list so because our signatures don't have expirations",
+    "start": "1567260",
+    "end": "1573500"
+  },
+  {
+    "text": "we need to be able to revoke them in some way and typically we would prefer to",
+    "start": "1573500",
+    "end": "1579740"
+  },
+  {
+    "text": "to revoke image signatures using a public key revocation but this is a bulk operation since",
+    "start": "1579740",
+    "end": "1585679"
+  },
+  {
+    "text": "public keys are used over multiple signatures um so if we only have a handful of images",
+    "start": "1585679",
+    "end": "1592460"
+  },
+  {
+    "text": "that we want to Repose signatures for we would prefer a ramification list for this use use case",
+    "start": "1592460",
+    "end": "1599539"
+  },
+  {
+    "text": "and our requirements for Distributing this configuration are mostly Guided by reliability",
+    "start": "1599539",
+    "end": "1605000"
+  },
+  {
+    "text": "so we don't want to introduce any new node level dependencies we need the ability to roll out this",
+    "start": "1605000",
+    "end": "1610340"
+  },
+  {
+    "text": "configuration in the slow and staged manner and also we'd like to have multiple fallback mechanisms for configuring this",
+    "start": "1610340",
+    "end": "1618200"
+  },
+  {
+    "text": "uh or Distributing this configuration for resilience",
+    "start": "1618200",
+    "end": "1625600"
+  },
+  {
+    "start": "1625000",
+    "end": "1625000"
+  },
+  {
+    "text": "to distribute the public keys in verification mode we've taken a layered approach so",
+    "start": "1626360",
+    "end": "1632779"
+  },
+  {
+    "text": "we bake a set of defaults into the node image and this is kept relatively fresh using our automation for building and",
+    "start": "1632779",
+    "end": "1640880"
+  },
+  {
+    "text": "rolling out new node images but in order to get faster updates than",
+    "start": "1640880",
+    "end": "1646580"
+  },
+  {
+    "text": "that we also have a dynamic update system that runs on each node and what this does is it periodically",
+    "start": "1646580",
+    "end": "1652940"
+  },
+  {
+    "text": "pulls a config map that sits in each cluster and mirrors that to disk and",
+    "start": "1652940",
+    "end": "1658400"
+  },
+  {
+    "text": "we're able to slowly roll out this config map just like we would roll in the application to multiple clusters for",
+    "start": "1658400",
+    "end": "1663799"
+  },
+  {
+    "text": "slow incremental updates to this configuration finally we have an override config layer",
+    "start": "1663799",
+    "end": "1671120"
+  },
+  {
+    "text": "on disk that takes precedence over the dynamic update mechanism this allows us to do this allows us to",
+    "start": "1671120",
+    "end": "1677120"
+  },
+  {
+    "text": "do pretty much zero dependency overrides if we need to I mean in general this layered approach",
+    "start": "1677120",
+    "end": "1682940"
+  },
+  {
+    "text": "allows us to roll out config at essentially any layer of the stack so we can continue to operate the system under",
+    "start": "1682940",
+    "end": "1689120"
+  },
+  {
+    "text": "a wide variety of of incidental constraints",
+    "start": "1689120",
+    "end": "1693460"
+  },
+  {
+    "start": "1693000",
+    "end": "1693000"
+  },
+  {
+    "text": "the approach for Distributing image revocation lists is actually a bit simpler we bake it we simply bake it into the",
+    "start": "1694760",
+    "end": "1701720"
+  },
+  {
+    "text": "machine image on on build and forego any Dynamic update mechanism",
+    "start": "1701720",
+    "end": "1708080"
+  },
+  {
+    "text": "uh just like how we make defaults in for the verification mode and public keys",
+    "start": "1708080",
+    "end": "1713779"
+  },
+  {
+    "text": "this is kept relatively fresh using our node lifecycle automation the interesting thing to note here is",
+    "start": "1713779",
+    "end": "1720080"
+  },
+  {
+    "text": "that Dynamic updates for this revocation list wouldn't actually be useful even if we implemented it",
+    "start": "1720080",
+    "end": "1725600"
+  },
+  {
+    "text": "and the reason for that is because container D is caching image pulls or pulled images on disk",
+    "start": "1725600",
+    "end": "1732080"
+  },
+  {
+    "text": "so if you wanted to purge our infrastructure of of a single image we need to not only",
+    "start": "1732080",
+    "end": "1738020"
+  },
+  {
+    "text": "make sure that we don't pull it again on new nodes but we also need to remove it",
+    "start": "1738020",
+    "end": "1743179"
+  },
+  {
+    "text": "from all existing caches so in a practice or approach here is to prioritize draining nodes so removing",
+    "start": "1743179",
+    "end": "1751100"
+  },
+  {
+    "text": "workloads off of them and deleting them that have run the revoked image at any time in the past",
+    "start": "1751100",
+    "end": "1758380"
+  },
+  {
+    "start": "1759000",
+    "end": "1759000"
+  },
+  {
+    "text": "so we're nearing the end of the talk so I want to close out by discussing some of the challenges that we've that we've",
+    "start": "1759740",
+    "end": "1765799"
+  },
+  {
+    "text": "encountered rolling out this system and recommendations that we have for others heading down this path",
+    "start": "1765799",
+    "end": "1772520"
+  },
+  {
+    "text": "I'll say the most significant challenge we faced in rolling out image verification is",
+    "start": "1772520",
+    "end": "1778700"
+  },
+  {
+    "text": "that you can't easily configure the verification mode by kubernetes namespace",
+    "start": "1778700",
+    "end": "1783860"
+  },
+  {
+    "text": "so at the cluster level namespaces are handy boundaries to separate different tenants in the same cluster",
+    "start": "1783860",
+    "end": "1790700"
+  },
+  {
+    "text": "but because nodes can run containers for multiple namespaces on the same node we",
+    "start": "1790700",
+    "end": "1796640"
+  },
+  {
+    "text": "don't really have this boundary available to us what this means is that you might need",
+    "start": "1796640",
+    "end": "1802279"
+  },
+  {
+    "text": "to assign all the images in a given cluster before you can turn on blocking your verification mode",
+    "start": "1802279",
+    "end": "1808640"
+  },
+  {
+    "text": "and this could be quite a challenge especially in a large multi-tenant cluster simply because there's more images that you would have to sign",
+    "start": "1808640",
+    "end": "1816380"
+  },
+  {
+    "text": "what we found here is that having dedicated clusters for more sensitive types of workloads not only has the",
+    "start": "1816380",
+    "end": "1824720"
+  },
+  {
+    "text": "obvious security benefit of of extra isolation but also this allows you to more easily",
+    "start": "1824720",
+    "end": "1830360"
+  },
+  {
+    "text": "sign all of those images in the cluster because there are fewer of them and then you can go from audit mode to",
+    "start": "1830360",
+    "end": "1837320"
+  },
+  {
+    "text": "blocking mode and that cluster sooner second",
+    "start": "1837320",
+    "end": "1843440"
+  },
+  {
+    "text": "in an organization with a lot of diverse CI configuration it's a lot of work to globally add a new",
+    "start": "1843440",
+    "end": "1850159"
+  },
+  {
+    "text": "signing step to all of those builds even if the integration on each one is relatively simple",
+    "start": "1850159",
+    "end": "1855860"
+  },
+  {
+    "text": "and what we found here is that monoreepos and consistent build tooling like bazel make it quite easy to make",
+    "start": "1855860",
+    "end": "1862279"
+  },
+  {
+    "text": "sweeping changes like this um and my recommendation in general for",
+    "start": "1862279",
+    "end": "1867799"
+  },
+  {
+    "text": "rolling out image signing is one to leave ample time for it but two",
+    "start": "1867799",
+    "end": "1874059"
+  },
+  {
+    "text": "simultaneously roll out audit mode signature verification",
+    "start": "1874059",
+    "end": "1879679"
+  },
+  {
+    "text": "this not only allows you to develop operational experience for the verification system sooner but also it",
+    "start": "1879679",
+    "end": "1885080"
+  },
+  {
+    "text": "will provide an additional source of telemetry for what images are signed where",
+    "start": "1885080",
+    "end": "1890320"
+  },
+  {
+    "text": "finally node level image verification is relatively Uncharted Territory so it's",
+    "start": "1890960",
+    "end": "1897020"
+  },
+  {
+    "text": "been a challenge to develop new techniques here that said we truly believe that the",
+    "start": "1897020",
+    "end": "1902480"
+  },
+  {
+    "text": "reliability benefits are well worth the effort and we're really excited to guide these features into containerd 2.0 so",
+    "start": "1902480",
+    "end": "1908840"
+  },
+  {
+    "text": "they're more widely available to everyone so to close out three takeaways",
+    "start": "1908840",
+    "end": "1916159"
+  },
+  {
+    "start": "1912000",
+    "end": "1912000"
+  },
+  {
+    "text": "first evaluate whether encapsulating signing images in a hardened service is worth the",
+    "start": "1916159",
+    "end": "1923360"
+  },
+  {
+    "text": "security and scalability benefits it's very likely not the right decision for everyone especially if you're only",
+    "start": "1923360",
+    "end": "1928640"
+  },
+  {
+    "text": "Building images in a few places um but in datadog CI environment there's",
+    "start": "1928640",
+    "end": "1934220"
+  },
+  {
+    "text": "no question that this was the right choice second think critically about using admission",
+    "start": "1934220",
+    "end": "1940279"
+  },
+  {
+    "text": "controllers for complex verification processes like like image verification at scale you may come to the same",
+    "start": "1940279",
+    "end": "1946700"
+  },
+  {
+    "text": "conclusion that we did at datadog and prefer the properties of image verification in the container runtime",
+    "start": "1946700",
+    "end": "1953659"
+  },
+  {
+    "text": "lastly these verification features are not yet merged into containerdy so if you're a",
+    "start": "1953659",
+    "end": "1960320"
+  },
+  {
+    "text": "user of containerd and you think you might use a feature like this I welcome you to join the conversation",
+    "start": "1960320",
+    "end": "1966500"
+  },
+  {
+    "text": "at the the link on this slide and give us your input",
+    "start": "1966500",
+    "end": "1972158"
+  },
+  {
+    "text": "that's all I have so thank you for your time",
+    "start": "1972200",
+    "end": "1976539"
+  },
+  {
+    "text": "all right thank you",
+    "start": "1978700",
+    "end": "1982240"
+  }
+]

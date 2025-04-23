@@ -1,0 +1,2387 @@
+[
+  {
+    "text": "[Music]",
+    "start": "3320",
+    "end": "8769"
+  },
+  {
+    "text": "my name is Joseph Lynch and today I'll be talking about how Netflix ensures highly reliable online stateful systems",
+    "start": "10080",
+    "end": "16240"
+  },
+  {
+    "text": "I'm a principal software engineer at Netflix working on our data platform I work on essentially every kind of online system that stores state that you could",
+    "start": "16240",
+    "end": "22560"
+  },
+  {
+    "text": "imagine um if it stores data I probably work with it I'm an Apache cander committer and I've worked across",
+    "start": "22560",
+    "end": "29439"
+  },
+  {
+    "text": "multiple different storage engines over many years and today I'd like to talk to you",
+    "start": "29439",
+    "end": "34520"
+  },
+  {
+    "text": "about making stateful systems reliable but to do that first I want to Define what does that even mean because I think",
+    "start": "34520",
+    "end": "41120"
+  },
+  {
+    "text": "that if you asked people they might say something like well it means you have a lot of nines right like who's heard that before if you have a lot of nines you're",
+    "start": "41120",
+    "end": "47399"
+  },
+  {
+    "text": "highly reliable well I think that your customers probably don't care a whole lot about how many nines your data store",
+    "start": "47399",
+    "end": "53640"
+  },
+  {
+    "text": "has instead I think that they care do the read and WR operations succeed with the expected consisten",
+    "start": "53640",
+    "end": "60199"
+  },
+  {
+    "text": "model so the semantics within the designated latency service level objetives or goals",
+    "start": "60199",
+    "end": "67280"
+  },
+  {
+    "text": "always a reliable stateful system has these properties so instead of asking how many nines do I have instead ask how",
+    "start": "67280",
+    "end": "75880"
+  },
+  {
+    "text": "often do my systems fail when they fail how large is the blast radius and then",
+    "start": "75880",
+    "end": "81360"
+  },
+  {
+    "text": "finally how long does it take us to recover from an outage and then you're going to spend money to make these go to zero either",
+    "start": "81360",
+    "end": "89079"
+  },
+  {
+    "text": "you're going to over provision computers you're going to pay a cloud provider to solve these problems for you or you're",
+    "start": "89079",
+    "end": "94320"
+  },
+  {
+    "text": "going to employ Engineers to build cool resiliency techniques but either way this is this is the way that you make",
+    "start": "94320",
+    "end": "100640"
+  },
+  {
+    "text": "stateful systems reliable and to kind of drive this point home of why nines are insufficient I",
+    "start": "100640",
+    "end": "106399"
+  },
+  {
+    "text": "want to consider three hypothetical stateful Services they all have equal number of",
+    "start": "106399",
+    "end": "111640"
+  },
+  {
+    "text": "nines the first service fails just a little bit all the time it never",
+    "start": "111640",
+    "end": "116920"
+  },
+  {
+    "text": "recovers and maybe we need to invest in request hedging or improving our tests",
+    "start": "116920",
+    "end": "122079"
+  },
+  {
+    "text": "to to cover some bug service B occasionally fails",
+    "start": "122079",
+    "end": "127479"
+  },
+  {
+    "text": "cataclysmically and when service B fails it recovers quickly but it still has a near 100% outage during that period",
+    "start": "127479",
+    "end": "134680"
+  },
+  {
+    "text": "perhaps we need to invest in load shedding or back pressure techniques then finally service C rarely fails but",
+    "start": "134680",
+    "end": "140720"
+  },
+  {
+    "text": "when it does fail it fails for a really long time maybe we didn't detect the issue maybe we need better alerting or",
+    "start": "140720",
+    "end": "147040"
+  },
+  {
+    "text": "failover support or perhaps you don't care about that Serv and if it fails rarely you'll just bulkhead it from the rest of your system and be okay with it",
+    "start": "147040",
+    "end": "153959"
+  },
+  {
+    "text": "the point that I'm trying to make is that different failure modes in your stateful services require different",
+    "start": "153959",
+    "end": "159120"
+  },
+  {
+    "text": "solutions and throughout the rest of this talk we'll be exploring a multitude of techniques that we can use to try to",
+    "start": "159120",
+    "end": "165360"
+  },
+  {
+    "text": "make these properties go the direction that we want so we want less failure when we do fail we want to recover",
+    "start": "165360",
+    "end": "171920"
+  },
+  {
+    "text": "recover quickly and we want to minimize the impact and at Netflix we use these",
+    "start": "171920",
+    "end": "177400"
+  },
+  {
+    "text": "techniques to reach very high scales of online stateful services we have near",
+    "start": "177400",
+    "end": "182720"
+  },
+  {
+    "text": "caches which live near to to service hosts that handle billions of requests per second in sub 100 microsecond",
+    "start": "182720",
+    "end": "188680"
+  },
+  {
+    "text": "latency we have remote caches based on M cach that handles tens of millions of requests per second in 100 microc SLO",
+    "start": "188680",
+    "end": "196519"
+  },
+  {
+    "text": "targets storing pedabytes of data and then finally the stateful database is under all of it is aache Cassandra",
+    "start": "196519",
+    "end": "202959"
+  },
+  {
+    "text": "running in full for region active mode in region reader write consistency single digit MC latency",
+    "start": "202959",
+    "end": "211680"
+  },
+  {
+    "text": "we serve almost the entire planet except for a couple of places and we replicate our user state to four Amazon",
+    "start": "212239",
+    "end": "218959"
+  },
+  {
+    "text": "regions this is a full active topology and our video metadata is replicated even more like if you actually look at",
+    "start": "218959",
+    "end": "225640"
+  },
+  {
+    "text": "like the open connect CDN it replicates state to hundreds of points of presence across the globe but we're going to",
+    "start": "225640",
+    "end": "231560"
+  },
+  {
+    "text": "focus in this talk on the AWS control plane that runs in those four Amazon",
+    "start": "231560",
+    "end": "236720"
+  },
+  {
+    "text": "regions and today we're going to we're going to combine three different chapters we're going to see how we build",
+    "start": "236720",
+    "end": "243000"
+  },
+  {
+    "text": "reliable stateful servers how we pair those with reliable stateful clients and then finally how we can design our apis",
+    "start": "243000",
+    "end": "250159"
+  },
+  {
+    "text": "to use all of those reliability techniques so let's get started we're going to cover five Concepts in stateful",
+    "start": "250159",
+    "end": "256759"
+  },
+  {
+    "text": "servers we're going to talk about sharding capacity planning rapid responses via rapid upgrades and then",
+    "start": "256759",
+    "end": "263840"
+  },
+  {
+    "text": "how two techniques we can use to use caching to improve our reliability first and most fundamental",
+    "start": "263840",
+    "end": "270039"
+  },
+  {
+    "text": "at Netflix is that our applications do not share caches or data stores my team",
+    "start": "270039",
+    "end": "276199"
+  },
+  {
+    "text": "the data platform team provides a managed experience where developers can spin up and spin down data stores on",
+    "start": "276199",
+    "end": "281880"
+  },
+  {
+    "text": "demand as they need them we appropriately size them for each use case and we can kind of see let's go",
+    "start": "281880",
+    "end": "287280"
+  },
+  {
+    "text": "back to that measurement technique before when we had single multi or multi-tenant data stores that served multiple customers we had rare failures",
+    "start": "287280",
+    "end": "294400"
+  },
+  {
+    "text": "that had large blast impact when we move to this technique we now have more frequent failures but they have more",
+    "start": "294400",
+    "end": "300280"
+  },
+  {
+    "text": "isolated blast radius so you can see that already we're making some tradeoffs amongst those metrics that are",
+    "start": "300280",
+    "end": "305479"
+  },
+  {
+    "text": "appropriate for our business but we don't want things to fail so we want to make sure that each",
+    "start": "305479",
+    "end": "311720"
+  },
+  {
+    "text": "of these single tenant data stores is appropriately provisioned and that's starts with capacity planning it starts",
+    "start": "311720",
+    "end": "318080"
+  },
+  {
+    "text": "with understanding your hardware for example here we've characterized two ec2 instances and we've measured how quickly",
+    "start": "318080",
+    "end": "325520"
+  },
+  {
+    "text": "their discs can respond to real workloads this is because less reliable discs slower discs mean less reliable",
+    "start": "325520",
+    "end": "332240"
+  },
+  {
+    "text": "service these are the foundations this is the level of detail you have to go down to in order to build up to a proper",
+    "start": "332240",
+    "end": "338520"
+  },
+  {
+    "text": "capacity model in order to uh minimize outages so for example that little like",
+    "start": "338520",
+    "end": "344600"
+  },
+  {
+    "text": "latency blip there on the P99 of that drive that's no good you're going to have SLO Busters",
+    "start": "344600",
+    "end": "350520"
+  },
+  {
+    "text": "there but we have to combine this understanding of Hardware with an understanding of our software and we",
+    "start": "350520",
+    "end": "356400"
+  },
+  {
+    "text": "program uh workload models per workload capacity models which take into account a bunch of a bunch of parameters about",
+    "start": "356400",
+    "end": "363639"
+  },
+  {
+    "text": "your workload such as how many reads per second or how large those reads are and then we can use some fancy statistics or",
+    "start": "363639",
+    "end": "370560"
+  },
+  {
+    "text": "as a previous speaker said a model that's good enough I think a good enough model uh to to to Output a cluster of",
+    "start": "370560",
+    "end": "378160"
+  },
+  {
+    "text": "computers that we call the least regretful choice and when we provision that",
+    "start": "378160",
+    "end": "383560"
+  },
+  {
+    "text": "cluster we're making a couple of trade-offs and one of the ones that I want to call it in particular is that when we provision three data stores we",
+    "start": "383560",
+    "end": "391280"
+  },
+  {
+    "text": "run those a lot hotter we essentially save money on our tier 3s and our tier 2s and then we spend it on our tier",
+    "start": "391280",
+    "end": "397720"
+  },
+  {
+    "text": "zeros so our tier zero data stores are over-provisioned relative to our expected workload and this kind of",
+    "start": "397720",
+    "end": "404160"
+  },
+  {
+    "text": "automatic capacity planning that we can continuously run on our database Fleet allows us to shift risk around and save",
+    "start": "404160",
+    "end": "410599"
+  },
+  {
+    "text": "money on one part of our Fleet and spend it to get reliability on",
+    "start": "410599",
+    "end": "415720"
+  },
+  {
+    "text": "another this also allows us to then take that cluster and and replicate it to 12",
+    "start": "415720",
+    "end": "420960"
+  },
+  {
+    "text": "Amazon availability zones spread across four regions and we do this for a few reasons but one of the most important",
+    "start": "420960",
+    "end": "426440"
+  },
+  {
+    "text": "ones is that we want to ensure that all of our microservices have local Zone access to their",
+    "start": "426440",
+    "end": "432400"
+  },
+  {
+    "text": "data because as as we'll see throughout this talk if you can keep a commun if you can keep no network connection",
+    "start": "432400",
+    "end": "438360"
+  },
+  {
+    "text": "that's the best no network communication most reliable if you have to make a network call make it in your local Zone",
+    "start": "438360",
+    "end": "444199"
+  },
+  {
+    "text": "if you have to cross zones keep it in your region and then finally sometimes you do have to go across region",
+    "start": "444199",
+    "end": "450639"
+  },
+  {
+    "text": "but also this allows us to have very highly reliable rights in read operations because we can use quorums to",
+    "start": "450639",
+    "end": "456599"
+  },
+  {
+    "text": "accept rights in any region so by having three copies in every region we are we",
+    "start": "456599",
+    "end": "461919"
+  },
+  {
+    "text": "are able to provide a very high level of reliability this minimizes the times that there are outages but sometimes we",
+    "start": "461919",
+    "end": "468840"
+  },
+  {
+    "text": "have to fill over so this is a little diagram that shows uh the running Netflix system and at least at Netflix",
+    "start": "468840",
+    "end": "475280"
+  },
+  {
+    "text": "most of our money is spent on our stateless Services we actually don't spend as much money on our stateful services as we do on our stateless ones",
+    "start": "475280",
+    "end": "482240"
+  },
+  {
+    "text": "and they're provisioned typically to handle around X over4 of global traffic and then when Us East one fails",
+    "start": "482240",
+    "end": "489319"
+  },
+  {
+    "text": "because you know it's Us East one we have to fail out of that region and at Netflix our resiliency team has built an",
+    "start": "489319",
+    "end": "496080"
+  },
+  {
+    "text": "amazing capability to evacuate an Amazon region in single digit minutes we can have all of the traffic out of that",
+    "start": "496080",
+    "end": "501960"
+  },
+  {
+    "text": "region but that's a problem for your data stores because they have to be ready to absorb a 33% hit of new traffic",
+    "start": "501960",
+    "end": "508720"
+  },
+  {
+    "text": "instantaneously and that's even a problem for your stess services because they can't Auto scale that fast so you have to reserve head",
+    "start": "508720",
+    "end": "515959"
+  },
+  {
+    "text": "and specifically with this architecture you have to reserve 33% headro but this actually is pretty okay because the",
+    "start": "515959",
+    "end": "522640"
+  },
+  {
+    "text": "alternative where we like Shard our databases and we run two copies instead of four in that alternative we have to",
+    "start": "522640",
+    "end": "529440"
+  },
+  {
+    "text": "reserve a lot more Headroom specifically we have to reserve a 100% Headroom we",
+    "start": "529440",
+    "end": "535240"
+  },
+  {
+    "text": "have to pre- a lot more reserved instances from Amazon for our stat less and we have have to run continuously a",
+    "start": "535240",
+    "end": "540399"
+  },
+  {
+    "text": "lot more for our stateful if we were to copy the data less so this might not match your business but at least in",
+    "start": "540399",
+    "end": "546600"
+  },
+  {
+    "text": "Netflix's case paying that money to replicate the state is actually worth it both in terms of reliability and because",
+    "start": "546600",
+    "end": "552680"
+  },
+  {
+    "text": "we can recoup the cost on stat less but sometimes even with all this capacity planning and sharding bad",
+    "start": "552680",
+    "end": "559000"
+  },
+  {
+    "text": "things happen and when they do you want to be able to deploy software and Hardware quickly I don't know about y'all but at least for me a lot of the",
+    "start": "559000",
+    "end": "565360"
+  },
+  {
+    "text": "reliability issues happen because of software that we write so we've carved mutation seams into our",
+    "start": "565360",
+    "end": "572360"
+  },
+  {
+    "text": "state images to allow us to more rapidly change software that doesn't affect the availability of the system specifically",
+    "start": "572360",
+    "end": "579560"
+  },
+  {
+    "text": "we've factored it into three components we have the components in yellow which we change frequently they're software",
+    "start": "579560",
+    "end": "585640"
+  },
+  {
+    "text": "that we write like configuration agents or monitoring agents we change them frequently but they do not affect the",
+    "start": "585640",
+    "end": "591040"
+  },
+  {
+    "text": "availability of the data store because we don't have to bring down the cassander process or the mcash process",
+    "start": "591040",
+    "end": "596200"
+  },
+  {
+    "text": "or what have you in order to to change these so there's no reliability impact we can change these quite quickly we",
+    "start": "596200",
+    "end": "602760"
+  },
+  {
+    "text": "couple the stateful process and the OS kernel together because if we have to upgrade for example Linux we're going to have to bring down the data store image",
+    "start": "602760",
+    "end": "609680"
+  },
+  {
+    "text": "and when we do that we're taking a risk because remember earlier I talked about quorums if we take down one member of",
+    "start": "609680",
+    "end": "614760"
+  },
+  {
+    "text": "the Quorum we're running a risk we could go down so we want to do this as fast as possible and we've released both a blog",
+    "start": "614760",
+    "end": "620760"
+  },
+  {
+    "text": "post as well as I've given a talk in the past about how we're able to do this in mere minutes going from one ec2 Ami to",
+    "start": "620760",
+    "end": "626880"
+  },
+  {
+    "text": "another automically similar to like a live CD or Pixi Boot and then finally uh we",
+    "start": "626880",
+    "end": "635399"
+  },
+  {
+    "text": "have the state and this is the most problematic part of a stateful service and you don't want to touge it that",
+    "start": "635399",
+    "end": "641160"
+  },
+  {
+    "text": "often if you have to move State around you're going to have low reliability why is that well one reason is because of",
+    "start": "641160",
+    "end": "648040"
+  },
+  {
+    "text": "the bathtub curve every time that we move state from to a new instance we're",
+    "start": "648040",
+    "end": "653200"
+  },
+  {
+    "text": "taking a chance that that instance will fail young the bathtub curve refers to Hardware typically fails young and old",
+    "start": "653200",
+    "end": "659760"
+  },
+  {
+    "text": "so we really if we've got a good reliable database host we really want to hold on to it we don't want to let go of",
+    "start": "659760",
+    "end": "664880"
+  },
+  {
+    "text": "it but if we do have to do that we want to move the state as fast as possible and Netflix we use Snapshot restoration",
+    "start": "664880",
+    "end": "671040"
+  },
+  {
+    "text": "where we suck down backups from S3 as fast as humanly possible onto new instances and then we just share the",
+    "start": "671040",
+    "end": "676639"
+  },
+  {
+    "text": "Deltas as we switch over this does have a reliable or sorry a major reliability",
+    "start": "676639",
+    "end": "682480"
+  },
+  {
+    "text": "impact before I get to how we can minimize some of that reliability impact I want to talk about monitoring because",
+    "start": "682480",
+    "end": "688279"
+  },
+  {
+    "text": "when you have state Services you have to care about how your drives are doing at",
+    "start": "688279",
+    "end": "693680"
+  },
+  {
+    "text": "Netflix when we're launching those new instances I mentioned the bathtub curve well we're going to burn in the discs",
+    "start": "693680",
+    "end": "699160"
+  },
+  {
+    "text": "and we're going to make sure that they can handle the type of load that we're going to put on them we call this",
+    "start": "699160",
+    "end": "704360"
+  },
+  {
+    "text": "pre-flight checks essentially it's like a little checklist of like can I talk to the network can I talk to the dis is the",
+    "start": "704360",
+    "end": "710360"
+  },
+  {
+    "text": "disc capable of responding in under a millisecond and then continuously we're monitoring errors and",
+    "start": "710360",
+    "end": "716560"
+  },
+  {
+    "text": "latency these systems of of monitor ing throw away thousands of ec2 instances on our fet every",
+    "start": "716560",
+    "end": "723120"
+  },
+  {
+    "text": "year and why I do that well because these things are just pending reliability problems if your drive is",
+    "start": "723120",
+    "end": "729399"
+  },
+  {
+    "text": "degrading it's going to fail if a drive fails you're going to have a bad day it would be better to get off of it",
+    "start": "729399",
+    "end": "736240"
+  },
+  {
+    "text": "earlier but that doesn't just apply to your Hardware it also applies to your software who here has had a Java program",
+    "start": "736240",
+    "end": "742399"
+  },
+  {
+    "text": "go into an endless garbage collection death spiral come on it can't just be me okay",
+    "start": "742399",
+    "end": "748000"
+  },
+  {
+    "text": "a couple more and Netflix because we run so many jbm data stores like elastic surch and Cassandra we run into what we call",
+    "start": "748000",
+    "end": "754120"
+  },
+  {
+    "text": "queries of death fairly frequently so what we did was we attached a monitoring agent to every jvm in our stateful Fleet",
+    "start": "754120",
+    "end": "760720"
+  },
+  {
+    "text": "and that monitoring agent detects this condition within about 2 seconds so if our jvms enter this death spiral it",
+    "start": "760720",
+    "end": "767880"
+  },
+  {
+    "text": "immediately takes a heap dump puts it in S3 so that we can analyze it later and remediates the incident it kills the",
+    "start": "767880",
+    "end": "775000"
+  },
+  {
+    "text": "process in practice this reduced 2,000 plus SLO violations at Netflix in the",
+    "start": "775000",
+    "end": "780920"
+  },
+  {
+    "text": "first year that we deployed it because over the course of a year when you have 2,000 plus clusters bad stuff happens so",
+    "start": "780920",
+    "end": "787920"
+  },
+  {
+    "text": "you want to recover quickly and little agents like this aren't hard to to add to your",
+    "start": "787920",
+    "end": "794079"
+  },
+  {
+    "text": "processes but let's say that we've we've invested in all these things and even then we still have to be careful how",
+    "start": "794079",
+    "end": "799480"
+  },
+  {
+    "text": "quickly we do maintenance so in the xaxis of this graph we have how often we do maintenance on the cassander fleet in",
+    "start": "799480",
+    "end": "805120"
+  },
+  {
+    "text": "the gray box there are some parameters of this uh simulation 2,000 cluster between 12 and 192 nodes and on the Y",
+    "start": "805120",
+    "end": "811600"
+  },
+  {
+    "text": "AIS we have how many outages we expect to cause through our maintenance so we can see using the naive data streaming",
+    "start": "811600",
+    "end": "818160"
+  },
+  {
+    "text": "approach where we move State between instances we can only really do about quarterly maintenance before we start",
+    "start": "818160",
+    "end": "823560"
+  },
+  {
+    "text": "accepting more than one outage related to this uh maintenance per year in contrast if we can send data faster then",
+    "start": "823560",
+    "end": "830839"
+  },
+  {
+    "text": "we can get to monthly maintenance we're able to image our Fleet even faster without causing too many outages if we",
+    "start": "830839",
+    "end": "837079"
+  },
+  {
+    "text": "if we decouple compute from State and use use EBS volumes and execute State movements with EBS swaps we can get even",
+    "start": "837079",
+    "end": "843040"
+  },
+  {
+    "text": "further but ultimately to get to something like weekly level changes or being able to roll out software changes",
+    "start": "843040",
+    "end": "848199"
+  },
+  {
+    "text": "faster we need to move use that in place Imaging technique that I talked about earlier as far as I'm aware this is like",
+    "start": "848199",
+    "end": "855160"
+  },
+  {
+    "text": "the best way to do this um I'm super curious if anybody has other ways um but at Netflix we've we've kind of taken",
+    "start": "855160",
+    "end": "860399"
+  },
+  {
+    "text": "this journey starting at the red and then over time moving to the green so that we can recover faster from software",
+    "start": "860399",
+    "end": "867560"
+  },
+  {
+    "text": "issues next I'd like to talk about caching because at Netflix we kind of treat caches like these materialized view",
+    "start": "867680",
+    "end": "874199"
+  },
+  {
+    "text": "engines so Services if you think about it they're really performing complicated almost joins right like they're talking",
+    "start": "874199",
+    "end": "880399"
+  },
+  {
+    "text": "to multiple data stores they're running business logic and they have some output of that communic of that computation",
+    "start": "880399",
+    "end": "885639"
+  },
+  {
+    "text": "that output at least at Netflix doesn't change that often so we put it in a cache and then most read operations hit",
+    "start": "885639",
+    "end": "891680"
+  },
+  {
+    "text": "that cached view whenever the underlying data of that service changes the service recalculates the cach value and fills",
+    "start": "891680",
+    "end": "897759"
+  },
+  {
+    "text": "that cach now some of you I I hear what you're saying you're going oh no oh no the cash",
+    "start": "897759",
+    "end": "903040"
+  },
+  {
+    "text": "the cash could go down the slide isn't actually relevant to that the cash could go down that is true however at Netflix",
+    "start": "903040",
+    "end": "908880"
+  },
+  {
+    "text": "we've invested in making our caches highly reliable for example investing in things like cash warming so if a node",
+    "start": "908880",
+    "end": "914000"
+  },
+  {
+    "text": "fails we repopulate it with the cash Data before it goes into service and by replicating it to every availability",
+    "start": "914000",
+    "end": "919519"
+  },
+  {
+    "text": "zone so if clients Miss in one zone they can retry against another so in practice these caches are essentially your",
+    "start": "919519",
+    "end": "925720"
+  },
+  {
+    "text": "service at that point and mcash can handle ERS of magnitude more traffic than a Java service",
+    "start": "925720",
+    "end": "931319"
+  },
+  {
+    "text": "can one anti pattern that we discourage is putting caches in front of data stores instead we prefer to put them in",
+    "start": "931319",
+    "end": "937120"
+  },
+  {
+    "text": "front of the service because a cach in front of the service protects the service which is at least for us usually",
+    "start": "937120",
+    "end": "942360"
+  },
+  {
+    "text": "the thing that fails first the cach is cheap relative to the service and like I mentioned earlier stateless apps are",
+    "start": "942360",
+    "end": "949199"
+  },
+  {
+    "text": "quite expensive to operate so this technique can help us improve reliability by decreasing the",
+    "start": "949199",
+    "end": "955720"
+  },
+  {
+    "text": "amount of load that the data stores have to handle it does shift load to caches but like I mentioned those are easier to",
+    "start": "955720",
+    "end": "961360"
+  },
+  {
+    "text": "to make reliable we can actually take this technique even further and move all the data into the client we call this total",
+    "start": "961360",
+    "end": "967880"
+  },
+  {
+    "text": "near caching uh Netflix has written a series of blog posts about this as well as an open source project called",
+    "start": "967880",
+    "end": "974199"
+  },
+  {
+    "text": "Hollow and the way this works is that the source of Truth data store isn't even involved in the read path all that",
+    "start": "974199",
+    "end": "980040"
+  },
+  {
+    "text": "it does is publish a snapshot up to some blob store like S3 through the producer",
+    "start": "980040",
+    "end": "985319"
+  },
+  {
+    "text": "and then the video metadata service in this case starts applying the Delta to the inmemory data set that it has and",
+    "start": "985319",
+    "end": "991000"
+  },
+  {
+    "text": "then can automically swap over from version one at the data set to version two and Netflix we like to treat Hollow",
+    "start": "991000",
+    "end": "996880"
+  },
+  {
+    "text": "almost like get but for your configuration data and this is the service that can handle billions of requests per second because there is no",
+    "start": "996880",
+    "end": "1003079"
+  },
+  {
+    "text": "network call it's all local to in memory it's great the more things that you can fit in this the",
+    "start": "1003079",
+    "end": "1009319"
+  },
+  {
+    "text": "better all right so we've seen a number of techniques for how to make reliable stateful servers but none of those are",
+    "start": "1009319",
+    "end": "1014839"
+  },
+  {
+    "text": "any use if your clients are doing the wrong things so let's Dive In to how to make reliable stateful clients and we're",
+    "start": "1014839",
+    "end": "1021319"
+  },
+  {
+    "text": "going to cover six Concepts we're going to talk about signaling service level objectives per name space and access",
+    "start": "1021319",
+    "end": "1027199"
+  },
+  {
+    "text": "pattern hedge requests exponential backoff load unbalancing and concurrency",
+    "start": "1027199",
+    "end": "1033480"
+  },
+  {
+    "text": "limits so let's start with signals because at Netflix there historically was a big debate about like tuning the",
+    "start": "1033480",
+    "end": "1039480"
+  },
+  {
+    "text": "timeouts and client tuning and what we realized on stateful Services was that",
+    "start": "1039480",
+    "end": "1045280"
+  },
+  {
+    "text": "you can't really set the correct timeout instead you need to know who the client is what Shard of what data store they're",
+    "start": "1045280",
+    "end": "1051400"
+  },
+  {
+    "text": "talking to and what data they're trying to access and then from those you can deduce the service level objectives so",
+    "start": "1051400",
+    "end": "1058360"
+  },
+  {
+    "text": "in this example at the top box we have a client that's saying hey I'd like to talk to the key value service the Napa",
+    "start": "1058360",
+    "end": "1063919"
+  },
+  {
+    "text": "Shard of that service in Us East one and in the bottom we're talking to a Time series abstraction posting a totally",
+    "start": "1063919",
+    "end": "1069520"
+  },
+  {
+    "text": "different chart and those signals start returning information to the client for example",
+    "start": "1069520",
+    "end": "1076000"
+  },
+  {
+    "text": "they might tell the client I'd like you to chunk large p payloads large payloads are really hard to make reliable because",
+    "start": "1076000",
+    "end": "1082320"
+  },
+  {
+    "text": "you don't know is the network slow or is it like dropping packets it's difficult when you're transmitting multi-",
+    "start": "1082320",
+    "end": "1087960"
+  },
+  {
+    "text": "megabytes of data at once to know if it's latency or expected in contrast if the client",
+    "start": "1087960",
+    "end": "1093720"
+  },
+  {
+    "text": "chunks information to smaller pieces of work you can individually retry and hedge those individual pieces of work",
+    "start": "1093720",
+    "end": "1099480"
+  },
+  {
+    "text": "and you can make progress in parallel but you can also go further and just compress stuff so at Netflix we've",
+    "start": "1099480",
+    "end": "1106520"
+  },
+  {
+    "text": "used uh lz4 compression from stateful clients to compress large payloads before they're scent in practice this",
+    "start": "1106520",
+    "end": "1112720"
+  },
+  {
+    "text": "reduces bite scent by between two and 3X and fewer bytes is more reliable why",
+    "start": "1112720",
+    "end": "1119320"
+  },
+  {
+    "text": "because every packet you send is an opportunity for a 200 millisecond SLO Buster when the Linux kernel Waits a",
+    "start": "1119320",
+    "end": "1125559"
+  },
+  {
+    "text": "minimum of 200 milliseconds to retry that packet so if you can send fewer bytes you're going to have more",
+    "start": "1125559",
+    "end": "1131240"
+  },
+  {
+    "text": "reliability compression helps you with that it also adds useful things like check summing and other useful",
+    "start": "1131240",
+    "end": "1137320"
+  },
+  {
+    "text": "properties finally I want to talk about slos because in that signals endpoint",
+    "start": "1137320",
+    "end": "1142520"
+  },
+  {
+    "text": "the services the key value service on the left and the time series service on the right are going to communicate with the client this is what I think your",
+    "start": "1142520",
+    "end": "1148520"
+  },
+  {
+    "text": "target service level objective should be and this is what the maximum should be you can think of Target as like the",
+    "start": "1148520",
+    "end": "1153960"
+  },
+  {
+    "text": "number that we're going to use Hedges and retries to try to hit and then Max is like after this just time out and go",
+    "start": "1153960",
+    "end": "1159640"
+  },
+  {
+    "text": "away we're also going to communicate the current concurrency limits so the server is saying hey client you're allowed to",
+    "start": "1159640",
+    "end": "1165240"
+  },
+  {
+    "text": "hedge 50 concurrent requests against me you're allowed to send a th normal requests if you're interested about",
+    "start": "1165240",
+    "end": "1171000"
+  },
+  {
+    "text": "hedge requests I highly recommend a wonderful article from Justin at Google called the tail at scale uh the general gist is that you send the request",
+    "start": "1171000",
+    "end": "1177559"
+  },
+  {
+    "text": "multiple times and whoever answers first uh you take",
+    "start": "1177559",
+    "end": "1182760"
+  },
+  {
+    "text": "earlier but we can also tune these slos based on the particular name space",
+    "start": "1182760",
+    "end": "1187919"
+  },
+  {
+    "text": "they're trying to access for example in this case we we have two name spaces that are actually pointing at the same data but one of them preserves ores a",
+    "start": "1187919",
+    "end": "1196159"
+  },
+  {
+    "text": "vual consistency and the other one present presents read your right consistency eventual consistency can",
+    "start": "1196159",
+    "end": "1201559"
+  },
+  {
+    "text": "have a submillisecond latency SLO it's really hard to make a read your rights uh consistency model sub millisecond so",
+    "start": "1201559",
+    "end": "1209320"
+  },
+  {
+    "text": "the SLO on the left can be stronger than the SLO on the right but it actually gets a little more",
+    "start": "1209320",
+    "end": "1214960"
+  },
+  {
+    "text": "complicated it's not just the name space it's also the client and their observed average latency for example if we have",
+    "start": "1214960",
+    "end": "1221720"
+  },
+  {
+    "text": "client a and they're making get requests against Nam space one if they're observing 1 millisecond of latency then",
+    "start": "1221720",
+    "end": "1226840"
+  },
+  {
+    "text": "that means that in order to hit the SL 10 milliseconds we're going to have to send a hedge around 9 milliseconds the",
+    "start": "1226840",
+    "end": "1232080"
+  },
+  {
+    "text": "same client might be doing put requests and those are averaging 1.5 milliseconds so we can we have to hedge a little bit",
+    "start": "1232080",
+    "end": "1237159"
+  },
+  {
+    "text": "earlier if we want want to try to hit that 10 millisecond SLO on the other hand scan requests are",
+    "start": "1237159",
+    "end": "1242799"
+  },
+  {
+    "text": "real slow they have an SLO of around 100 milliseconds so we don't want to hedge until 77 milliseconds after",
+    "start": "1242799",
+    "end": "1248960"
+  },
+  {
+    "text": "that and finally client B might continuously be getting above the SLO latency in which case hedging isn't",
+    "start": "1248960",
+    "end": "1254840"
+  },
+  {
+    "text": "going to help you hedging is just a strategy to help you meet the SLO if you're always missing the SLO there's no",
+    "start": "1254840",
+    "end": "1260080"
+  },
+  {
+    "text": "point in doubling the load to your back end just to try to meet something that you will fail",
+    "start": "1260080",
+    "end": "1265200"
+  },
+  {
+    "text": "at and this leads to what I call like kind of the three zones of dynamic hedging uh timeouts the first zone is",
+    "start": "1265200",
+    "end": "1272080"
+  },
+  {
+    "text": "the zone of hope this is the part where the client is observing latencies that are significantly under the SLO",
+    "start": "1272080",
+    "end": "1277400"
+  },
+  {
+    "text": "specifically under half once you get to half though you're now hedging 50% of your work roughly so this is the part",
+    "start": "1277400",
+    "end": "1284919"
+  },
+  {
+    "text": "where you have to make a decision you could either really try hard to make the SLO this is the zone of last ditch",
+    "start": "1284919",
+    "end": "1290320"
+  },
+  {
+    "text": "attempts um you could try really hard to make the SLO in which case you're going to be provisioning your backend for 50",
+    "start": "1290320",
+    "end": "1295600"
+  },
+  {
+    "text": "plus% extra load or you could just say like let's back off a bit and give the backends some",
+    "start": "1295600",
+    "end": "1301240"
+  },
+  {
+    "text": "room and Netflix when we hit the SLO itself we back off entirely and this is",
+    "start": "1301240",
+    "end": "1306360"
+  },
+  {
+    "text": "because at least for us when the backend service is on average above your SLO there's probably something wrong and",
+    "start": "1306360",
+    "end": "1312200"
+  },
+  {
+    "text": "hedges probably aren't going to help you out so you can see that in these three zones we need to use different",
+    "start": "1312200",
+    "end": "1318240"
+  },
+  {
+    "text": "approaches to how we hedge against the downstream Services depending on whether we're likely to get a positive",
+    "start": "1318240",
+    "end": "1325400"
+  },
+  {
+    "text": "result we also have to be really careful when we're hedging requests and we have to use concurrency limiting to prevent",
+    "start": "1325400",
+    "end": "1331400"
+  },
+  {
+    "text": "too much load going to our vend services so let's walk through an example in this case client one sends two requests to",
+    "start": "1331400",
+    "end": "1338039"
+  },
+  {
+    "text": "server one which immediately goes into garbage collection pause because it's Java at that point client one Waits The",
+    "start": "1338039",
+    "end": "1345520"
+  },
+  {
+    "text": "SLO minus the average and then says okay I'd like to hedge against server two maybe it'll respond to me at that point",
+    "start": "1345520",
+    "end": "1352000"
+  },
+  {
+    "text": "it puts a hedge limiter in place that 50 number we saw earlier in this example it's one we're allowing one outstanding",
+    "start": "1352000",
+    "end": "1358679"
+  },
+  {
+    "text": "hedge when the client one tries to hedge uh request b instead of allowing that hedge to go through we say there might",
+    "start": "1358679",
+    "end": "1365240"
+  },
+  {
+    "text": "be something wrong with the back end let's let's just wait for it once we get the response back from",
+    "start": "1365240",
+    "end": "1371760"
+  },
+  {
+    "text": "server two to request a now the the Hedge limiter lifts and a subsequent put from client one to server one is allowed",
+    "start": "1371760",
+    "end": "1378559"
+  },
+  {
+    "text": "to speculate so we can see in this example if we had done nothing all three of",
+    "start": "1378559",
+    "end": "1384600"
+  },
+  {
+    "text": "these requests would have hit that latency busting 24 millisecond GC plus",
+    "start": "1384600",
+    "end": "1389679"
+  },
+  {
+    "text": "because of this hedging system we were able to rescue two two requests two of three so this kind of goes back to that",
+    "start": "1389679",
+    "end": "1395960"
+  },
+  {
+    "text": "in this case we couldn't prevent the issue we did have some SLO violation but we minimized the impact fewer requests",
+    "start": "1395960",
+    "end": "1403120"
+  },
+  {
+    "text": "had violated the SLO we can use similar techniques",
+    "start": "1403120",
+    "end": "1408480"
+  },
+  {
+    "text": "to make GC tolerant timeouts so if I'm setting if I'm implementing a naive",
+    "start": "1408480",
+    "end": "1413600"
+  },
+  {
+    "text": "timeout I might set a single asynchronous future at 500 milliseconds and then at the end of 500 milliseconds",
+    "start": "1413600",
+    "end": "1418919"
+  },
+  {
+    "text": "I throw an exception in our stateful clients we use what we call GC tolerant timers which is where we chain four",
+    "start": "1418919",
+    "end": "1424799"
+  },
+  {
+    "text": "async feutures 125 milliseconds apart the exact numbers don't matter you could do three you could do two what matters",
+    "start": "1424799",
+    "end": "1430960"
+  },
+  {
+    "text": "though is that it's more than one and this creates essentially a virtual clock that's resilient to that client one",
+    "start": "1430960",
+    "end": "1436480"
+  },
+  {
+    "text": "pausing so let's do an example where client one sends a request to a stateful service the service actually responds",
+    "start": "1436480",
+    "end": "1442760"
+  },
+  {
+    "text": "but because that client was garbage collecting when it was responding a naive timer would incorrectly throw an exception when it wakes up from the",
+    "start": "1442760",
+    "end": "1449400"
+  },
+  {
+    "text": "garbage collection contrast that with our GC tolerant timer which correctly Returns the result and does not pollute our logs",
+    "start": "1449400",
+    "end": "1456279"
+  },
+  {
+    "text": "with an incorrect error that misleads our investigators before we implemented this we spent a significant amount of",
+    "start": "1456279",
+    "end": "1462400"
+  },
+  {
+    "text": "time tracking down services that thought their data stores were slow when in reality their caches were actually quite",
+    "start": "1462400",
+    "end": "1468039"
+  },
+  {
+    "text": "fast their key value stores were quite fast but their service was underload so this technique doesn't",
+    "start": "1468039",
+    "end": "1473960"
+  },
+  {
+    "text": "again make the problem go away but it does help you resolve it faster by preventing your operators from getting",
+    "start": "1473960",
+    "end": "1480600"
+  },
+  {
+    "text": "distracted and then finally sometimes things are going to uh break and you're going to get load",
+    "start": "1480600",
+    "end": "1486559"
+  },
+  {
+    "text": "shedding and when that happens we do allow a retry against stateful Services we allow really just one retry although",
+    "start": "1486559",
+    "end": "1492840"
+  },
+  {
+    "text": "it is implemented generically to more than one we use a slightly modified cap exponential back off algorithm the only",
+    "start": "1492840",
+    "end": "1499200"
+  },
+  {
+    "text": "real modification that's worth pointing out here is that the first retry happens relevant to that SL Target so you can",
+    "start": "1499200",
+    "end": "1505080"
+  },
+  {
+    "text": "see how having those slos is allowing us to more intelligently retry against our backends if we didn't have those service",
+    "start": "1505080",
+    "end": "1511200"
+  },
+  {
+    "text": "level objectives then we would have to take something that would probably uh mess up with our slos more",
+    "start": "1511200",
+    "end": "1517799"
+  },
+  {
+    "text": "frequently but wouldn't it be nice though if we didn't send any requests to that slow server in the first place",
+    "start": "1517799",
+    "end": "1523720"
+  },
+  {
+    "text": "that's where load balancing or I like to say load unbalancing comes into play",
+    "start": "1523720",
+    "end": "1529000"
+  },
+  {
+    "text": "so at the bottom here we have a bunch of resources about different load balancing strategies including a simulation where",
+    "start": "1529000",
+    "end": "1534559"
+  },
+  {
+    "text": "you can reproduce these numbers um but the end result is that the typical load balancing algorithms like random load",
+    "start": "1534559",
+    "end": "1539880"
+  },
+  {
+    "text": "balancing or round robin load balancing they don't actually work very well at at avoiding slow servers instead a lot of",
+    "start": "1539880",
+    "end": "1546200"
+  },
+  {
+    "text": "people at Netflix use choice of two The Power of R of two random choices and we've actually recently rolled out at",
+    "start": "1546200",
+    "end": "1551919"
+  },
+  {
+    "text": "Netflix an improvement on choice of two called weighted choice of N and the way that works is by",
+    "start": "1551919",
+    "end": "1558799"
+  },
+  {
+    "text": "exploiting I priority knowledge about networks in the cloud so specifically",
+    "start": "1558799",
+    "end": "1564720"
+  },
+  {
+    "text": "this is three zones and us one and those are the latencies between them we know that because we have a replica of data",
+    "start": "1564720",
+    "end": "1571200"
+  },
+  {
+    "text": "in every Zone if we send the request to the same Zone we're going to get a faster response we don't need anybody to",
+    "start": "1571200",
+    "end": "1577000"
+  },
+  {
+    "text": "tell us that we know it we can measure it so all we have to do is kind of wait",
+    "start": "1577000",
+    "end": "1583200"
+  },
+  {
+    "text": "requests towards our local Zone replica but we want this to degrade so like what",
+    "start": "1583200",
+    "end": "1588240"
+  },
+  {
+    "text": "if we only have two copies or what if we are in the wrong Zone Etc so instead of",
+    "start": "1588240",
+    "end": "1593679"
+  },
+  {
+    "text": "just having like a strict routing rule we take our concurrency and instead of just picking the two that have the less",
+    "start": "1593679",
+    "end": "1599200"
+  },
+  {
+    "text": "concurrency we wait the concurrency by these factors so this sounds pretty cool does",
+    "start": "1599200",
+    "end": "1605679"
+  },
+  {
+    "text": "it work yes it works really well so this is an example of us running a synthetic",
+    "start": "1605679",
+    "end": "1611679"
+  },
+  {
+    "text": "load test where we took a cassander client that was doing local one reads and we moved it from our way to least",
+    "start": "1611679",
+    "end": "1617840"
+  },
+  {
+    "text": "loaded load balancer algorithm to the out of the box choice of two and immediately we regressed from 500 microc",
+    "start": "1617840",
+    "end": "1624000"
+  },
+  {
+    "text": "latencies to 800 microc latencies I'll point something out that's client side latency that's submillisecond latency",
+    "start": "1624000",
+    "end": "1631279"
+  },
+  {
+    "text": "from a database client to its server this looked pretty positive so we",
+    "start": "1631279",
+    "end": "1636399"
+  },
+  {
+    "text": "were like we should put it in production and we saw a bunch of graphs like this just dropping off a cliff and this is",
+    "start": "1636399",
+    "end": "1642399"
+  },
+  {
+    "text": "fantastic we love it when our Theory matches our measurement matches production and if you're curious to",
+    "start": "1642399",
+    "end": "1648679"
+  },
+  {
+    "text": "learn more we talked about this at Apache con last year and I've left Links at the bottom all right so let's put all these",
+    "start": "1648679",
+    "end": "1655919"
+  },
+  {
+    "text": "techniques together and let's look at a real world key value Service uh issue",
+    "start": "1655919",
+    "end": "1661159"
+  },
+  {
+    "text": "which did not turn into an incident so at time T1 at 7:02 a.m. an",
+    "start": "1661159",
+    "end": "1667200"
+  },
+  {
+    "text": "upstream client of this key value service suffers a retry storm and their traffic instantly",
+    "start": "1667200",
+    "end": "1673519"
+  },
+  {
+    "text": "doubles within 30 seconds our additive increase multiplicative decrease server concurrency limiters are shedding load",
+    "start": "1673519",
+    "end": "1679799"
+  },
+  {
+    "text": "off of the server trying to protect the backend from the sudden load Spike meanwhile those client Hedges and",
+    "start": "1679799",
+    "end": "1687279"
+  },
+  {
+    "text": "exponential retries we talked about are mitigating the impact this is such a small impact that nobody's even getting",
+    "start": "1687279",
+    "end": "1693200"
+  },
+  {
+    "text": "we're not violating any of our user visible slos at this point the only problem that we have is that high latency impact and that's because we",
+    "start": "1693200",
+    "end": "1700200"
+  },
+  {
+    "text": "went from 40% utilization to 80% utilization in 10 seconds so finally our server",
+    "start": "1700200",
+    "end": "1706559"
+  },
+  {
+    "text": "autoscaling system restores our latency SLO and this whole process from the",
+    "start": "1706559",
+    "end": "1711679"
+  },
+  {
+    "text": "client load doubling to our server limit tripping to our client Hedges and exponential retries mitigating to the",
+    "start": "1711679",
+    "end": "1717640"
+  },
+  {
+    "text": "server autoscaling finally restoring the SLO takes about 5 minutes there's no human involved here everything happened",
+    "start": "1717640",
+    "end": "1724279"
+  },
+  {
+    "text": "as expected we had an issue we mitigated the impact we recovered quickly no human",
+    "start": "1724279",
+    "end": "1729760"
+  },
+  {
+    "text": "was involved all right so I made a pretty",
+    "start": "1729760",
+    "end": "1736720"
+  },
+  {
+    "text": "important assumption when I was talking about hedging and retrying and breaking",
+    "start": "1736720",
+    "end": "1742120"
+  },
+  {
+    "text": "down work what was that assumption I assumed that the work was",
+    "start": "1742120",
+    "end": "1748640"
+  },
+  {
+    "text": "itemp potent and that's actually pretty tricky to build into your state apis I also",
+    "start": "1748640",
+    "end": "1755440"
+  },
+  {
+    "text": "assumed that your state FL apis provided a fixed unit of work",
+    "start": "1755440",
+    "end": "1760480"
+  },
+  {
+    "text": "capability both of those have to be designed into your stateful apis so",
+    "start": "1760480",
+    "end": "1765559"
+  },
+  {
+    "text": "let's see how that works in the real world and we'll motivate it with two real world production examples in our",
+    "start": "1765559",
+    "end": "1771559"
+  },
+  {
+    "text": "key value service and our time series service now hold on there's some code coming it'll be okay we'll walk through",
+    "start": "1771559",
+    "end": "1779159"
+  },
+  {
+    "text": "it let's assume you have to retry how do you make your mutable API safe well the",
+    "start": "1779159",
+    "end": "1784240"
+  },
+  {
+    "text": "answer is item potency tokens who here has used stripe to charge a credit card couple folks the way that works so",
+    "start": "1784240",
+    "end": "1792120"
+  },
+  {
+    "text": "that you don't double charge your credit card is using an item potency key the client generates a unique ID that",
+    "start": "1792120",
+    "end": "1797960"
+  },
+  {
+    "text": "Associates with that transaction so even if the device has to retry it multiple times you don't have multiple",
+    "start": "1797960",
+    "end": "1804080"
+  },
+  {
+    "text": "charges in concept this is pretty simple you generate some token you send it with your mutative end point and then if",
+    "start": "1804080",
+    "end": "1810039"
+  },
+  {
+    "text": "something bad happens you just retry with the same item potency token but you have to make sure that the",
+    "start": "1810039",
+    "end": "1816279"
+  },
+  {
+    "text": "backing storage engines implement this item potency so let's dive in and understand what kinds of tokens we might",
+    "start": "1816279",
+    "end": "1822799"
+  },
+  {
+    "text": "need a Netflix item potency token is generally a tupal of a time stamp and some form of token depending on the back",
+    "start": "1822799",
+    "end": "1829919"
+  },
+  {
+    "text": "end these things are going to change so let's look at the simplest one and Netflix use a lot of Apache",
+    "start": "1829919",
+    "end": "1835960"
+  },
+  {
+    "text": "Cassandra Apache Cassandra uses last right winds to duplicate things so as long as we send mutations with the same",
+    "start": "1835960",
+    "end": "1841519"
+  },
+  {
+    "text": "timestamp they will be duplicate so we can use client monotonic timestamps in",
+    "start": "1841519",
+    "end": "1847000"
+  },
+  {
+    "text": "this case a microsecond timestamp with a little bit of Randomness mixed into the last character just to prevent a little",
+    "start": "1847000",
+    "end": "1852360"
+  },
+  {
+    "text": "bit of duplication and a random knots and the combination of this uuid4 and the time",
+    "start": "1852360",
+    "end": "1858519"
+  },
+  {
+    "text": "stamp uniquely identifies that mutation if we have a more consistent",
+    "start": "1858519",
+    "end": "1864200"
+  },
+  {
+    "text": "store we might need to make a global monotonic time stamp within the same region perhaps we're like reaching out",
+    "start": "1864200",
+    "end": "1869559"
+  },
+  {
+    "text": "to a zookeeper cluster to acquire some lease or perhaps we're using a store like Foundation DB which which has a",
+    "start": "1869559",
+    "end": "1875840"
+  },
+  {
+    "text": "central Time Stamper and then finally the most consistent option is to take a global",
+    "start": "1875840",
+    "end": "1882399"
+  },
+  {
+    "text": "transaction ID this is how a lot of transactional data stores work um for example like my SQL or post where they",
+    "start": "1882399",
+    "end": "1887880"
+  },
+  {
+    "text": "actually associate a global transaction ID with a with mutation and you have to",
+    "start": "1887880",
+    "end": "1893679"
+  },
+  {
+    "text": "somehow encapsulate that transaction ID or move it into your data model so that you can retry against those",
+    "start": "1893679",
+    "end": "1899080"
+  },
+  {
+    "text": "stores transactions don't magically make your database trans isolated or or item",
+    "start": "1899080",
+    "end": "1904679"
+  },
+  {
+    "text": "you have to actually put it in your data model and think about I might have to retry this right how would that",
+    "start": "1904679",
+    "end": "1911080"
+  },
+  {
+    "text": "look but these three different options have a different consistency reliability tradeoff so on the x-axis here we have",
+    "start": "1911080",
+    "end": "1917720"
+  },
+  {
+    "text": "kind of the level of how strongly consistent we are ranging from not at all consistent all the way up to GL Global linearizability on the y- AIS we",
+    "start": "1917720",
+    "end": "1924919"
+  },
+  {
+    "text": "have the reliability of that technique and we'll notice that the",
+    "start": "1924919",
+    "end": "1930559"
+  },
+  {
+    "text": "regional isolated tokens and the global isolated tokens have problems now why do I say that they're less reliable it's",
+    "start": "1930559",
+    "end": "1937240"
+  },
+  {
+    "text": "because they require communication across the network a client monotonic clock requires no network connectivity",
+    "start": "1937240",
+    "end": "1943559"
+  },
+  {
+    "text": "for you to generate the next token cont contrast that with a local region token where you need at least a",
+    "start": "1943559",
+    "end": "1949480"
+  },
+  {
+    "text": "quorum in a region to vote or a global one where you have to talk across a W",
+    "start": "1949480",
+    "end": "1954840"
+  },
+  {
+    "text": "Network so at Netflix we tried as much as possible to have client monotonic clocks I think an earlier presenter said",
+    "start": "1954840",
+    "end": "1961200"
+  },
+  {
+    "text": "it really well if you can make it less consistent make it less consistent",
+    "start": "1961200",
+    "end": "1966240"
+  },
+  {
+    "text": "nobody knows if the recommendations in Netflix are the right recommendations in Netflix so don't bring down your service",
+    "start": "1966240",
+    "end": "1973080"
+  },
+  {
+    "text": "trying to get a global linear isop clock to use in your in your transactions",
+    "start": "1973080",
+    "end": "1979039"
+  },
+  {
+    "text": "I am going to be a little bit contrarian though because uh earlier we heard about how clocks are problematic and if the",
+    "start": "1980760",
+    "end": "1986000"
+  },
+  {
+    "text": "clocks are outside of the cloud I agree with that however we actually measured this across the cassander fleet at",
+    "start": "1986000",
+    "end": "1991840"
+  },
+  {
+    "text": "Netflix over 25,000 virtual machines across over 20 instance families all",
+    "start": "1991840",
+    "end": "1997279"
+  },
+  {
+    "text": "with Nitro cards in them though and we did not observe clock drifts Beyond 1",
+    "start": "1997279",
+    "end": "2003600"
+  },
+  {
+    "text": "millisecond the only time that we observe clock drifts above 1 m non- monotonic was when vm's booted so",
+    "start": "2003600",
+    "end": "2010279"
+  },
+  {
+    "text": "the first about 2 to 3 minutes of a vm's life it has an inaccurate clock then after that it's accurate how does this",
+    "start": "2010279",
+    "end": "2017039"
+  },
+  {
+    "text": "work atomic clocks it's pretty cool so ec2 in every availability Zone maintains",
+    "start": "2017039",
+    "end": "2022840"
+  },
+  {
+    "text": "a highly accurate clock source and then using their Nitro system they give your VM direct access to it and I should say",
+    "start": "2022840",
+    "end": "2029320"
+  },
+  {
+    "text": "that when I set out to write this memo it was because the CER Community was proposing using clocks in a strongly",
+    "start": "2029320",
+    "end": "2034639"
+  },
+  {
+    "text": "consistent method and so I was like no no no everybody in distribut systems know the clocks don't work and then we",
+    "start": "2034639",
+    "end": "2039840"
+  },
+  {
+    "text": "measured it and it turns out they actually work pretty well surprising unexpected but it turns out accurate I",
+    "start": "2039840",
+    "end": "2046120"
+  },
+  {
+    "text": "highly encourage you if you are building a system based on clocks measure it see what",
+    "start": "2046120",
+    "end": "2051919"
+  },
+  {
+    "text": "happens all right so we've seen the concepts but how does this actually work in reality let's dive into some examples",
+    "start": "2051919",
+    "end": "2058960"
+  },
+  {
+    "text": "of real world apis using these Concepts we're going to start with the key value abstraction which at Netflix offers",
+    "start": "2058960",
+    "end": "2065358"
+  },
+  {
+    "text": "developers a stable hash map as a service a twole hashmap and exposes a",
+    "start": "2065359",
+    "end": "2070440"
+  },
+  {
+    "text": "pretty simple cred interface you can write items to the store you can delete them you can read them and then you can",
+    "start": "2070440",
+    "end": "2076560"
+  },
+  {
+    "text": "scan all of the items across the entire outer map so let's dive in let's look at put",
+    "start": "2076560",
+    "end": "2083040"
+  },
+  {
+    "text": "items we can see immediately the item potency token pops right out the first",
+    "start": "2083040",
+    "end": "2088280"
+  },
+  {
+    "text": "required argument to write data to the store is you have to have an item potency token generated via one of those methods that we talked about",
+    "start": "2088280",
+    "end": "2094878"
+  },
+  {
+    "text": "earlier but we also see that in our list of items there's a chunk number and that facilitates the clients's splitting up",
+    "start": "2094879",
+    "end": "2102079"
+  },
+  {
+    "text": "large payloads into multiple small ones and Then followed by a",
+    "start": "2102079",
+    "end": "2107240"
+  },
+  {
+    "text": "commit on the read side we see the same kind of breaking down of work a get items response does not guarantee that",
+    "start": "2107320",
+    "end": "2113800"
+  },
+  {
+    "text": "you will receive a thousand items or 2,000 items instead it attempts to return a fixed size of data and this is",
+    "start": "2113800",
+    "end": "2121200"
+  },
+  {
+    "text": "because we want to be able to retry each component and you might say jrpc shouldn't you be using streaming that's",
+    "start": "2121200",
+    "end": "2128320"
+  },
+  {
+    "text": "what we thought too didn't work very well and the reason it didn't work very well is because all of those resiliency",
+    "start": "2128320",
+    "end": "2134040"
+  },
+  {
+    "text": "techniques I talked about where you can retry individual pieces of work and you can hedge and you can speculate and you can retry they don't work in a streaming",
+    "start": "2134040",
+    "end": "2141839"
+  },
+  {
+    "text": "API so instead we've shifted almost all of our state apis to paginated apis that return fixed amounts of data and the",
+    "start": "2141839",
+    "end": "2148880"
+  },
+  {
+    "text": "client has to explicitly request the next page this also has nice back pressure effects where the client if the",
+    "start": "2148880",
+    "end": "2154720"
+  },
+  {
+    "text": "client isn't asking for the next page the data sour does not preemptively return",
+    "start": "2154720",
+    "end": "2160078"
+  },
+  {
+    "text": "it this does lead to one interesting failure mode though which is that because most storage engines Implement",
+    "start": "2160599",
+    "end": "2166520"
+  },
+  {
+    "text": "pagination based on number of rows and we want to implement pagination in terms of size we have this mismatch where the",
+    "start": "2166520",
+    "end": "2173280"
+  },
+  {
+    "text": "server might do many round trips to the data store in order to accumulate a page so many round trips that we actually",
+    "start": "2173280",
+    "end": "2179200"
+  },
+  {
+    "text": "bust the SLO that's pretty easy because we know what the SLO is so we can just stop",
+    "start": "2179200",
+    "end": "2185880"
+  },
+  {
+    "text": "paginating and no point did our API promise that we would return a fixed amount of work or that we'd perform a",
+    "start": "2185880",
+    "end": "2191560"
+  },
+  {
+    "text": "fixed number so instead we'd rather present progress to the client and then let the client request the next page if",
+    "start": "2191560",
+    "end": "2197960"
+  },
+  {
+    "text": "they need it in many cases they're just asking for the first",
+    "start": "2197960",
+    "end": "2203040"
+  },
+  {
+    "text": "item finally let's look at scan scan is just like get except that there's no primary key and the only kind of",
+    "start": "2203800",
+    "end": "2210760"
+  },
+  {
+    "text": "interesting thing in this API is that when when you initiate a scan the key value service dynamically computes how",
+    "start": "2210760",
+    "end": "2217560"
+  },
+  {
+    "text": "many concurrent cursors it releases to that client and that's the uh repeated",
+    "start": "2217560",
+    "end": "2222760"
+  },
+  {
+    "text": "string value next page so for example if the backend system is lowly loaded then",
+    "start": "2222760",
+    "end": "2228280"
+  },
+  {
+    "text": "it might return a high concurrency like 16 concurrent cursors that then the client could consume quite quickly if a",
+    "start": "2228280",
+    "end": "2235119"
+  },
+  {
+    "text": "lot of clients are scanning then it will only return a small number of cursors and this has a natural back pressure",
+    "start": "2235119",
+    "end": "2240520"
+  },
+  {
+    "text": "effect where if a bunch of clients show up and start full table scanning this name space the key value service",
+    "start": "2240520",
+    "end": "2245920"
+  },
+  {
+    "text": "protects itself and rate limits how quickly they can",
+    "start": "2245920",
+    "end": "2250839"
+  },
+  {
+    "text": "scan all right so let's wrap it up how do we put it all together well on the right side we saw that item potency",
+    "start": "2251200",
+    "end": "2257359"
+  },
+  {
+    "text": "token in use to duplicate in this case the back end is some storage engine that implements a last rate winds uh use case",
+    "start": "2257359",
+    "end": "2263720"
+  },
+  {
+    "text": "so the time stamp is sufficient we are able to chunk and break down large rights and on reads we return pages of",
+    "start": "2263720",
+    "end": "2269720"
+  },
+  {
+    "text": "work within the service level objective we do not offer a service level objective across all pages because at",
+    "start": "2269720",
+    "end": "2275599"
+  },
+  {
+    "text": "least at Netflix people can store gigabytes in a single key in our key value store we can't offer an SLO on how",
+    "start": "2275599",
+    "end": "2281200"
+  },
+  {
+    "text": "quickly we'll overturn gigabytes we can offer a throughput SLO which is a proxy for that individual page size limit so",
+    "start": "2281200",
+    "end": "2288240"
+  },
+  {
+    "text": "like if you take that size and multiply it by the number of pages that's your throughput SLO and I think a key Insight here is",
+    "start": "2288240",
+    "end": "2294680"
+  },
+  {
+    "text": "that we're focusing on fixed size work not fixed count work as we mentioned earlier every bite",
+    "start": "2294680",
+    "end": "2301680"
+  },
+  {
+    "text": "that we transmit either in wrs or in reads is an opportunity for failure",
+    "start": "2301680",
+    "end": "2307440"
+  },
+  {
+    "text": "all right let's see so that's like a nice example you might say oh that's like you know that's just one key value API what about other apis it turns out",
+    "start": "2307440",
+    "end": "2314640"
+  },
+  {
+    "text": "you can use these techniques in general for example at Netflix we have the time series extraction this stores all of our",
+    "start": "2314640",
+    "end": "2320240"
+  },
+  {
+    "text": "Trace information loog PDS log blobs which are like playback log blobs that tell us that somebody hit play and just",
+    "start": "2320240",
+    "end": "2326359"
+  },
+  {
+    "text": "to kind of like demonstrate the scale of the service this service handles between 20 and 30 million events per second",
+    "start": "2326359",
+    "end": "2332680"
+  },
+  {
+    "text": "fully durably with retention for multiple weeks and that's how the customer service agents know that your",
+    "start": "2332680",
+    "end": "2338880"
+  },
+  {
+    "text": "TV had that really odd error at 2: in the morning while you were watching Bridgerton so how does the system work",
+    "start": "2338880",
+    "end": "2346079"
+  },
+  {
+    "text": "well we have our write event records and point which takes a list of event records and nowhere in this event record do we see item potency token but I",
+    "start": "2346079",
+    "end": "2353599"
+  },
+  {
+    "text": "promise you it's there just look a little closer on the read side it looks just like the get items we have get items on",
+    "start": "2353599",
+    "end": "2359640"
+  },
+  {
+    "text": "the top and we have scan on the bottom essentially read a specific event stream or read all of them the item pocy token in the Serv is",
+    "start": "2359640",
+    "end": "2366720"
+  },
+  {
+    "text": "actually built into the contract of Time series specifically if you provide an event that has the same event time and",
+    "start": "2366720",
+    "end": "2372599"
+  },
+  {
+    "text": "the same unique event ID then this backend storage of this duplicates that operation so while it's not called an",
+    "start": "2372599",
+    "end": "2378440"
+  },
+  {
+    "text": "item potency token it's using the same concept and on the read side again we see that breaking down of a large of a",
+    "start": "2378440",
+    "end": "2385359"
+  },
+  {
+    "text": "potentially very large response into multiple pages that can be consumed",
+    "start": "2385359",
+    "end": "2391040"
+  },
+  {
+    "text": "progressively and the one thing that I'd like to touch on in this service is that because of the massive scale here here",
+    "start": "2391040",
+    "end": "2396920"
+  },
+  {
+    "text": "developers asked us for an additional level of reliability and they were willing to",
+    "start": "2396920",
+    "end": "2402119"
+  },
+  {
+    "text": "trade off significant amounts of consistency in order to get it and specifically that's that operation mode",
+    "start": "2402119",
+    "end": "2407560"
+  },
+  {
+    "text": "on the left there which we call fire and forget where the only thing that the time series client does is like inue it into a buffer and goes like okay I'm",
+    "start": "2407560",
+    "end": "2414920"
+  },
+  {
+    "text": "done it doesn't even wait until it gets off the box is this durable no would",
+    "start": "2414920",
+    "end": "2420480"
+  },
+  {
+    "text": "most database people say that that is like an acceptable thing probably not but our users really loved that that could handle 20 million per second and",
+    "start": "2420480",
+    "end": "2427640"
+  },
+  {
+    "text": "and it worked all the time they didn't care if we dropped like one service Trace out of billions in that",
+    "start": "2427640",
+    "end": "2435400"
+  },
+  {
+    "text": "minute but then we we do offer more consistent and less reliable options as we go to the left for example we can say",
+    "start": "2435400",
+    "end": "2443200"
+  },
+  {
+    "text": "we'll let you know when we have it in cued into our inmemory queue on the C on the time series server or we'll respond",
+    "start": "2443200",
+    "end": "2449760"
+  },
+  {
+    "text": "back to you once it is durable in storage so we can see again how",
+    "start": "2449760",
+    "end": "2455319"
+  },
+  {
+    "text": "depending on what your customer need you can be more reliable by trading off consistency or if they needed that",
+    "start": "2455319",
+    "end": "2461839"
+  },
+  {
+    "text": "consistency you could just spend a lot of money that's another valuable way to get the type of reliability that you",
+    "start": "2461839",
+    "end": "2469280"
+  },
+  {
+    "text": "need all right so let's wrap it with time series again we see the item potency token on rights we see multiple",
+    "start": "2469280",
+    "end": "2475280"
+  },
+  {
+    "text": "modes of acknowledgement in this particular service we just ban large events like you can't write large events to this larger than four megabytes and",
+    "start": "2475280",
+    "end": "2481480"
+  },
+  {
+    "text": "then reads uh return within with Pages within the SLO fixed size work not fixed",
+    "start": "2481480",
+    "end": "2488319"
+  },
+  {
+    "text": "count all right with that we've seen how we can modify make modifications to our",
+    "start": "2488319",
+    "end": "2493400"
+  },
+  {
+    "text": "stateful apis to be able to use those client and server techniques that we covered earlier in the talk and I hope",
+    "start": "2493400",
+    "end": "2499480"
+  },
+  {
+    "text": "that some of these might help you improve the reliability of your stateful services with that thank you please",
+    "start": "2499480",
+    "end": "2505880"
+  },
+  {
+    "text": "remember to vote and leave feedback thank you um vice versa",
+    "start": "2505880",
+    "end": "2513640"
+  },
+  {
+    "text": "techologies for the hedging enabling Technologies for",
+    "start": "2513640",
+    "end": "2519040"
+  },
+  {
+    "text": "hedging weighted Choice routing um it's a good question I mean I think that the generic answer would be something like a",
+    "start": "2519040",
+    "end": "2525240"
+  },
+  {
+    "text": "service mesh because that would allow you to implement those techniques like once centrally in your in your proxy",
+    "start": "2525240",
+    "end": "2530599"
+  },
+  {
+    "text": "that does erass routing you could Implement your load balancing policy um that particular like weighted choice of n that requires a little bit more",
+    "start": "2530599",
+    "end": "2536839"
+  },
+  {
+    "text": "metadata because we need to know information about like where data is stored so it's a little bit more complex to make uh kind of generic but you can",
+    "start": "2536839",
+    "end": "2543680"
+  },
+  {
+    "text": "do it um and then on hedging hedging is very very easy to make generic you can throw that in service meshes you can",
+    "start": "2543680",
+    "end": "2550119"
+  },
+  {
+    "text": "throw it in some generic IPC library that you distribute to all your clients um hedging is easiest to implement in a",
+    "start": "2550119",
+    "end": "2555760"
+  },
+  {
+    "text": "language that has proper acing Futures so like rust or Java um or C++ with futures um it's really hard to implement",
+    "start": "2555760",
+    "end": "2562800"
+  },
+  {
+    "text": "in something like python although you can do it um so that's one of the reasons why I think I would probably lean towards some kind of external side",
+    "start": "2562800",
+    "end": "2569240"
+  },
+  {
+    "text": "card that implements those resiliency techniques centrally does that answer your question",
+    "start": "2569240",
+    "end": "2575160"
+  },
+  {
+    "text": "great",
+    "start": "2575160",
+    "end": "2578160"
+  },
+  {
+    "text": "hi thanks for the talk um do you have any strategies for the server side",
+    "start": "2590319",
+    "end": "2595440"
+  },
+  {
+    "text": "handling of the adeny tokens yeah um great question so many data stores have",
+    "start": "2595440",
+    "end": "2602839"
+  },
+  {
+    "text": "a built-in item potency technique so for example aache cassander last right wins so as long as you can present a mutation",
+    "start": "2602839",
+    "end": "2608319"
+  },
+  {
+    "text": "with the same time stamp um other cases are are more difficult and usually involve some form of data modeling so",
+    "start": "2608319",
+    "end": "2615000"
+  },
+  {
+    "text": "for example like let's say you've got a transactional SQL store you could Implement uh item potency by doing a",
+    "start": "2615000",
+    "end": "2620160"
+  },
+  {
+    "text": "transaction like a compar and set operation so you know insert this if it does already exist um insert if not",
+    "start": "2620160",
+    "end": "2626079"
+  },
+  {
+    "text": "exists is an item potent opport um is is an item potent operation um but yeah it's definitely per storage engine so if",
+    "start": "2626079",
+    "end": "2633000"
+  },
+  {
+    "text": "you're using like elastic search the way that you implement item potency for elastic search is is different from Cassandra which is different from like",
+    "start": "2633000",
+    "end": "2638640"
+  },
+  {
+    "text": "postres um does that answer your question or would you like more examples yeah handle it at the actual",
+    "start": "2638640",
+    "end": "2645559"
+  },
+  {
+    "text": "data store layer as opposed to the service layer itself yeah so that's actually one of the reasons why why",
+    "start": "2645559",
+    "end": "2650960"
+  },
+  {
+    "text": "Netflix has been moving towards these uh online State full abstractions so like the key value in Time series abstraction",
+    "start": "2650960",
+    "end": "2656040"
+  },
+  {
+    "text": "that I presented um one of their core reasons of being is to implement those item potency techniques um for people so",
+    "start": "2656040",
+    "end": "2663200"
+  },
+  {
+    "text": "like when you send mutations to the key value service or to the time series service it handles like oh I'm talking to dynb this is how dynb does item",
+    "start": "2663200",
+    "end": "2670559"
+  },
+  {
+    "text": "potency oh this is I'm talking to um Cassandra this is how cander inflence item potency although you certainly",
+    "start": "2670559",
+    "end": "2676280"
+  },
+  {
+    "text": "could do that in like libraries um I just think it would be more difficult to maintain",
+    "start": "2676280",
+    "end": "2682640"
+  },
+  {
+    "text": "thanks I think we've got a question in the",
+    "start": "2685000",
+    "end": "2689000"
+  },
+  {
+    "text": "front hi he thanks great talk you mentioned decomissioning some couple",
+    "start": "2694760",
+    "end": "2701359"
+  },
+  {
+    "text": "thousand Sur a month or a year a year in AWS that just means you give that back",
+    "start": "2701359",
+    "end": "2707960"
+  },
+  {
+    "text": "right yes I was curious whether you like communicate that to AWS or",
+    "start": "2707960",
+    "end": "2713838"
+  },
+  {
+    "text": "you it mostly comes back to us actually um so this is a great question I and the",
+    "start": "2714920",
+    "end": "2722720"
+  },
+  {
+    "text": "first technique that we use is that we um we detach but don't terminate yet and",
+    "start": "2722720",
+    "end": "2728520"
+  },
+  {
+    "text": "then we allow the autoscaling group so we from an autoscaling group we detach the instance but we don't terminate it",
+    "start": "2728520",
+    "end": "2734040"
+  },
+  {
+    "text": "that kind of reserves it out of the pool Amazon gives us a new instance which hopefully is healthy and then we release",
+    "start": "2734040",
+    "end": "2739440"
+  },
+  {
+    "text": "that one and then to answer your question of like do we just leave it to the plees",
+    "start": "2739440",
+    "end": "2745079"
+  },
+  {
+    "text": "um it just goes back into the pool um the pre-flight checks uh help us not get",
+    "start": "2745079",
+    "end": "2751480"
+  },
+  {
+    "text": "it back uh this is especially a problem for like narrowly constrained instance amilies so for example back when like we",
+    "start": "2751480",
+    "end": "2757480"
+  },
+  {
+    "text": "used a lot of d2s it was very common for us to get get the same D2 back um and so those pre-flight that's actually why we",
+    "start": "2757480",
+    "end": "2763319"
+  },
+  {
+    "text": "added the pre-flight checks because the pre-flight checks on our end will reject that Hardware from re-entering the",
+    "start": "2763319",
+    "end": "2770079"
+  },
+  {
+    "text": "fleet uh there's no as far as I'm aware there's no durable way to know that a",
+    "start": "2770480",
+    "end": "2775839"
+  },
+  {
+    "text": "new Amazon instance is an old one so like if you have one instance ID and then you terminate it and Amazon hands",
+    "start": "2775839",
+    "end": "2781280"
+  },
+  {
+    "text": "you back a new one I'm not aware of how to know that it is degraded um we have talked with with AWS uh about how to",
+    "start": "2781280",
+    "end": "2788559"
+  },
+  {
+    "text": "improve these communication capabilities it would be nice if they had an API where we could be like our monitoring systems have detected this degraded",
+    "start": "2788559",
+    "end": "2795079"
+  },
+  {
+    "text": "Hardware one thing I can say is that E2 actually already knows a lot of times that that drive is degraded they just",
+    "start": "2795079",
+    "end": "2801480"
+  },
+  {
+    "text": "can't pull it because there's a user workload on it so think about it like from their perspective they don't know if you're using the drive like they",
+    "start": "2801480",
+    "end": "2807440"
+  },
+  {
+    "text": "might know that it's throwing all these iers but they don't know if your workload cares about that so they're not going to just like turn off your",
+    "start": "2807440",
+    "end": "2812599"
+  },
+  {
+    "text": "workload um so yeah I I think in practice I I I don't think I can share",
+    "start": "2812599",
+    "end": "2818400"
+  },
+  {
+    "text": "the exact numbers I can talk to you afterwards but in practice Amazon actually catches a lot of that on their",
+    "start": "2818400",
+    "end": "2823880"
+  },
+  {
+    "text": "own does that answer your question yeah fantastic all right I think there's a",
+    "start": "2823880",
+    "end": "2829040"
+  },
+  {
+    "text": "hand in the back hi uh you talking about uh",
+    "start": "2829040",
+    "end": "2837720"
+  },
+  {
+    "text": "designing API designing clients and right so uh",
+    "start": "2837720",
+    "end": "2846240"
+  },
+  {
+    "text": "are usually providing like a set of API to the who the uses of the St services",
+    "start": "2846240",
+    "end": "2856640"
+  },
+  {
+    "text": "or they can use St Services directly how that relationship so we target an 8020",
+    "start": "2856640",
+    "end": "2864079"
+  },
+  {
+    "text": "um so about 80% of services at Netflix go through those abstraction layers in which case we offer them um a lot of",
+    "start": "2864079",
+    "end": "2870640"
+  },
+  {
+    "text": "guarantees around API compatibility about 20% of users do go directly to storage engines and which case we like",
+    "start": "2870640",
+    "end": "2876400"
+  },
+  {
+    "text": "send them the 25 page memo and like this is how you implement item potency this is how you don't kill this data store",
+    "start": "2876400",
+    "end": "2881720"
+  },
+  {
+    "text": "this is how you do backups like but but a lot of folks do want that level of control uh at Netflix and so we do give",
+    "start": "2881720",
+    "end": "2888559"
+  },
+  {
+    "text": "them that freedom um although it is again an 8020 so about 20% of users do direct data access and manage their own",
+    "start": "2888559",
+    "end": "2895760"
+  },
+  {
+    "text": "uh implementations of some of these uh we do provide data store client libraries as well in all major supported",
+    "start": "2895760",
+    "end": "2901800"
+  },
+  {
+    "text": "languages um but yeah we definitely kind of push people towards the uh apis that we know have all the item",
+    "start": "2901800",
+    "end": "2908640"
+  },
+  {
+    "text": "potency and resiliency techniques that we think are important um there are cases where for example we've we've",
+    "start": "2908640",
+    "end": "2914760"
+  },
+  {
+    "text": "worked to get some of these resiliency techniques I'm actually working with a colleague right now to get that load balancer into the open source cassand",
+    "start": "2914760",
+    "end": "2920720"
+  },
+  {
+    "text": "driver um so we do sometimes you know bring that back to the open source Community um but it's it can be",
+    "start": "2920720",
+    "end": "2926079"
+  },
+  {
+    "text": "challenging because uh a lot of these techniques um when when you don't have a",
+    "start": "2926079",
+    "end": "2932040"
+  },
+  {
+    "text": "requirement for really high reliability a lot of them don't make sense uh to pay the the engineering",
+    "start": "2932040",
+    "end": "2939520"
+  },
+  {
+    "text": "complexity I think there was a speaker earlier who alluded to like NASA right so like NASA it makes sense for them to",
+    "start": "2939520",
+    "end": "2945520"
+  },
+  {
+    "text": "invest in reliability um you know if you're showing cat pictures maybe maybe it",
+    "start": "2945520",
+    "end": "2951960"
+  },
+  {
+    "text": "doesn't I hope that answers your question all right fantastic thank you",
+    "start": "2952839",
+    "end": "2960020"
+  },
+  {
+    "text": "[Applause] everyone",
+    "start": "2960020",
+    "end": "2967300"
+  },
+  {
+    "text": "[Music]",
+    "start": "2967300",
+    "end": "2970389"
+  }
+]

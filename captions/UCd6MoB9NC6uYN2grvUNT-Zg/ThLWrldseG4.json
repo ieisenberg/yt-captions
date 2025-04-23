@@ -1,0 +1,2310 @@
+[
+  {
+    "start": "0",
+    "end": "23000"
+  },
+  {
+    "text": "hi everybody welcome my name is Jordan young I'm a manager of analytics",
+    "start": "0",
+    "end": "5310"
+  },
+  {
+    "text": "engineering at glu mobile and I'm going to talk a little bit today about our",
+    "start": "5310",
+    "end": "10889"
+  },
+  {
+    "text": "data platform and how we use Kinesis and apache storm to handle what is fairly",
+    "start": "10889",
+    "end": "17580"
+  },
+  {
+    "text": "large data data load every single day so",
+    "start": "17580",
+    "end": "24439"
+  },
+  {
+    "start": "23000",
+    "end": "23000"
+  },
+  {
+    "text": "to start who here has used amazon kinesis at all or is familiar with it",
+    "start": "24439",
+    "end": "29720"
+  },
+  {
+    "text": "okay what about a patchy storm and what",
+    "start": "29720",
+    "end": "35040"
+  },
+  {
+    "text": "about Hadoop okay cool so let's get",
+    "start": "35040",
+    "end": "42510"
+  },
+  {
+    "text": "started then let's let's go over we're going to talk about I'm going to briefly introduce Glu Mobile of some of our data",
+    "start": "42510",
+    "end": "49050"
+  },
+  {
+    "text": "requirements and challenges and then I'm going to talk a little bit about our architecture and some of the decisions",
+    "start": "49050",
+    "end": "54420"
+  },
+  {
+    "text": "that we've made I'll try to be brief there I'm just going to try to set some context and then I'm going to go fairly",
+    "start": "54420",
+    "end": "61469"
+  },
+  {
+    "text": "deep into Kinesis and especially the amazon kinesis connector library how",
+    "start": "61469",
+    "end": "66930"
+  },
+  {
+    "text": "that works and how it's been a good solution for us then I'm going to spend some time going through our real-time",
+    "start": "66930",
+    "end": "74250"
+  },
+  {
+    "text": "implementation which uses a patchy storm and how we've been able to to integrate Kinesis with that and then lastly I'm",
+    "start": "74250",
+    "end": "80850"
+  },
+  {
+    "text": "going to go through kind of a bunch of kind of ad hoc challenges and insights that we faced building out this platform",
+    "start": "80850",
+    "end": "87689"
+  },
+  {
+    "text": "things that I wish we'd kind of known about before but that we've had to learn through trial and error all right so Glu",
+    "start": "87689",
+    "end": "96090"
+  },
+  {
+    "start": "95000",
+    "end": "95000"
+  },
+  {
+    "text": "Mobile is a leading publisher of mobile games these are a few of our franchises our best performing games Kim Kardashian",
+    "start": "96090",
+    "end": "103350"
+  },
+  {
+    "text": "Hollywood but we have a couple other fairly recognizable franchises",
+    "start": "103350",
+    "end": "109829"
+  },
+  {
+    "text": "deerhunter contract killer racing rivals and so forth right now we have four",
+    "start": "109829",
+    "end": "115530"
+  },
+  {
+    "text": "titles in the top hundred grossing typically like four to six million daily",
+    "start": "115530",
+    "end": "120960"
+  },
+  {
+    "text": "active users and since we started collecting data back in 2010 we've had",
+    "start": "120960",
+    "end": "126299"
+  },
+  {
+    "text": "over a billion global installs so what do we collect those four to six million",
+    "start": "126299",
+    "end": "132750"
+  },
+  {
+    "start": "129000",
+    "end": "129000"
+  },
+  {
+    "text": "daily active users Jenner rate quite a bit of data anywhere between 700 million to we've had a few",
+    "start": "132750",
+    "end": "139380"
+  },
+  {
+    "text": "days where we've gone over 2 billion events per day 600 bites an event that means we could theoretically collect up",
+    "start": "139380",
+    "end": "145620"
+  },
+  {
+    "text": "to 1.2 terabytes in a single day and if we had a successful game launch for example that could we need to be",
+    "start": "145620",
+    "end": "151200"
+  },
+  {
+    "text": "prepared to scale up higher than that and where do we get this data so the vast majority of it comes from client",
+    "start": "151200",
+    "end": "157050"
+  },
+  {
+    "text": "side SDKs we also collect data from game servers from Central Services servers from an attribution partner from ad",
+    "start": "157050",
+    "end": "163680"
+  },
+  {
+    "text": "networks from third parties and so forth all right so some of the basic",
+    "start": "163680",
+    "end": "170610"
+  },
+  {
+    "start": "168000",
+    "end": "168000"
+  },
+  {
+    "text": "requirements around it we need near zero data loss high levels of time we need to be able to handle a flexible data format",
+    "start": "170610",
+    "end": "177800"
+  },
+  {
+    "text": "the kind of data that we collect for Kim Kardashian Hollywood is not necessarily going to be the same kind of data that",
+    "start": "177800",
+    "end": "183030"
+  },
+  {
+    "text": "we collect for contract killer sniper those are two very different games with two very different engines and so we",
+    "start": "183030",
+    "end": "188910"
+  },
+  {
+    "text": "need to be able to pass arbitrary fields in if we want to be able to do good analytics on it we also need to be able",
+    "start": "188910",
+    "end": "195600"
+  },
+  {
+    "text": "to do real-time aggregations and we need reasonably low latency for ad-hoc queries so it can wait till the next",
+    "start": "195600",
+    "end": "205080"
+  },
+  {
+    "text": "hour typically for that sort of thing something like how much money we've made camp but something like getting you know",
+    "start": "205080",
+    "end": "211380"
+  },
+  {
+    "text": "the tutorial completion rate or whatever something that we haven't instrumented previously can wait till the next hour",
+    "start": "211380",
+    "end": "217440"
+  },
+  {
+    "text": "typically and some other requirements it can't be expensive it needs to be",
+    "start": "217440",
+    "end": "225000"
+  },
+  {
+    "start": "219000",
+    "end": "219000"
+  },
+  {
+    "text": "implemented with minimal engineering effort through this through most of this process I've been the only engineer",
+    "start": "225000",
+    "end": "231180"
+  },
+  {
+    "text": "working on this with a little bit of help from some contractors but we definitely needed something that was",
+    "start": "231180",
+    "end": "237030"
+  },
+  {
+    "text": "going to be easy to maintain and simple to set up and then also we needed",
+    "start": "237030",
+    "end": "242160"
+  },
+  {
+    "text": "something that would require minimal changes to existing games so we couldn't just go tell all of our our client teams",
+    "start": "242160",
+    "end": "249690"
+  },
+  {
+    "text": "oh yeah you have to totally like restructure the way that your game works and you have to use the server to send data that is never going to work we",
+    "start": "249690",
+    "end": "255390"
+  },
+  {
+    "text": "pretty much knew that we had to just build an SDK that they could drop into their game all right so where does that",
+    "start": "255390",
+    "end": "263610"
+  },
+  {
+    "text": "leave us so about three and a half years ago well before I started blew our data platform was every game",
+    "start": "263610",
+    "end": "272090"
+  },
+  {
+    "start": "264000",
+    "end": "264000"
+  },
+  {
+    "text": "had a separate sequel server shard they all had inconsistent schemas and that was a complete disaster it would be like",
+    "start": "272090",
+    "end": "277490"
+  },
+  {
+    "text": "a whole day of work to compare the retention numbers between two games did not work at all and so they decided to",
+    "start": "277490",
+    "end": "285979"
+  },
+  {
+    "text": "go to a third party and that worked a lot better we were able to compare",
+    "start": "285979",
+    "end": "292009"
+  },
+  {
+    "text": "retention numbers across different games for example but ultimately lack the flexibility that we needed in our data",
+    "start": "292009",
+    "end": "298370"
+  },
+  {
+    "text": "platform so we talked to our third party and we had them set up a raw data API",
+    "start": "298370",
+    "end": "303560"
+  },
+  {
+    "text": "where we could pull all of our data every hour over HTTP so we wrote a python application that would pull all",
+    "start": "303560",
+    "end": "309680"
+  },
+  {
+    "text": "that data over HTTP and upload it to s3 then we set up a Hadoop cluster and use",
+    "start": "309680",
+    "end": "319129"
+  },
+  {
+    "text": "that Hadoop cluster to calculate all the aggregates that we were interested in looking at dashboards as well as to do",
+    "start": "319129",
+    "end": "324409"
+  },
+  {
+    "text": "all of our ad hoc analysis then we used amazon redshift as the back end for for",
+    "start": "324409",
+    "end": "331039"
+  },
+  {
+    "text": "a bunch of tableau dashboards and so we were able to set this up fairly quickly you know and it worked reasonably well",
+    "start": "331039",
+    "end": "338569"
+  },
+  {
+    "text": "mostly these are components that were ready made and so forth but we",
+    "start": "338569",
+    "end": "345529"
+  },
+  {
+    "text": "eventually ran into some problems so that a strategy of downloading all those files over HTTP was not particularly",
+    "start": "345529",
+    "end": "353150"
+  },
+  {
+    "text": "reliable if you can imagine you're pulling down you know terabytes of data a day you're going to you're going to",
+    "start": "353150",
+    "end": "360770"
+  },
+  {
+    "text": "run into some situations where you don't get complete files and so forth it also didn't necessarily scale well that third",
+    "start": "360770",
+    "end": "367789"
+  },
+  {
+    "text": "party didn't necessarily know when we were going to didn't necessarily scale",
+    "start": "367789",
+    "end": "372889"
+  },
+  {
+    "text": "up in advance of some of our like large launches and so we'd have downtime right during a game launch which is total",
+    "start": "372889",
+    "end": "378229"
+  },
+  {
+    "text": "disaster and it wasn't timely we had to wait a few hours before we could pull",
+    "start": "378229",
+    "end": "383990"
+  },
+  {
+    "text": "that data down and so something like real time was not really an option all right so where did that leave us well we",
+    "start": "383990",
+    "end": "390440"
+  },
+  {
+    "text": "had to bring our data collection in house so that meant building our own analytics SDK and it meant setting up a",
+    "start": "390440",
+    "end": "395599"
+  },
+  {
+    "text": "framework for collecting data from that SDK and so we had two basic options here we could use some like Kafka build our own service or we",
+    "start": "395599",
+    "end": "403939"
+  },
+  {
+    "text": "could use a hosted service like Kinesis and given that I'm here you can probably",
+    "start": "403939",
+    "end": "410120"
+  },
+  {
+    "text": "guess which one will you chose alright so really briefly before I get into our",
+    "start": "410120",
+    "end": "417020"
+  },
+  {
+    "text": "particular implementation of Kinesis let's go over the basics of it so you",
+    "start": "417020",
+    "end": "425060"
+  },
+  {
+    "start": "421000",
+    "end": "421000"
+  },
+  {
+    "text": "have producers which generate data that can be a server or client on mobile client whatever it puts it onto a",
+    "start": "425060",
+    "end": "432830"
+  },
+  {
+    "text": "Kinesis stream that stream is defined by shards so stream could be anywhere from",
+    "start": "432830",
+    "end": "438620"
+  },
+  {
+    "text": "one to theoretically an infinite number of shards those shards have capacity",
+    "start": "438620",
+    "end": "445669"
+  },
+  {
+    "text": "limits so the more data you want to pass through the more shards you need and then you have consumers that read data",
+    "start": "445669",
+    "end": "451520"
+  },
+  {
+    "text": "off the stream and so the fundamental difference here between something like Kinesis and SQS is you can actually have",
+    "start": "451520",
+    "end": "459020"
+  },
+  {
+    "text": "multiple consumers reading the same stream of data because it uses checkpointing instead of like deleting",
+    "start": "459020",
+    "end": "465500"
+  },
+  {
+    "text": "records alright and so why did we pick",
+    "start": "465500",
+    "end": "470719"
+  },
+  {
+    "start": "469000",
+    "end": "469000"
+  },
+  {
+    "text": "Kinesis a minimal setup time all these pre-built applications which are pretty useful the canisius connector library",
+    "start": "470719",
+    "end": "476930"
+  },
+  {
+    "text": "and the Kinesis storm spouts worked really well with the architecture that we were sort of planning no maintenance",
+    "start": "476930",
+    "end": "483139"
+  },
+  {
+    "text": "no hardware which men with one engineer you could actually run this and there",
+    "start": "483139",
+    "end": "489379"
+  },
+  {
+    "text": "wasn't really a price consideration it didn't it wasn't a big enough difference to factor into our decision alright so",
+    "start": "489379",
+    "end": "496699"
+  },
+  {
+    "text": "our producers like I said we had to build client SDKs we built a native",
+    "start": "496699",
+    "end": "503300"
+  },
+  {
+    "text": "Android plugin in Java and we built a native iOS plugin and objective-c and we",
+    "start": "503300",
+    "end": "509389"
+  },
+  {
+    "text": "built a unity wrapper for our unity titles we built these on top of the AWS SDKs for their respective platforms and",
+    "start": "509389",
+    "end": "517130"
+  },
+  {
+    "text": "neat these SDKs these plugins implement our own internal analytics schema so we",
+    "start": "517130",
+    "end": "522469"
+  },
+  {
+    "text": "don't have to worry about a client team you know sending us records that don't",
+    "start": "522469",
+    "end": "528140"
+  },
+  {
+    "text": "conform to our schema they have to conform to our schema and then we also have additional server-side implementations like I discussed before",
+    "start": "528140",
+    "end": "536079"
+  },
+  {
+    "text": "we don't do any record batching or any compression which might seem like you",
+    "start": "537490",
+    "end": "543260"
+  },
+  {
+    "text": "know not a smart thing to do but it turns out the cost difference is is",
+    "start": "543260",
+    "end": "548720"
+  },
+  {
+    "text": "minimal enough that we don't care and it makes working with some of these downstream applications a little bit easier we flush records every 30 seconds",
+    "start": "548720",
+    "end": "555320"
+  },
+  {
+    "text": "or upon certain important events we do our client authentication using Cognito",
+    "start": "555320",
+    "end": "561370"
+  },
+  {
+    "text": "and we have IM roles for our server authentication alright so we have these",
+    "start": "561370",
+    "end": "570080"
+  },
+  {
+    "start": "568000",
+    "end": "568000"
+  },
+  {
+    "text": "producers generating data how many charge do we want the stream that they're writing to to be so we made an",
+    "start": "570080",
+    "end": "579800"
+  },
+  {
+    "text": "architecture decision to have one global stream for all of our data because it's all being processed by the same system",
+    "start": "579800",
+    "end": "586700"
+  },
+  {
+    "text": "in the back end we don't really treat the data from multiple games any differently in this sort of perspective",
+    "start": "586700",
+    "end": "593440"
+  },
+  {
+    "text": "so how big does that stream need to be well there's some limits on your shards",
+    "start": "593440",
+    "end": "598730"
+  },
+  {
+    "text": "a thousand records per second a megabyte per second and rights two megabytes per second and reads so in our situation",
+    "start": "598730",
+    "end": "604330"
+  },
+  {
+    "text": "let's say we peek out at 20,000 records per second 600 spur message so in order",
+    "start": "604330",
+    "end": "610550"
+  },
+  {
+    "text": "to handle the the message volume we'd need at least 20 shards those 20 charts",
+    "start": "610550",
+    "end": "617180"
+  },
+  {
+    "text": "are going to cover our or right capacity easily since we only have to do twelve",
+    "start": "617180",
+    "end": "622400"
+  },
+  {
+    "text": "megabyte per second of of writing and that we're going to forty megabytes per second of read capacity which means we",
+    "start": "622400",
+    "end": "628220"
+  },
+  {
+    "text": "could theoretically run up to three applications so 20 charge right that's",
+    "start": "628220",
+    "end": "633440"
+  },
+  {
+    "text": "that's what we should go with well probably not there's a couple other considerations so like I said what is",
+    "start": "633440",
+    "end": "639890"
+  },
+  {
+    "text": "your like peak peak load going to be you know down to the minute are you all right accepting any sort of delay you",
+    "start": "639890",
+    "end": "645140"
+  },
+  {
+    "text": "have to provision for that it's also probably a good idea to have some excess capacity I'm going to talk a little bit later about scaling this and it's",
+    "start": "645140",
+    "end": "652310"
+  },
+  {
+    "text": "totally possible to do but it's also not",
+    "start": "652310",
+    "end": "657640"
+  },
+  {
+    "text": "completely trivial and so it's probably better if you just are scaled up especially if you like you don't want to",
+    "start": "657640",
+    "end": "663050"
+  },
+  {
+    "text": "be scaling up in the middle of a game launch for example that's probably not ideal and then the",
+    "start": "663050",
+    "end": "668910"
+  },
+  {
+    "text": "last thing the mount thing anyone really thinks about is like what happens if your consumer applications or if your",
+    "start": "668910",
+    "end": "675089"
+  },
+  {
+    "text": "applications that are consuming data off the stream go down for like an hour or",
+    "start": "675089",
+    "end": "680610"
+  },
+  {
+    "text": "something like that you're gonna have to catch back up and if you're right at those read limits you're not gonna be",
+    "start": "680610",
+    "end": "685980"
+  },
+  {
+    "text": "able to do that because you're going to get throttled so it's helpful to have a little bit of extra space there just in",
+    "start": "685980",
+    "end": "691500"
+  },
+  {
+    "text": "case here your application ends up getting behind so given that we actually",
+    "start": "691500",
+    "end": "697050"
+  },
+  {
+    "text": "run we have 35 shards set up right now and we have a fairly big game launch at",
+    "start": "697050",
+    "end": "702509"
+  },
+  {
+    "text": "the end of the month and so we're probably you know potentially going to",
+    "start": "702509",
+    "end": "709470"
+  },
+  {
+    "text": "think about scaling that up even a little bit further before before we do that all right so let's go into a little",
+    "start": "709470",
+    "end": "718410"
+  },
+  {
+    "start": "715000",
+    "end": "715000"
+  },
+  {
+    "text": "bit of detail about about our consumers so we use the amazon kinesis connector",
+    "start": "718410",
+    "end": "723720"
+  },
+  {
+    "text": "library which is not to be confused with the Kinesis client library they're both kcls it's really confusing it got me for",
+    "start": "723720",
+    "end": "729990"
+  },
+  {
+    "text": "quite a bit of time so the canisius connector library sits on top of the",
+    "start": "729990",
+    "end": "735120"
+  },
+  {
+    "text": "Kinesis client library client library handles stuff like the check pointing it",
+    "start": "735120",
+    "end": "741269"
+  },
+  {
+    "text": "uses DynamoDB to do check pointing it handle stuff like distributing shards",
+    "start": "741269",
+    "end": "746879"
+  },
+  {
+    "text": "across multiple instances of your application all you have to do is just give your application give another",
+    "start": "746879",
+    "end": "754529"
+  },
+  {
+    "text": "instance the same application name and it will automatically load balance those charge across it so if you have 35",
+    "start": "754529",
+    "end": "760259"
+  },
+  {
+    "text": "shards and five applications it'll or five instances of your application it will give each of those 77 shards and so",
+    "start": "760259",
+    "end": "769949"
+  },
+  {
+    "text": "forth what the Kinesis connector library is just a really simple framework for building an application on top of that",
+    "start": "769949",
+    "end": "776399"
+  },
+  {
+    "text": "and so it follows a basic data flow you get records from the shard you transform",
+    "start": "776399",
+    "end": "783269"
+  },
+  {
+    "text": "those records you filter those records and then you insert them into a buffer this buffer has a should flush method",
+    "start": "783269",
+    "end": "789149"
+  },
+  {
+    "text": "one that's triggered it takes all of the records that are in the buffer and it emits them somehow and so in order to",
+    "start": "789149",
+    "end": "796709"
+  },
+  {
+    "text": "get this to work all that you have to do is implement this pipeline and so this is actually",
+    "start": "796709",
+    "end": "803410"
+  },
+  {
+    "start": "798000",
+    "end": "798000"
+  },
+  {
+    "text": "like our exact pipeline I didn't change any code here or at all you can see that",
+    "start": "803410",
+    "end": "809830"
+  },
+  {
+    "text": "there's a there's a transformer class that implements the trends that",
+    "start": "809830",
+    "end": "815980"
+  },
+  {
+    "text": "transformer interface that I transform interface you have a filter class that implements the I filter interface you",
+    "start": "815980",
+    "end": "822730"
+  },
+  {
+    "text": "have a buffer class that implements the I buffer interface and you have an emitter class that implements the i am",
+    "start": "822730",
+    "end": "828850"
+  },
+  {
+    "text": "error in our interface and i'm going to get into some of the details about our",
+    "start": "828850",
+    "end": "833920"
+  },
+  {
+    "text": "transformer but really quickly let's",
+    "start": "833920",
+    "end": "839140"
+  },
+  {
+    "text": "talk about that basic memory buffer so that's sort of the default that comes in amazon sample application and that was",
+    "start": "839140",
+    "end": "847750"
+  },
+  {
+    "text": "adequate for our needs basically it lets you input or lets you i omit records",
+    "start": "847750",
+    "end": "853090"
+  },
+  {
+    "text": "after a certain mount of time or certain number of records or certain bite size of the buffer and so you can implement",
+    "start": "853090",
+    "end": "860170"
+  },
+  {
+    "text": "limits for each of those and it'll limit after that and then we're also pretty much using a standard s3 emitter with",
+    "start": "860170",
+    "end": "867880"
+  },
+  {
+    "text": "just a couple changes for like file file naming and stuff like that all right so",
+    "start": "867880",
+    "end": "874390"
+  },
+  {
+    "start": "874000",
+    "end": "874000"
+  },
+  {
+    "text": "what might like a transformer implementation look like so we're not really doing a whole lot here you could do more the important stuff is that",
+    "start": "874390",
+    "end": "881440"
+  },
+  {
+    "text": "we're adding the sequence number in to the record and then we're getting the system timestamp so right now there",
+    "start": "881440",
+    "end": "888820"
+  },
+  {
+    "text": "isn't a way for us to get the timestamp of when a record was added to the stream which is what we really want",
+    "start": "888820",
+    "end": "894570"
+  },
+  {
+    "text": "theoretically amazon is going to come out with this and it will let us have access to that data but for the for the",
+    "start": "894570",
+    "end": "900070"
+  },
+  {
+    "text": "time being this is the best thing that we have we can get the timestamp when it was actually processed and if your",
+    "start": "900070",
+    "end": "905200"
+  },
+  {
+    "text": "application is running up to date that's only gonna be off by like you know 10 20 30 milliseconds or something like that",
+    "start": "905200",
+    "end": "911460"
+  },
+  {
+    "text": "so not a big deal anyways we append that stuff and then we return the JSON screen",
+    "start": "911460",
+    "end": "916570"
+  },
+  {
+    "text": "and that's all we do and that's pretty much our entire consumer application and",
+    "start": "916570",
+    "end": "922300"
+  },
+  {
+    "text": "took very very little effort to implement it all right so let's talk",
+    "start": "922300",
+    "end": "928240"
+  },
+  {
+    "text": "about real time now so first I want to kind of talk about",
+    "start": "928240",
+    "end": "934240"
+  },
+  {
+    "start": "932000",
+    "end": "932000"
+  },
+  {
+    "text": "storm a little bit so what is it it's a distributed fault tolerant framework for processing real-time data so it views",
+    "start": "934240",
+    "end": "942250"
+  },
+  {
+    "text": "incoming records as tuples and those tuples are passed through in an arbitrary directed acyclic graph of",
+    "start": "942250",
+    "end": "948790"
+  },
+  {
+    "text": "nodes called a topology and there's two types of nodes there spouts which emit",
+    "start": "948790",
+    "end": "954880"
+  },
+  {
+    "text": "tuples from outside the topology to in the topology and then there's bolts which process tuples that are already in",
+    "start": "954880",
+    "end": "960580"
+  },
+  {
+    "text": "the topology so you have usually like a couple spouts and then you know some",
+    "start": "960580",
+    "end": "965860"
+  },
+  {
+    "text": "arbitrary number of bolts that do whatever it is that they want to do and so the result is you can read from",
+    "start": "965860",
+    "end": "973150"
+  },
+  {
+    "text": "anywhere and you can write to anywhere in real time okay so a little quick bit",
+    "start": "973150",
+    "end": "979660"
+  },
+  {
+    "start": "978000",
+    "end": "978000"
+  },
+  {
+    "text": "on some cluster architecture here so you",
+    "start": "979660",
+    "end": "984820"
+  },
+  {
+    "text": "have a Nimbus machine which is your master node sort of like a job tracker and a Hadoop cluster and a Hadoop",
+    "start": "984820",
+    "end": "991090"
+  },
+  {
+    "text": "cluster resource manager I guess yarn that does stuff like it sends the jar",
+    "start": "991090",
+    "end": "998200"
+  },
+  {
+    "text": "files out to all this supervisor machines which are your slaves it assigns tasks to each each worker that",
+    "start": "998200",
+    "end": "1005940"
+  },
+  {
+    "text": "you've that you've spun up on the supervisors and so forth that talks to",
+    "start": "1005940",
+    "end": "1012300"
+  },
+  {
+    "text": "the zookeeper cluster which is you know in our case consists of three machines",
+    "start": "1012300",
+    "end": "1017310"
+  },
+  {
+    "text": "and that handles state and so this is pretty important it handles both the state of tuples as they're flowing through the topology so it knows what",
+    "start": "1017310",
+    "end": "1025589"
+  },
+  {
+    "text": "bolts have processed what tuples and which ones have been finished processing and that's important for storms",
+    "start": "1025590",
+    "end": "1031770"
+  },
+  {
+    "text": "reliability model it uses that to guarantee at least once processing and it also stores the state of the of the",
+    "start": "1031770",
+    "end": "1041250"
+  },
+  {
+    "text": "shards on in your stream so it does all the checkpointing just like DynamoDB",
+    "start": "1041250",
+    "end": "1046829"
+  },
+  {
+    "text": "does the checkpointing for any canisius client library application anyways so",
+    "start": "1046830",
+    "end": "1055620"
+  },
+  {
+    "text": "the zookeepers are tracking State on these supervisors typically those are going to be large instances they have",
+    "start": "1055620",
+    "end": "1060990"
+  },
+  {
+    "text": "some number of workers which are JVMs is for we have reason to think that it's",
+    "start": "1060990",
+    "end": "1066890"
+  },
+  {
+    "text": "better to use less of those at least in our instant in our use case and then",
+    "start": "1066890",
+    "end": "1072770"
+  },
+  {
+    "text": "sitting on each of those workers you have some arbitrary number of executors which are threads and then on each of",
+    "start": "1072770",
+    "end": "1077809"
+  },
+  {
+    "text": "those executors you have some arbitrary number of tasks which are executed serially on those executors all right so",
+    "start": "1077809",
+    "end": "1086330"
+  },
+  {
+    "text": "what does it look like from the topology perspective so this is a really simple",
+    "start": "1086330",
+    "end": "1091910"
+  },
+  {
+    "start": "1087000",
+    "end": "1087000"
+  },
+  {
+    "text": "topology that might let you do you know calculate some basic metrics from data",
+    "start": "1091910",
+    "end": "1097840"
+  },
+  {
+    "text": "coming through Kinesis so you have your Kinesis storm spout that's reading",
+    "start": "1097840",
+    "end": "1105350"
+  },
+  {
+    "text": "records off Kinesis and sending them into the you know sending them into the",
+    "start": "1105350",
+    "end": "1113929"
+  },
+  {
+    "text": "topology then you have a deserializer bolt which is maybe taking those records and deserializing them into some sort of",
+    "start": "1113929",
+    "end": "1122360"
+  },
+  {
+    "text": "a class to give you easy access to different fields or whatever then you might have a segregated bolt which takes",
+    "start": "1122360",
+    "end": "1129290"
+  },
+  {
+    "text": "all of that data and creates a bunch of different data flows a bunch of different streams that downstream bolts",
+    "start": "1129290",
+    "end": "1135350"
+  },
+  {
+    "text": "can then subscribe to so you might have an aggregator that subscribes to your monetization events and calculates your",
+    "start": "1135350",
+    "end": "1142070"
+  },
+  {
+    "text": "revenue in real time you might have an aggregator that subscribes to you know",
+    "start": "1142070",
+    "end": "1148400"
+  },
+  {
+    "text": "some sort of a heartbeat event and calculates your unique users you might have a filter that you know filters out",
+    "start": "1148400",
+    "end": "1154580"
+  },
+  {
+    "text": "and pulls down QA data or something like that and in our instance we're writing it to Amazon RDS my sequel database but",
+    "start": "1154580",
+    "end": "1163309"
+  },
+  {
+    "text": "that could be really written to anywhere that's that sort of an arbitrary not an arbitrary decision but from storms",
+    "start": "1163309",
+    "end": "1170750"
+  },
+  {
+    "text": "perspective it's arbitrary alright so let's talk about implementing this",
+    "start": "1170750",
+    "end": "1176210"
+  },
+  {
+    "start": "1173000",
+    "end": "1173000"
+  },
+  {
+    "text": "Kinesis storm spout so the kind of first step in getting topology to work so you",
+    "start": "1176210",
+    "end": "1183559"
+  },
+  {
+    "text": "have to set up a Kinesis spout config object and a couple of these options are fairly important so like I said earlier",
+    "start": "1183559",
+    "end": "1190340"
+  },
+  {
+    "text": "zookeepers handles all the state it handles all the checkpointing for the shards in your stream",
+    "start": "1190340",
+    "end": "1198290"
+  },
+  {
+    "text": "and all of that state is tied to a zookeeper prefix so if your topology goes down you want to launch it again if",
+    "start": "1198290",
+    "end": "1206750"
+  },
+  {
+    "text": "you keep the zookeeper prefix the same it's going to start processing records where it left off and so like I said",
+    "start": "1206750",
+    "end": "1212930"
+  },
+  {
+    "text": "that's sort of important in terms of guaranteeing at least once processing if",
+    "start": "1212930",
+    "end": "1220090"
+  },
+  {
+    "text": "there isn't a prefix that has any sort of state associated with it it's going to default to that initial position",
+    "start": "1220090",
+    "end": "1225350"
+  },
+  {
+    "text": "extreme so you could say get start processing hit from the latest record or",
+    "start": "1225350",
+    "end": "1230600"
+  },
+  {
+    "text": "you can start from the trim horizon which in our case would be 24 hours would be 24 hours in the past and you",
+    "start": "1230600",
+    "end": "1237410"
+  },
+  {
+    "text": "could sort of imagine situations where you might want to do either one of those but typically like you want to keep some",
+    "start": "1237410",
+    "end": "1243920"
+  },
+  {
+    "text": "sort of check pointing you know where your your stream is located you know how",
+    "start": "1243920",
+    "end": "1249650"
+  },
+  {
+    "text": "how far down each shard is gone and then the last important thing and I'll discuss this a little bit later is that",
+    "start": "1249650",
+    "end": "1255890"
+  },
+  {
+    "text": "empty records list back off Millie's that has some implications for when you do shard splitting on on your screen",
+    "start": "1255890",
+    "end": "1265990"
+  },
+  {
+    "text": "okay anyways you set up that config object you set up a Kinesis spout object",
+    "start": "1265990",
+    "end": "1271970"
+  },
+  {
+    "text": "using that in your credentials and then all you have to do is build or dot set spout and give it a name so that",
+    "start": "1271970",
+    "end": "1278900"
+  },
+  {
+    "text": "downstream bolt can refer to it and then give it some parallels man we found that",
+    "start": "1278900",
+    "end": "1284570"
+  },
+  {
+    "text": "it's probably a good idea to have one to",
+    "start": "1284570",
+    "end": "1290150"
+  },
+  {
+    "text": "have one executors / shard that you have it's not necessarily totally necessary",
+    "start": "1290150",
+    "end": "1296750"
+  },
+  {
+    "text": "to do that it'll still function without that but we found that that's probably a good a good idea all right so given that",
+    "start": "1296750",
+    "end": "1307010"
+  },
+  {
+    "start": "1305000",
+    "end": "1305000"
+  },
+  {
+    "text": "like some basic lessons that we've we've learned while implementing this so for",
+    "start": "1307010",
+    "end": "1315860"
+  },
+  {
+    "text": "starters only only extract necessary fields when you're deserialising so",
+    "start": "1315860",
+    "end": "1322070"
+  },
+  {
+    "text": "initially we extracted every single field including this big JSON blurb and",
+    "start": "1322070",
+    "end": "1328220"
+  },
+  {
+    "text": "that was really slow it took a ton of hardware to handle our entire dream when we limit when we limited that",
+    "start": "1328220",
+    "end": "1335419"
+  },
+  {
+    "text": "too only a few fields it made things a lot faster we realize like if we really needed that data on a small set of",
+    "start": "1335419",
+    "end": "1341359"
+  },
+  {
+    "text": "events we could just filter and then pass the record and then just pull out",
+    "start": "1341359",
+    "end": "1346909"
+  },
+  {
+    "text": "those fields at a later time when there's when we don't quite have like the whole fire hose of data flowing to",
+    "start": "1346909",
+    "end": "1353690"
+  },
+  {
+    "text": "the stream it was we've also found that it's helpful to have big instances with",
+    "start": "1353690",
+    "end": "1359179"
+  },
+  {
+    "text": "only a few workers so having too many workers can can reduce the throughput",
+    "start": "1359179",
+    "end": "1367369"
+  },
+  {
+    "text": "quite a bit but sometimes it's necessary if you want to have some flexibility especially if you're running multiple",
+    "start": "1367369",
+    "end": "1373639"
+  },
+  {
+    "text": "topologies on a single cluster so you might want to be able to break it down into more granular components and so",
+    "start": "1373639",
+    "end": "1380149"
+  },
+  {
+    "text": "there's a bit of a trade-off there and then lastly like our final state where",
+    "start": "1380149",
+    "end": "1385159"
+  },
+  {
+    "text": "we're at with our current topology so we can handle 42,000 records per second and that's with for c4 2 x-large instances",
+    "start": "1385159",
+    "end": "1393440"
+  },
+  {
+    "text": "as our supervisors and then we're using 2 m3 largest for do keepers and an m3",
+    "start": "1393440",
+    "end": "1399799"
+  },
+  {
+    "text": "extra large for our combination Nimbus zookeeper machine it's pretty typical to",
+    "start": "1399799",
+    "end": "1405979"
+  },
+  {
+    "text": "have those running them on one machine there's no reason why they dig they can't although we're thinking about",
+    "start": "1405979",
+    "end": "1413239"
+  },
+  {
+    "text": "possibly downsizing those a little bit but ultimately it's a pretty fast framework we're able to handle more than",
+    "start": "1413239",
+    "end": "1420200"
+  },
+  {
+    "text": "enough data on not really that much that much hardware all right so where does",
+    "start": "1420200",
+    "end": "1430940"
+  },
+  {
+    "start": "1428000",
+    "end": "1428000"
+  },
+  {
+    "text": "that leave us so this is our our new architecture so we have our SDKs and and",
+    "start": "1430940",
+    "end": "1439519"
+  },
+  {
+    "text": "server implement Kinesis producers wherever they are they're sending data to our Kinesis stream and then that's",
+    "start": "1439519",
+    "end": "1446450"
+  },
+  {
+    "text": "being read by two different applications so we have the Kinesis storm spout which",
+    "start": "1446450",
+    "end": "1451879"
+  },
+  {
+    "text": "is sending those records into a storm topology which is generating real-time aggregates which we're storing in a my",
+    "start": "1451879",
+    "end": "1459200"
+  },
+  {
+    "text": "sequel database and then viewing those with a lightweight front end and then we",
+    "start": "1459200",
+    "end": "1464359"
+  },
+  {
+    "text": "also have our bachelor which we're using that Kinesis connector library application to upload that data",
+    "start": "1464359",
+    "end": "1470070"
+  },
+  {
+    "text": "task 3 every hour we ETL previous hours data into a Hadoop cluster which we",
+    "start": "1470070",
+    "end": "1478170"
+  },
+  {
+    "text": "store the data therefore it ad hoc queries but we also generated lit aggregates which we write back to s3 we",
+    "start": "1478170",
+    "end": "1485040"
+  },
+  {
+    "text": "copy those two red shift and we visualize them with tableau and then that last line that's going from the",
+    "start": "1485040",
+    "end": "1490560"
+  },
+  {
+    "text": "Hadoop cluster up to the that my sequel database so that's our batch backfill",
+    "start": "1490560",
+    "end": "1497640"
+  },
+  {
+    "text": "for all the aggregates that we calculate with storm and so we found that having a batch layer following up the real time",
+    "start": "1497640",
+    "end": "1504870"
+  },
+  {
+    "text": "layers is really nice it means I can take that storm topology down for maintenance and there won't be any like",
+    "start": "1504870",
+    "end": "1511190"
+  },
+  {
+    "text": "repercussions will always catch back up and have and have those metrics as the",
+    "start": "1511190",
+    "end": "1518370"
+  },
+  {
+    "text": "correct metrics all right so now I'm",
+    "start": "1518370",
+    "end": "1523590"
+  },
+  {
+    "text": "going to kind of talk about a bunch of kind of random problems that we've run",
+    "start": "1523590",
+    "end": "1529920"
+  },
+  {
+    "text": "into that we've noticed and that we've had to kind of come up with some solutions for so first one regards",
+    "start": "1529920",
+    "end": "1540290"
+  },
+  {
+    "start": "1537000",
+    "end": "1537000"
+  },
+  {
+    "text": "charge buffers and file sizes so we quickly found out that those buffers in",
+    "start": "1540290",
+    "end": "1549240"
+  },
+  {
+    "text": "a in a Kinesis connector library application there's a there's a single",
+    "start": "1549240",
+    "end": "1556320"
+  },
+  {
+    "text": "buffer for every single shard not for each instance of your application so if",
+    "start": "1556320",
+    "end": "1561660"
+  },
+  {
+    "text": "you're running 35 shards on five machines that means 35 buffers not 5 buffers and that could create a bit of a",
+    "start": "1561660",
+    "end": "1570480"
+  },
+  {
+    "text": "problem if we wanted to chunk that data into fairly large files like 128 megabytes files or something we're going",
+    "start": "1570480",
+    "end": "1578010"
+  },
+  {
+    "text": "to run into some memory bottlenecks because those buffers are going to get fairly large and our machine might not",
+    "start": "1578010",
+    "end": "1584430"
+  },
+  {
+    "text": "be able to to handle all of that at least you know we're definitely going to",
+    "start": "1584430",
+    "end": "1590370"
+  },
+  {
+    "text": "run it we're going to run into memory problems way before we run into CPU problems if those if those buffer limits",
+    "start": "1590370",
+    "end": "1597990"
+  },
+  {
+    "text": "are set fairly so what's the obvious solution to that well let's just make the buffer smaller right let's output every 16 megabytes",
+    "start": "1597990",
+    "end": "1605490"
+  },
+  {
+    "text": "instead of 128 megabytes and that definitely works that means that we can",
+    "start": "1605490",
+    "end": "1611220"
+  },
+  {
+    "text": "utilize a lot more CPU before we run into memory problems and we can run this application on fewer instances but that",
+    "start": "1611220",
+    "end": "1618000"
+  },
+  {
+    "text": "creates a problem downstream for us which is that Hadoop does not like lots of small files and you can imagine if",
+    "start": "1618000",
+    "end": "1626640"
+  },
+  {
+    "text": "you know if you want like really small files like eat megabyte files and you have you know or maybe you're outputting",
+    "start": "1626640",
+    "end": "1632850"
+  },
+  {
+    "text": "stuff every 15 seconds so each charge is generating 240 files every hour and you",
+    "start": "1632850",
+    "end": "1639210"
+  },
+  {
+    "text": "have 35 charge you're gonna end up with like eight eight or nine thousand files every hour and at our scale that created",
+    "start": "1639210",
+    "end": "1648240"
+  },
+  {
+    "text": "some problems where we had to spend a decent amount of of our clusters like",
+    "start": "1648240",
+    "end": "1653940"
+  },
+  {
+    "text": "throughput in order to actually in order to actually do to run our ETL jobs just",
+    "start": "1653940",
+    "end": "1659520"
+  },
+  {
+    "text": "because of the overhead of setting up 8,000 map containers and so that's what",
+    "start": "1659520",
+    "end": "1665880"
+  },
+  {
+    "text": "this is kind of representing so we have a bunch of zip files sitting on s3 our",
+    "start": "1665880",
+    "end": "1671910"
+  },
+  {
+    "text": "application master assigns one of those to every single you know spins up 8,000",
+    "start": "1671910",
+    "end": "1677460"
+  },
+  {
+    "text": "map containers and assigns one of those files to every one of those map containers they go through they",
+    "start": "1677460",
+    "end": "1683430"
+  },
+  {
+    "text": "initialize a process that he'd really fast because they're in very much of it and then they'll put it to a reducer and",
+    "start": "1683430",
+    "end": "1688710"
+  },
+  {
+    "text": "then they have to you know we have to spin up another mapper after that and",
+    "start": "1688710",
+    "end": "1694760"
+  },
+  {
+    "text": "yeah that was definitely creating some problems so our solution of this was we",
+    "start": "1694760",
+    "end": "1700710"
+  },
+  {
+    "text": "wrote a combined file input format so we instead of using the sort of default text text input format we wrote an input",
+    "start": "1700710",
+    "end": "1709710"
+  },
+  {
+    "text": "format that tells that application master to chunk all those files and have",
+    "start": "1709710",
+    "end": "1716730"
+  },
+  {
+    "text": "multiple files read by a single matte container so it kind of like iterates",
+    "start": "1716730",
+    "end": "1721740"
+  },
+  {
+    "text": "down the list until it gets to a certain file size and then it tells that map that map container you're going to",
+    "start": "1721740",
+    "end": "1727620"
+  },
+  {
+    "text": "process all of the data that's associated with this with these files and that was a massive",
+    "start": "1727620",
+    "end": "1734760"
+  },
+  {
+    "text": "improvement so now instead of setting up 8,000 map containers we set up like 100 map containers and now we use like",
+    "start": "1734760",
+    "end": "1741810"
+  },
+  {
+    "text": "thirty percent of the resources so instead of spending 20 minutes every hour running our et al we spend eight",
+    "start": "1741810",
+    "end": "1747570"
+  },
+  {
+    "text": "minutes an hour or something like that and that frees up a lot of time to do more ad hoc stuff and you know if we",
+    "start": "1747570",
+    "end": "1753420"
+  },
+  {
+    "text": "ever get behind or whatever makes things a lot easier it takes a lot of pressure off of our Hadoop cluster alright",
+    "start": "1753420",
+    "end": "1759870"
+  },
+  {
+    "text": "another challenge that we've run into so the Kinesis API doesn't let you get the",
+    "start": "1759870",
+    "end": "1768060"
+  },
+  {
+    "start": "1760000",
+    "end": "1760000"
+  },
+  {
+    "text": "gateway IP address there's no get gateway IP address saw method that you can call from a kit you know from a",
+    "start": "1768060",
+    "end": "1774660"
+  },
+  {
+    "text": "Kinesis record and devices don't know their own gateway IP address the only",
+    "start": "1774660",
+    "end": "1781680"
+  },
+  {
+    "text": "way to do that is to receive a message from the device and so this was a big",
+    "start": "1781680",
+    "end": "1786780"
+  },
+  {
+    "text": "problem for us we rely on IP addresses to do Geo lookups and geographic splits",
+    "start": "1786780",
+    "end": "1792240"
+  },
+  {
+    "text": "are really important for our platform when we ran into this problem initially we realized that unless we found a",
+    "start": "1792240",
+    "end": "1798180"
+  },
+  {
+    "text": "solution we would not be able to use Kinesis because we need to know how much money we're making in each country we",
+    "start": "1798180",
+    "end": "1804210"
+  },
+  {
+    "text": "need to know you know how many installs we're getting in each country you know",
+    "start": "1804210",
+    "end": "1809430"
+  },
+  {
+    "text": "we need to be able to compare the tutorial funnels across countries we need to be able to limit analyses during",
+    "start": "1809430",
+    "end": "1814620"
+  },
+  {
+    "text": "beta 2 only beta countries for example it's really important for the for the",
+    "start": "1814620",
+    "end": "1820230"
+  },
+  {
+    "text": "sort of stuff that we do and so this was a big big problem fortunately there's a",
+    "start": "1820230",
+    "end": "1828210"
+  },
+  {
+    "start": "1828000",
+    "end": "1828000"
+  },
+  {
+    "text": "pretty pretty straightforward solution we set up a web application we had all",
+    "start": "1828210",
+    "end": "1835080"
+  },
+  {
+    "text": "of our devices upon session start let's say ping that web application and a web",
+    "start": "1835080",
+    "end": "1842280"
+  },
+  {
+    "text": "application would then see what the IP address was it could do a geo look up and it could return that data back to",
+    "start": "1842280",
+    "end": "1848820"
+  },
+  {
+    "text": "the device and you know that was fairly straightforward to set up and we thought",
+    "start": "1848820",
+    "end": "1855780"
+  },
+  {
+    "text": "it was working pretty well but then we looked at the numbers a little bit and for a lot of applications we were",
+    "start": "1855780",
+    "end": "1861120"
+  },
+  {
+    "text": "getting like pretty good pretty good hit rates like we'd get ninety-five percent of those the the",
+    "start": "1861120",
+    "end": "1866820"
+  },
+  {
+    "text": "devices that we saw ninety-five percent of installs we had a country for but",
+    "start": "1866820",
+    "end": "1872880"
+  },
+  {
+    "text": "then for some applications we were running to problems and these are sort",
+    "start": "1872880",
+    "end": "1878640"
+  },
+  {
+    "text": "of twofold so first of all it's mobile gaming so there's a lot of people that will install your app and then like",
+    "start": "1878640",
+    "end": "1885650"
+  },
+  {
+    "text": "click on it to start and then there'll be a loading screen and then after 15",
+    "start": "1885650",
+    "end": "1891600"
+  },
+  {
+    "text": "seconds they'll run out of patience and then they'll just be like screw this i'm deleting it and so we were running into",
+    "start": "1891600",
+    "end": "1896880"
+  },
+  {
+    "text": "situations where we didn't actually have enough time for those users to send for",
+    "start": "1896880",
+    "end": "1903929"
+  },
+  {
+    "text": "them to send us that that that event with all of that data before they before they exited the app and granted like you",
+    "start": "1903929",
+    "end": "1911850"
+  },
+  {
+    "text": "know those are not exactly like high-value customers obviously but we are very interested in being able to tie",
+    "start": "1911850",
+    "end": "1917010"
+  },
+  {
+    "text": "all the way to the top of the funnel on a country basis and then the second issue was we have a lot of different",
+    "start": "1917010",
+    "end": "1923160"
+  },
+  {
+    "text": "client teams they want to make games they don't want to instrument geo events and so sometimes they would mess this up",
+    "start": "1923160",
+    "end": "1930230"
+  },
+  {
+    "text": "and then we'd have to wait for an entirely new like you know we'd have to",
+    "start": "1930230",
+    "end": "1936750"
+  },
+  {
+    "text": "submit an entirely new build like two weeks three weeks later to correct this problem so right now we're in the",
+    "start": "1936750",
+    "end": "1944220"
+  },
+  {
+    "text": "process of doing this but we are switching out this architecture a little bit and we're just going to have that",
+    "start": "1944220",
+    "end": "1950190"
+  },
+  {
+    "text": "web application act as a Kinesis producer and then send the data straight to Kinesis that way all the device has to do is paying a URL and we'll get the",
+    "start": "1950190",
+    "end": "1957600"
+  },
+  {
+    "text": "data that we need and then the other",
+    "start": "1957600",
+    "end": "1964590"
+  },
+  {
+    "text": "thing that we're doing with respect to this is we're testing out this very Amazonian sort of architecture so we set",
+    "start": "1964590",
+    "end": "1975360"
+  },
+  {
+    "text": "up another version of this that uses the API gateway and has that call lambda function and then the lambda function as",
+    "start": "1975360",
+    "end": "1983250"
+  },
+  {
+    "text": "the geo look up or the lambda function as the geo look up and then sends the data to Kinesis and this is nice because",
+    "start": "1983250",
+    "end": "1992880"
+  },
+  {
+    "text": "there's no hardware at all there's nothing that you have to worry about at all",
+    "start": "1992880",
+    "end": "1997970"
+  },
+  {
+    "text": "but we're trying to balance that convenience and lack of maintenance with",
+    "start": "1997970",
+    "end": "2004279"
+  },
+  {
+    "text": "the fact that this is a bit more expensive and so our server engineering",
+    "start": "2004279",
+    "end": "2009799"
+  },
+  {
+    "text": "came is trying to figure out what they're going to do with respect to this",
+    "start": "2009799",
+    "end": "2016179"
+  },
+  {
+    "text": "all right so the last thing I'm going to talk about is scaling so question that",
+    "start": "2016179",
+    "end": "2024049"
+  },
+  {
+    "start": "2018000",
+    "end": "2018000"
+  },
+  {
+    "text": "anyone building a big data platform probably needs to ask themselves as can our system scale with minimal effort and",
+    "start": "2024049",
+    "end": "2030710"
+  },
+  {
+    "text": "impact so let's break this down we have a couple different components and how do",
+    "start": "2030710",
+    "end": "2036379"
+  },
+  {
+    "text": "those individually scale so the stream can we scale up and down with Amazon it",
+    "start": "2036379",
+    "end": "2042109"
+  },
+  {
+    "text": "can we scale up and down a can you to stream and yes you can you can scale up and down a stream you can split shards",
+    "start": "2042109",
+    "end": "2048770"
+  },
+  {
+    "text": "and you can merge charge which should theoretically cover all of that behavior",
+    "start": "2048770",
+    "end": "2055179"
+  },
+  {
+    "text": "that can get complicated though and I'm going to talk about that on the next slide a little bit more can you scale up",
+    "start": "2055179",
+    "end": "2062179"
+  },
+  {
+    "text": "your consumers you can always add more machines if you you know quadruple your",
+    "start": "2062179",
+    "end": "2067460"
+  },
+  {
+    "text": "shard count you can quadruple your consumers and that scales up pretty",
+    "start": "2067460",
+    "end": "2072799"
+  },
+  {
+    "text": "seamlessly Hadoop same thing you could always add more nodes you know we're not",
+    "start": "2072799",
+    "end": "2079638"
+  },
+  {
+    "text": "super concerned about that we have enough extra room right now but if we like quintupled our data or something we",
+    "start": "2079639",
+    "end": "2086179"
+  },
+  {
+    "text": "definitely need to add more nodes and that's something that's you know definitely feasible to do and then and",
+    "start": "2086179",
+    "end": "2092510"
+  },
+  {
+    "text": "what about stolen so I'll talk about some of the difficulties of that we've",
+    "start": "2092510",
+    "end": "2097970"
+  },
+  {
+    "text": "run into with scaling up and storm in two slides from now after i talk about",
+    "start": "2097970",
+    "end": "2105970"
+  },
+  {
+    "text": "splitting shards okay so let's say you have one shard and you want to split it",
+    "start": "2105970",
+    "end": "2112700"
+  },
+  {
+    "start": "2106000",
+    "end": "2106000"
+  },
+  {
+    "text": "into two shards that operation is pretty simple you can call a split shard",
+    "start": "2112700",
+    "end": "2119780"
+  },
+  {
+    "text": "operation on your shard and you know give it that the hash key that's halfway",
+    "start": "2119780",
+    "end": "2125780"
+  },
+  {
+    "text": "through the hash space of that shard and it'll create two new sharks to neutral charge really simple all right but what",
+    "start": "2125780",
+    "end": "2134059"
+  },
+  {
+    "text": "if you want to split those two charge into three shards now if you wanted to",
+    "start": "2134059",
+    "end": "2139250"
+  },
+  {
+    "text": "split it into four you would just do this operation twice pretty simple but if you want to split it into three it's a little bit more complicated so you",
+    "start": "2139250",
+    "end": "2145640"
+  },
+  {
+    "text": "have to take your first shard in this case it's charred too and you've just put it two thirds of the way down that",
+    "start": "2145640",
+    "end": "2151540"
+  },
+  {
+    "text": "you know the hash key that's two-thirds of the way through the key space and",
+    "start": "2151540",
+    "end": "2158569"
+  },
+  {
+    "text": "that creates charge for in charge six which are different sizes and you have to do the same thing with chard three to",
+    "start": "2158569",
+    "end": "2164750"
+  },
+  {
+    "text": "create charge seven in charge five so now you have four shards two small ones",
+    "start": "2164750",
+    "end": "2170780"
+  },
+  {
+    "text": "and two big ones and you have to merge those two small ones to create a char",
+    "start": "2170780",
+    "end": "2175849"
+  },
+  {
+    "text": "date so that you have three charge that are of the same size and and cover like",
+    "start": "2175849",
+    "end": "2181490"
+  },
+  {
+    "text": "contiguous ranges of the hash space and",
+    "start": "2181490",
+    "end": "2187430"
+  },
+  {
+    "text": "so you know that's also probably manageable but what if I want to take like 29 shards and then scale at 237",
+    "start": "2187430",
+    "end": "2194960"
+  },
+  {
+    "text": "shards or some it's really nasty if you use prime numbers for this makes it much",
+    "start": "2194960",
+    "end": "2200480"
+  },
+  {
+    "text": "more complicated that's going to be really difficult to do and is getting involved like a lot of splitting and",
+    "start": "2200480",
+    "end": "2207559"
+  },
+  {
+    "text": "splitting with you know you're gonna have to come up with a whole strategy Frau to do that it's not going to be",
+    "start": "2207559",
+    "end": "2212720"
+  },
+  {
+    "text": "particularly easy so fortunately someone at Amazon wrote this Kinesis scaling",
+    "start": "2212720",
+    "end": "2218660"
+  },
+  {
+    "text": "utils library and so if you package that into a jar all you have to do is give it",
+    "start": "2218660",
+    "end": "2223790"
+  },
+  {
+    "text": "a stream name and your new shard count and there's sort of a deterministic way of doing this that's optimal and it will",
+    "start": "2223790",
+    "end": "2229940"
+  },
+  {
+    "text": "go and execute that for you which is incredibly nice that being said it's",
+    "start": "2229940",
+    "end": "2235880"
+  },
+  {
+    "text": "worthwhile to note that it goes a bit",
+    "start": "2235880",
+    "end": "2241430"
+  },
+  {
+    "text": "faster if you're doing a simpler sort of operation so if you're going from 32 to 64 it'll run faster than if you're going",
+    "start": "2241430",
+    "end": "2249049"
+  },
+  {
+    "text": "from 29 to 37 for example and scaling",
+    "start": "2249049",
+    "end": "2255109"
+  },
+  {
+    "text": "those things also sort of is like a little bit slower when your stream gets larger because it can only do one operation at a time so",
+    "start": "2255109",
+    "end": "2263050"
+  },
+  {
+    "text": "I you know when I think we scaled from 30 to 35 it took like took 30 or 40",
+    "start": "2263050",
+    "end": "2268870"
+  },
+  {
+    "text": "minutes to do it so you know this is definitely possible you're Kinesis",
+    "start": "2268870",
+    "end": "2274590"
+  },
+  {
+    "text": "client library applications won't be affected by it but it's also not the",
+    "start": "2274590",
+    "end": "2279850"
+  },
+  {
+    "text": "kind of thing that you want to do during like a highly critical time all right so what about storm so whenever we scaled",
+    "start": "2279850",
+    "end": "2288820"
+  },
+  {
+    "start": "2284000",
+    "end": "2284000"
+  },
+  {
+    "text": "up and down the stream when we were first starting out we ran into some some",
+    "start": "2288820",
+    "end": "2295060"
+  },
+  {
+    "text": "issues which is we couldn't refresh the list of charge that zookeeper state the",
+    "start": "2295060",
+    "end": "2301660"
+  },
+  {
+    "text": "state associated with our zookeeper prefix that was running was hard-coded in there we couldn't refresh that",
+    "start": "2301660",
+    "end": "2308350"
+  },
+  {
+    "text": "charred list so what we had to do is we had to take down our apology give it a",
+    "start": "2308350",
+    "end": "2314620"
+  },
+  {
+    "text": "new zookeeper prefix and then restart it and that's obviously problematic because a we have to take down the topology and",
+    "start": "2314620",
+    "end": "2320020"
+  },
+  {
+    "text": "B we're actually going to lose some data because we have to default to latest so there might be a you know while we're",
+    "start": "2320020",
+    "end": "2325840"
+  },
+  {
+    "text": "doing that there might be a couple minute interval we're like you know we're going to lose out on that data",
+    "start": "2325840",
+    "end": "2331140"
+  },
+  {
+    "text": "which could be problematic it's not super bad in our instance and aren't in our situation but I can imagine",
+    "start": "2331140",
+    "end": "2337510"
+  },
+  {
+    "text": "situations where that would not be acceptable anyways that issue was solved",
+    "start": "2337510",
+    "end": "2343960"
+  },
+  {
+    "text": "in Kinesis storms about 11 1 now all you have to do is a storm rebalance so a rebalance will take all of the tasks and",
+    "start": "2343960",
+    "end": "2352020"
+  },
+  {
+    "text": "reassign them to different workers so",
+    "start": "2352020",
+    "end": "2357640"
+  },
+  {
+    "text": "fortunately that will Repole the shard list which means you'll be able to you",
+    "start": "2357640",
+    "end": "2363280"
+  },
+  {
+    "text": "know start processing data again properly and you're not you're still",
+    "start": "2363280",
+    "end": "2368350"
+  },
+  {
+    "text": "going to process every single topple at least once so that's that was like a major improvement we're really happy about that you know this is also",
+    "start": "2368350",
+    "end": "2375880"
+  },
+  {
+    "text": "something that you're inevitably gonna have to do if you were to like add more workers if you were to try to scale up",
+    "start": "2375880",
+    "end": "2381250"
+  },
+  {
+    "text": "and make your cluster bigger you're also going to do a rebalance to tell your topology to take more workers it's the",
+    "start": "2381250",
+    "end": "2387760"
+  },
+  {
+    "text": "same command it'll automatically handle that that's you keep a refresh shower",
+    "start": "2387760",
+    "end": "2392860"
+  },
+  {
+    "text": "list refresh one other thing to keep in mind is that that empty records list back off",
+    "start": "2392860",
+    "end": "2398520"
+  },
+  {
+    "text": "Millie's setting that I was talking about earlier it needs to be adequately low and the reason for this is if",
+    "start": "2398520",
+    "end": "2405090"
+  },
+  {
+    "text": "anyone's ever scaled up a Kinesis stream after you scale it up you have a bunch",
+    "start": "2405090",
+    "end": "2412110"
+  },
+  {
+    "text": "of clothes charge which are charged that have data on them that applications could read but that aren't accepting new data and if you have a store if you have",
+    "start": "2412110",
+    "end": "2422160"
+  },
+  {
+    "text": "a Paula gee that's running like right at the latest records those are going to get cleaned out of data pretty quickly and you're going to have a bunch of them",
+    "start": "2422160",
+    "end": "2429750"
+  },
+  {
+    "text": "and so each of those executors those threads are going to end up with you",
+    "start": "2429750",
+    "end": "2434850"
+  },
+  {
+    "text": "know having to handle maybe like let's say to close shards in an open chart and like with the first version of the",
+    "start": "2434850",
+    "end": "2440700"
+  },
+  {
+    "text": "Kinesis storm spout that we were using this was set to five hundred to five",
+    "start": "2440700",
+    "end": "2446100"
+  },
+  {
+    "text": "hundred milliseconds and that created a big bottleneck because we would pull from a closed shard get no records back",
+    "start": "2446100",
+    "end": "2451790"
+  },
+  {
+    "text": "wait 500 milliseconds pull from another close shard get no records back wait 500 milliseconds and then finally we were",
+    "start": "2451790",
+    "end": "2458430"
+  },
+  {
+    "text": "able to pull from our from our open chart but setting that adequately low makes that less of a problem so just",
+    "start": "2458430",
+    "end": "2466350"
+  },
+  {
+    "text": "make sure if you're scaling up charge and you have closed chars that is low otherwise you'll run it or that you have",
+    "start": "2466350",
+    "end": "2473370"
+  },
+  {
+    "text": "lots of X lots of threads enough threads to cover all of your open and close charts all right so that works pretty",
+    "start": "2473370",
+    "end": "2482310"
+  },
+  {
+    "text": "well but there's sort of a side effect of this which is that restarting a rebalancing causes tasks to lose their",
+    "start": "2482310",
+    "end": "2488610"
+  },
+  {
+    "text": "state so this is sort of a weakness of storm it doesn't like it doesn't store",
+    "start": "2488610",
+    "end": "2497310"
+  },
+  {
+    "text": "any of the state anything that needs to be kept in memory and like lists of ID's or whatever it is that it's being",
+    "start": "2497310",
+    "end": "2502350"
+  },
+  {
+    "text": "processed by a given task so when we would do this which you know we'd shut",
+    "start": "2502350",
+    "end": "2507750"
+  },
+  {
+    "text": "down the topology because we were scaling it up we'd noticed that like our daily active user account would all the sudden spike and it wasn't because we",
+    "start": "2507750",
+    "end": "2514170"
+  },
+  {
+    "text": "were getting lots of people showing up it's because the list of ID's that we were comparing new IDs against was wiped",
+    "start": "2514170",
+    "end": "2519510"
+  },
+  {
+    "text": "away because we rebalance the topology so that breaks certain operations that",
+    "start": "2519510",
+    "end": "2524970"
+  },
+  {
+    "text": "are sort of required long-running memory like he counts and joins so maybe you want to",
+    "start": "2524970",
+    "end": "2530590"
+  },
+  {
+    "text": "store out attributes for a certain set of users for like a long period of time that's also going to get wiped so how do",
+    "start": "2530590",
+    "end": "2536620"
+  },
+  {
+    "text": "you deal with this situation so our answer to this was teased Redis so",
+    "start": "2536620",
+    "end": "2543160"
+  },
+  {
+    "start": "2538000",
+    "end": "2538000"
+  },
+  {
+    "text": "reticent eval you store and we realized",
+    "start": "2543160",
+    "end": "2548380"
+  },
+  {
+    "text": "we could use that to store a long-running state so how do we do this well rattus has some really nice data",
+    "start": "2548380",
+    "end": "2554260"
+  },
+  {
+    "text": "structures for handling these sort of the sort of problems that we were interested in we could use Redis sets to",
+    "start": "2554260",
+    "end": "2559690"
+  },
+  {
+    "text": "count unique values and we can do joins using key value hashes and on top of",
+    "start": "2559690",
+    "end": "2565180"
+  },
+  {
+    "text": "that easy deployment and management using elastic cash so that's worked",
+    "start": "2565180",
+    "end": "2571060"
+  },
+  {
+    "text": "pretty well in our in our situation and so what does this look like in practice well on the left side over there you",
+    "start": "2571060",
+    "end": "2579820"
+  },
+  {
+    "text": "know sort of part of a topology maybe you have a local aggregator that takes ids from heartbeat events or something",
+    "start": "2579820",
+    "end": "2585220"
+  },
+  {
+    "text": "like that it adds those two to a Redis",
+    "start": "2585220",
+    "end": "2591090"
+  },
+  {
+    "text": "to a Redis key and then you have another another bolt that is an aggregator that",
+    "start": "2591090",
+    "end": "2599800"
+  },
+  {
+    "text": "gets the cardinality of those sets and outputs it to somewhere and similarly that joint apology maybe have two",
+    "start": "2599800",
+    "end": "2607390"
+  },
+  {
+    "text": "sources you have a join bolt that depending on the situation might do a",
+    "start": "2607390",
+    "end": "2612760"
+  },
+  {
+    "text": "hashmap set or might do a hashmap get and then eventually output a joint couple which you might do some later",
+    "start": "2612760",
+    "end": "2618490"
+  },
+  {
+    "text": "processing on and so i'm going to go through the simpler the simpler use case",
+    "start": "2618490",
+    "end": "2623710"
+  },
+  {
+    "text": "here which is the unique topology so a really really really simple implementation of it so two things",
+    "start": "2623710",
+    "end": "2632010"
+  },
+  {
+    "start": "2625000",
+    "end": "2625000"
+  },
+  {
+    "text": "points of terminology to to go over first so the first is every single bolt",
+    "start": "2632010",
+    "end": "2637660"
+  },
+  {
+    "text": "storm bolt has to have an execute method and that is the code that is actually called on the topple when it enters the",
+    "start": "2637660",
+    "end": "2646080"
+  },
+  {
+    "text": "the bolt and then the second thing is there's this concept of tick topples so in addition to a bolt receiving tuples",
+    "start": "2646080",
+    "end": "2655210"
+  },
+  {
+    "text": "from some upstream from some upstream node it can also receive",
+    "start": "2655210",
+    "end": "2661560"
+  },
+  {
+    "text": "system generated tuples every X number of seconds and that's configurable by bolt so in our situation if it's not a",
+    "start": "2661560",
+    "end": "2670060"
+  },
+  {
+    "text": "tick tupple we're going to add our item to the set and you can see that just",
+    "start": "2670060",
+    "end": "2675250"
+  },
+  {
+    "text": "adds it to a list of ID's that's stored locally and then if it is a tick tupple so maybe that's every 10 seconds or",
+    "start": "2675250",
+    "end": "2680260"
+  },
+  {
+    "text": "something like that we're going to call that emit method on that list of ID's and so how is that going to work well",
+    "start": "2680260",
+    "end": "2687000"
+  },
+  {
+    "text": "we're going to set up a Redis pipeline and then we're going to iterate across all the ideas in the list of ID's and",
+    "start": "2687000",
+    "end": "2693220"
+  },
+  {
+    "text": "we're going to add them to the set s add then we're going to sink the pipeline that pipelining is pretty important",
+    "start": "2693220",
+    "end": "2699820"
+  },
+  {
+    "text": "especially if you're trying to do something that's it fairly large scale it means you don't get you don't have to",
+    "start": "2699820",
+    "end": "2705910"
+  },
+  {
+    "text": "query for all the responses from the Redis server after each event in order",
+    "start": "2705910",
+    "end": "2712750"
+  },
+  {
+    "text": "to proceed means you can just send a bunch of those things out and then collect all those responses later and",
+    "start": "2712750",
+    "end": "2718990"
+  },
+  {
+    "text": "then that's that can eliminate a lot of network bottleneck and then additionally it's probably pretty useful probably",
+    "start": "2718990",
+    "end": "2725170"
+  },
+  {
+    "text": "pretty a pretty good idea to set some sort of expiration especially for this sort of use case we're trying to",
+    "start": "2725170",
+    "end": "2731050"
+  },
+  {
+    "text": "calculate daily active users we don't care about this at after the end of the day we've gotten the total number we can",
+    "start": "2731050",
+    "end": "2736600"
+  },
+  {
+    "text": "we can reclaim all that memory and so that's that little Jetta stat expire bit",
+    "start": "2736600",
+    "end": "2743440"
+  },
+  {
+    "text": "at the bottom alright so that's our local aggregator so we implement that and that's going to be able to that's",
+    "start": "2743440",
+    "end": "2750940"
+  },
+  {
+    "text": "going to send all of these records into a Retta set and so now we want to get them out and so this doesn't really need",
+    "start": "2750940",
+    "end": "2757570"
+  },
+  {
+    "text": "to be done with storm it doesn't rely on any downstream or on any upstream bolts",
+    "start": "2757570",
+    "end": "2763990"
+  },
+  {
+    "text": "it's not this this bolt is not actually receiving anything except for these two couples bottom little method is is the",
+    "start": "2763990",
+    "end": "2775570"
+  },
+  {
+    "text": "at what you actually have to how you actually instrument a tick tupple so Amit frequency in seconds you can replace that with whatever you want this",
+    "start": "2775570",
+    "end": "2782650"
+  },
+  {
+    "text": "is just going to execute like every 10 seconds or so let's say all it's going to do is it's going to get the set",
+    "start": "2782650",
+    "end": "2790390"
+  },
+  {
+    "text": "cardinality from from the key and then it's going to admit it to or",
+    "start": "2790390",
+    "end": "2796039"
+  },
+  {
+    "text": "wherever so in our case that's my sequel database but it could really be whatever",
+    "start": "2796039",
+    "end": "2801679"
+  },
+  {
+    "text": "wherever you wanted to admit it to all right so okay so what do we talk about",
+    "start": "2801679",
+    "end": "2811609"
+  },
+  {
+    "text": "we talked about the Kinesis connector library and how you can use that to build basic consumer applications really",
+    "start": "2811609",
+    "end": "2818089"
+  },
+  {
+    "text": "quickly you just need to implement classes or you just need to set up some classes that implement a few of those",
+    "start": "2818089",
+    "end": "2823429"
+  },
+  {
+    "text": "interfaces really simple how you can use the Kinesis storm spout to build to do",
+    "start": "2823429",
+    "end": "2831529"
+  },
+  {
+    "text": "real-time processing with Apache storm we talked about how you can get around",
+    "start": "2831529",
+    "end": "2837079"
+  },
+  {
+    "text": "some file size bottle necks with a combined file input format we talked about how you can do Geo lookups with",
+    "start": "2837079",
+    "end": "2842179"
+  },
+  {
+    "text": "Kinesis in lieu of there being an API",
+    "start": "2842179",
+    "end": "2847429"
+  },
+  {
+    "text": "built into Kinesis that that lets you get that information and then lastly we talked a little bit about storming",
+    "start": "2847429",
+    "end": "2852619"
+  },
+  {
+    "text": "that's herba about storming about scaling and how you can scale up shards",
+    "start": "2852619",
+    "end": "2860869"
+  },
+  {
+    "text": "easily with that Kinesis scaling utils library and about how I you can manage",
+    "start": "2860869",
+    "end": "2867769"
+  },
+  {
+    "text": "that scaling with respect to your storm storm topology using canisius storms",
+    "start": "2867769",
+    "end": "2873319"
+  },
+  {
+    "text": "about one dot one dot one",
+    "start": "2873319",
+    "end": "2876129"
+  }
+]

@@ -1,0 +1,1782 @@
+[
+  {
+    "text": "welcome to the last day of ccon do you guys have a good time so",
+    "start": "280",
+    "end": "6040"
+  },
+  {
+    "text": "far yay okay so let's get started in this uh",
+    "start": "6040",
+    "end": "12320"
+  },
+  {
+    "text": "session we will cover a new and Innovative way to use ebpf to efficiently enforce Network policies for",
+    "start": "12320",
+    "end": "19760"
+  },
+  {
+    "text": "host processes using ebpf uh before we start a bit about myself uh I'm my name is Vin Kerney and",
+    "start": "19760",
+    "end": "27240"
+  },
+  {
+    "text": "I work for eBay Cloud where I'm helping build uh the network segmentation identity based Network segmentation for",
+    "start": "27240",
+    "end": "34600"
+  },
+  {
+    "text": "eBay the agenda for today is we start with an overview of what network Nam spaces are and understand the difference",
+    "start": "34600",
+    "end": "41559"
+  },
+  {
+    "text": "between host processes and processes that are running in kuber SPS uh we will then cover our use case of efficiently",
+    "start": "41559",
+    "end": "48160"
+  },
+  {
+    "text": "securing host Network process communication that motivated this project and look at how host processes",
+    "start": "48160",
+    "end": "53879"
+  },
+  {
+    "text": "are secured today uh in order to set uh to show what's new in this talk we need",
+    "start": "53879",
+    "end": "59600"
+  },
+  {
+    "text": "to set some background and context for that uh I will briefly look uh we'll briefly look at the structure of celium",
+    "start": "59600",
+    "end": "66280"
+  },
+  {
+    "text": "identities and celium network policies and see how celum uses BPF to enforce",
+    "start": "66280",
+    "end": "71360"
+  },
+  {
+    "text": "Network policies for regular kubernetes spot traffic we then look at how we may",
+    "start": "71360",
+    "end": "77159"
+  },
+  {
+    "text": "assign identities to host processes uh then we wave that EF magic one and",
+    "start": "77159",
+    "end": "83040"
+  },
+  {
+    "text": "identify uh in order to identify host processes inside the kernel in the network traffic data path then uh I will",
+    "start": "83040",
+    "end": "91520"
+  },
+  {
+    "text": "show you a demo of this feature and after that I will touch upon EBAs trust fabric solution which we currently use",
+    "start": "91520",
+    "end": "96840"
+  },
+  {
+    "text": "for securing Network traffic in our defense and depth strategy and then I will open up the floor for",
+    "start": "96840",
+    "end": "104560"
+  },
+  {
+    "text": "questions most of you may be familiar with kubernetes name spaces uh they provide us with a way to isolate cluster",
+    "start": "106560",
+    "end": "113320"
+  },
+  {
+    "text": "resources and divide it amongst users similarly Network namespaces provide us",
+    "start": "113320",
+    "end": "119000"
+  },
+  {
+    "text": "with a way to isolate and share the kernel Network stack amongst multiple applications that are running on the",
+    "start": "119000",
+    "end": "124520"
+  },
+  {
+    "text": "Node on the very left here you can see it's a blue box it's a host process a regular host process it gets to use the",
+    "start": "124520",
+    "end": "131720"
+  },
+  {
+    "text": "local host and the E zero the IP addresses and the routing firewall rules that are there available to the host",
+    "start": "131720",
+    "end": "137680"
+  },
+  {
+    "text": "Network namespace to the right of that you have this SP one with a single container in it it gets its own",
+    "start": "137680",
+    "end": "144000"
+  },
+  {
+    "text": "interfaces IP addresses routing rules Etc which is isolated from the host and",
+    "start": "144000",
+    "end": "149519"
+  },
+  {
+    "text": "for two here has two containers they get to share their own Local Host and ezero interface and and the IP addresses and",
+    "start": "149519",
+    "end": "156160"
+  },
+  {
+    "text": "routing rules but isolated from pod one and from the host so in that sense to",
+    "start": "156160",
+    "end": "163720"
+  },
+  {
+    "text": "summarize the key difference between host processes and kubernetes Sport processes is that all host processes",
+    "start": "163720",
+    "end": "169080"
+  },
+  {
+    "text": "share the network interfaces IP addresses uh Etc in the root or the host Network names space and all",
+    "start": "169080",
+    "end": "176080"
+  },
+  {
+    "text": "containerized processes within a kuber spot get their own set their own copy of interfaces IP address and IP addresses",
+    "start": "176080",
+    "end": "183319"
+  },
+  {
+    "text": "and routing rules that is not shared with any other name space in that sense uh this means that",
+    "start": "183319",
+    "end": "189120"
+  },
+  {
+    "text": "each kubernetes spot acts like its own virtual machine as far as the networking",
+    "start": "189120",
+    "end": "194480"
+  },
+  {
+    "text": "behavior is concerned the consequences of this are that pod to host communication happens via the ezero",
+    "start": "194480",
+    "end": "201200"
+  },
+  {
+    "text": "interface in the Pod and pod top communication typically transits the",
+    "start": "201200",
+    "end": "206280"
+  },
+  {
+    "text": "root net root network name space and the PO to external communication transits",
+    "start": "206280",
+    "end": "211439"
+  },
+  {
+    "text": "the ezer interface in the root name space now uh let's look at our use case",
+    "start": "211439",
+    "end": "219040"
+  },
+  {
+    "text": "consider this scenario you have two nodes a master node that runs the kubernetes API server the scheduler and",
+    "start": "219040",
+    "end": "225480"
+  },
+  {
+    "text": "a worker node that node one that runs cuet which listens on TCP Port",
+    "start": "225480",
+    "end": "231760"
+  },
+  {
+    "text": "10250 now the API server talks to kuet on this port 10250 in order to perform",
+    "start": "231760",
+    "end": "238799"
+  },
+  {
+    "text": "tasks such as exec into a container or get the container logs this is a",
+    "start": "238799",
+    "end": "244040"
+  },
+  {
+    "text": "legitimate and expected communication pattern between the API server and the kuet now let's ring in the",
+    "start": "244040",
+    "end": "251519"
+  },
+  {
+    "text": "Schuler the Schuler is not expected to talk to the kuet directly at least but",
+    "start": "251519",
+    "end": "257320"
+  },
+  {
+    "text": "let's say there is a vulnerability in the scheduler that allows a hacker to take control of that and impersonate the",
+    "start": "257320",
+    "end": "263080"
+  },
+  {
+    "text": "API server this hacker now has access to the customer workloads any request from the ular to",
+    "start": "263080",
+    "end": "270800"
+  },
+  {
+    "text": "the kuet should be denied but the kuet cannot distinguish between traffic",
+    "start": "270800",
+    "end": "276199"
+  },
+  {
+    "text": "coming from the API server versus scheduler impersonating the API server",
+    "start": "276199",
+    "end": "281440"
+  },
+  {
+    "text": "because they have the same Source IP and stolen credentials so we need another layer of security",
+    "start": "281440",
+    "end": "288840"
+  },
+  {
+    "text": "here how are host processes secured today well it is established it is accomplished at layer 7 through",
+    "start": "288840",
+    "end": "296240"
+  },
+  {
+    "text": "cryptographic mechanisms using transport layer security or TLS identities are",
+    "start": "296240",
+    "end": "301720"
+  },
+  {
+    "text": "established by using certificates and communication is secured by establishing",
+    "start": "301720",
+    "end": "306800"
+  },
+  {
+    "text": "a shared secret key or a session key to authenticate and encrypt data data that's transmitted between them now",
+    "start": "306800",
+    "end": "314080"
+  },
+  {
+    "text": "layer 7 security is sufficient so then what's the catch well cryptographic",
+    "start": "314080",
+    "end": "319639"
+  },
+  {
+    "text": "functions are not cheap there is computational overhead of encryption and decryption there is the increased",
+    "start": "319639",
+    "end": "326039"
+  },
+  {
+    "text": "latency and then there is increased bandwidth needs this kind of makes it an easy target for dos attacks the defense",
+    "start": "326039",
+    "end": "333639"
+  },
+  {
+    "text": "in depth strategy is to have an additional layer of security or as many layers of security that's feasible uh in",
+    "start": "333639",
+    "end": "339520"
+  },
+  {
+    "text": "this case we're looking at having another layer of security that drops malicious traffic early that is what",
+    "start": "339520",
+    "end": "346039"
+  },
+  {
+    "text": "ebpf brings to the table now let's look at how celium",
+    "start": "346039",
+    "end": "353360"
+  },
+  {
+    "text": "efficiently secures kubernetes Port traffic what celium does is it attaches evf programs to the p network interfaces",
+    "start": "353360",
+    "end": "360720"
+  },
+  {
+    "text": "as well as the host network interface the long story short these BPF programs perform sender identification and policy",
+    "start": "360720",
+    "end": "368639"
+  },
+  {
+    "text": "enforcement the BPF programs that handle traffic egressing the Pod insert the",
+    "start": "368639",
+    "end": "374080"
+  },
+  {
+    "text": "cender identity into the encapsulation headers that we use the BPF programs at the Ingress they look up the policy for",
+    "start": "374080",
+    "end": "381280"
+  },
+  {
+    "text": "the incoming sender and determine whether the traffic should be allowed or denied denied that is enforcement of the",
+    "start": "381280",
+    "end": "387599"
+  },
+  {
+    "text": "policy in this example we have the bank teller pod tagged with the teller identity for traffic going",
+    "start": "387599",
+    "end": "393919"
+  },
+  {
+    "text": "out and the BPF programs at the Ingress which is the bank database pod checks to",
+    "start": "393919",
+    "end": "399440"
+  },
+  {
+    "text": "see if this is allowed and then enforces that policy in this case it lets it through the same BPF programs would deny",
+    "start": "399440",
+    "end": "407520"
+  },
+  {
+    "text": "traffic that's coming from the bank camera power or any other source that's not allowed by",
+    "start": "407520",
+    "end": "412840"
+  },
+  {
+    "text": "policy the drop here happens at the lowest layers of the network stack well",
+    "start": "412840",
+    "end": "418120"
+  },
+  {
+    "text": "before any computation overhead of cryptographic mechanisms is",
+    "start": "418120",
+    "end": "424440"
+  },
+  {
+    "text": "incurred now we talked about encapsulation what's the story on the wire well uh when pods communicate in",
+    "start": "426160",
+    "end": "433160"
+  },
+  {
+    "text": "our scenario we where we using uh genive encapsulation headers or if you choose to use V",
+    "start": "433160",
+    "end": "438680"
+  },
+  {
+    "text": "vxlan uh the BPF programs and on the center side stores the identity of the",
+    "start": "438680",
+    "end": "444000"
+  },
+  {
+    "text": "sender in this vni field or the virtual Network identifier field it's a 24-bit field the this also means that there is",
+    "start": "444000",
+    "end": "450440"
+  },
+  {
+    "text": "a 24-bit constraint on the value of the identity what we need is also a way to",
+    "start": "450440",
+    "end": "457319"
+  },
+  {
+    "text": "express the policy and how is this policy expressed celum offers a custom resource named celum Network policy that",
+    "start": "457319",
+    "end": "463840"
+  },
+  {
+    "text": "allows us to specify the policy Network policy for our traffic in this example",
+    "start": "463840",
+    "end": "469319"
+  },
+  {
+    "text": "we have two pods we have the bank teller pod with label Ro equals teller and we",
+    "start": "469319",
+    "end": "474479"
+  },
+  {
+    "text": "have the bank database Port Bank DB pod with label Ro equals database now a cium",
+    "start": "474479",
+    "end": "480479"
+  },
+  {
+    "text": "network policy that only allows the teller to access the database is shown here what it says is that allow apply",
+    "start": "480479",
+    "end": "488639"
+  },
+  {
+    "text": "this policy to pods with label Ro equals database which would be the bank DB pod and allow traffic the action that you",
+    "start": "488639",
+    "end": "495919"
+  },
+  {
+    "text": "need to take is allow incoming traffic from Parts with with label Ro equals",
+    "start": "495919",
+    "end": "501599"
+  },
+  {
+    "text": "star which would be this part here the bank teleport you're hearing the word labels a lot as you might guess they play a key",
+    "start": "501599",
+    "end": "508800"
+  },
+  {
+    "text": "role here now here is another example let's say we",
+    "start": "508800",
+    "end": "513839"
+  },
+  {
+    "text": "have a bank auditor pod it needs access to all database pods in all Nam spaces",
+    "start": "513839",
+    "end": "519760"
+  },
+  {
+    "text": "such a policy is expressed using a cluster wide Network policy that applies to pods with label Ro equals database in",
+    "start": "519760",
+    "end": "527240"
+  },
+  {
+    "text": "this case it says apply this to all database Port all ports with label Ro equals database and the action to take",
+    "start": "527240",
+    "end": "534200"
+  },
+  {
+    "text": "is allow uh traffic that that comes from ports with label role equals",
+    "start": "534200",
+    "end": "542760"
+  },
+  {
+    "text": "auditor now there is another piece to this puzzle that is ayum identity crd",
+    "start": "542920",
+    "end": "548839"
+  },
+  {
+    "text": "custom resource this custom resource allows selan to associate labels with",
+    "start": "548839",
+    "end": "554640"
+  },
+  {
+    "text": "integer identity values these integer identity values facilitate efficient policy lookup in the BPF programs in",
+    "start": "554640",
+    "end": "562800"
+  },
+  {
+    "text": "this example the identity value of 1 2 3 4 5 is associated with the label Ro",
+    "start": "562800",
+    "end": "568760"
+  },
+  {
+    "text": "equals t",
+    "start": "568760",
+    "end": "571360"
+  },
+  {
+    "text": "uh generation and management of identities for host processes can be a talk of its own uh because it's a",
+    "start": "574399",
+    "end": "580160"
+  },
+  {
+    "text": "complex topic it's highly subjective and there is no one right way to assign identities to host processes or",
+    "start": "580160",
+    "end": "586360"
+  },
+  {
+    "text": "processes it can vary from one use case to another and uh but however I have to",
+    "start": "586360",
+    "end": "591519"
+  },
+  {
+    "text": "discuss this briefly here specific to my our use case in order to give better context for the rest of the",
+    "start": "591519",
+    "end": "597880"
+  },
+  {
+    "text": "stock so what happens with our use case we use a unique ID for like kind",
+    "start": "597880",
+    "end": "603240"
+  },
+  {
+    "text": "processes uh what do I mean by that let's see uh one example is all kubernetes API servers in a cluster",
+    "start": "603240",
+    "end": "610399"
+  },
+  {
+    "text": "would carry the same identity say 1 2 3 and all kuet in a in a single cluster",
+    "start": "610399",
+    "end": "616040"
+  },
+  {
+    "text": "would bear the identity say 456 all Jagger agent instances across multiple",
+    "start": "616040",
+    "end": "621279"
+  },
+  {
+    "text": "clusters could bear the same identity value of 789 but you may choose to do it on a per cluster basis you see what I",
+    "start": "621279",
+    "end": "627720"
+  },
+  {
+    "text": "mean so the common constraint though is that in this setup with encapsulation we have to",
+    "start": "627720",
+    "end": "634600"
+  },
+  {
+    "text": "live with the 24-bit identity 24-bit number that the that can go into the vni",
+    "start": "634600",
+    "end": "640160"
+  },
+  {
+    "text": "field of the genu or VX line headers this does give us 16.7 million unique application identities which is",
+    "start": "640160",
+    "end": "645920"
+  },
+  {
+    "text": "sufficient for our purpose but if for some reason that becomes a limitation geneve has this capability of options",
+    "start": "645920",
+    "end": "652839"
+  },
+  {
+    "text": "that can be used to allow carrying identities identity values that are greater than 24",
+    "start": "652839",
+    "end": "658240"
+  },
+  {
+    "text": "bits so the real Crux of the problem is that",
+    "start": "658240",
+    "end": "663480"
+  },
+  {
+    "text": "host processes do not have labels that can be mapped to an identity nor do they",
+    "start": "663480",
+    "end": "669120"
+  },
+  {
+    "text": "belong to a distinct network name space that can be associated with an identity so the the million dollar question is",
+    "start": "669120",
+    "end": "676200"
+  },
+  {
+    "text": "how do we identify traffic coming from host processes in the kernel and assign the network identity",
+    "start": "676200",
+    "end": "682680"
+  },
+  {
+    "text": "to assign the network identity to such",
+    "start": "682680",
+    "end": "687680"
+  },
+  {
+    "text": "traffic I'm I'm going to digress a bit here to talk about the original idea that is",
+    "start": "687920",
+    "end": "694680"
+  },
+  {
+    "text": "responsible for solving this problem here today uh this is not my first barbecue the idea dates back to a couple",
+    "start": "694680",
+    "end": "701240"
+  },
+  {
+    "text": "of years ago at 2022 ccon in Detroit I presented a use case of quickly resizing",
+    "start": "701240",
+    "end": "706839"
+  },
+  {
+    "text": "a particular pod that is increasing its memory allocation when that pod issued a",
+    "start": "706839",
+    "end": "712040"
+  },
+  {
+    "text": "make command to build code which is a CPU and memory intensive task on that instance I used an ebpf",
+    "start": "712040",
+    "end": "719760"
+  },
+  {
+    "text": "program to identify when the specific container that I was interested in ran the make Command by looking up the",
+    "start": "719760",
+    "end": "726519"
+  },
+  {
+    "text": "cgroup ID of the container task for that I use the BPF helper function BPF get",
+    "start": "726519",
+    "end": "732519"
+  },
+  {
+    "text": "current cgroup ID in the in the context of the exec system call this allowed me",
+    "start": "732519",
+    "end": "738600"
+  },
+  {
+    "text": "to look up the cgroup ID knowing the cgroup ID allowed me to tell between my container running the make Command",
+    "start": "738600",
+    "end": "745320"
+  },
+  {
+    "text": "versus other containers or other processes on the Node running the same make Command this allowed me to trigger",
+    "start": "745320",
+    "end": "753000"
+  },
+  {
+    "text": "an inpl pod resize for my container only when my container issued the make Command that idea was well received so",
+    "start": "753000",
+    "end": "761839"
+  },
+  {
+    "text": "why is this relevant guess what the answer again lies in cgroup",
+    "start": "761839",
+    "end": "770000"
+  },
+  {
+    "text": "ID now we wave that ebpf magic wand once again only this time we do it in selum",
+    "start": "770720",
+    "end": "778440"
+  },
+  {
+    "text": "network traffic data path it starts it starts with the host process sending a",
+    "start": "778440",
+    "end": "783880"
+  },
+  {
+    "text": "packet in the kernel it shows up as a socket buffer structure or SKB we use",
+    "start": "783880",
+    "end": "789680"
+  },
+  {
+    "text": "the BPF helper function BPF SKB cgroup ID to look up the cgroup ID of the",
+    "start": "789680",
+    "end": "795519"
+  },
+  {
+    "text": "sending host process we then use that cgroup ID to",
+    "start": "795519",
+    "end": "800639"
+  },
+  {
+    "text": "look up the 24-bit host process identity from the host Process net ID BPF map",
+    "start": "800639",
+    "end": "807000"
+  },
+  {
+    "text": "which is preconfigured by the control plane we then insert this 24-bit identity",
+    "start": "807000",
+    "end": "813040"
+  },
+  {
+    "text": "value into the vni field the virtual Network identifier field in the J or VX",
+    "start": "813040",
+    "end": "818160"
+  },
+  {
+    "text": "line header and transmit the encapsulated packet the last step to this is at the",
+    "start": "818160",
+    "end": "824519"
+  },
+  {
+    "text": "receiver we look up the Ingress Network policy to determine if the sender is",
+    "start": "824519",
+    "end": "829839"
+  },
+  {
+    "text": "allowed or denied to talk to the Target and then we make a allow drop decision",
+    "start": "829839",
+    "end": "834920"
+  },
+  {
+    "text": "on the incoming traffic now let's understand the demo setup our",
+    "start": "834920",
+    "end": "842000"
+  },
+  {
+    "text": "demo setup uh continuing on this theme of the banking business for this demo we have a simple two node cluster here",
+    "start": "842000",
+    "end": "849519"
+  },
+  {
+    "text": "there is uh the there are nodes the master and a node named node one on node",
+    "start": "849519",
+    "end": "854920"
+  },
+  {
+    "text": "one we have the bank database pod and on the master we have three parts the bank teller pod the bank auditor pod and a",
+    "start": "854920",
+    "end": "863199"
+  },
+  {
+    "text": "thief the the bank teller needs to be able to talk to the bank database SP in",
+    "start": "863199",
+    "end": "868759"
+  },
+  {
+    "text": "order to do operations such as account credit debit and the bank audit report",
+    "start": "868759",
+    "end": "875160"
+  },
+  {
+    "text": "also needs to be able to access the bank database spot in addition it needs access to the host Network for",
+    "start": "875160",
+    "end": "880800"
+  },
+  {
+    "text": "monitoring the thief is a bad actor who has social engineered their way into",
+    "start": "880800",
+    "end": "885880"
+  },
+  {
+    "text": "getting host network access celum and other cni Solutions have been great at enforcing Network policies for regular",
+    "start": "885880",
+    "end": "892839"
+  },
+  {
+    "text": "pods aka the bank teller pod and the bank database pod but not the auditor or",
+    "start": "892839",
+    "end": "900000"
+  },
+  {
+    "text": "the thief pods until now in this demo we will see how we can allow the bank",
+    "start": "900000",
+    "end": "905800"
+  },
+  {
+    "text": "teller and the bank auditor to access the bank database while keeping the thief",
+    "start": "905800",
+    "end": "912800"
+  },
+  {
+    "text": "out I have a video recording of This demo uh the smart thing to do is to just",
+    "start": "914880",
+    "end": "920120"
+  },
+  {
+    "text": "play this video",
+    "start": "920120",
+    "end": "926440"
+  },
+  {
+    "text": "but let's have some fun let's do this demo",
+    "start": "926440",
+    "end": "931920"
+  },
+  {
+    "text": "live the video can be Plan B I'm going to apologize if it's too",
+    "start": "936120",
+    "end": "942279"
+  },
+  {
+    "text": "small for people in the back uh I've done done my best to expand this up let's start by looking at some pods",
+    "start": "942279",
+    "end": "948160"
+  },
+  {
+    "text": "specs I have three pods specs three podspec files yaml files that we want to look at uh the bank teller auditor and",
+    "start": "948160",
+    "end": "955079"
+  },
+  {
+    "text": "thief and then a policy file we'll look at these uh as we go along",
+    "start": "955079",
+    "end": "960399"
+  },
+  {
+    "text": "first let's look at uh the bank teller pod so this file contains a spec for two",
+    "start": "960399",
+    "end": "968480"
+  },
+  {
+    "text": "parts the bank teller which has label Ro equals teller we schedule this on the master node and the bank DBP which has",
+    "start": "968480",
+    "end": "976480"
+  },
+  {
+    "text": "label Ro equals database we schedule it on node one let's create",
+    "start": "976480",
+    "end": "983279"
+  },
+  {
+    "text": "this it's been created now let's look at the AUD auditor",
+    "start": "985440",
+    "end": "991279"
+  },
+  {
+    "text": "pod this has label Ro equals auditor and we schedu schedule it on the master node",
+    "start": "991279",
+    "end": "998240"
+  },
+  {
+    "text": "it has host Network equals to True which means it uses the host network name space let's create this",
+    "start": "998240",
+    "end": "1005279"
+  },
+  {
+    "text": "part and lastly let's look at the",
+    "start": "1006600",
+    "end": "1012759"
+  },
+  {
+    "text": "thief the thief is also scheduled on the master node and it has host Network",
+    "start": "1014199",
+    "end": "1019480"
+  },
+  {
+    "text": "equals to True which means it's using the host Network Nam",
+    "start": "1019480",
+    "end": "1024199"
+  },
+  {
+    "text": "space all right let's verify that the pods are up and running we have our two node cluster here with the master node",
+    "start": "1026919",
+    "end": "1034120"
+  },
+  {
+    "text": "bearing the IP address 10510 let's look at the pods as you can see the bank auditor and",
+    "start": "1034120",
+    "end": "1041438"
+  },
+  {
+    "text": "the thief pod have the IP address 192 168 10510 which is the IP of the master",
+    "start": "1041439",
+    "end": "1047038"
+  },
+  {
+    "text": "node that's because they're using the host Network and the bank teller and Bank DB pods are using are managed by",
+    "start": "1047039",
+    "end": "1054960"
+  },
+  {
+    "text": "celium so celium assigns these IP addresses 0041 and",
+    "start": "1054960",
+    "end": "1060480"
+  },
+  {
+    "text": "10141 now without any policies in place all pods can talk to all other pods in this in this demo in this test we will",
+    "start": "1062039",
+    "end": "1069679"
+  },
+  {
+    "text": "try to Ping the bank database pod from the other three pods before I do that",
+    "start": "1069679",
+    "end": "1074880"
+  },
+  {
+    "text": "let's watch the traffic that's coming in and going out of the bank DB pod for that I'm going to fire up this t uh TCP",
+    "start": "1074880",
+    "end": "1082240"
+  },
+  {
+    "text": "dump wire shark uh with filtering on the Ping packets which is icmp as a filter",
+    "start": "1082240",
+    "end": "1088320"
+  },
+  {
+    "text": "and the IP address of the bank DBP which is 101",
+    "start": "1088320",
+    "end": "1094880"
+  },
+  {
+    "text": "141 let's restart the capture all right now now the fun starts",
+    "start": "1094880",
+    "end": "1101799"
+  },
+  {
+    "text": "let's first let's first ping from the teller pod with this command I'm exacting into",
+    "start": "1101799",
+    "end": "1107200"
+  },
+  {
+    "text": "the bank teller and I'm looking up the IP address of the bank database pod and uh sending a ping to it one ping",
+    "start": "1107200",
+    "end": "1115280"
+  },
+  {
+    "text": "only as you can see the Ping was successful the icmp Ping Echo request went out and it got a reply back from",
+    "start": "1115280",
+    "end": "1122559"
+  },
+  {
+    "text": "the from the bank DB pod the source address is that of the bank teller and the destination address is of the bank",
+    "start": "1122559",
+    "end": "1129840"
+  },
+  {
+    "text": "DB we look at this field here the vni virtual Network identifier field it has",
+    "start": "1129840",
+    "end": "1135760"
+  },
+  {
+    "text": "a ID value of it has a value of 11638 eight where does that come from for that",
+    "start": "1135760",
+    "end": "1141480"
+  },
+  {
+    "text": "let's look at the celium end points C is my Alias for getting the celum end",
+    "start": "1141480",
+    "end": "1146799"
+  },
+  {
+    "text": "points and it shows it manages two parts the teller and the DB part and the identity ID value for the teller is 11",
+    "start": "1146799",
+    "end": "1154039"
+  },
+  {
+    "text": "1638 that's what goes on The Wire that's what celum puts on The Wire now let's",
+    "start": "1154039",
+    "end": "1159520"
+  },
+  {
+    "text": "ping from the",
+    "start": "1159520",
+    "end": "1162919"
+  },
+  {
+    "text": "auditor so I do the same thing I exec into the bank audit report and send a",
+    "start": "1166000",
+    "end": "1172039"
+  },
+  {
+    "text": "ping the Ping is successful if you look here it's using IP address of",
+    "start": "1172039",
+    "end": "1177880"
+  },
+  {
+    "text": "1036 where does that come from well it is the IP address of the celium host",
+    "start": "1177880",
+    "end": "1183760"
+  },
+  {
+    "text": "interface celum host interface is what celum uses through rout traffic that's uh for host Network pods and it has a ID",
+    "start": "1183760",
+    "end": "1192440"
+  },
+  {
+    "text": "a local it's this is the Local Host ID a generic value of six let's try",
+    "start": "1192440",
+    "end": "1199799"
+  },
+  {
+    "text": "the thief the thief is also able to Ping",
+    "start": "1199799",
+    "end": "1206520"
+  },
+  {
+    "text": "it's using the same Source address as the as the auditor and it has the same network identity as the auditor so at",
+    "start": "1206520",
+    "end": "1214000"
+  },
+  {
+    "text": "the database spot we cannot tell the difference between the teller and the thief uh the auditor and the thief",
+    "start": "1214000",
+    "end": "1219360"
+  },
+  {
+    "text": "excuse me now let's we need some policies here",
+    "start": "1219360",
+    "end": "1224440"
+  },
+  {
+    "text": "that would stop the thief from being able to talk to the talk to the database let's let's look at what that might",
+    "start": "1224440",
+    "end": "1230720"
+  },
+  {
+    "text": "be so this yamu file specifies a simple  Network policy that says apply this",
+    "start": "1230720",
+    "end": "1238520"
+  },
+  {
+    "text": "to Parts with label Ro equals database and the action to take is allow incoming",
+    "start": "1238520",
+    "end": "1244280"
+  },
+  {
+    "text": "traffic from pods from pods with label Ro equals teller or Ro equals auditor",
+    "start": "1244280",
+    "end": "1251320"
+  },
+  {
+    "text": "let's create this",
+    "start": "1251320",
+    "end": "1254080"
+  },
+  {
+    "text": "policy and let's very",
+    "start": "1256840",
+    "end": "1260600"
+  },
+  {
+    "text": "CNP is my Alias for getting the celum network policies and uh we can see it's",
+    "start": "1263520",
+    "end": "1268600"
+  },
+  {
+    "text": "got a creation time stab uid so it looks legit and uh the spec is what we",
+    "start": "1268600",
+    "end": "1275679"
+  },
+  {
+    "text": "expect now let's do our ping test again these are our nodes these are the",
+    "start": "1275679",
+    "end": "1281720"
+  },
+  {
+    "text": "pods they're still running good now let's clear the Clutter over",
+    "start": "1281720",
+    "end": "1287360"
+  },
+  {
+    "text": "here and and let's try pinging from the",
+    "start": "1287360",
+    "end": "1293679"
+  },
+  {
+    "text": "thief the thief cannot ping anymore as you can see the echo request went out",
+    "start": "1293679",
+    "end": "1300520"
+  },
+  {
+    "text": "but no response so the thief is been stopped let's verify that it works for",
+    "start": "1300520",
+    "end": "1305720"
+  },
+  {
+    "text": "the teller so we exec into the teller and",
+    "start": "1305720",
+    "end": "1311760"
+  },
+  {
+    "text": "the bank teller is able to Ping so it's working for the teller and then let's try the auditor",
+    "start": "1311760",
+    "end": "1320519"
+  },
+  {
+    "text": "the auditor cannot ping why let's look at the source ID of the thief and the",
+    "start": "1322520",
+    "end": "1329279"
+  },
+  {
+    "text": "source ID of the auditor they are the same they have the same identifier so you cannot distinguish between the",
+    "start": "1329279",
+    "end": "1335159"
+  },
+  {
+    "text": "teller the auditor and the thief so we need some ebpf magic here thankfully I",
+    "start": "1335159",
+    "end": "1342159"
+  },
+  {
+    "text": "have a script that just does that does just that so this little script do vpf magic",
+    "start": "1342159",
+    "end": "1350159"
+  },
+  {
+    "text": "34567 uh what it tells it what it does is it takes this value of 34567 and",
+    "start": "1350159",
+    "end": "1356120"
+  },
+  {
+    "text": "assigns this as an identity as a network identity for the bank auditor pod let's run the script what it did is it looked",
+    "start": "1356120",
+    "end": "1363960"
+  },
+  {
+    "text": "up the container ID of the bank auditor and then uh it found the cgroup ID for that container ID which is this value",
+    "start": "1363960",
+    "end": "1370679"
+  },
+  {
+    "text": "here 1 16347 and Associated the ID value that I passed in 3 45 6 7 with that it",
+    "start": "1370679",
+    "end": "1377120"
+  },
+  {
+    "text": "created a celium Iden object for that and then it entered this value uh this",
+    "start": "1377120",
+    "end": "1382720"
+  },
+  {
+    "text": "is BPF tool hex pardon me but it it trust me that this is cgroup ID mapping",
+    "start": "1382720",
+    "end": "1388039"
+  },
+  {
+    "text": "to the network identity value and now that we have this in place let's try the",
+    "start": "1388039",
+    "end": "1394000"
+  },
+  {
+    "text": "bank auditor ping again so this time the Ping",
+    "start": "1394000",
+    "end": "1400640"
+  },
+  {
+    "text": "worked and if we look closely what's changed the ID the network identifier of",
+    "start": "1400640",
+    "end": "1407799"
+  },
+  {
+    "text": "345 67 is now going on the wire for the bank auditor pod let's verify that the",
+    "start": "1407799",
+    "end": "1414240"
+  },
+  {
+    "text": "thief is not letting through let has been let through as well so let's ping from the",
+    "start": "1414240",
+    "end": "1421278"
+  },
+  {
+    "text": "thief nope the thief is still locked out the auditor can reach the database but",
+    "start": "1422440",
+    "end": "1427880"
+  },
+  {
+    "text": "the thief cannot and just to make sure that I didn't break the bank teller let's ping from the teller one more",
+    "start": "1427880",
+    "end": "1436039"
+  },
+  {
+    "text": "time and and the teller can ping so that with that we were able to allow the bank",
+    "start": "1437279",
+    "end": "1443840"
+  },
+  {
+    "text": "teller and the bank auditor to talk to the bank DBP while keeping the thief out",
+    "start": "1443840",
+    "end": "1450000"
+  },
+  {
+    "text": "that my friends is the magic of ebpf for you thank",
+    "start": "1450000",
+    "end": "1456799"
+  },
+  {
+    "text": "[Applause]",
+    "start": "1459420",
+    "end": "1462589"
+  },
+  {
+    "text": "you these vams could crash any time",
+    "start": "1465200",
+    "end": "1470320"
+  },
+  {
+    "text": "all right um let's have a quick poll uh can you guess uh how much code I had to",
+    "start": "1470320",
+    "end": "1476080"
+  },
+  {
+    "text": "write in the network traffic data path in order to figure out the identity of the of the process that is sending the",
+    "start": "1476080",
+    "end": "1482399"
+  },
+  {
+    "text": "packet uh can I get a please can I please get a show off hands how many people think it's more than 100 lines of",
+    "start": "1482399",
+    "end": "1489320"
+  },
+  {
+    "text": "code no no one okay a few how many people think it's more than 10 less than",
+    "start": "1489320",
+    "end": "1497320"
+  },
+  {
+    "text": "100 okay you're all very smart how many people for less than 10 that's the only",
+    "start": "1497320",
+    "end": "1503480"
+  },
+  {
+    "text": "choice left or there are a few people who's I don't know okay well let's take",
+    "start": "1503480",
+    "end": "1508960"
+  },
+  {
+    "text": "a look this is what it took that's it the fact that it is so ridiculously",
+    "start": "1508960",
+    "end": "1516600"
+  },
+  {
+    "text": "simple to make this happen speaks volumes about the maturity of psyllium for this",
+    "start": "1516600",
+    "end": "1523880"
+  },
+  {
+    "text": "purpose now now let's uh switch gears a little bit uh as we saw identity based",
+    "start": "1524440",
+    "end": "1530520"
+  },
+  {
+    "text": "policy enforcement for host processes is uh is quite cool but we cannot go home",
+    "start": "1530520",
+    "end": "1535679"
+  },
+  {
+    "text": "just yet think about it what happens if the container jailbreaks and acquires the capability BPF capability on the",
+    "start": "1535679",
+    "end": "1543320"
+  },
+  {
+    "text": "host it can manipulate the maps and then we may be in trouble uh so we still need",
+    "start": "1543320",
+    "end": "1548880"
+  },
+  {
+    "text": "a defense and depth strategy that's grounded in zero trust principles and uh to that end uh we've been using the",
+    "start": "1548880",
+    "end": "1555559"
+  },
+  {
+    "text": "trust fabric solution within eBay for a couple of years and uh it it evolved for",
+    "start": "1555559",
+    "end": "1560760"
+  },
+  {
+    "text": "uh the last five six years it started around the time spify and Spire started uh it's been working well at eBay scale",
+    "start": "1560760",
+    "end": "1566880"
+  },
+  {
+    "text": "and uh it's kept us legally compliant with the payment card industry PCI regulations uh the security requirements",
+    "start": "1566880",
+    "end": "1572880"
+  },
+  {
+    "text": "that they they ask for uh in terms of uh at the core of it it uh this solution",
+    "start": "1572880",
+    "end": "1579919"
+  },
+  {
+    "text": "leverages Chas and web tokens jots and in terms of performance it does over 36",
+    "start": "1579919",
+    "end": "1585120"
+  },
+  {
+    "text": "million token generations and out of 4 billion token validations each day we're working to open source this code",
+    "start": "1585120",
+    "end": "1590279"
+  },
+  {
+    "text": "I'm pushing for that and uh I hope to present uh in a at a future conference if we get the chance present our",
+    "start": "1590279",
+    "end": "1596760"
+  },
+  {
+    "text": "segmentation solution that uh combines layer 7even trust fabric policies with layer 4 S network",
+    "start": "1596760",
+    "end": "1604799"
+  },
+  {
+    "text": "policies now so to summarize securing apps at",
+    "start": "1606760",
+    "end": "1612760"
+  },
+  {
+    "text": "scale it is a challenging problem and we need to have an efficient way to enforce policies un fortunately ebpf continues",
+    "start": "1612760",
+    "end": "1619880"
+  },
+  {
+    "text": "to shine and show its power in this space uh we broke new ground here today in extending layer 4 identity based",
+    "start": "1619880",
+    "end": "1626840"
+  },
+  {
+    "text": "segmentation to host processes uh of course uh we plan to contribute this feature to Upstream celium we have a",
+    "start": "1626840",
+    "end": "1633919"
+  },
+  {
+    "text": "bunch of issues to resolve Aon cases to figure out uh after we are done with that we should be able to get there uh",
+    "start": "1633919",
+    "end": "1641240"
+  },
+  {
+    "text": "the bottom line is that we need layers of security or what's called as a defense in depth strategy uh zero trust",
+    "start": "1641240",
+    "end": "1648159"
+  },
+  {
+    "text": "chitecture this is this is where the industry is headed and with this we are aligning ourselves in that",
+    "start": "1648159",
+    "end": "1654360"
+  },
+  {
+    "text": "direction and uh with that I will conclude this session uh thanks a lot for attending but before you go I have",
+    "start": "1654360",
+    "end": "1660799"
+  },
+  {
+    "text": "one request please scan please scan this QR code it will take you to a place",
+    "start": "1660799",
+    "end": "1666039"
+  },
+  {
+    "text": "where you can leave feedback for me please let me know what you found useful or what I could have done better I love",
+    "start": "1666039",
+    "end": "1672159"
+  },
+  {
+    "text": "to hear back from you and uh I read I look at the feedback and I try to act on it uh so please please visit that link",
+    "start": "1672159",
+    "end": "1679679"
+  },
+  {
+    "text": "leave feedback thank you [Music] [Applause]",
+    "start": "1679679",
+    "end": "1686140"
+  },
+  {
+    "text": "and thank you uh I can take some questions now uh we looks like we have",
+    "start": "1688200",
+    "end": "1693360"
+  },
+  {
+    "text": "some time for",
+    "start": "1693360",
+    "end": "1696158"
+  },
+  {
+    "text": "that hi thanks for a talk um the question I have is the text needs to",
+    "start": "1700399",
+    "end": "1705559"
+  },
+  {
+    "text": "work because you have this magic. sh how does it work in practice to like make this production ready um the in practice",
+    "start": "1705559",
+    "end": "1713960"
+  },
+  {
+    "text": "what we would need to do is there are two parts to it so it breaks down to the identity configuration of the identity",
+    "start": "1713960",
+    "end": "1720679"
+  },
+  {
+    "text": "so one of the things I covered touched upon there is that cium identity object so we need to create that and that's the",
+    "start": "1720679",
+    "end": "1727600"
+  },
+  {
+    "text": "part where the control plane Plumbing comes in and uh we we looked at it closely looked at our application space",
+    "start": "1727600",
+    "end": "1734360"
+  },
+  {
+    "text": "and how do we do that that's where we we were trying to figure out what's a good way to figure out the identity values",
+    "start": "1734360",
+    "end": "1740120"
+  },
+  {
+    "text": "given that we have so many uh applications we have X number of applications and uh the number of",
+    "start": "1740120",
+    "end": "1746480"
+  },
+  {
+    "text": "instances so an application like you know kubernetes API server you could have five instances in a typical cluster",
+    "start": "1746480",
+    "end": "1752840"
+  },
+  {
+    "text": "that has uh like a production cluster uh now you take that to some other uh",
+    "start": "1752840",
+    "end": "1758600"
+  },
+  {
+    "text": "applications how do we map the identities that is the uh harder part of the problem that we want to solve and",
+    "start": "1758600",
+    "end": "1763679"
+  },
+  {
+    "text": "the control plan interface that's what we're trying to Define uh which will be very generic the uh the the question",
+    "start": "1763679",
+    "end": "1771080"
+  },
+  {
+    "text": "about uh what this script does it assumes that part is plumbed in so if you notice I passed that argument value",
+    "start": "1771080",
+    "end": "1778240"
+  },
+  {
+    "text": "at 3 4 5 6 7 this script is essentially taking that and it's like pretending that this whole control plane Plumbing",
+    "start": "1778240",
+    "end": "1784440"
+  },
+  {
+    "text": "has come in that's going to be a lot of code uh in the data path uh we need to",
+    "start": "1784440",
+    "end": "1789760"
+  },
+  {
+    "text": "this is one particular case so this is a communication that's happening cross node so we are talking from uh host",
+    "start": "1789760",
+    "end": "1796840"
+  },
+  {
+    "text": "process host Network Bo that's on the master to node one uh we also need to resolve cases like what if the host",
+    "start": "1796840",
+    "end": "1804240"
+  },
+  {
+    "text": "processes are on the same node what if a host processor is talking to like kuet",
+    "start": "1804240",
+    "end": "1809640"
+  },
+  {
+    "text": "uh a kuet is talking to a pod that is allowed by Pol by default because health checks run in that in that so we should",
+    "start": "1809640",
+    "end": "1817200"
+  },
+  {
+    "text": "and we need to ensure that we don't break it by doing this so there are these several Corner cases that we need to resolve um it's not a whole lot of",
+    "start": "1817200",
+    "end": "1826120"
+  },
+  {
+    "text": "work uh we it's it's about prioritizing and bandwidth so uh you may imagine how",
+    "start": "1826120",
+    "end": "1832919"
+  },
+  {
+    "text": "things change a bit here and there ter of priorities this is this was not a",
+    "start": "1832919",
+    "end": "1838600"
+  },
+  {
+    "text": "very high priority project to begin with it's it was like okay you just joined eBay here is this fun project for you to",
+    "start": "1838600",
+    "end": "1845159"
+  },
+  {
+    "text": "do to get warmed up yeah that's what it was uh yeah I hope that answered your",
+    "start": "1845159",
+    "end": "1851840"
+  },
+  {
+    "text": "question couple of question uh the second was related to the first one in order to inject the identi into the vni",
+    "start": "1851840",
+    "end": "1859559"
+  },
+  {
+    "text": "I assume that you have to build your ebpf on the on the host right yes it is",
+    "start": "1859559",
+    "end": "1865720"
+  },
+  {
+    "text": "done by uh an ebpf program uh okay what if in a production environment you are",
+    "start": "1865720",
+    "end": "1871240"
+  },
+  {
+    "text": "not allowed to build anything so this is uh are you talking about um",
+    "start": "1871240",
+    "end": "1880320"
+  },
+  {
+    "text": "permissions yeah the having the the capability to build a BPF program",
+    "start": "1880320",
+    "end": "1885919"
+  },
+  {
+    "text": "injecting the identity for that particular pod or host process and attach it to the uh to the program",
+    "start": "1885919",
+    "end": "1893440"
+  },
+  {
+    "text": "itself attaching of course must be allowed but probably build the the BPF not yeah this would what this would look",
+    "start": "1893440",
+    "end": "1900360"
+  },
+  {
+    "text": "like is this would be an extension of a new feature in celium which already has the BPF capabilities so celium agent can",
+    "start": "1900360",
+    "end": "1908320"
+  },
+  {
+    "text": "it has the uh full access to the system because it's a core infra component which means it has BPF uh CIS capability",
+    "start": "1908320",
+    "end": "1915760"
+  },
+  {
+    "text": "BPF it it's allowed to attach to attach BPF programs and do a bunch of additional things that it needs to do as",
+    "start": "1915760",
+    "end": "1921679"
+  },
+  {
+    "text": "a system a critical system demon uh now the part about how do you specify",
+    "start": "1921679",
+    "end": "1929240"
+  },
+  {
+    "text": "identity for a host process that can be as simple as a annotation on the host process let's say you want to uh specify",
+    "start": "1929240",
+    "end": "1937000"
+  },
+  {
+    "text": "in this case we have a host Network P the bank teller there could be an annotation which what I did the do ebpf",
+    "start": "1937000",
+    "end": "1943000"
+  },
+  {
+    "text": "magic do ebpf magic script instead of that in the bank teller pod you set an annotation that says uh the my network",
+    "start": "1943000",
+    "end": "1950480"
+  },
+  {
+    "text": "identity is 34567 so that is typically how the control plane would look at it",
+    "start": "1950480",
+    "end": "1956000"
+  },
+  {
+    "text": "and and implement it uh I didn't do it in this case because this was easier to",
+    "start": "1956000",
+    "end": "1961559"
+  },
+  {
+    "text": "show U that's kind of little bit hidden it's behind the scenes I did that in the",
+    "start": "1961559",
+    "end": "1966760"
+  },
+  {
+    "text": "demo a couple of years ago using annot using uh pod annotations where I specified the resources it wasn't as",
+    "start": "1966760",
+    "end": "1973360"
+  },
+  {
+    "text": "readily seen this is a lot easier to see so for demo purposes this is what you do but yeah to I hope it answers your",
+    "start": "1973360",
+    "end": "1979880"
+  },
+  {
+    "text": "question uh that's one way to do it that's not the only way but typically we you know we make liberal",
+    "start": "1979880",
+    "end": "1987760"
+  },
+  {
+    "text": "use of annotations it's a very convenient com uh feature that's there in cm you have this would be one of",
+    "start": "1987760",
+    "end": "1992960"
+  },
+  {
+    "text": "those uh when uh in production environments the identity would be",
+    "start": "1992960",
+    "end": "1999559"
+  },
+  {
+    "text": "looked up by various uh parameter okay this is an application what namespace is",
+    "start": "1999559",
+    "end": "2004760"
+  },
+  {
+    "text": "it running in application namespaces are typically used use unique and then you",
+    "start": "2004760",
+    "end": "2010240"
+  },
+  {
+    "text": "could have the cluster that varies it could be a staging test cluster or a Dev",
+    "start": "2010240",
+    "end": "2015559"
+  },
+  {
+    "text": "cluster or a production cluster and they would have different identities so that would be something uh some kind of an",
+    "start": "2015559",
+    "end": "2021720"
+  },
+  {
+    "text": "admission control hook would inject based on it it would look up a some kind of a central database and then uh inject",
+    "start": "2021720",
+    "end": "2029080"
+  },
+  {
+    "text": "that ID into that so that the application developer doesn't have to specify that so that mapping has to",
+    "start": "2029080",
+    "end": "2034720"
+  },
+  {
+    "text": "happen so the control plane part of the work is significant uh and really if you think about it we",
+    "start": "2034720",
+    "end": "2042080"
+  },
+  {
+    "text": "celum just needs to provide interfaces to make this happen because our control plan how we do it may be very different",
+    "start": "2042080",
+    "end": "2048480"
+  },
+  {
+    "text": "from how you do it or another a third company would do it so we cannot you know become opinionated on that part",
+    "start": "2048480",
+    "end": "2055040"
+  },
+  {
+    "text": "sure thank you sure hi um after reading the description",
+    "start": "2055040",
+    "end": "2062398"
+  },
+  {
+    "text": "I had an impression that the talk wouldn't be focused on host Network containers but not uh host Network",
+    "start": "2062399",
+    "end": "2069000"
+  },
+  {
+    "text": "containers but on host processes oh it's the same it's the same thing so um I",
+    "start": "2069000",
+    "end": "2075720"
+  },
+  {
+    "text": "believe in the abstract I did write both uh host Network host Network pods as",
+    "start": "2075720",
+    "end": "2082240"
+  },
+  {
+    "text": "well as uh host processes this can be applied to host processes as well so the caveat with that is that it would apply",
+    "start": "2082240",
+    "end": "2088960"
+  },
+  {
+    "text": "to the long running host processes the difference is uh we're looking at the cgroup ID in the case of uh the when you",
+    "start": "2088960",
+    "end": "2097200"
+  },
+  {
+    "text": "create a pod the container D or the cryo there your uh container runtime creates",
+    "start": "2097200",
+    "end": "2103079"
+  },
+  {
+    "text": "the cgroup uh C group for that pod in the case of in the case of host processes like an example would be the",
+    "start": "2103079",
+    "end": "2109680"
+  },
+  {
+    "text": "cube API server or cuet the cgroup ID is created by systemd so if you look in the",
+    "start": "2109680",
+    "end": "2115720"
+  },
+  {
+    "text": "in the BPF math paths you'll find uh you'll see where it looks up system d. slice in that under that you will find",
+    "start": "2115720",
+    "end": "2122480"
+  },
+  {
+    "text": "all the host process that are running now if it's a very shortlived host process that is one which is which we",
+    "start": "2122480",
+    "end": "2129280"
+  },
+  {
+    "text": "cannot I don't know if we have super fast way of figuring out the control plane and then Plumbing it it could",
+    "start": "2129280",
+    "end": "2134480"
+  },
+  {
+    "text": "still happen but that's some that's a case that I've not really considered uh",
+    "start": "2134480",
+    "end": "2139720"
+  },
+  {
+    "text": "what we really were looking at is the use case here is uh kubernetes API",
+    "start": "2139720",
+    "end": "2146079"
+  },
+  {
+    "text": "server in cluster a should only be able to talk to kubernetes cuets in cluster a",
+    "start": "2146079",
+    "end": "2152040"
+  },
+  {
+    "text": "and not cluster B so thanks for the reply but my question is what if I got",
+    "start": "2152040",
+    "end": "2157280"
+  },
+  {
+    "text": "introd reduced to some vulnerability after node update like through our my",
+    "start": "2157280",
+    "end": "2163280"
+  },
+  {
+    "text": "package repository so I would like to set up like centralized setup uh",
+    "start": "2163280",
+    "end": "2169200"
+  },
+  {
+    "text": "firewall to Al host process outside of kubernetes right now we using anible for",
+    "start": "2169200",
+    "end": "2174680"
+  },
+  {
+    "text": "that and it would be nice to have like netor policy like actually describing",
+    "start": "2174680",
+    "end": "2179960"
+  },
+  {
+    "text": "the firewall at the notes this yeah this doesn't preclude or prevent uh net scope",
+    "start": "2179960",
+    "end": "2186319"
+  },
+  {
+    "text": "kind of uh uh a firewall in uh from being there this doesn't uh it can",
+    "start": "2186319",
+    "end": "2192240"
+  },
+  {
+    "text": "continue to work so the that is the idea of defense and depth the strategy right you have multiple layers of security you",
+    "start": "2192240",
+    "end": "2200119"
+  },
+  {
+    "text": "you kind of assume that a motivated uh attacker or a hacker will find a way to get into your network so you can't just",
+    "start": "2200119",
+    "end": "2207160"
+  },
+  {
+    "text": "say okay I just I have my VPN I'm all set they could break into that and then do have what you need to do is limit the",
+    "start": "2207160",
+    "end": "2214200"
+  },
+  {
+    "text": "blast radius but what would be your advice to to group",
+    "start": "2214200",
+    "end": "2219480"
+  },
+  {
+    "text": "all CG groups inside kubernetes and disc them from all CG groups like in system D",
+    "start": "2219480",
+    "end": "2227160"
+  },
+  {
+    "text": "and outside of kubernetes there is no difference it's a kernel it's a kernel construct c groups is a kernel construct",
+    "start": "2227160",
+    "end": "2234160"
+  },
+  {
+    "text": "every single process gets uh gets its yeah but how to know like because there's like random ideas how to",
+    "start": "2234160",
+    "end": "2241280"
+  },
+  {
+    "text": "distinguish them in real time oh by using the BPF skbc group ID that",
+    "start": "2241280",
+    "end": "2247240"
+  },
+  {
+    "text": "function call the the that is the easy part the hard part is when that lookup",
+    "start": "2247240",
+    "end": "2252880"
+  },
+  {
+    "text": "happens does the map entry is that configured so that configuration can be",
+    "start": "2252880",
+    "end": "2258960"
+  },
+  {
+    "text": "done easily for long running processes which is which we want one as pods are",
+    "start": "2258960",
+    "end": "2264520"
+  },
+  {
+    "text": "pods have a life cycle there's going to be like a pre-art and there's a bunch of things that happens you can hook into",
+    "start": "2264520",
+    "end": "2269560"
+  },
+  {
+    "text": "one of these and do it for pods and system de processes like kuet API CU API",
+    "start": "2269560",
+    "end": "2275599"
+  },
+  {
+    "text": "server Cube API server is really part but systemd is a kuet service uh kuet is a systemd service there is a there is a",
+    "start": "2275599",
+    "end": "2282520"
+  },
+  {
+    "text": "systemd file that goes along with it and systemd is responsible for its uh running running this or its Health",
+    "start": "2282520",
+    "end": "2288920"
+  },
+  {
+    "text": "keeping it alive and those kind of processes uh the cgroup ID is created by System D it's managed by System D and uh",
+    "start": "2288920",
+    "end": "2296400"
+  },
+  {
+    "text": "you can reliably look them up okay thanks thanks L I hope that answers your",
+    "start": "2296400",
+    "end": "2302280"
+  },
+  {
+    "text": "question uh we are out of time but I'm happy to uh I think there's another the",
+    "start": "2302280",
+    "end": "2307680"
+  },
+  {
+    "text": "talk after this so I'll step away from here and uh I I'll be around here in case you have more questions",
+    "start": "2307680",
+    "end": "2315359"
+  }
+]

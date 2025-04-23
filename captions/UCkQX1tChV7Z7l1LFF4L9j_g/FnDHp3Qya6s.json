@@ -1,0 +1,2296 @@
+[
+  {
+    "start": "0",
+    "end": "52000"
+  },
+  {
+    "text": "[Music]",
+    "start": "2610",
+    "end": "9959"
+  },
+  {
+    "text": "I am Charles Nutter I am one of the J Ruby guys uh worked at Sun micros",
+    "start": "11360",
+    "end": "16400"
+  },
+  {
+    "text": "systems for some amount of time um about around three years and then moved to asine yard for about three years and now",
+    "start": "16400",
+    "end": "22560"
+  },
+  {
+    "text": "I'm at Red Hat essentially doing exactly the same thing that I've been doing for the past six uh primarily been",
+    "start": "22560",
+    "end": "28720"
+  },
+  {
+    "text": "responsible for the compiler in J Ruby and more specifically performance and",
+    "start": "28720",
+    "end": "33879"
+  },
+  {
+    "text": "profiling and try to make Ruby code run as fast try to make our core libraries run as fast as possible and so as a",
+    "start": "33879",
+    "end": "39840"
+  },
+  {
+    "text": "result I spent a lot of time looking inside the jvm how it optimizes how it compiles stuff and trying to figure out",
+    "start": "39840",
+    "end": "46320"
+  },
+  {
+    "text": "how to use that information to improve J Ruby so today what we're going to learn in this talk is how the jvm's jit works",
+    "start": "46320",
+    "end": "54320"
+  },
+  {
+    "start": "52000",
+    "end": "52000"
+  },
+  {
+    "text": "and specifically we're talking about open jdk here which is what the vast majority of people run uh how to monitor",
+    "start": "54320",
+    "end": "60199"
+  },
+  {
+    "text": "the jit so you can see what's happening and actually see the decisions it's making see the code it's spinning out",
+    "start": "60199",
+    "end": "65960"
+  },
+  {
+    "text": "and adjust your expectations appropriately finding problems in that output so how to tell when there's",
+    "start": "65960",
+    "end": "72040"
+  },
+  {
+    "text": "something that's bad in the jit output or in the resulting assembly code and then we actually will take a look at",
+    "start": "72040",
+    "end": "77920"
+  },
+  {
+    "text": "what the assembly code the optimized native machine code that hotspot outputs",
+    "start": "77920",
+    "end": "83400"
+  },
+  {
+    "text": "uh and we'll do a little primer so you can understand how to read it and it actually will and hopefully by the end",
+    "start": "83400",
+    "end": "89159"
+  },
+  {
+    "text": "you'll see that it actually is is useful at some point to be able to look at that assembly and figure out what you're doing wrong and why hotpots making bad",
+    "start": "89159",
+    "end": "95840"
+  },
+  {
+    "text": "decisions because of it uh things we won't cover I won't talk anything about anything GC related as far as tuning uh",
+    "start": "95840",
+    "end": "102759"
+  },
+  {
+    "start": "98000",
+    "end": "98000"
+  },
+  {
+    "text": "the monitoring and optimizations that you'll see here are largely if you've got a piece of code in your system that",
+    "start": "102759",
+    "end": "110600"
+  },
+  {
+    "text": "it actually is CPU bound and it's not optimizing the way you expect it to rather than being memory bound or IO",
+    "start": "110600",
+    "end": "117000"
+  },
+  {
+    "text": "bound that's what you'll get out of this so there's other talks about GC tuning and about how to do better on GC and of",
+    "start": "117000",
+    "end": "122920"
+  },
+  {
+    "text": "course if you run a Zool you don't have to tune the GC at all as as Gil was telling us uh but there are lots of",
+    "start": "122920",
+    "end": "128599"
+  },
+  {
+    "text": "other tools and lots of other talks for that that I won't get into I won't talk about how open jdk is implemented",
+    "start": "128599",
+    "end": "133760"
+  },
+  {
+    "text": "internally we'll talk specific we'll talk a little bit about how the jit in open jdk is structured and what",
+    "start": "133760",
+    "end": "139040"
+  },
+  {
+    "text": "decisions it makes and when but not really how it's implemented directly uh and I won't talk anything about like the",
+    "start": "139040",
+    "end": "145120"
+  },
+  {
+    "text": "jni native layers so we're focusing almost entirely on optimization and jit at the jvm level so what is jit uh just",
+    "start": "145120",
+    "end": "153319"
+  },
+  {
+    "text": "in time compilation uh but it still has quite a few meanings uh it's basically means you compile the code or optimize",
+    "start": "153319",
+    "end": "159800"
+  },
+  {
+    "text": "the code when you need to or when you've decided that it's a good a good time to make that optimization decision uh as on",
+    "start": "159800",
+    "end": "166120"
+  },
+  {
+    "text": "the on the CLR for example Microsoft's implementation uh there is no interpreter that's not mixed mode they",
+    "start": "166120",
+    "end": "172159"
+  },
+  {
+    "text": "still call it a jit because immediately before the code executes they will compile it to machine code and then cach",
+    "start": "172159",
+    "end": "177879"
+  },
+  {
+    "text": "that forever uh whereas on the jbm typical jbm will run an interpreter for a little while and decide which code is",
+    "start": "177879",
+    "end": "184599"
+  },
+  {
+    "text": "hot or important and then we'll we'll go through the effort of making native code out of it uh and a large portion of java",
+    "start": "184599",
+    "end": "191040"
+  },
+  {
+    "text": "code in a typical application or application server may never jit it may actually get hot enough so it saves the",
+    "start": "191040",
+    "end": "196760"
+  },
+  {
+    "text": "time of doing all that compilation up front um and that's and of course never there's if you only call a piece of code",
+    "start": "196760",
+    "end": "203200"
+  },
+  {
+    "text": "once or twice there's no reason to go through the effort to try and analyze it optimize it turn it into machine code uh",
+    "start": "203200",
+    "end": "209120"
+  },
+  {
+    "text": "just run it in the interpreter a few times and then you're done you move on with the rest of the application and now for Hotspot we're",
+    "start": "209120",
+    "end": "215879"
+  },
+  {
+    "start": "214000",
+    "end": "214000"
+  },
+  {
+    "text": "talking about what's called a mixed mode jit or a mix mode runtime uh which means",
+    "start": "215879",
+    "end": "221000"
+  },
+  {
+    "text": "that it will interpret for a while and that's just normal bite code walking with an artificial stack a real virtual",
+    "start": "221000",
+    "end": "226480"
+  },
+  {
+    "text": "machine at that point and then at some point it will turn that into compiled",
+    "start": "226480",
+    "end": "231680"
+  },
+  {
+    "text": "native execution and actually run it directly on the native system a real native Hardware native register",
+    "start": "231680",
+    "end": "238360"
+  },
+  {
+    "text": "machine and it decides how to do this by profiling while it does the interpretation so the code runs for a",
+    "start": "238360",
+    "end": "244599"
+  },
+  {
+    "start": "239000",
+    "end": "239000"
+  },
+  {
+    "text": "certain amount of time uh hotspot inserts little hooks into it and gathers metrics about how it's running what",
+    "start": "244599",
+    "end": "251200"
+  },
+  {
+    "text": "methods it's calling uh what sort of looping structures it's doing what sort of locking it's doing uh basically",
+    "start": "251200",
+    "end": "257320"
+  },
+  {
+    "text": "gathering information about invariance and constants and statistics about the code uh the the hotspot guys talk a lot",
+    "start": "257320",
+    "end": "264080"
+  },
+  {
+    "text": "about the shape of code and that's what it does during interpretation time to try and gather that information so it",
+    "start": "264080",
+    "end": "269600"
+  },
+  {
+    "text": "can can make good decisions for optimizing and now even then that is still kind of an educated guess you",
+    "start": "269600",
+    "end": "275000"
+  },
+  {
+    "text": "can't predict all possible paths through a given program you can't tell whether the program is going to reach certain places so things may change in the",
+    "start": "275000",
+    "end": "282680"
+  },
+  {
+    "text": "future uh you may have one request that represents 99% of your application and",
+    "start": "282680",
+    "end": "288199"
+  },
+  {
+    "text": "then there's another request that is that last 1% if that hits it may change the",
+    "start": "288199",
+    "end": "293800"
+  },
+  {
+    "text": "assumptions that the jvm has about optimizing and it may have to to back off a little bit so everyone should know",
+    "start": "293800",
+    "end": "299479"
+  },
+  {
+    "start": "298000",
+    "end": "298000"
+  },
+  {
+    "text": "the Golden Rule of optimizing anything just don't do unnecessary work and the",
+    "start": "299479",
+    "end": "304919"
+  },
+  {
+    "text": "purpose of this profiling is to figure out where the hot sections of code are gather as much information about",
+    "start": "304919",
+    "end": "310360"
+  },
+  {
+    "text": "unnecessary work they're doing as you can and get rid of that work try and get it down to the Bare Essentials of what",
+    "start": "310360",
+    "end": "316520"
+  },
+  {
+    "text": "the code actually needs to do and there's a number of different ways that hotspot and other VMS do this uh this is",
+    "start": "316520",
+    "end": "324199"
+  },
+  {
+    "text": "a long list we'll go through each of these more in detail so first of all inlining is kind of the biggest one um",
+    "start": "324199",
+    "end": "330560"
+  },
+  {
+    "start": "327000",
+    "end": "327000"
+  },
+  {
+    "text": "if you can't get your code to inline on the jvm you're not going to get a bunch of the other optimizations that fall out of it inlining essentially just takes a",
+    "start": "330560",
+    "end": "337440"
+  },
+  {
+    "text": "caller and a call E and combines them into one unit uh sometimes that can be done immediately easily without a lot of",
+    "start": "337440",
+    "end": "344280"
+  },
+  {
+    "text": "checking like for example calling a static method you always know what body of code you're hitting it's easy to",
+    "start": "344280",
+    "end": "349440"
+  },
+  {
+    "text": "inline that uh whereas calling a virtual method you may have to profile at that",
+    "start": "349440",
+    "end": "354880"
+  },
+  {
+    "text": "call site figure out what the types are that are seen maybe only one maybe you're only ever calling string two",
+    "start": "354880",
+    "end": "360039"
+  },
+  {
+    "text": "string or object. two string then you can inline that logic directly into the directly into the caller and then",
+    "start": "360039",
+    "end": "366599"
+  },
+  {
+    "text": "optimize it as if it were part of that code uh so yeah with all of these more code",
+    "start": "366599",
+    "end": "373680"
+  },
+  {
+    "text": "means better visibility the more levels we can inline the more pieces of logic we can put all together in one unit the",
+    "start": "373680",
+    "end": "379400"
+  },
+  {
+    "text": "better we can see the unnecessary work like extra argument juggling or VAR ARS",
+    "start": "379400",
+    "end": "384680"
+  },
+  {
+    "text": "arrays things like that that you can't see unless you're able to pull the methods together into a single unit let's see what it actually looks like in",
+    "start": "384680",
+    "end": "390960"
+  },
+  {
+    "text": "practice so we've got a little uh accumulator here that's just going to add up a bunch of numbers uh the add all method takes a",
+    "start": "390960",
+    "end": "398319"
+  },
+  {
+    "text": "Max which will be the maximum number we're going to add and then it calls this add method to do the addition for you to kind of demonstrate the somewhat",
+    "start": "398319",
+    "end": "404960"
+  },
+  {
+    "text": "contrived case of of doing the inlining now here in this case only one target is ever seen even if this is a virtual",
+    "start": "404960",
+    "end": "411319"
+  },
+  {
+    "text": "method we can see that there's only one that's ever getting called here and hotspot will recognize that profile it",
+    "start": "411319",
+    "end": "417680"
+  },
+  {
+    "text": "and say it's always calling this particular body of code and it'll actually emit code that looks like",
+    "start": "417680",
+    "end": "423800"
+  },
+  {
+    "text": "this the jvm guys are always telling us that it's very cheap and very easy to",
+    "start": "423800",
+    "end": "428879"
+  },
+  {
+    "text": "just split code off into small methods let the jvm figure out which are the hot pieces and it will inline it and the",
+    "start": "428879",
+    "end": "435440"
+  },
+  {
+    "text": "fact that it's making the call to a virtual method in the first place will almost completely disappear out of the execution profile make things a little",
+    "start": "435440",
+    "end": "442680"
+  },
+  {
+    "text": "bit simpler by breaking things up so Loop unrolling uh loop unrolling",
+    "start": "442680",
+    "end": "447840"
+  },
+  {
+    "start": "446000",
+    "end": "446000"
+  },
+  {
+    "text": "basically analyzes a loop to to determine whether it's uh has a constant stride whether it has uh a fixed number",
+    "start": "447840",
+    "end": "454800"
+  },
+  {
+    "text": "of elements and then can unroll certain size Loops so that rather than constantly jumping back to the top for",
+    "start": "454800",
+    "end": "460680"
+  },
+  {
+    "text": "all those three or five or 10 elements it just goes straight through there's no jumps and there's no tests that have to",
+    "start": "460680",
+    "end": "466560"
+  },
+  {
+    "text": "be done as a result of that because it can prove the shape of the the loop ahead of time look at an example here",
+    "start": "466560",
+    "end": "473680"
+  },
+  {
+    "text": "We're looping over a fixed size final string array uh so this is using the standard",
+    "start": "473680",
+    "end": "479599"
+  },
+  {
+    "text": "the the Java 5 iterator style uh for Loop and the jvm is able to see that",
+    "start": "479599",
+    "end": "485800"
+  },
+  {
+    "text": "this is always going to be a three element array it's always going to be one element at a time there's no reason",
+    "start": "485800",
+    "end": "490960"
+  },
+  {
+    "text": "to do all of the extra logic to test do we have another element do we have another element loop back to the top we",
+    "start": "490960",
+    "end": "496440"
+  },
+  {
+    "text": "can just emit it directly and here's what you actually will end up with it in many cases the",
+    "start": "496440",
+    "end": "502000"
+  },
+  {
+    "text": "native code will completely omit the jumps and you'll just see each of those calls happen in place possibly with the",
+    "start": "502000",
+    "end": "508280"
+  },
+  {
+    "text": "actual strings inlined as well lock cooning is another one that",
+    "start": "508280",
+    "end": "513959"
+  },
+  {
+    "start": "512000",
+    "end": "512000"
+  },
+  {
+    "text": "can come out of inlining so here we have a private synchronized method uh called",
+    "start": "513959",
+    "end": "519440"
+  },
+  {
+    "text": "process that we're calling repeatedly in a loop uh now if if if it profiles the",
+    "start": "519440",
+    "end": "525120"
+  },
+  {
+    "text": "right way it may turn out that we don't really need or want to do that locking",
+    "start": "525120",
+    "end": "530279"
+  },
+  {
+    "text": "for every single call acquire the lock do the call release the lock every single time we go through this",
+    "start": "530279",
+    "end": "536760"
+  },
+  {
+    "text": "Loop if we can actually inline that logic we can move the lock out further lock it once do the three calls and then",
+    "start": "536760",
+    "end": "544320"
+  },
+  {
+    "text": "unlock and save us the overhead of doing that locking all the time again very important that inlining",
+    "start": "544320",
+    "end": "550320"
+  },
+  {
+    "text": "happens here so we can't so we can see that Downstream us removing the synchronization is not going to affect",
+    "start": "550320",
+    "end": "556160"
+  },
+  {
+    "text": "something else uh locky lighting is another one it can do if you have a goofy overprotective code uh for example",
+    "start": "556160",
+    "end": "564120"
+  },
+  {
+    "start": "558000",
+    "end": "558000"
+  },
+  {
+    "text": "this where we're actually synchronizing on a local variable uh the jbm will actually see that this variable never",
+    "start": "564120",
+    "end": "570320"
+  },
+  {
+    "text": "actually escapes this piece of code no other thread can ever see it and it will simply just eliminate the locking in",
+    "start": "570320",
+    "end": "576640"
+  },
+  {
+    "text": "that case entirely the the uh canonical story about this one is uh the string string",
+    "start": "576640",
+    "end": "584320"
+  },
+  {
+    "text": "buffer versus string Builder string Builder being added later on to remove the synchronization from all of the",
+    "start": "584320",
+    "end": "590160"
+  },
+  {
+    "text": "string append methods and so on uh but by the time they ended up getting it out",
+    "start": "590160",
+    "end": "595440"
+  },
+  {
+    "text": "there the jvm already was good enough at telling a string buffer was only being used by that one thread and eliminating",
+    "start": "595440",
+    "end": "601040"
+  },
+  {
+    "text": "the locks and so in most cases string buffer and string Builder have exactly the same performance characteristics now it's kind of a funny way that it ended",
+    "start": "601040",
+    "end": "607640"
+  },
+  {
+    "text": "up Escape analysis is a little bit newer and slowly improving at the jvm level uh",
+    "start": "607640",
+    "end": "614240"
+  },
+  {
+    "start": "608000",
+    "end": "608000"
+  },
+  {
+    "text": "Escape analysis allows us to take object structures like arrays or classes or",
+    "start": "614240",
+    "end": "619519"
+  },
+  {
+    "text": "objects that have fields and eliminate the object creation only use the contents of the object uh for example",
+    "start": "619519",
+    "end": "628320"
+  },
+  {
+    "text": "passing a VAR args right now without Escape analysis there's no way to optimize that intermediate array away it",
+    "start": "628320",
+    "end": "635320"
+  },
+  {
+    "text": "has to create create the array stuff the arguments into it pass it someone pulls",
+    "start": "635320",
+    "end": "640519"
+  },
+  {
+    "text": "the arguments out and then that goes into the garbage collector pool at some point probably the Young Generation but you've got that array that sticks around",
+    "start": "640519",
+    "end": "646920"
+  },
+  {
+    "text": "and you've got the overhead from it all the time if you can escape an analyze it and inline those two together there's no",
+    "start": "646920",
+    "end": "652959"
+  },
+  {
+    "text": "reason to have the array let's look at a example that uses our little Foo struct here so we got three methods bar baz and",
+    "start": "652959",
+    "end": "660160"
+  },
+  {
+    "text": "quux that call each other uh we're constructing a foo up at the top and passing it through each of these",
+    "start": "660160",
+    "end": "666000"
+  },
+  {
+    "text": "levels same object all the way through we're only accessing the individual fields of that class now if we can",
+    "start": "666000",
+    "end": "672600"
+  },
+  {
+    "text": "inline all these together and we can't and no one else outside of these three methods can see the foo object then",
+    "start": "672600",
+    "end": "679519"
+  },
+  {
+    "text": "Escape analysis can actually just make it this code essentially it will just have those fields directly in place",
+    "start": "679519",
+    "end": "685600"
+  },
+  {
+    "text": "it'll see that the field values are not changed along the way it'll see that the object itself is not used or passed out",
+    "start": "685600",
+    "end": "692560"
+  },
+  {
+    "text": "to an API or passed to a hash table or something and just do that stuff directly in line now we're allocating no",
+    "start": "692560",
+    "end": "699160"
+  },
+  {
+    "text": "objects these strings are coming out of the constant pool in the class and are just interned and always available and",
+    "start": "699160",
+    "end": "705680"
+  },
+  {
+    "text": "we've massively improved the performance of this by not having to create that intermediate struct now this is still",
+    "start": "705680",
+    "end": "711959"
+  },
+  {
+    "text": "probably one of the weakest areas as far as hotspot goes uh it can do Escape analysis but only if every single path",
+    "start": "711959",
+    "end": "719240"
+  },
+  {
+    "text": "that sees that object gets inlined if anything if it ever escapes out of that inlined body it has to have the full",
+    "start": "719240",
+    "end": "725600"
+  },
+  {
+    "text": "object there",
+    "start": "725600",
+    "end": "728600"
+  },
+  {
+    "text": "question uh yes it should be it should be it'll be able to see mostly what it's looking at here is uh can the contents",
+    "start": "731519",
+    "end": "739800"
+  },
+  {
+    "text": "of the object be the only thing we actually see the only things we actually use or do we have to create the full object to pass it around and regardless",
+    "start": "739800",
+    "end": "746600"
+  },
+  {
+    "text": "of where the data from for those fields com from it should still be able to see it it may optimize it down to just the",
+    "start": "746600",
+    "end": "752360"
+  },
+  {
+    "text": "field accesses of",
+    "start": "752360",
+    "end": "755480"
+  },
+  {
+    "text": "this well the jbm is going to do all this at runtime regardless of what your code is but if it can see that this",
+    "start": "757680",
+    "end": "764800"
+  },
+  {
+    "text": "happens at runtime that you're never leaving this object never leaves a certain set of methods it'll optimize as",
+    "start": "764800",
+    "end": "770079"
+  },
+  {
+    "text": "it if it wasn't there at all",
+    "start": "770079",
+    "end": "774560"
+  },
+  {
+    "text": "yeah uh is it true for only Hotpot or is it also for other jvms uh I believe they",
+    "start": "777480",
+    "end": "783680"
+  },
+  {
+    "text": "all have some level of Escape analysis uh the jrocket guys think their's is is right up there I know the isul guys",
+    "start": "783680",
+    "end": "789120"
+  },
+  {
+    "text": "think they've got some of the best escape analysis uh in their VM uh hotspot may be actually one of the",
+    "start": "789120",
+    "end": "794320"
+  },
+  {
+    "text": "weaker ones in this area uh I've seen some of the demonstrations of jrocket where it can do uh partial Escape",
+    "start": "794320",
+    "end": "802079"
+  },
+  {
+    "text": "analysis uh which is a little bit trickier and defer the creation of objects until it actually needs them uh",
+    "start": "802079",
+    "end": "808199"
+  },
+  {
+    "text": "or have separate paths that if it does leave this particular context it'll create the object uh but they are all",
+    "start": "808199",
+    "end": "814680"
+  },
+  {
+    "text": "moving this way H and especially with the move I guess is supposed to be Java 9 where Primitives are no longer",
+    "start": "814680",
+    "end": "820800"
+  },
+  {
+    "text": "supposed to be actually part of the language there's probably going to be have to be a little bit of work to make sure that the actual objects the numeric",
+    "start": "820800",
+    "end": "828959"
+  },
+  {
+    "text": "objects can either Escape away or be optimized just like Primitives are",
+    "start": "828959",
+    "end": "834560"
+  },
+  {
+    "text": "today uh I'm focusing in on runtime there are things that Java c will do at compile time to eliminate some of this",
+    "start": "836959",
+    "end": "843759"
+  },
+  {
+    "text": "stuff it doesn't go as far as eliminating object creation but it will eliminate things like field accesses to constant fields and",
+    "start": "843759",
+    "end": "850440"
+  },
+  {
+    "text": "whatnot all right so what are the usual perf syncs that you have in your application uh by far other than",
+    "start": "850440",
+    "end": "858079"
+  },
+  {
+    "start": "855000",
+    "end": "855000"
+  },
+  {
+    "text": "actually leaving the process uh memory accesses are usually going to be the biggest problem allocating lots of",
+    "start": "858079",
+    "end": "864120"
+  },
+  {
+    "text": "objects a garbage collection costs uh blowing the cash and not having enough cash space for the data you're accessing",
+    "start": "864120",
+    "end": "871120"
+  },
+  {
+    "text": "or accessing it in a cash unfriendly way uh the next thing that you'll have is the actual cost of doing calls uh you",
+    "start": "871120",
+    "end": "878399"
+  },
+  {
+    "text": "have to do a memory reference and a branch that kills a lot of the pipelining aspects of the processor it",
+    "start": "878399",
+    "end": "883480"
+  },
+  {
+    "text": "can't figure out where you're actually going until you get to that point of doing the branching uh you have to save",
+    "start": "883480",
+    "end": "888959"
+  },
+  {
+    "text": "off different you have to save off the stack save off the registers restore them on the way back so there are costs",
+    "start": "888959",
+    "end": "895000"
+  },
+  {
+    "text": "involved with doing those calls and that's where a lot of the inlining actually helps save you some time uh and",
+    "start": "895000",
+    "end": "900600"
+  },
+  {
+    "text": "then of course things that are somewhere in between with locks and volatile rights uh who actually knows what",
+    "start": "900600",
+    "end": "907959"
+  },
+  {
+    "start": "906000",
+    "end": "906000"
+  },
+  {
+    "text": "volatile does and why okay there a few folks so the the",
+    "start": "907959",
+    "end": "913079"
+  },
+  {
+    "text": "the quick version of this is that each CPU contains a cache of what's in memory",
+    "start": "913079",
+    "end": "918240"
+  },
+  {
+    "text": "a view of what's in memory because it's very expensive to go all the way back out to main memory in the grand scheme",
+    "start": "918240",
+    "end": "923519"
+  },
+  {
+    "text": "of things a 100 times slower than just getting it from the processor cache uh those caches might be out of sync now if",
+    "start": "923519",
+    "end": "930160"
+  },
+  {
+    "text": "it doesn't matter that they're out of sync and eventually whoever wins it doesn't matter for the correctness of",
+    "start": "930160",
+    "end": "935880"
+  },
+  {
+    "text": "the application then it's not a problem however if the caches really must be in sync and you've got code that has to be",
+    "start": "935880",
+    "end": "942680"
+  },
+  {
+    "text": "data that has to be seen the same across all threads and across all cores you have to have some way of synchronizing",
+    "start": "942680",
+    "end": "948440"
+  },
+  {
+    "text": "those and what volatile does is say this particular field on this object must",
+    "start": "948440",
+    "end": "955680"
+  },
+  {
+    "text": "look the same to everybody after a given right for forces it to be flushed so the other threads will see it and that's",
+    "start": "955680",
+    "end": "962360"
+  },
+  {
+    "text": "expensive because that does have to go across cores and potentially all the way out to main memory as",
+    "start": "962360",
+    "end": "968120"
+  },
+  {
+    "start": "968000",
+    "end": "968000"
+  },
+  {
+    "text": "well um another term call site I mentioned it once basically just a place in a piece of code where you make a call",
+    "start": "968120",
+    "end": "975160"
+  },
+  {
+    "text": "at the at the bik code level is where you have an invoke virtual and invoke static and so on uh and again there are",
+    "start": "975160",
+    "end": "980639"
+  },
+  {
+    "text": "different shapes of call sites uh a couple examples of",
+    "start": "980639",
+    "end": "986440"
+  },
+  {
+    "text": "these so I mentioned that uh static methods are very easy to inline uh they're guaranteed to be monomorphic",
+    "start": "986440",
+    "end": "993160"
+  },
+  {
+    "text": "there's only one target that you're ever going to see at a particular static method call Point unless you do you know",
+    "start": "993160",
+    "end": "999120"
+  },
+  {
+    "text": "class reloading tricks that's outside of scope for this right",
+    "start": "999120",
+    "end": "1004440"
+  },
+  {
+    "text": "now so current time Millies here is actually a static method it's monomorphic it will inline potentially",
+    "start": "1004440",
+    "end": "1011399"
+  },
+  {
+    "text": "be uh an intrinsic we'll talk about that later Constructors are also monomorphic you're saying a specific class that you",
+    "start": "1011399",
+    "end": "1018319"
+  },
+  {
+    "text": "want to call Constructor on and uh also with this super calls are also always",
+    "start": "1018319",
+    "end": "1023679"
+  },
+  {
+    "text": "monomorphic and if they haven't exceeded budgets they will inline in almost every case uh here we have a bimorphic site",
+    "start": "1023679",
+    "end": "1030400"
+  },
+  {
+    "text": "where we have uh two different kinds of lists that have their own implementation of ad uh hotspot will actually inline",
+    "start": "1030400",
+    "end": "1037720"
+  },
+  {
+    "text": "biomorphic call sites it won't go any further than that so if you run this code and you look at the actual",
+    "start": "1037720",
+    "end": "1042880"
+  },
+  {
+    "text": "optimized code that comes out of it you will probably see those two different pieces of code with a type check to",
+    "start": "1042880",
+    "end": "1048240"
+  },
+  {
+    "text": "determine which one one actually inlined uh and at the bottom we've got polymorphic which for Hotpot is three or",
+    "start": "1048240",
+    "end": "1053760"
+  },
+  {
+    "text": "more different types uh and at this point they will all just end up being calls or I think in some modes one of",
+    "start": "1053760",
+    "end": "1060320"
+  },
+  {
+    "text": "them will inline the others will be calls and it'll fail over to those all right mentioned that we're",
+    "start": "1060320",
+    "end": "1066240"
+  },
+  {
+    "start": "1064000",
+    "end": "1064000"
+  },
+  {
+    "text": "talking about hotspot everybody knows client and server that's done Java for any given time uh the jbm guys call",
+    "start": "1066240",
+    "end": "1071919"
+  },
+  {
+    "text": "these C1 and C2 compiler one and compiler two uh C1 does do inlining but",
+    "start": "1071919",
+    "end": "1078039"
+  },
+  {
+    "text": "it is much less aggressive uh it can inline things that are obviously inlinable like Constructors static calls",
+    "start": "1078039",
+    "end": "1085440"
+  },
+  {
+    "text": "uh it has fewer opportunities to profile and optimize it needs to get code out there and executing as fast as possible",
+    "start": "1085440",
+    "end": "1091880"
+  },
+  {
+    "text": "sooner in the in the process of the application uh server mode the C2 compiler will inline much more",
+    "start": "1091880",
+    "end": "1098000"
+  },
+  {
+    "text": "aggressively uh code will run a lot longer it'll gather a lot more information a lot of profile and shape",
+    "start": "1098000",
+    "end": "1103200"
+  },
+  {
+    "text": "of the code and then perform a more expensive optimization process to actually turn",
+    "start": "1103200",
+    "end": "1108640"
+  },
+  {
+    "text": "that into native code um we're going to focus on what C2 actually does tiered mode is I think it was in",
+    "start": "1108640",
+    "end": "1116200"
+  },
+  {
+    "text": "Java 6 but not really working uh in Java 7 it has been on sometimes off sometimes",
+    "start": "1116200",
+    "end": "1123240"
+  },
+  {
+    "text": "it's supposed to combine these two so it essentially does a client mode pass very quickly to optimize that still has some",
+    "start": "1123240",
+    "end": "1130960"
+  },
+  {
+    "text": "profiling and instrumentation in it to gather additional information after that runs for a little while the client mode",
+    "start": "1130960",
+    "end": "1137679"
+  },
+  {
+    "text": "optimized code will then fall over back into C2 server optimized code and so the idea is you get the fast startup and the",
+    "start": "1137679",
+    "end": "1145080"
+  },
+  {
+    "text": "eventual server style performance um it's still a little bit flaky sometimes",
+    "start": "1145080",
+    "end": "1150200"
+  },
+  {
+    "text": "though and you don't always get all the way back to regular C2 performance so C2",
+    "start": "1150200",
+    "end": "1155880"
+  },
+  {
+    "start": "1154000",
+    "end": "1154000"
+  },
+  {
+    "text": "server in line profile to see hotspots uh gather information at call",
+    "start": "1155880",
+    "end": "1161240"
+  },
+  {
+    "text": "sites and at Branch edges profile until we have 10,000 calls of a particular",
+    "start": "1161240",
+    "end": "1166600"
+  },
+  {
+    "text": "method this is a lot it does mean that short running applications it's very",
+    "start": "1166600",
+    "end": "1172159"
+  },
+  {
+    "text": "possible that none of the code you're actually interested in will compile down to native code it'll remain in The Interpreter um sometimes it means that",
+    "start": "1172159",
+    "end": "1179679"
+  },
+  {
+    "text": "large top level methods that do a lot of work will not compile uh the jbm does have some ways to compile it in place uh",
+    "start": "1179679",
+    "end": "1186919"
+  },
+  {
+    "text": "but they're a little bit tricky and they're usually only useful for benchmarking purposes but 10,000 calls is kind of the magic number for Hotpot",
+    "start": "1186919",
+    "end": "1193200"
+  },
+  {
+    "text": "in most cases uh like I said it inlines both monomorphic and bimorphic calls and",
+    "start": "1193200",
+    "end": "1198400"
+  },
+  {
+    "text": "then does have other mechanisms like caching and and whatnot for polymorphic calls and making them faster all right",
+    "start": "1198400",
+    "end": "1204120"
+  },
+  {
+    "text": "so now we have to actually look and see how this works so monitoring the jit there are dozens of flags to turn on all",
+    "start": "1204120",
+    "end": "1211400"
+  },
+  {
+    "start": "1205000",
+    "end": "1205000"
+  },
+  {
+    "text": "sorts of different metrics and all sorts of different output to to watch it we'll go through a few some of them generate",
+    "start": "1211400",
+    "end": "1217159"
+  },
+  {
+    "text": "massive amounts of output and actually require a separate tool to analyze that output and figure out what it means and",
+    "start": "1217159",
+    "end": "1224000"
+  },
+  {
+    "text": "I'll show that too uh it is always evolving they're adding new flags all the time new ways",
+    "start": "1224000",
+    "end": "1229200"
+  },
+  {
+    "text": "to tune the jvm new ways to tune inlining and Escape analysis and monitor those things uh and so it's it takes a",
+    "start": "1229200",
+    "end": "1235840"
+  },
+  {
+    "text": "little work to understand we'll go through some of the basics here to try and give you a good idea of what you can get out of the jvm as far as inlining",
+    "start": "1235840",
+    "end": "1245919"
+  },
+  {
+    "text": "metrics okay so we got our accumulator again uh we've got a little bit more uh",
+    "start": "1246080",
+    "end": "1251320"
+  },
+  {
+    "text": "boilerplate here to to pull in a an argument off the command line so we've got that we run our",
+    "start": "1251320",
+    "end": "1257679"
+  },
+  {
+    "text": "accumulator looks like it's working okay uh the first one that we're going to look at is print",
+    "start": "1257679",
+    "end": "1263120"
+  },
+  {
+    "start": "1261000",
+    "end": "1261000"
+  },
+  {
+    "text": "compilation um all these flags are specific to hotspot so they'll have the-xx colon prefix on all of them uh",
+    "start": "1263120",
+    "end": "1270080"
+  },
+  {
+    "text": "Plus usually turns something on minus turns something off and then if it's a numeric thing like inlining size or",
+    "start": "1270080",
+    "end": "1276039"
+  },
+  {
+    "text": "inlining count um it'll be whatever equals so print compilation is the first one and this essentially does what it",
+    "start": "1276039",
+    "end": "1282279"
+  },
+  {
+    "text": "says it just prints out the methods as they compile gives you a little bit of information about why it compiled them",
+    "start": "1282279",
+    "end": "1288320"
+  },
+  {
+    "text": "how big they were and so on so we run our code and all we see is this string hash",
+    "start": "1288320",
+    "end": "1294600"
+  },
+  {
+    "text": "code compil n nothing nothing of ours actually compiles in this case what's the problem here does anybody see the",
+    "start": "1294600",
+    "end": "1301679"
+  },
+  {
+    "text": "problem how many times did we actually run this Loop we ran it a thousand times and I",
+    "start": "1301679",
+    "end": "1307559"
+  },
+  {
+    "text": "already said only methods that are called 10,000 times are even considered for optimization so let's bump that",
+    "start": "1307559",
+    "end": "1315120"
+  },
+  {
+    "text": "up okay got those two all right so bump that up to 10,000 now we've got actual",
+    "start": "1315120",
+    "end": "1320640"
+  },
+  {
+    "text": "10,000 calls to that ad method and we see that ad actually will will optimize here and will jit down uh so it's kind",
+    "start": "1320640",
+    "end": "1328120"
+  },
+  {
+    "text": "of the first thing that you look for if there's a particular piece of code that you know is hot and that you're expecting the jvm to optimize it doesn't",
+    "start": "1328120",
+    "end": "1334960"
+  },
+  {
+    "text": "show up here it's not doing it and there'll be various there's other tools that will help give you a little bit",
+    "start": "1334960",
+    "end": "1340440"
+  },
+  {
+    "text": "more information about why so now what is this hash code call uh in previous",
+    "start": "1340440",
+    "end": "1345760"
+  },
+  {
+    "text": "versions of the jbm there was actually more stuff that would jit just in startup enough code was getting called",
+    "start": "1345760",
+    "end": "1352799"
+  },
+  {
+    "text": "just to load jars up do security verifications unzip things pull classes in and verify them and so on and they",
+    "start": "1352799",
+    "end": "1360679"
+  },
+  {
+    "text": "you would see about a dozen methods or so that would jit before it even got to your code and so this is now they've got",
+    "start": "1360679",
+    "end": "1367360"
+  },
+  {
+    "text": "it down to this one method that actually is getting hot enough during startup uh to actually jit C2",
+    "start": "1367360",
+    "end": "1374600"
+  },
+  {
+    "text": "compiler all right so now there's longer versions of this out you this is the same flag but you'll get more",
+    "start": "1374600",
+    "end": "1380840"
+  },
+  {
+    "text": "information if you let it run for a while let hotspot make some decisions back off from some decisions so we got",
+    "start": "1380840",
+    "end": "1386799"
+  },
+  {
+    "text": "things that are we got zombies that are in the code we have uh methods that are made not entrant",
+    "start": "1386799",
+    "end": "1393840"
+  },
+  {
+    "text": "anymore what do what do these things mean now one thing I didn't mention about the way the jvm works and the way",
+    "start": "1393840",
+    "end": "1400799"
+  },
+  {
+    "text": "similar VMS work these are optimistic compilers optimistic VMS uh so it's",
+    "start": "1400799",
+    "end": "1406039"
+  },
+  {
+    "text": "going to assume at any given point that the profile of the code that it's gathered the shape of the code is",
+    "start": "1406039",
+    "end": "1411320"
+  },
+  {
+    "text": "accurate at that moment and it'll make us decisions for optimizing based on that",
+    "start": "1411320",
+    "end": "1416559"
+  },
+  {
+    "start": "1413000",
+    "end": "1413000"
+  },
+  {
+    "text": "profile now if we wrong we need a way to bail out one of those would be to constantly be checking some detail the",
+    "start": "1416559",
+    "end": "1423320"
+  },
+  {
+    "text": "class hasn't changed we've still got the same type uh no new code has been loaded into the system things like that active",
+    "start": "1423320",
+    "end": "1429679"
+  },
+  {
+    "text": "checks uh and the jvm also has mechanisms for sort of lazily checking",
+    "start": "1429679",
+    "end": "1435440"
+  },
+  {
+    "text": "uh periodically just pinging something core to the VM to to see if a class class has changed uh or causing code",
+    "start": "1435440",
+    "end": "1443039"
+  },
+  {
+    "text": "just to Branch off into The Interpreter if something changes rather than doing the checks constantly and this is called",
+    "start": "1443039",
+    "end": "1449640"
+  },
+  {
+    "text": "deoptimization so we have a piece of running code uh We've made a mistake",
+    "start": "1449640",
+    "end": "1454720"
+  },
+  {
+    "start": "1450000",
+    "end": "1450000"
+  },
+  {
+    "text": "essentially and we need to back off and we need to reanalyze the shape",
+    "start": "1454720",
+    "end": "1460799"
+  },
+  {
+    "text": "of the system reanalyze the code so what you you'll see these in the output of of print compilation and a few other of the",
+    "start": "1460799",
+    "end": "1466720"
+  },
+  {
+    "text": "jvm output uncommon track basically means we were wrong about our assumptions uh a branch didn't go the",
+    "start": "1466720",
+    "end": "1473159"
+  },
+  {
+    "text": "way we thought it would uh a method that we were calling on Class A suddenly became a method on Class B we need to",
+    "start": "1473159",
+    "end": "1480240"
+  },
+  {
+    "text": "back off and so you'll see that in the logging output for for different uh for other flags uncommon trap not entrant",
+    "start": "1480240",
+    "end": "1487919"
+  },
+  {
+    "text": "means that we've decided this code is no good anymore anyone who walks into here is probably going to fail and come out",
+    "start": "1487919",
+    "end": "1494440"
+  },
+  {
+    "text": "this other and follow the wrong path the non non-optimized path so we make it not entering no threads can enter this code",
+    "start": "1494440",
+    "end": "1502480"
+  },
+  {
+    "text": "anymore and then zombie means that everybody has left that code there are no threads live still running the badly",
+    "start": "1502480",
+    "end": "1509320"
+  },
+  {
+    "text": "or incorrectly optimized code and it is now almost dead it will be dead",
+    "start": "1509320",
+    "end": "1515799"
+  },
+  {
+    "text": "soon zombies quite appropriate for that uh so then why why don't we see a jit at",
+    "start": "1515799",
+    "end": "1521039"
+  },
+  {
+    "start": "1517000",
+    "end": "1517000"
+  },
+  {
+    "text": "all of course we didn't get called enough was one of the reasons but there are upper limits for what hotspot will",
+    "start": "1521039",
+    "end": "1526520"
+  },
+  {
+    "text": "even consider to optimize uh for example if you generate uh a parser that has a",
+    "start": "1526520",
+    "end": "1531559"
+  },
+  {
+    "text": "really large jump table and a big switch that does all of the jumps in it or if you just doing a jump table of your own",
+    "start": "1531559",
+    "end": "1537440"
+  },
+  {
+    "text": "with a large switch it can very easily cross the threshold where hotspot will just say it's too complicated too big",
+    "start": "1537440",
+    "end": "1543159"
+  },
+  {
+    "text": "the benefits of going through all the optimization are not going to be worth it and it just won't jit it and you will get that output not in this this will",
+    "start": "1543159",
+    "end": "1550000"
+  },
+  {
+    "text": "only show the compiled ones uh log compilation which I'll talk about later will actually show why it decides not to",
+    "start": "1550000",
+    "end": "1555559"
+  },
+  {
+    "text": "compile things as well all right some other stuff you'll see in this output there's little sigils",
+    "start": "1555559",
+    "end": "1561960"
+  },
+  {
+    "text": "over here an exclamation point must be important otherwise why wouldn't they why would they use an exclamation point",
+    "start": "1561960",
+    "end": "1568640"
+  },
+  {
+    "text": "uh but it's not actually that exciting uh mostly just means that there's there's exception handling in here and I",
+    "start": "1568640",
+    "end": "1573840"
+  },
+  {
+    "text": "think a lot of cases this is exception handling that's occurring across a native boundary I'm not sure if it's",
+    "start": "1573840",
+    "end": "1579000"
+  },
+  {
+    "text": "always just a regular exception uh exception handling block there's this",
+    "start": "1579000",
+    "end": "1585120"
+  },
+  {
+    "text": "n uh probably guess what this one is it's not too hard this one is actually a native method and possibly an intrinsic",
+    "start": "1585120",
+    "end": "1592360"
+  },
+  {
+    "text": "which again I'll come back to in a few minutes uh this one down here this is",
+    "start": "1592360",
+    "end": "1597640"
+  },
+  {
+    "text": "where I was talking about the jvm can actually replace running code doesn't necessarily have to be left it can still",
+    "start": "1597640",
+    "end": "1603039"
+  },
+  {
+    "text": "be in The Interpreter executing uh and the jvm will decide while it's executing",
+    "start": "1603039",
+    "end": "1608559"
+  },
+  {
+    "text": "to compile it fix up the stack fix up the execution context and then start running the native code at that point uh",
+    "start": "1608559",
+    "end": "1615440"
+  },
+  {
+    "text": "the jbm guys usually say this is really only useful for benchmarks because if you've got one big loop in your application you're probably not writing",
+    "start": "1615440",
+    "end": "1621760"
+  },
+  {
+    "text": "a very good application um and then the other columns here there's are just milliseconds from the start of the jvm",
+    "start": "1621760",
+    "end": "1628960"
+  },
+  {
+    "text": "and then a sequence number of when it was compiled so you can see that these are not in order uh the get bytes making",
+    "start": "1628960",
+    "end": "1635480"
+  },
+  {
+    "text": "it not entrance is a number 42 that one was compiled earlier and we're just using that sequence number as additional",
+    "start": "1635480",
+    "end": "1643080"
+  },
+  {
+    "text": "information referring back to that particular compile compiled body",
+    "start": "1643080",
+    "end": "1648279"
+  },
+  {
+    "start": "1647000",
+    "end": "1647000"
+  },
+  {
+    "text": "Okay so we've got compilation what about inlining now we're going even deeper we",
+    "start": "1648279",
+    "end": "1654320"
+  },
+  {
+    "text": "have to pass the magic unlock diagnostic VM options flag to get this one out and",
+    "start": "1654320",
+    "end": "1659720"
+  },
+  {
+    "text": "this one will display a hierarchy of the inlined methods so you'll actually get to see an indented hierarchy that shows",
+    "start": "1659720",
+    "end": "1665799"
+  },
+  {
+    "text": "the decisions hotspots made about optimizing and inlining those methods together uh it will often include",
+    "start": "1665799",
+    "end": "1671039"
+  },
+  {
+    "text": "reasons why it didn't in line if it gets too deep or if the overall size of the code is too high it'll say that and",
+    "start": "1671039",
+    "end": "1677200"
+  },
+  {
+    "text": "it'll say I stopped at this point you figure it out and open jdk actually has improved the output of this quite a bit",
+    "start": "1677200",
+    "end": "1684320"
+  },
+  {
+    "text": "all right so let's run our code again and now we we don't get any of our output we don't get any inlining",
+    "start": "1684320",
+    "end": "1690120"
+  },
+  {
+    "text": "information why is that well if we look back at our original code you see that parse int",
+    "start": "1690120",
+    "end": "1697600"
+  },
+  {
+    "text": "print line and add all are each called once uh add all calls add 10,000",
+    "start": "1697600",
+    "end": "1706200"
+  },
+  {
+    "text": "times but in and that one jits so we do actually get hot enough for it to turn into machine code but there's nothing in",
+    "start": "1706200",
+    "end": "1713320"
+  },
+  {
+    "text": "there to inline so we actually don't have any piece of code here that's getting hot enough for the jvm to",
+    "start": "1713320",
+    "end": "1719399"
+  },
+  {
+    "text": "compile it and inline other methods into it all there is is a standard native plus operation here um so there's no",
+    "start": "1719399",
+    "end": "1725679"
+  },
+  {
+    "text": "inlining to be done so we'll we'll fix this up a little bit and we'll add another layer and we'll add all the",
+    "start": "1725679",
+    "end": "1730799"
+  },
+  {
+    "text": "square roots and do our own little square rip call that we'll then eventually call math. Square try to get a few more layers in here for",
+    "start": "1730799",
+    "end": "1736799"
+  },
+  {
+    "text": "demonstration purposes now if we run this we see our hash code",
+    "start": "1736799",
+    "end": "1742000"
+  },
+  {
+    "text": "compiles there uh and then we see add I've also got print compilation on here so we've got that output as well it says",
+    "start": "1742000",
+    "end": "1747799"
+  },
+  {
+    "text": "I compiled this and then the print inlining will print the inlining graph so add square root",
+    "start": "1747799",
+    "end": "1753080"
+  },
+  {
+    "text": "compiles uh within there it calls our square root method and that in lines",
+    "start": "1753080",
+    "end": "1758240"
+  },
+  {
+    "text": "because it's hot we can see that it's getting hit a lot and then below that we can see math square root the actual",
+    "start": "1758240",
+    "end": "1764200"
+  },
+  {
+    "text": "operation that's doing that and again it's marked intrinsic so here's our hot",
+    "start": "1764200",
+    "end": "1770399"
+  },
+  {
+    "text": "method and that's all that in lines here we've got the square root as an intrinsic and I will again come back to",
+    "start": "1770480",
+    "end": "1776080"
+  },
+  {
+    "start": "1775000",
+    "end": "1775000"
+  },
+  {
+    "text": "that so log compilation is another one that gives you more information uh kind of combines the print compilation output",
+    "start": "1776080",
+    "end": "1781760"
+  },
+  {
+    "text": "and the print in lining output and a bunch of other things um including why it doesn't compile things or why it",
+    "start": "1781760",
+    "end": "1787519"
+  },
+  {
+    "text": "doesn't optimize things uh and it it spits out the most horrendous XML ever I mean it's essentially like a relational",
+    "start": "1787519",
+    "end": "1794000"
+  },
+  {
+    "text": "graph transposed into this massive flat XML file so you do you don't want to",
+    "start": "1794000",
+    "end": "1799600"
+  },
+  {
+    "text": "read it I mean it looks like this throughout the whole thing it's all like compile ID uh you you have to refer back",
+    "start": "1799600",
+    "end": "1807399"
+  },
+  {
+    "text": "to other compile elements to figure out what compile ID 23 is awful stuff but as",
+    "start": "1807399",
+    "end": "1813440"
+  },
+  {
+    "text": "a part of open jdk there is a tool called log compilation log C uh and I",
+    "start": "1813440",
+    "end": "1819720"
+  },
+  {
+    "text": "actually on my GitHub account github.com headus I have just pulled that out of open jdk so you can just build the jar",
+    "start": "1819720",
+    "end": "1826279"
+  },
+  {
+    "text": "and run it uh and this will analyze the output from log compilation and give you",
+    "start": "1826279",
+    "end": "1831919"
+  },
+  {
+    "text": "good information so here we have a very basic version uh of the compiled",
+    "start": "1831919",
+    "end": "1839519"
+  },
+  {
+    "text": "methods here we have one that's actually showing The inlining Happening um showing the time that it took to do the",
+    "start": "1839679",
+    "end": "1845159"
+  },
+  {
+    "text": "compilation uh showing what the size of the in-memory graph of the code the node graph was um you can also see the bite",
+    "start": "1845159",
+    "end": "1852159"
+  },
+  {
+    "text": "sizes of each of these methods as we go along and now the the same things that we saw earlier making not entrant",
+    "start": "1852159",
+    "end": "1858440"
+  },
+  {
+    "text": "uncommon traps they will also show up in this output uh and show why certain",
+    "start": "1858440",
+    "end": "1863480"
+  },
+  {
+    "text": "things needed to be bailed out of what decisions were wrong so you'll see things that say type",
+    "start": "1863480",
+    "end": "1870919"
+  },
+  {
+    "text": "profile uh here's a piece of code we're just calling an equals method on an opaque object reference uh the jvm is",
+    "start": "1870919",
+    "end": "1877440"
+  },
+  {
+    "text": "able to see that it's always been string so all it does is insert a type check in there confirming that it's string before",
+    "start": "1877440",
+    "end": "1883639"
+  },
+  {
+    "text": "it proceeds with the optimized version uh here's another one where it couldn't actually inline the string index of",
+    "start": "1883639",
+    "end": "1889799"
+  },
+  {
+    "text": "supplementary method was too big to inline for whatever reason maybe it didn't get hot enough for the size maybe",
+    "start": "1889799",
+    "end": "1895559"
+  },
+  {
+    "text": "it's just a gigantic method but something to look into if you see that that's your code and something",
+    "start": "1895559",
+    "end": "1900639"
+  },
+  {
+    "text": "that you want to inline and want to optimize well so intrinsic I said a couple times",
+    "start": "1900639",
+    "end": "1905840"
+  },
+  {
+    "start": "1902000",
+    "end": "1902000"
+  },
+  {
+    "text": "intrinsics are essentially just methods that are known to the jit and that there may be some operating system or Hardware",
+    "start": "1905840",
+    "end": "1913600"
+  },
+  {
+    "text": "specific fastest way to do that like array copies or an optimized square root",
+    "start": "1913600",
+    "end": "1920519"
+  },
+  {
+    "text": "rather than doing the hand hand done square root uh so when you see intrinsics you'll basically it'll insert",
+    "start": "1920519",
+    "end": "1927919"
+  },
+  {
+    "text": "into that point the best code possible rather than trying to do its own optimization around that so here's a couple here's the",
+    "start": "1927919",
+    "end": "1934639"
+  },
+  {
+    "text": "examples that we had before uh the square root function is intrinsic in fact I think all of math is intrinsic",
+    "start": "1934639",
+    "end": "1941440"
+  },
+  {
+    "text": "and they're just treated specially by the jit and injected an optimized version instead um here's intrinsics I know of",
+    "start": "1941440",
+    "end": "1948519"
+  },
+  {
+    "start": "1944000",
+    "end": "1944000"
+  },
+  {
+    "text": "there's there's certainly a lot of other ones string equals um I think object",
+    "start": "1948519",
+    "end": "1953639"
+  },
+  {
+    "text": "hash code the base hash code is uh almost all the math methods array copy",
+    "start": "1953639",
+    "end": "1959080"
+  },
+  {
+    "text": "is done as a fast native memory copy um and then there's a bunch of sun",
+    "start": "1959080",
+    "end": "1965120"
+  },
+  {
+    "text": "miscellaneous unsafe methods that that have to be intrinsics because they're doing low-level processor tweaks in a",
+    "start": "1965120",
+    "end": "1971320"
+  },
+  {
+    "text": "lot of cases so now we're we're talking at this point about having the optimized machine code and we're getting",
+    "start": "1971320",
+    "end": "1977600"
+  },
+  {
+    "text": "everything down we're getting everything to optimize and jit and in line um so now we can go down to the next",
+    "start": "1977600",
+    "end": "1985639"
+  },
+  {
+    "text": "level so at this point it's kind of like like a Choose Your Own Adventure thing a lot of people don't really want to see",
+    "start": "1986919",
+    "end": "1992600"
+  },
+  {
+    "text": "this part um I I I feel proud of the distinction that I'm one of the few people that",
+    "start": "1992600",
+    "end": "1998240"
+  },
+  {
+    "text": "actually has assembly code in my talks at Java conferences but you know it's it's sort",
+    "start": "1998240",
+    "end": "2003639"
+  },
+  {
+    "text": "of your decision whether you want to take the blue pill or the red pill here I think it's a lot of fun and I I",
+    "start": "2003639",
+    "end": "2009440"
+  },
+  {
+    "text": "have learned a lot and fixed some interesting problems because of this and so I'm going to say that we're all going to continue down the rabbit hole um so",
+    "start": "2009440",
+    "end": "2017440"
+  },
+  {
+    "start": "2013000",
+    "end": "2013000"
+  },
+  {
+    "text": "knowing that your code compiles is good that's the first thing that you can get out with print compilation knowing that it inlines and that hotspot is",
+    "start": "2017440",
+    "end": "2023799"
+  },
+  {
+    "text": "optimizing it as a whole is better but seeing what it actually does to the code and how it optimizes is at some point",
+    "start": "2023799",
+    "end": "2030679"
+  },
+  {
+    "text": "the only thing that you got left um you you may have to actually look at it so the caveat here is that I don't really",
+    "start": "2030679",
+    "end": "2036159"
+  },
+  {
+    "start": "2035000",
+    "end": "2035000"
+  },
+  {
+    "text": "know assembly all that well uh but I do fake it pretty well and it's not that",
+    "start": "2036159",
+    "end": "2041600"
+  },
+  {
+    "text": "hard okay print assembly my favorite uh this one does not come with open jdk by",
+    "start": "2041600",
+    "end": "2048000"
+  },
+  {
+    "start": "2042000",
+    "end": "2042000"
+  },
+  {
+    "text": "default for whatever reason uh I think it's mostly because of the assembly plugins or other licenses uh but you can",
+    "start": "2048000",
+    "end": "2055200"
+  },
+  {
+    "text": "Google for Hotspot print assembly and there are some pre-made builds for open jdk on on various",
+    "start": "2055200",
+    "end": "2060960"
+  },
+  {
+    "text": "platforms and it's essentially just an assembly jump dumping plugin for Hotspot every time it compiles a method it will",
+    "start": "2060960",
+    "end": "2067440"
+  },
+  {
+    "text": "also spit out to the console what the assembly code for that method is with a whole bunch of annotation to show you",
+    "start": "2067440",
+    "end": "2073760"
+  },
+  {
+    "text": "where the where the assembly lines up with the Java code there is an alternative that's built in called print",
+    "start": "2073760",
+    "end": "2079560"
+  },
+  {
+    "start": "2077000",
+    "end": "2077000"
+  },
+  {
+    "text": "opto assembly uh you have to get one of the debug or fast debug builds and it's it's okay it's kind of like the last",
+    "start": "2079560",
+    "end": "2086280"
+  },
+  {
+    "text": "phase before it actually does real x86 or x86 64 assembly so there's some sort",
+    "start": "2086280",
+    "end": "2091358"
+  },
+  {
+    "text": "of weird hotspot assembly instructions in there um and it's not as pretty as the other one but it is available and",
+    "start": "2091359",
+    "end": "2097040"
+  },
+  {
+    "text": "and built in to the debug and fast debug builds all right so we have to unlock",
+    "start": "2097040",
+    "end": "2102400"
+  },
+  {
+    "text": "this one again turn on print assembly and then run our stuff and let's see what we",
+    "start": "2102400",
+    "end": "2108000"
+  },
+  {
+    "text": "actually get out of it okay here we are you'll see tons and",
+    "start": "2108000",
+    "end": "2113160"
+  },
+  {
+    "text": "tons of output because lots of stuff will jit in a typical application um here is our uh add method in accumulator",
+    "start": "2113160",
+    "end": "2120000"
+  },
+  {
+    "text": "which is the interesting one uh so there you go it's pretty",
+    "start": "2120000",
+    "end": "2125119"
+  },
+  {
+    "text": "self-explanatory right everyone understands uh x86 assembly I'm",
+    "start": "2125119",
+    "end": "2131520"
+  },
+  {
+    "text": "not going to just drop you right into that so the stuff you're going to see here uh you'll see things like add and",
+    "start": "2131520",
+    "end": "2136880"
+  },
+  {
+    "start": "2132000",
+    "end": "2132000"
+  },
+  {
+    "text": "sub which are pretty easy to understand moves are just moving data from one place to another uh the various jumps uh",
+    "start": "2136880",
+    "end": "2144280"
+  },
+  {
+    "text": "pushing and popping for stack operations preserving registers and whatnot calling",
+    "start": "2144280",
+    "end": "2149520"
+  },
+  {
+    "text": "and returning from sub routines and then the various registers that you'll see so we're talking about a register",
+    "start": "2149520",
+    "end": "2156480"
+  },
+  {
+    "start": "2155000",
+    "end": "2155000"
+  },
+  {
+    "text": "machine now rather than having having stack moves or we're doing pushes and Pops of of uh of of values into fields",
+    "start": "2156480",
+    "end": "2162800"
+  },
+  {
+    "text": "or values from Fields into the stack and from the stack back uh we are doing essentially slots we have a certain",
+    "start": "2162800",
+    "end": "2169040"
+  },
+  {
+    "text": "number of slots on the processor move data into slots trigger operations that work against them and then get the data",
+    "start": "2169040",
+    "end": "2174720"
+  },
+  {
+    "text": "back out of the slots again uh and so the jbm stack and local variables and parameters all essentially just become",
+    "start": "2174720",
+    "end": "2181880"
+  },
+  {
+    "text": "register moves moves to and from registers to and from memory and so on now I did mention that there's a",
+    "start": "2181880",
+    "end": "2188599"
+  },
+  {
+    "start": "2186000",
+    "end": "2186000"
+  },
+  {
+    "text": "native stack the native code has a stack too it has to maintain the registers and the view of the processor between calls",
+    "start": "2188599",
+    "end": "2196079"
+  },
+  {
+    "text": "once we jump from one piece of code to another and then go back we want to be able to continue executing from the same point so it maintains an additional",
+    "start": "2196079",
+    "end": "2202800"
+  },
+  {
+    "text": "stack that preserves those register values from call to call and this is where some of the cost of doing actual",
+    "start": "2202800",
+    "end": "2208680"
+  },
+  {
+    "text": "hard calls at the assembly level can bite you you're doing a lot more moving of data around uh when you don't need to",
+    "start": "2208680",
+    "end": "2215640"
+  },
+  {
+    "text": "uh and there's various conventions for this you can have the caller saves off its own registers and res restores them",
+    "start": "2215640",
+    "end": "2221280"
+  },
+  {
+    "text": "you can have the call E saves off the registers and restores them and there's a couple others that you don't need to go",
+    "start": "2221280",
+    "end": "2226440"
+  },
+  {
+    "text": "into okay so we'll break this down a little bit more",
+    "start": "2226440",
+    "end": "2231680"
+  },
+  {
+    "text": "here starting at the top decompiled method 1134 CBD 0 this is the address of",
+    "start": "2231680",
+    "end": "2238480"
+  },
+  {
+    "text": "the native code and tells us which method it's actually compile compiling at this point or what it's where it's",
+    "start": "2238480",
+    "end": "2244119"
+  },
+  {
+    "text": "outputting it into memory uh we can see what architectures it's disassembling for various Flags about what kind of",
+    "start": "2244119",
+    "end": "2251440"
+  },
+  {
+    "text": "entry point this is what kind of uh uh jvm level checks need to be done when",
+    "start": "2251440",
+    "end": "2256760"
+  },
+  {
+    "text": "entering this code there are a number of constants here we can see the actual signature so",
+    "start": "2256760",
+    "end": "2263200"
+  },
+  {
+    "text": "this is the add method and it takes two integers that's the double I and returns",
+    "start": "2263200",
+    "end": "2268240"
+  },
+  {
+    "text": "one integer uh the first parameter is going to go in the RSI register the second",
+    "start": "2268240",
+    "end": "2274319"
+  },
+  {
+    "text": "parameter is going into RDX uh and then we've also got the stack pointer of the caller so we know where",
+    "start": "2274319",
+    "end": "2280240"
+  },
+  {
+    "text": "we are in the native call stack and now we're ready to do the body of the code so first off we got RBP which",
+    "start": "2280240",
+    "end": "2287520"
+  },
+  {
+    "text": "points at the current frame the current stack frame from whatever the previous call was we'll push that",
+    "start": "2287520",
+    "end": "2293040"
+  },
+  {
+    "text": "down we're going to subtract two from the stat because we",
+    "start": "2293040",
+    "end": "2298160"
+  },
+  {
+    "text": "have two arguments being passed so we need two slots for our own reg for our own values that are being passed in here",
+    "start": "2298160",
+    "end": "2307480"
+  },
+  {
+    "text": "uh you'll see no Ops like this to just memory align code on certain boundaries to ease the ease the decoding process on",
+    "start": "2307839",
+    "end": "2313599"
+  },
+  {
+    "text": "the processor and now you can actually see that we're actually at accumulator do",
+    "start": "2313599",
+    "end": "2320240"
+  },
+  {
+    "text": "add line minus one essentially it says line 16 this is in the in native code",
+    "start": "2320240",
+    "end": "2326839"
+  },
+  {
+    "text": "but we're at negative one we're right about to enter that code we're not at the zero line of the method we at the",
+    "start": "2326839",
+    "end": "2333079"
+  },
+  {
+    "text": "minus one line of the method all right so we'll move move parameter one into",
+    "start": "2333079",
+    "end": "2339480"
+  },
+  {
+    "text": "eax we will add those two parameters together storing the result back in the",
+    "start": "2339480",
+    "end": "2347760"
+  },
+  {
+    "text": "ax and this actually in a lot of cases it will be able to correspond the assembly code back to at least Java line",
+    "start": "2347760",
+    "end": "2355760"
+  },
+  {
+    "text": "numbers but sometimes to individual Java bite codes here is our I add actually happening in assembly code one to one",
+    "start": "2355760",
+    "end": "2364280"
+  },
+  {
+    "text": "matching put the stack pointer back where it was pop it",
+    "start": "2364440",
+    "end": "2369560"
+  },
+  {
+    "text": "off and now this one I wasn't sure about it first I had asked the jvm guys uh but this is actually a safe point this is",
+    "start": "2369560",
+    "end": "2376319"
+  },
+  {
+    "text": "where we check in with the jvm and say do you need to do any garbage collector work do you need to uh de optimize some",
+    "start": "2376319",
+    "end": "2382880"
+  },
+  {
+    "text": "code other things the jvm might want to do on these little boundaries check in periodically that's all this is",
+    "start": "2382880",
+    "end": "2389960"
+  },
+  {
+    "text": "doing and then we have our return from the method that's all there is to it and so",
+    "start": "2389960",
+    "end": "2396599"
+  },
+  {
+    "text": "the bulk of the bulk of methods that you'll see the bulk of code that you come see out of coming out of hotspot will be these instructions um a few",
+    "start": "2396599",
+    "end": "2403400"
+  },
+  {
+    "text": "additional ones that you'll see will be things like uh lock l or add L for doing volatile reads and wrs uh you'll see",
+    "start": "2403400",
+    "end": "2410880"
+  },
+  {
+    "text": "call Operations actually we'll go into some of these so things to watch for if",
+    "start": "2410880",
+    "end": "2416640"
+  },
+  {
+    "start": "2413000",
+    "end": "2413000"
+  },
+  {
+    "text": "you see just straight through operations against registers and memory locations you're probably doing pretty well if you start to see a lot of call Operations",
+    "start": "2416640",
+    "end": "2423400"
+  },
+  {
+    "text": "things aren't in line uh if you start to see lock operations or or whatever the the current processor's locking",
+    "start": "2423400",
+    "end": "2429560"
+  },
+  {
+    "text": "mechanism is uh that could be a problem for your application too you could be busting caches you could be do overusing",
+    "start": "2429560",
+    "end": "2435520"
+  },
+  {
+    "text": "volatile Fields uh here's what a call looks",
+    "start": "2435520",
+    "end": "2441119"
+  },
+  {
+    "text": "like so this is in a piece of code within J Ruby uh normally when we add two integers together two Ruby fix nums",
+    "start": "2442560",
+    "end": "2450160"
+  },
+  {
+    "text": "is what they're called uh they'll just produce another fixed n a standard 64-bit long value uh we don't overflow",
+    "start": "2450160",
+    "end": "2456680"
+  },
+  {
+    "text": "the same way does so if we overflow past that 64-bit value we need to produce a ruby big num instead a larger arbitrary",
+    "start": "2456680",
+    "end": "2463319"
+  },
+  {
+    "text": "Precision integer uh usually it doesn't happen so usually we're okay and in this",
+    "start": "2463319",
+    "end": "2469319"
+  },
+  {
+    "text": "case the jbm will optimize the code in such a way that that call is never followed it avoids the ad big num path",
+    "start": "2469319",
+    "end": "2476319"
+  },
+  {
+    "text": "because we're not using it it's seeing that we're never making that call so it just leaves it as a call in the future",
+    "start": "2476319",
+    "end": "2481599"
+  },
+  {
+    "text": "if we started hitting it a lot more and started doing a massive amount of fixed num and big num math this might change",
+    "start": "2481599",
+    "end": "2486960"
+  },
+  {
+    "text": "it might back off on those assumptions and reoptimize it so the big num path is the one that's",
+    "start": "2486960",
+    "end": "2492400"
+  },
+  {
+    "text": "followed now this is one that actually bit us uh early on in the jrb 16 cycle",
+    "start": "2492400",
+    "end": "2498920"
+  },
+  {
+    "text": "or maybe 15 about a year ago uh I was looking at code to try and figure out how we could make our object",
+    "start": "2498920",
+    "end": "2505680"
+  },
+  {
+    "text": "construction faster I thought I had figured everything out it was pretty clean uh and I I I actually dumped the",
+    "start": "2505680",
+    "end": "2511880"
+  },
+  {
+    "text": "assembly and profiling told me nothing I mean it's the death of a million billion Cuts every single everything single",
+    "start": "2511880",
+    "end": "2518520"
+  },
+  {
+    "text": "object was having some unknown hidden performance problem on construction and",
+    "start": "2518520",
+    "end": "2524160"
+  },
+  {
+    "text": "so I looked at the code the assembly code that came out of our basic objects default Constructor and I saw this lock",
+    "start": "2524160",
+    "end": "2530920"
+  },
+  {
+    "text": "and I knew that that's not the greatest thing to see in the Constructor constantly hitting some volatile field",
+    "start": "2530920",
+    "end": "2536839"
+  },
+  {
+    "text": "and flushing a cach somewhere so why are we doing this volatile right in the Constructor so I went back to the code",
+    "start": "2536839",
+    "end": "2543119"
+  },
+  {
+    "text": "and looked around found this piece of code I thought I was being so active here and early initializing this",
+    "start": "2543119",
+    "end": "2549280"
+  },
+  {
+    "text": "volatile field so that I didn't have to null check it later well it turned out it was a terrible idea to pre-",
+    "start": "2549280",
+    "end": "2554520"
+  },
+  {
+    "text": "initialize a volatile field in the Constructor this way it's much cheaper to do the null check and what I was",
+    "start": "2554520",
+    "end": "2559920"
+  },
+  {
+    "text": "essentially doing was every Ruby object in the system was doing a vol right when it was constructed every single time",
+    "start": "2559920",
+    "end": "2566280"
+  },
+  {
+    "text": "whether whether it needed to or not so fix that pull that out put the null checks back in uh and hooray I Ed",
+    "start": "2566280",
+    "end": "2575559"
+  },
+  {
+    "text": "the assembly output to actually fix a massive performance problem in the system uh and suddenly all objects in",
+    "start": "2575559",
+    "end": "2581160"
+  },
+  {
+    "text": "the system became many times faster to create benchmarks were considerably better than and that's an example of",
+    "start": "2581160",
+    "end": "2587359"
+  },
+  {
+    "text": "something very small one assembly operation that was happening uh that you can't see in a profiler uh you can't see",
+    "start": "2587359",
+    "end": "2594280"
+  },
+  {
+    "text": "it in a lot of the other tools but it had a tremendous impact on the performance of the",
+    "start": "2594280",
+    "end": "2599440"
+  },
+  {
+    "text": "application now there are also various flags for tuning in lining um none of these are standard and they're subject",
+    "start": "2599440",
+    "end": "2604960"
+  },
+  {
+    "start": "2602000",
+    "end": "2602000"
+  },
+  {
+    "text": "to change and so on uh but you can can change what the maximum size of a method that it will inline is uh what what it",
+    "start": "2604960",
+    "end": "2612040"
+  },
+  {
+    "text": "considers small code it optimizes small code differently than large code how frequently a method needs to be called",
+    "start": "2612040",
+    "end": "2618240"
+  },
+  {
+    "text": "in order for it to inline there's also tuning for uh how far down it will inline normally it will",
+    "start": "2618240",
+    "end": "2625400"
+  },
+  {
+    "text": "inline up to nine calls and if you think about that and you've got really deep class hierarchies it's possible that the",
+    "start": "2625400",
+    "end": "2631720"
+  },
+  {
+    "text": "top levels of the Constructor chain may not in line in that case but nine is the magic number that they've they've kind",
+    "start": "2631720",
+    "end": "2637640"
+  },
+  {
+    "text": "of settled on it the in Hotpot and then it has a separate metric for recursive",
+    "start": "2637640",
+    "end": "2643119"
+  },
+  {
+    "text": "inlining oftentimes if you have a heavily recursive method inlining too many levels of that will actually push",
+    "start": "2643119",
+    "end": "2649119"
+  },
+  {
+    "text": "out other code that's potentially more important the recursion is often not the most important thing to inline in that",
+    "start": "2649119",
+    "end": "2654760"
+  },
+  {
+    "text": "case and they get overemphasized because you're making so many deep calls all",
+    "start": "2654760",
+    "end": "2660000"
+  },
+  {
+    "text": "right so what have we learned here hopefully we've learned a little bit about how the hotspot jit Works what optimizations it does and why how to",
+    "start": "2660000",
+    "end": "2666720"
+  },
+  {
+    "start": "2661000",
+    "end": "2661000"
+  },
+  {
+    "text": "monitor it see what it's actually doing as far as compilation how to find problems in that output and then how to",
+    "start": "2666720",
+    "end": "2672800"
+  },
+  {
+    "text": "fix those problems in a lot of cases uh things we missed like I said not doing anything with GC if you",
+    "start": "2672800",
+    "end": "2678680"
+  },
+  {
+    "start": "2677000",
+    "end": "2677000"
+  },
+  {
+    "text": "haven't tried G visual GC it's really amazing and it will help with your GC problems for sure and hopefully you're",
+    "start": "2678680",
+    "end": "2685880"
+  },
+  {
+    "text": "no dummy now you'll be able to take this and do something interesting with it optimize some code to death uh and uh",
+    "start": "2685880",
+    "end": "2692640"
+  },
+  {
+    "text": "you know if you're able to do that let me know tell me your story that's all I have for today a",
+    "start": "2692640",
+    "end": "2699700"
+  },
+  {
+    "text": "[Music]",
+    "start": "2699700",
+    "end": "2707289"
+  }
+]

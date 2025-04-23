@@ -1,0 +1,1862 @@
+[
+  {
+    "start": "0",
+    "end": "14000"
+  },
+  {
+    "text": "today we're going to be talking about scaling kubernetes networking beyond 100 000 endpoints my name is rob and i'm",
+    "start": "80",
+    "end": "7839"
+  },
+  {
+    "text": "going to be joined with minhan also my co-worker from google",
+    "start": "7839",
+    "end": "16000"
+  },
+  {
+    "start": "14000",
+    "end": "14000"
+  },
+  {
+    "text": "today's talk is going to be divided into six different sections uh we've got a problem statement",
+    "start": "16000",
+    "end": "22400"
+  },
+  {
+    "text": "uh which will kind of give some background into why we did all this work uh then an endpoint slice api",
+    "start": "22400",
+    "end": "29119"
+  },
+  {
+    "text": "introduction just a very high level idea of why we designed the endpoint slice api and what it can accomplish",
+    "start": "29119",
+    "end": "36239"
+  },
+  {
+    "text": "and then i'll talk about how it works uh some of the key functionality involved",
+    "start": "36239",
+    "end": "41680"
+  },
+  {
+    "text": "and then i'll dig a bit deeper into how we could profile kubernetes to dramatically improve the performance",
+    "start": "41680",
+    "end": "48480"
+  },
+  {
+    "text": "of these implementations and finally putting it all together talk about how that translates into",
+    "start": "48480",
+    "end": "54239"
+  },
+  {
+    "text": "performance at and even beyond a hundred thousand endpoints uh and in conclusion i'll talk about",
+    "start": "54239",
+    "end": "60960"
+  },
+  {
+    "text": "what's next uh what's coming up that is going to be based on this functionality and there's some really",
+    "start": "60960",
+    "end": "66400"
+  },
+  {
+    "text": "exciting stuff but with that i'll hand it over to minhon to give some background",
+    "start": "66400",
+    "end": "73840"
+  },
+  {
+    "text": "all right thank you rob for the intro so before we go to our solution so let's understand what the exact pain",
+    "start": "75600",
+    "end": "82560"
+  },
+  {
+    "text": "points our users have so there are mainly two pain points when using kubernetes service at scale",
+    "start": "82560",
+    "end": "88880"
+  },
+  {
+    "start": "83000",
+    "end": "83000"
+  },
+  {
+    "text": "the first one is that there's currently a limit for number of endpoints within a single service so this is",
+    "start": "88880",
+    "end": "95600"
+  },
+  {
+    "text": "around 5000 endpoints in a single service so the second one is",
+    "start": "95600",
+    "end": "100799"
+  },
+  {
+    "text": "that the user may observe a significant performance degradation in a very large cluster to be more",
+    "start": "100799",
+    "end": "107920"
+  },
+  {
+    "text": "specific an endpoint update of a large service containing 5000 endpoints in 5000 node cluster may",
+    "start": "107920",
+    "end": "115920"
+  },
+  {
+    "text": "freeze the control plane for a couple of seconds so both of these questions these",
+    "start": "115920",
+    "end": "121600"
+  },
+  {
+    "text": "problems are originating in the same thing which is the endpoints api",
+    "start": "121600",
+    "end": "127040"
+  },
+  {
+    "text": "the api was designed in the very early days of kubernetes and the scalability wasn't an important",
+    "start": "127040",
+    "end": "132800"
+  },
+  {
+    "text": "area of consideration at those days so in short the problem lies in the fact",
+    "start": "132800",
+    "end": "137920"
+  },
+  {
+    "text": "that the endpoints object contains a full list of all endpoints behind a given service",
+    "start": "137920",
+    "end": "145200"
+  },
+  {
+    "start": "148000",
+    "end": "148000"
+  },
+  {
+    "text": "so that is the subset section of the endpoints api object so what's wrong with that",
+    "start": "150560",
+    "end": "157680"
+  },
+  {
+    "text": "right let's walk through rough estimation",
+    "start": "157680",
+    "end": "163200"
+  },
+  {
+    "start": "165000",
+    "end": "165000"
+  },
+  {
+    "text": "so let's say there are p number back and pod because the",
+    "start": "166400",
+    "end": "173040"
+  },
+  {
+    "text": "endpoint object needs to contain a full list of endpoints behind the service then",
+    "start": "173040",
+    "end": "178640"
+  },
+  {
+    "text": "the size of the endpoint object is proportional to the number of backend part which is op",
+    "start": "178640",
+    "end": "186480"
+  },
+  {
+    "start": "188000",
+    "end": "188000"
+  },
+  {
+    "text": "so one and a half megabyte of endpoint object",
+    "start": "188800",
+    "end": "195760"
+  },
+  {
+    "text": "can roughly contain 5000 endpoints",
+    "start": "195760",
+    "end": "200959"
+  },
+  {
+    "text": "inside a service and that there's a various aspects like",
+    "start": "200959",
+    "end": "207360"
+  },
+  {
+    "text": "that can influence the size of the endpoint object like the side the length of the name and the name",
+    "start": "207360",
+    "end": "213040"
+  },
+  {
+    "text": "spaces of those back and pod is it the ipv6 endpoint or the ipv4 endpoint",
+    "start": "213040",
+    "end": "220239"
+  },
+  {
+    "text": "so what happened when we go beyond one and a half uh one and a half",
+    "start": "220799",
+    "end": "228239"
+  },
+  {
+    "text": "megabyte um so first of all there's a limitation in the scd um for the maximum size of an",
+    "start": "228239",
+    "end": "236080"
+  },
+  {
+    "text": "endpoint of an object right and the default value is set to 1.5 megabytes",
+    "start": "236080",
+    "end": "243599"
+  },
+  {
+    "text": "although this value is configurable um the performance characteristics of scd",
+    "start": "243599",
+    "end": "249599"
+  },
+  {
+    "text": "are started to getting worse so we don't want to do that so to summarize the limitation of the",
+    "start": "249599",
+    "end": "256799"
+  },
+  {
+    "text": "number of endpoints inside a single cluster is actually the the the the consequence of the xcd",
+    "start": "256799",
+    "end": "265360"
+  },
+  {
+    "text": "the scd size limit",
+    "start": "265360",
+    "end": "269840"
+  },
+  {
+    "text": "so let's take a look at the second aspect of the problem that is the performance degradation so",
+    "start": "271440",
+    "end": "278080"
+  },
+  {
+    "start": "274000",
+    "end": "274000"
+  },
+  {
+    "text": "in order to understand that we need to do a quick recap on how does the service control",
+    "start": "278080",
+    "end": "284880"
+  },
+  {
+    "text": "actually works within the kubernetes behind the scene so when the service gets created the",
+    "start": "284880",
+    "end": "290960"
+  },
+  {
+    "text": "endpoints object gets created so the pod gets created then pod gets scheduled the cuber watches its own",
+    "start": "290960",
+    "end": "297440"
+  },
+  {
+    "text": "the parts running on itself and then cubeless signals the container runtime to",
+    "start": "297440",
+    "end": "302880"
+  },
+  {
+    "text": "uh basically um in the implement this container and this part and the",
+    "start": "302880",
+    "end": "308080"
+  },
+  {
+    "text": "container runtime says it's run and it's running and healthy then the cube updates the pot status to be ready and",
+    "start": "308080",
+    "end": "315199"
+  },
+  {
+    "text": "the endpoints controller watches the pod and then it updates the endpoints correspondingly",
+    "start": "315199",
+    "end": "321440"
+  },
+  {
+    "text": "and q proxy pick it up and program iptables ipvs and to implement kubernetes services and",
+    "start": "321440",
+    "end": "328800"
+  },
+  {
+    "text": "then eventually the endpoint is programmed so what happened is that each",
+    "start": "328800",
+    "end": "336400"
+  },
+  {
+    "start": "331000",
+    "end": "331000"
+  },
+  {
+    "text": "q proxy uh running on each node needs to watch all endpoints of the whole kubernetes",
+    "start": "336400",
+    "end": "344639"
+  },
+  {
+    "text": "cluster right so so this is because it has this this in",
+    "start": "344639",
+    "end": "352160"
+  },
+  {
+    "text": "these information is necessary for it to basically implement kubernetes service on each node and that translates",
+    "start": "352160",
+    "end": "360000"
+  },
+  {
+    "text": "to um there are n number of nodes means n number of watchers right and because there's no magic in",
+    "start": "360000",
+    "end": "368160"
+  },
+  {
+    "text": "sending update through the network so any number of copies object copies will need to be sent from",
+    "start": "368160",
+    "end": "374639"
+  },
+  {
+    "text": "the api server to each watcher and combined with the number back in pod",
+    "start": "374639",
+    "end": "380960"
+  },
+  {
+    "text": "and the size of the endpoint object which is proportional then to the number back in pod",
+    "start": "380960",
+    "end": "386960"
+  },
+  {
+    "text": "and times the number watcher so the total bytes transmitted per update is o n",
+    "start": "386960",
+    "end": "394720"
+  },
+  {
+    "text": "times p so let's give some real numbers here so the number of",
+    "start": "394720",
+    "end": "400720"
+  },
+  {
+    "start": "397000",
+    "end": "397000"
+  },
+  {
+    "text": "nodes let's say it's a large cluster with five thousand five thousand nodes and the size of the endpoint",
+    "start": "400720",
+    "end": "407280"
+  },
+  {
+    "text": "object is one megabyte which contains let's say 5000 endpoints then in each",
+    "start": "407280",
+    "end": "413039"
+  },
+  {
+    "text": "update um we need to send five gigabytes of data that is basically the size of the full",
+    "start": "413039",
+    "end": "420000"
+  },
+  {
+    "text": "dvd right so for one endpoint object one endpoint update for a large service",
+    "start": "420000",
+    "end": "428319"
+  },
+  {
+    "text": "and let's do a further estimation right let's say total by transmitted per update is five",
+    "start": "428400",
+    "end": "434000"
+  },
+  {
+    "text": "gigabyte and what about we do a rolling update let's do let's do a rollout to this large service",
+    "start": "434000",
+    "end": "440080"
+  },
+  {
+    "text": "and this service let's say have 5 000 endpoints and that roughly translate to",
+    "start": "440080",
+    "end": "445120"
+  },
+  {
+    "text": "more than 3 000 maybe more or maybe less depending on what's your rolling update strategy then",
+    "start": "445120",
+    "end": "451360"
+  },
+  {
+    "text": "let's assume it's 5 000 updates right then that translates to 25 terabyte of",
+    "start": "451360",
+    "end": "456800"
+  },
+  {
+    "text": "data that is a lot of data in the contrary the user what user expects is that",
+    "start": "456800",
+    "end": "464479"
+  },
+  {
+    "start": "458000",
+    "end": "458000"
+  },
+  {
+    "text": "it wants to run large services in large clusters",
+    "start": "464479",
+    "end": "470720"
+  },
+  {
+    "text": "and it wants to be agile as well right it wants to enable auto scaling it wants to roll out",
+    "start": "470720",
+    "end": "476960"
+  },
+  {
+    "text": "frequently and that translates to high churn within the service and all of this should just work and",
+    "start": "476960",
+    "end": "483680"
+  },
+  {
+    "text": "kubernetes should provide this kind of capability so",
+    "start": "483680",
+    "end": "489919"
+  },
+  {
+    "text": "so we look at this problem space and we at first we consider a few tactical",
+    "start": "489919",
+    "end": "496400"
+  },
+  {
+    "text": "solutions for this problem and we later realized those tactical solutions may contain other downsides so",
+    "start": "496400",
+    "end": "504639"
+  },
+  {
+    "text": "we decided to reinvent the endpoint api altogether now we are trying to",
+    "start": "504639",
+    "end": "511520"
+  },
+  {
+    "text": "let me quickly walk through what is endpoint slice api",
+    "start": "511520",
+    "end": "516640"
+  },
+  {
+    "text": "so the goal of the endpoint api the primary goal is to address the scalability constraints that we listed",
+    "start": "516640",
+    "end": "522080"
+  },
+  {
+    "text": "out in the previous section that is to support tens of thousands of backend endpoint in a cluster with thousands of nodes",
+    "start": "522080",
+    "end": "529600"
+  },
+  {
+    "text": "since we're basically reinventing and redesigning the whole endpoint",
+    "start": "529600",
+    "end": "536080"
+  },
+  {
+    "text": "the endpoint api we throw in a bunch of other extension points which we wanted to address dual stack",
+    "start": "536080",
+    "end": "543440"
+  },
+  {
+    "text": "and topological aware services and things like that so we're going to",
+    "start": "543440",
+    "end": "548560"
+  },
+  {
+    "text": "talk about this a little bit later but first we focus on the first one which is",
+    "start": "548560",
+    "end": "553600"
+  },
+  {
+    "text": "the scalability aspect of this so at a high level",
+    "start": "553600",
+    "end": "559519"
+  },
+  {
+    "start": "556000",
+    "end": "556000"
+  },
+  {
+    "text": "we want to slice a monolithic big endpoint object into multiple",
+    "start": "559519",
+    "end": "565920"
+  },
+  {
+    "text": "objects and each object is called endpoint slice so this is very similar to",
+    "start": "565920",
+    "end": "571440"
+  },
+  {
+    "text": "database sharding but it comes with some kubernetes specific flavors",
+    "start": "571440",
+    "end": "577200"
+  },
+  {
+    "start": "576000",
+    "end": "576000"
+  },
+  {
+    "text": "so q proxy watches all endpoint slices which represent all endpoints",
+    "start": "577200",
+    "end": "583440"
+  },
+  {
+    "text": "behind services and when the update endpoint update happens only the",
+    "start": "583440",
+    "end": "589760"
+  },
+  {
+    "text": "corresponding endpoint slice gets shipped to all cube proxy and the rest doesn't need",
+    "start": "589760",
+    "end": "595600"
+  },
+  {
+    "text": "to be shipped and transmitted so with all that",
+    "start": "595600",
+    "end": "600800"
+  },
+  {
+    "text": "this is a very high level intro to the endpoint slice api and i will let rob",
+    "start": "600800",
+    "end": "607600"
+  },
+  {
+    "text": "to talk more about how it actually works behind the scene",
+    "start": "607600",
+    "end": "613040"
+  },
+  {
+    "text": "thanks minhan yeah that's a great background for the endpoint slice api",
+    "start": "614560",
+    "end": "620000"
+  },
+  {
+    "text": "and i'm just going to provide just a little bit more detail on how it actually works at the different pieces",
+    "start": "620000",
+    "end": "625839"
+  },
+  {
+    "start": "622000",
+    "end": "622000"
+  },
+  {
+    "text": "that come together to make this work so there's three core components that i want to talk about there's an",
+    "start": "625839",
+    "end": "632560"
+  },
+  {
+    "text": "endpoint slice controller that watches services and pods and creates or updates endpoint slices",
+    "start": "632560",
+    "end": "638640"
+  },
+  {
+    "text": "this is very similar to the endpoints controller it's just managing endpoint slices instead then we",
+    "start": "638640",
+    "end": "645279"
+  },
+  {
+    "text": "have a newer controller called the endpoint slice mirroring controller that watches custom endpoints and",
+    "start": "645279",
+    "end": "651760"
+  },
+  {
+    "text": "mirrors them over to endpoint slices and finally we have coup proxy this is",
+    "start": "651760",
+    "end": "656880"
+  },
+  {
+    "text": "not a new component but we've added new functionality here so instead of watching endpoints it can watch endpoint slices",
+    "start": "656880",
+    "end": "665120"
+  },
+  {
+    "text": "and update iptables or ipvs proxy rules i wanted to cover just a little bit more",
+    "start": "665120",
+    "end": "672000"
+  },
+  {
+    "start": "671000",
+    "end": "671000"
+  },
+  {
+    "text": "about the endpoint slice controller though the endpoint slice controller had a couple key goals",
+    "start": "672000",
+    "end": "678480"
+  },
+  {
+    "text": "and some of it is not always intuitive so we wanted to reduce endpoint slice",
+    "start": "678480",
+    "end": "684720"
+  },
+  {
+    "text": "churn this lines up with what menhan was saying earlier every node is going to be watching",
+    "start": "684720",
+    "end": "689920"
+  },
+  {
+    "text": "endpoint slices so updates are very expensive we want to minimize the number of endpoint slices we're updating",
+    "start": "689920",
+    "end": "696399"
+  },
+  {
+    "text": "because every single time we update it it has to get sent out to every node then we want to limit the",
+    "start": "696399",
+    "end": "704320"
+  },
+  {
+    "text": "request per second to api server endpoint slices that are too small will result in too many resources being",
+    "start": "704320",
+    "end": "711279"
+  },
+  {
+    "text": "updated and on the other hand if we have endpoint slices that are way too big it will result in a dvd's worth of data",
+    "start": "711279",
+    "end": "718480"
+  },
+  {
+    "text": "getting sent across the cluster even for the tiniest of changes and we'll be right back to the problem we had that to begin with so",
+    "start": "718480",
+    "end": "726079"
+  },
+  {
+    "text": "with that background i wanted to explain one relatively unintuitive part of the",
+    "start": "726079",
+    "end": "731920"
+  },
+  {
+    "start": "730000",
+    "end": "730000"
+  },
+  {
+    "text": "how this controller works so let's imagine an example where you",
+    "start": "731920",
+    "end": "737760"
+  },
+  {
+    "text": "have two endpoint slices now keep in mind that endpoint slices by default can hold",
+    "start": "737760",
+    "end": "743920"
+  },
+  {
+    "text": "up to 100 endpoints so we have one endpoint slice with 70 endpoints",
+    "start": "743920",
+    "end": "749200"
+  },
+  {
+    "text": "and one endpoint slice with 80 endpoints and we have 50 endpoints to add",
+    "start": "749200",
+    "end": "755760"
+  },
+  {
+    "text": "now you would think well this is a really straightforward update you can just update those two endpoint slices and",
+    "start": "755760",
+    "end": "762079"
+  },
+  {
+    "text": "everything will work fine but instead what the controller is going to do is create an",
+    "start": "762079",
+    "end": "768000"
+  },
+  {
+    "text": "entirely new endpoint slice because we prefer a single create over",
+    "start": "768000",
+    "end": "773839"
+  },
+  {
+    "text": "multiple updates there's a lot of extra detail and logic here that",
+    "start": "773839",
+    "end": "778880"
+  },
+  {
+    "text": "means that this rarely actually happens often in an individual sync we're also",
+    "start": "778880",
+    "end": "784240"
+  },
+  {
+    "text": "updating endpoint slices and if we are we fill them up as much as we can but if we're not updating anything we",
+    "start": "784240",
+    "end": "791200"
+  },
+  {
+    "text": "prefer to create something new as opposed to run multiple updates",
+    "start": "791200",
+    "end": "797600"
+  },
+  {
+    "text": "so let's talk about how this actually uh translated into performance uh this api and this functionality was",
+    "start": "798000",
+    "end": "805760"
+  },
+  {
+    "text": "alpha and kubernetes 116. and it was it worked that was the good",
+    "start": "805760",
+    "end": "812959"
+  },
+  {
+    "start": "810000",
+    "end": "810000"
+  },
+  {
+    "text": "news but when we actually started to look at performance things were just slower coup proxy was",
+    "start": "812959",
+    "end": "820079"
+  },
+  {
+    "text": "very noticeably slower when using endpoint slices compared to endpoints and part of this",
+    "start": "820079",
+    "end": "826560"
+  },
+  {
+    "text": "made sense you know the implementation was more complex there was more to do and that was almost fine but endpoint",
+    "start": "826560",
+    "end": "834800"
+  },
+  {
+    "text": "slice implementations really should have been faster because we really wanted to scale this out",
+    "start": "834800",
+    "end": "840320"
+  },
+  {
+    "text": "so i did some profiling with a really cool tool called pprof uh against cube proxy just to see if",
+    "start": "840320",
+    "end": "847600"
+  },
+  {
+    "text": "there were any bottlenecks that we could uh get rid of so if you've run prof",
+    "start": "847600",
+    "end": "853519"
+  },
+  {
+    "text": "before you're probably familiar with something that looks a bit like this uh this is uh the result",
+    "start": "853519",
+    "end": "861600"
+  },
+  {
+    "text": "of running a p prof report on coop proxy specifically for cpu time it can",
+    "start": "861600",
+    "end": "867519"
+  },
+  {
+    "text": "profile any number of components but in this case i was interested in cpu time",
+    "start": "867519",
+    "end": "873360"
+  },
+  {
+    "text": "and with that background i found three really important ways we could improve",
+    "start": "873360",
+    "end": "879680"
+  },
+  {
+    "text": "performance here first we had a endpoint dot ip",
+    "start": "879680",
+    "end": "884880"
+  },
+  {
+    "text": "function which was taking 43 of total cpu time that's an absolutely massive amount for",
+    "start": "884880",
+    "end": "892560"
+  },
+  {
+    "text": "doing something that shouldn't have taken any time i had thought that this function was just getting a string that's it but what it",
+    "start": "892560",
+    "end": "899600"
+  },
+  {
+    "text": "was actually doing was it was calling net parse ip that parse an ip",
+    "start": "899600",
+    "end": "904639"
+  },
+  {
+    "text": "out of a string port iport combination there's no reason we",
+    "start": "904639",
+    "end": "910079"
+  },
+  {
+    "text": "couldn't have just used the iport string here so making that really simple change",
+    "start": "910079",
+    "end": "915440"
+  },
+  {
+    "text": "ended up really improving performance here",
+    "start": "915440",
+    "end": "920480"
+  },
+  {
+    "text": "the second big performance update was we had a function called handle update endpoint slice that was using 55",
+    "start": "920480",
+    "end": "928480"
+  },
+  {
+    "text": "percent of cpu time and i should mention just to be clear that this was",
+    "start": "928480",
+    "end": "934320"
+  },
+  {
+    "text": "55 of cpu time after we fixed the previous issue so we were calculating this",
+    "start": "934320",
+    "end": "941920"
+  },
+  {
+    "text": "new merged data structure every single time we got an endpoint to up update to an endpoint slice the",
+    "start": "941920",
+    "end": "949440"
+  },
+  {
+    "text": "problem was we weren't actually using that until we ran iptables updates or ipvs",
+    "start": "949440",
+    "end": "955440"
+  },
+  {
+    "text": "updates which was a lot less frequently at least when there were frequent updates so",
+    "start": "955440",
+    "end": "961279"
+  },
+  {
+    "text": "changing this logic to only run when we needed it ended up making another very significant",
+    "start": "961279",
+    "end": "966839"
+  },
+  {
+    "text": "difference and finally there was this function called detect stale connections which after the",
+    "start": "966839",
+    "end": "974560"
+  },
+  {
+    "text": "previous two fixes was using 88 cpu time i it was entirely necessary to",
+    "start": "974560",
+    "end": "981920"
+  },
+  {
+    "text": "clean up stale udp connections and it was pretty hard to optimize but one thing we'd missed is it was",
+    "start": "981920",
+    "end": "988240"
+  },
+  {
+    "text": "running for every connection and it only needed to run for tcp connect for udp",
+    "start": "988240",
+    "end": "993759"
+  },
+  {
+    "text": "connections so we restructured this and that got rid of some very significant cpu time",
+    "start": "993759",
+    "end": "1002399"
+  },
+  {
+    "start": "1002000",
+    "end": "1002000"
+  },
+  {
+    "text": "so if you look at what that resulted in the big tall long yellow line there",
+    "start": "1002399",
+    "end": "1008880"
+  },
+  {
+    "text": "represents my initial endpoint slice implementation and this is scaling from 0 to 10 000",
+    "start": "1008880",
+    "end": "1015440"
+  },
+  {
+    "text": "endpoints in a cluster and you can see that my endpoint slice implementation",
+    "start": "1015440",
+    "end": "1020880"
+  },
+  {
+    "text": "was very slow and took three minutes longer to complete in addition to using more cpu for the",
+    "start": "1020880",
+    "end": "1026798"
+  },
+  {
+    "text": "entirety of its running time on the other hand uh all the other implementations",
+    "start": "1026799",
+    "end": "1033678"
+  },
+  {
+    "text": "finished on time finished right as the scale-up happened and they were reasonably efficient but",
+    "start": "1033679",
+    "end": "1040240"
+  },
+  {
+    "text": "you can notice that the initial endpoints implementation was also not great",
+    "start": "1040240",
+    "end": "1045600"
+  },
+  {
+    "text": "the bottom two lines that are relatively flat are these improved and optimized implementations",
+    "start": "1045600",
+    "end": "1051520"
+  },
+  {
+    "text": "and you can see some significant improvements there but i know it's hard to understand real numbers from a chart",
+    "start": "1051520",
+    "end": "1059039"
+  },
+  {
+    "text": "so to take a look at real numbers uh here's what we observed",
+    "start": "1059039",
+    "end": "1065679"
+  },
+  {
+    "text": "the endpoint slice implementation was around 20 times faster than the baseline",
+    "start": "1065679",
+    "end": "1071520"
+  },
+  {
+    "text": "endpoints implementation in 1.16 and even still more than three times",
+    "start": "1071520",
+    "end": "1077039"
+  },
+  {
+    "text": "faster than the updated and improved endpoints implementation in 1.17",
+    "start": "1077039",
+    "end": "1083280"
+  },
+  {
+    "text": "so very significant improvements just from some basic profiling",
+    "start": "1083280",
+    "end": "1088799"
+  },
+  {
+    "text": "but if you're at this talk you're probably not just interested in ten thousand points because well we know that this",
+    "start": "1089440",
+    "end": "1096240"
+  },
+  {
+    "text": "works at ten thousand endpoints and it's pretty reliable at this point but we really want to understand well",
+    "start": "1096240",
+    "end": "1102160"
+  },
+  {
+    "text": "just how far can we push this thing so let's talk about a hundred thousand endpoints",
+    "start": "1102160",
+    "end": "1109840"
+  },
+  {
+    "start": "1108000",
+    "end": "1108000"
+  },
+  {
+    "text": "but before we get too far into this i have to provide some caveats uh these results are absolutely not",
+    "start": "1109840",
+    "end": "1116640"
+  },
+  {
+    "text": "scientific this is just what happens when we wanted to know what would happen at the scale",
+    "start": "1116640",
+    "end": "1122960"
+  },
+  {
+    "text": "uh this is at by no means an endorsement of running a service with",
+    "start": "1122960",
+    "end": "1128000"
+  },
+  {
+    "text": "100 000 endpoints at least not in production and i did absolutely nothing to tune",
+    "start": "1128000",
+    "end": "1134080"
+  },
+  {
+    "text": "this cluster for better performance at scale it was running with all the standard e2e",
+    "start": "1134080",
+    "end": "1139200"
+  },
+  {
+    "text": "test settings so if anything it probably was tuned",
+    "start": "1139200",
+    "end": "1144400"
+  },
+  {
+    "text": "against scale there's some things like really verbose log levels which have to have some kind",
+    "start": "1144400",
+    "end": "1149919"
+  },
+  {
+    "text": "of negative impact on performance so with appropriate efforts to tune these components",
+    "start": "1149919",
+    "end": "1155760"
+  },
+  {
+    "text": "i'd imagine results could have been better",
+    "start": "1155760",
+    "end": "1160320"
+  },
+  {
+    "start": "1160000",
+    "end": "1160000"
+  },
+  {
+    "text": "so let's talk just briefly about how i set this up so i used coop test with most defaults",
+    "start": "1160799",
+    "end": "1167520"
+  },
+  {
+    "text": "used for e2e test clusters and i ran this on a 1.19",
+    "start": "1167520",
+    "end": "1174400"
+  },
+  {
+    "text": "alpha free release so this is after code freeze but before 1.19.0",
+    "start": "1174400",
+    "end": "1181919"
+  },
+  {
+    "text": "so somewhere in that mix i have a specific commit there if you're interested is what this",
+    "start": "1181919",
+    "end": "1187679"
+  },
+  {
+    "text": "was run against and you can see the command i used to spin up this cluster",
+    "start": "1187679",
+    "end": "1193840"
+  },
+  {
+    "text": "uh the end result was four thousand and two nodes one of those was the master one of those",
+    "start": "1193919",
+    "end": "1199520"
+  },
+  {
+    "text": "was for heapster and there were four thousand nodes for everything else i should point out these nodes were",
+    "start": "1199520",
+    "end": "1206080"
+  },
+  {
+    "text": "relatively small uh they're n1 standard ones only one core",
+    "start": "1206080",
+    "end": "1211280"
+  },
+  {
+    "text": "of a cpu so keep that in mind when you look at the numbers later on well we really did put a lot of pods on",
+    "start": "1211280",
+    "end": "1218320"
+  },
+  {
+    "text": "these nodes and that also could have adversely affected performance",
+    "start": "1218320",
+    "end": "1224320"
+  },
+  {
+    "text": "so i learned pretty quickly on that although a hundred thousand pod deployment doesn't work i it at least in my case",
+    "start": "1224480",
+    "end": "1232640"
+  },
+  {
+    "text": "was impossible to actually get any information about it because if as an example you try to run coop",
+    "start": "1232640",
+    "end": "1240080"
+  },
+  {
+    "text": "cuddle get pods and at least in my experience it would consistently time out",
+    "start": "1240080",
+    "end": "1245679"
+  },
+  {
+    "text": "because every pod inside a deployment shares the same set of labels it was very difficult to just get an",
+    "start": "1245679",
+    "end": "1252159"
+  },
+  {
+    "text": "individual pot or a small subset of pots so instead what i ended up doing is 10",
+    "start": "1252159",
+    "end": "1257280"
+  },
+  {
+    "text": "deployments with 10 000 pods each and surprisingly enough there weren't any issues listing 10 000 pods at a time",
+    "start": "1257280",
+    "end": "1266720"
+  },
+  {
+    "text": "and i targeted all those pods all 100 000 pods with a single node port service",
+    "start": "1267120",
+    "end": "1275440"
+  },
+  {
+    "text": "i it was a node port service but all my testing all my load testing was based on the cluster ip from within",
+    "start": "1275440",
+    "end": "1283120"
+  },
+  {
+    "text": "the cluster but it did technically have no port functionality as well",
+    "start": "1283120",
+    "end": "1289600"
+  },
+  {
+    "text": "now as you'd imagine as we're scaling up endpoints hit that lcd object size limit at around",
+    "start": "1289600",
+    "end": "1295919"
+  },
+  {
+    "text": "10 000 pods and this is what minhon mentioned earlier there's a limit to the size of an object in ncd",
+    "start": "1295919",
+    "end": "1303440"
+  },
+  {
+    "text": "and you can configure that to a point but increasing that too much is just not going to help",
+    "start": "1303440",
+    "end": "1308559"
+  },
+  {
+    "text": "very much so you can see that we hit just over ten thousand endpoints and i just consistently got",
+    "start": "1308559",
+    "end": "1315120"
+  },
+  {
+    "text": "errors whenever the endpoints controller tried to update and points from that point on",
+    "start": "1315120",
+    "end": "1322399"
+  },
+  {
+    "text": "but endpoint slices kept on working as expected and so we ended up with 1006 endpoint",
+    "start": "1322480",
+    "end": "1329520"
+  },
+  {
+    "text": "slices to store 100 thousand endpoints i have to mention this is again by",
+    "start": "1329520",
+    "end": "1334640"
+  },
+  {
+    "text": "design because the controller is minimizing updates and it's always going to create a new endpoint slice instead of",
+    "start": "1334640",
+    "end": "1340880"
+  },
+  {
+    "text": "updating multiple endpoint slices that those are the two options so not every endpoint slice was",
+    "start": "1340880",
+    "end": "1347360"
+  },
+  {
+    "text": "completely full but reasonably good distribution here",
+    "start": "1347360",
+    "end": "1353440"
+  },
+  {
+    "start": "1353000",
+    "end": "1353000"
+  },
+  {
+    "text": "now you have to you have to wonder at this kind of scale how crazy does ip tables look and",
+    "start": "1353440",
+    "end": "1360240"
+  },
+  {
+    "text": "well the answer is pretty crazy uh four four hundred thousand total lines and",
+    "start": "1360240",
+    "end": "1366320"
+  },
+  {
+    "text": "over a hundred thousand of those lines were probabilities now if you're familiar with how",
+    "start": "1366320",
+    "end": "1372240"
+  },
+  {
+    "text": "cube proxies high p tables implementation works uh it is really just uh decreasing",
+    "start": "1372240",
+    "end": "1378880"
+  },
+  {
+    "text": "probabilities so the very first item in this list would have a 100 000",
+    "start": "1378880",
+    "end": "1386480"
+  },
+  {
+    "text": "chance of going to that end point and if that isn't picked it goes one further down the list and there's",
+    "start": "1386480",
+    "end": "1392799"
+  },
+  {
+    "text": "a one in ninety nine thousand nine hundred and ninety nine chance that it will go to that end point",
+    "start": "1392799",
+    "end": "1398080"
+  },
+  {
+    "text": "all the way down the list so just a really really long chain of probabilities",
+    "start": "1398080",
+    "end": "1403679"
+  },
+  {
+    "text": "it sounds really strange but it ends up being fairly reliable and fairly performant",
+    "start": "1403679",
+    "end": "1409919"
+  },
+  {
+    "text": "but at this point once we got into a hundred thousand probabilities of 100 000 endpoints uh",
+    "start": "1409919",
+    "end": "1416960"
+  },
+  {
+    "text": "coupe proxy updates were really slowing down uh so sync proxy rules the actual",
+    "start": "1416960",
+    "end": "1423679"
+  },
+  {
+    "text": "code and logic behind uh coupe proxy",
+    "start": "1423679",
+    "end": "1431840"
+  },
+  {
+    "text": "well i sent 50 000 requests across the cluster to this service and they averaged a 883",
+    "start": "1450720",
+    "end": "1459440"
+  },
+  {
+    "text": "second millisecond response time so not exactly blazing fast but it did work and i",
+    "start": "1459440",
+    "end": "1466880"
+  },
+  {
+    "text": "specifically used minhan's fork of hay because it includes this really cool functionality",
+    "start": "1466880",
+    "end": "1472400"
+  },
+  {
+    "text": "that allows you to see a response distribution and used appropriately you can see",
+    "start": "1472400",
+    "end": "1479919"
+  },
+  {
+    "text": "exactly how many different endpoints unique endpoints respond to your request",
+    "start": "1479919",
+    "end": "1485679"
+  },
+  {
+    "text": "and so in this case my fifty thousand requests were distributed across twelve thousand seven hundred pods",
+    "start": "1485679",
+    "end": "1492960"
+  },
+  {
+    "text": "now i also had to test out ipvs because i was curious just how that performance might differ",
+    "start": "1493440",
+    "end": "1500000"
+  },
+  {
+    "text": "so there's a different proxy or mode include proxy for ipvs and just enabling that",
+    "start": "1500000",
+    "end": "1507600"
+  },
+  {
+    "text": "it worked reasonably well",
+    "start": "1507600",
+    "end": "1514559"
+  },
+  {
+    "start": "1513000",
+    "end": "1513000"
+  },
+  {
+    "text": "okay um so let's talk about iptables",
+    "start": "1514559",
+    "end": "1519840"
+  },
+  {
+    "text": "we had a 50 000 request sent across the cluster to that service we had a 883",
+    "start": "1519840",
+    "end": "1529360"
+  },
+  {
+    "text": "millisecond response time on average and the requests were distributed to 12",
+    "start": "1529360",
+    "end": "1535679"
+  },
+  {
+    "text": "700 pods and the way i was able to determine that was with",
+    "start": "1535679",
+    "end": "1540960"
+  },
+  {
+    "text": "minhan's fork of hay which made it very straightforward to see just how",
+    "start": "1540960",
+    "end": "1546799"
+  },
+  {
+    "text": "many pods we were able to reach with these requests so 12 700 unique pots so this is",
+    "start": "1546799",
+    "end": "1553520"
+  },
+  {
+    "text": "not exactly blazing fast but it did work",
+    "start": "1553520",
+    "end": "1558320"
+  },
+  {
+    "text": "and then for ipvs uh i had to try out the ipvs proxy remote and for that",
+    "start": "1559600",
+    "end": "1567360"
+  },
+  {
+    "text": "we sent another fifty thousand requests again with the same library and the average response time was a bit",
+    "start": "1567360",
+    "end": "1573520"
+  },
+  {
+    "text": "slower but the requests were more distributed going to seventeen thousand pots so again continue to work but",
+    "start": "1573520",
+    "end": "1582080"
+  },
+  {
+    "text": "a bit slower with ipps in this specific instance",
+    "start": "1582080",
+    "end": "1587120"
+  },
+  {
+    "text": "but of course you're probably curious i know i said more than a hundred thousand beyond a",
+    "start": "1587120",
+    "end": "1593120"
+  },
+  {
+    "text": "hundred thousand endpoints so this all continues to work well with a hundred and twenty thousand pots",
+    "start": "1593120",
+    "end": "1600320"
+  },
+  {
+    "text": "uh so in this case we have twelve hundred and four total endpoint slices",
+    "start": "1600320",
+    "end": "1605440"
+  },
+  {
+    "text": "that we ended up with and it all generally worked but it's at this point",
+    "start": "1605440",
+    "end": "1611279"
+  },
+  {
+    "text": "that i have to provide a few caveats because as much as this worked it wasn't always pretty",
+    "start": "1611279",
+    "end": "1619279"
+  },
+  {
+    "start": "1618000",
+    "end": "1618000"
+  },
+  {
+    "text": "there were errors and i would be remiss not to mention",
+    "start": "1619279",
+    "end": "1624480"
+  },
+  {
+    "text": "uh so first it's worth mentioning that the api server would timeout uh this is one example of",
+    "start": "1624480",
+    "end": "1631279"
+  },
+  {
+    "text": "it timing out on an endpoint slice watch uh but there are other examples",
+    "start": "1631279",
+    "end": "1636640"
+  },
+  {
+    "text": "too where it would timeout and eventually a connection would be re-established and things would work but these errors",
+    "start": "1636640",
+    "end": "1644799"
+  },
+  {
+    "text": "became more common the further i pushed the limits so the closer i got to",
+    "start": "1644799",
+    "end": "1649919"
+  },
+  {
+    "text": "120 000 the more frequently at observe errors like this",
+    "start": "1649919",
+    "end": "1655760"
+  },
+  {
+    "text": "and then there's kind of a trickier error around endpoint slice updates uh the way",
+    "start": "1655760",
+    "end": "1662720"
+  },
+  {
+    "text": "kubernetes controllers work is they use this shared cache of resource this dramatically",
+    "start": "1662720",
+    "end": "1668880"
+  },
+  {
+    "text": "decreases load on api server but it does mean that sometimes a controller may be operating on",
+    "start": "1668880",
+    "end": "1675840"
+  },
+  {
+    "text": "resources that are not completely up to date and if for example say the endpoint slice",
+    "start": "1675840",
+    "end": "1682000"
+  },
+  {
+    "text": "controller chooses to try to update a resource that it has a stale copy of",
+    "start": "1682000",
+    "end": "1687360"
+  },
+  {
+    "text": "you'll get this kind of error message the object has been modified please apply your changes",
+    "start": "1687360",
+    "end": "1692640"
+  },
+  {
+    "text": "and try again so that makes sense but it is something that will appear more and more in log",
+    "start": "1692640",
+    "end": "1699120"
+  },
+  {
+    "text": "messages and we're working on ways that we can try to work around this but unfortunately with caching i don't think",
+    "start": "1699120",
+    "end": "1705279"
+  },
+  {
+    "text": "we'll ever be able to completely get rid of the possibility this could happen and as you would",
+    "start": "1705279",
+    "end": "1711360"
+  },
+  {
+    "text": "imagine the more and more endpoint slices you get for service the higher the likelihood of these",
+    "start": "1711360",
+    "end": "1717600"
+  },
+  {
+    "text": "events happening is and then finally as i've already",
+    "start": "1717600",
+    "end": "1722640"
+  },
+  {
+    "text": "mentioned the endpoints controller just kept on running into that lcd object size limit we're hoping to",
+    "start": "1722640",
+    "end": "1728640"
+  },
+  {
+    "text": "truncate endpoints in the future so that when you get to this large scale the controller stops",
+    "start": "1728640",
+    "end": "1734480"
+  },
+  {
+    "text": "trying at a certain point but right now it'll just keep on trying and failing and that's just",
+    "start": "1734480",
+    "end": "1740000"
+  },
+  {
+    "text": "unfortunately what the story is at this scale right now",
+    "start": "1740000",
+    "end": "1745039"
+  },
+  {
+    "start": "1744000",
+    "end": "1744000"
+  },
+  {
+    "text": "so let's look at some real data uh the this is the results i got over those few",
+    "start": "1745360",
+    "end": "1751440"
+  },
+  {
+    "text": "runs with a hundred thousand hundred and twenty thousand endpoints for both ipvs and ip tables i should say",
+    "start": "1751440",
+    "end": "1759919"
+  },
+  {
+    "text": "these results are definitely not scientific they re represent just a few runs and from a",
+    "start": "1759919",
+    "end": "1765600"
+  },
+  {
+    "text": "single node in a cluster that's running pre-release software any number of factors could influence",
+    "start": "1765600",
+    "end": "1771440"
+  },
+  {
+    "text": "these so with that said i want to highlight a couple things",
+    "start": "1771440",
+    "end": "1776480"
+  },
+  {
+    "text": "ipvs update times were dramatically faster 5 seconds instead of 25 or 29 seconds",
+    "start": "1776480",
+    "end": "1783600"
+  },
+  {
+    "text": "with ip tables and you can also see the ip tables performance",
+    "start": "1783600",
+    "end": "1788720"
+  },
+  {
+    "text": "hit as you gradually increase the number of end points becomes more and more significant at",
+    "start": "1788720",
+    "end": "1794559"
+  },
+  {
+    "text": "scale whereas ipvs performance is relatively flat regardless of scale",
+    "start": "1794559",
+    "end": "1802000"
+  },
+  {
+    "text": "so that's great it works it works well reasonably well at high scale but what's",
+    "start": "1803279",
+    "end": "1810159"
+  },
+  {
+    "text": "next let's talk about the really cool features that endpoint slices",
+    "start": "1810159",
+    "end": "1815919"
+  },
+  {
+    "text": "are going to enable we have some really exciting goals for",
+    "start": "1815919",
+    "end": "1821520"
+  },
+  {
+    "start": "1818000",
+    "end": "1818000"
+  },
+  {
+    "text": "kubernetes 1.20 i realize there's a chance not all of these are going to make it in",
+    "start": "1821520",
+    "end": "1826960"
+  },
+  {
+    "text": "kubernetes 1.20 but at this point we're hopeful uh so we're trying to work towards a",
+    "start": "1826960",
+    "end": "1833679"
+  },
+  {
+    "text": "plan for automatic topology aware routing and endpoint slice subsetting these two features are really",
+    "start": "1833679",
+    "end": "1839919"
+  },
+  {
+    "text": "closely tied together and they're very related to everything we've discussed so far so i'm going to",
+    "start": "1839919",
+    "end": "1845679"
+  },
+  {
+    "text": "follow up on those in a couple additional slides but beyond that we also have some really",
+    "start": "1845679",
+    "end": "1852000"
+  },
+  {
+    "text": "exciting work to support multi-cluster services and significant dual stack updates",
+    "start": "1852000",
+    "end": "1857679"
+  },
+  {
+    "text": "both of which are going to be heavily reliant on endpoints license",
+    "start": "1857679",
+    "end": "1862960"
+  },
+  {
+    "text": "and if you're interested in using endpoint slices on windows we're hoping to have beta support for",
+    "start": "1862960",
+    "end": "1868880"
+  },
+  {
+    "text": "cube proxy in kubernetes 1.20 but let's talk a little bit more about",
+    "start": "1868880",
+    "end": "1875360"
+  },
+  {
+    "text": "that automatic topology aware routing the concept is really simple right now",
+    "start": "1875360",
+    "end": "1880960"
+  },
+  {
+    "text": "if you make a request any anywhere inside a cluster",
+    "start": "1880960",
+    "end": "1886000"
+  },
+  {
+    "text": "to a service you're equally likely to end up at any end point anywhere else inside the cluster so",
+    "start": "1886000",
+    "end": "1893120"
+  },
+  {
+    "text": "it doesn't matter if it's the same zone or a different zone equally likely the idea is why not try to keep",
+    "start": "1893120",
+    "end": "1900799"
+  },
+  {
+    "text": "zones as requests as close to their origination as possible",
+    "start": "1900799",
+    "end": "1906320"
+  },
+  {
+    "text": "so endpoint slices already store that topology information for each endpoint and coup proxy can be updated to prefer",
+    "start": "1906320",
+    "end": "1913519"
+  },
+  {
+    "text": "endpoints that are in the same zone or region and as you can imagine this has potential for much faster routing",
+    "start": "1913519",
+    "end": "1919679"
+  },
+  {
+    "text": "and significant cost savings now if you take this idea and add this next idea you have",
+    "start": "1919679",
+    "end": "1925919"
+  },
+  {
+    "text": "significant ability to save costs and decrease api server load with subsetting",
+    "start": "1925919",
+    "end": "1934000"
+  },
+  {
+    "text": "the idea is what if not just topology or where routing but what if",
+    "start": "1934000",
+    "end": "1939200"
+  },
+  {
+    "text": "coup proxy could just select the endpoint slices that were relevant to it so",
+    "start": "1939200",
+    "end": "1944240"
+  },
+  {
+    "text": "the ones that represent the closest endpoints to it",
+    "start": "1944240",
+    "end": "1949840"
+  },
+  {
+    "text": "and couproxy even if you don't want to run a hundred",
+    "start": "1961120",
+    "end": "1967919"
+  },
+  {
+    "start": "1964000",
+    "end": "1964000"
+  },
+  {
+    "text": "thousand endpoint these performance improvements are going to be noticeable at all levels",
+    "start": "1967919",
+    "end": "1974080"
+  },
+  {
+    "text": "the upper limits of service size are dramatically higher now so that's something to be excited about",
+    "start": "1974080",
+    "end": "1979279"
+  },
+  {
+    "text": "if you've been thinking about running larger services and i have to be honest endpoint slices",
+    "start": "1979279",
+    "end": "1985840"
+  },
+  {
+    "text": "don't and can't solve all the bottlenecks but they have solved a really significant one",
+    "start": "1985840",
+    "end": "1992080"
+  },
+  {
+    "text": "so new features like topology or where routing and subsetting will result in really significant",
+    "start": "1992080",
+    "end": "1997679"
+  },
+  {
+    "text": "scalability improvements and i'm very excited about the future with endpoint slices and all the great",
+    "start": "1997679",
+    "end": "2004159"
+  },
+  {
+    "text": "functionality we're going to build on top of this thanks so much for your time i've",
+    "start": "2004159",
+    "end": "2010399"
+  },
+  {
+    "text": "enjoyed it feel free to reach out to me or minhon if you have any questions",
+    "start": "2010399",
+    "end": "2016799"
+  },
+  {
+    "text": "thanks",
+    "start": "2016840",
+    "end": "2019840"
+  },
+  {
+    "text": "hey thanks for uh being part of our talk uh we have time to answer a couple questions that",
+    "start": "2024799",
+    "end": "2030159"
+  },
+  {
+    "text": "came in uh thanks for all the questions uh again i think you'll see in chat uh",
+    "start": "2030159",
+    "end": "2035440"
+  },
+  {
+    "text": "we're also going to be on the kubernetes networking channel and cncf slack if you have additional follow-up",
+    "start": "2035440",
+    "end": "2042000"
+  },
+  {
+    "text": "questions that we can't get to here uh one question that came in",
+    "start": "2042000",
+    "end": "2048240"
+  },
+  {
+    "text": "uh relatively early in the talk is uh do you think going beyond one million endpoints is going to be",
+    "start": "2048240",
+    "end": "2055118"
+  },
+  {
+    "text": "possible in the future or even the near future um and i think",
+    "start": "2055119",
+    "end": "2063118"
+  },
+  {
+    "text": "i think that's a great question what we can say is the endpoints api is no",
+    "start": "2063119",
+    "end": "2068800"
+  },
+  {
+    "text": "longer the bottleneck with endpoint slices we've solved one of",
+    "start": "2068800",
+    "end": "2074720"
+  },
+  {
+    "text": "the bottlenecks here but as this talk kind of covered there are other bottlenecks that we'll run into",
+    "start": "2074720",
+    "end": "2080240"
+  },
+  {
+    "text": "uh as an example uh current implementations of coup proxy were really not",
+    "start": "2080240",
+    "end": "2085358"
+  },
+  {
+    "text": "intended to reach the scale of a million endpoints uh and also there's uh some uh",
+    "start": "2085359",
+    "end": "2094000"
+  },
+  {
+    "text": "some other load uh say api server that may need some addressing so those are some high level",
+    "start": "2094000",
+    "end": "2100800"
+  },
+  {
+    "text": "things that i know we need to address if we really wanted to support a million endpoints i know if there's a sufficient demand uh",
+    "start": "2100800",
+    "end": "2108000"
+  },
+  {
+    "text": "the open source community is awesome and always working to improve the scalability of kubernetes",
+    "start": "2108000",
+    "end": "2114240"
+  },
+  {
+    "text": "um so maybe uh minhon i don't know do you want to take on one more question",
+    "start": "2114240",
+    "end": "2121440"
+  },
+  {
+    "text": "um i think we're at time and then i have already typed in a bunch of answers to the",
+    "start": "2121440",
+    "end": "2126560"
+  },
+  {
+    "text": "questions um so oh there's one more",
+    "start": "2126560",
+    "end": "2132320"
+  },
+  {
+    "text": "um oh there's a lot more coming in okay so okay let me pick the the first",
+    "start": "2132320",
+    "end": "2140480"
+  },
+  {
+    "text": "one um uh i i want to run 10k ngx web server",
+    "start": "2140480",
+    "end": "2148800"
+  },
+  {
+    "text": "pods for same application what should be preferred idea",
+    "start": "2148800",
+    "end": "2155119"
+  },
+  {
+    "text": "the first a is one cluster and run all 10k pods in same name space on physical",
+    "start": "2155200",
+    "end": "2161359"
+  },
+  {
+    "text": "server b split using namespace with 1k per namespace distribute a c",
+    "start": "2161359",
+    "end": "2169280"
+  },
+  {
+    "text": "distribute 1k on 10 clusters i need speed um so",
+    "start": "2169280",
+    "end": "2177200"
+  },
+  {
+    "text": "i i will [Music] it really depends on how your deployment",
+    "start": "2177200",
+    "end": "2184240"
+  },
+  {
+    "text": "model like we we take these a lot of questions similar to this before so basically",
+    "start": "2184240",
+    "end": "2190560"
+  },
+  {
+    "text": "why do you need to run like one million endpoints behind a service in the first",
+    "start": "2190560",
+    "end": "2195839"
+  },
+  {
+    "text": "place right i why can't you chop it up so like for instance",
+    "start": "2195839",
+    "end": "2201760"
+  },
+  {
+    "text": "one one aspect is to one aspect to consider is like how to deploy do you have a load",
+    "start": "2201760",
+    "end": "2209040"
+  },
+  {
+    "text": "balancer or some multi-cluster service implementation that can target",
+    "start": "2209040",
+    "end": "2214720"
+  },
+  {
+    "text": "back ends across different clusters right and then how do you deploy how do we rolling update through those",
+    "start": "2214720",
+    "end": "2221520"
+  },
+  {
+    "text": "like different deployments um in different clusters so um like more clusters",
+    "start": "2221520",
+    "end": "2228880"
+  },
+  {
+    "text": "um definitely give you more availability and um and high like basically reliability",
+    "start": "2228880",
+    "end": "2234800"
+  },
+  {
+    "text": "built in um but it takes like basically it's more painful to roll out and then debug",
+    "start": "2234800",
+    "end": "2240240"
+  },
+  {
+    "text": "um and you can have i i would say it really depends on your use case and then",
+    "start": "2240240",
+    "end": "2245280"
+  },
+  {
+    "text": "um there's a balance between basically the uh the number of shard",
+    "start": "2245280",
+    "end": "2251359"
+  },
+  {
+    "text": "of your deployment and the number of your um clusters yeah so so",
+    "start": "2251359",
+    "end": "2258320"
+  },
+  {
+    "text": "the answer is probably it depends based on your requirements of your reliability and how agile you want and",
+    "start": "2258320",
+    "end": "2265280"
+  },
+  {
+    "text": "then and then there are some also some other bottlenecks on the deployment controller",
+    "start": "2265280",
+    "end": "2270320"
+  },
+  {
+    "text": "itself that it can't support let's say a million pods behind the deployment if you scale",
+    "start": "2270320",
+    "end": "2276320"
+  },
+  {
+    "text": "a deployment to a million pods you will basically keep on creating parts in the loop",
+    "start": "2276320",
+    "end": "2281680"
+  },
+  {
+    "text": "and take for take a while to actually realize those ten like a million pods um so",
+    "start": "2281680",
+    "end": "2289680"
+  },
+  {
+    "text": "yep um so sorry we are at time so i will try to type in some of the",
+    "start": "2289680",
+    "end": "2295359"
+  },
+  {
+    "text": "answers to the the questions yeah and i'm also seeing some questions",
+    "start": "2295359",
+    "end": "2302240"
+  },
+  {
+    "text": "come in on slack and we'll follow up there as well so thanks so much for the time thank you",
+    "start": "2302240",
+    "end": "2311359"
+  }
+]

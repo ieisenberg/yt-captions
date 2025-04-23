@@ -1,0 +1,2821 @@
+[
+  {
+    "start": "0",
+    "end": "16000"
+  },
+  {
+    "text": "I'm Kevin Millar I'm one of the engineering managers within ec2",
+    "start": "0",
+    "end": "5160"
+  },
+  {
+    "text": "specifically in some of our networking area and I've been with Amazon now for about seven years so can talk about kind",
+    "start": "5160",
+    "end": "12150"
+  },
+  {
+    "text": "of things that have happened over a long duration but today in particular this morning I want to talk a little bit",
+    "start": "12150",
+    "end": "17820"
+  },
+  {
+    "start": "16000",
+    "end": "16000"
+  },
+  {
+    "text": "about network performance and this is a 400 level talk this is we're going to deep dive on TCP performance and really",
+    "start": "17820",
+    "end": "24689"
+  },
+  {
+    "text": "get into some of the the underlying nitty-gritty that happens within TCP and and so the first you know the first",
+    "start": "24689",
+    "end": "31199"
+  },
+  {
+    "text": "couple sections will really focus on you know what is TCP how does it work what are some of the underlying parameters",
+    "start": "31199",
+    "end": "37860"
+  },
+  {
+    "text": "and inputs the TCP uses to control how fast data is sent on the network which",
+    "start": "37860",
+    "end": "42870"
+  },
+  {
+    "text": "obviously I'm sure most of you really do care about when you're in the cloud and and you're trying to send data back and",
+    "start": "42870",
+    "end": "48450"
+  },
+  {
+    "text": "forth or you know acts as a database or deliver content and customers obviously",
+    "start": "48450",
+    "end": "53820"
+  },
+  {
+    "text": "network performance matters a great deal so we're going to spend a couple the first couple seconds really focused on that and then we're going to talk about",
+    "start": "53820",
+    "end": "60680"
+  },
+  {
+    "text": "some some applications of this and some samples I put together some situations I",
+    "start": "60680",
+    "end": "67590"
+  },
+  {
+    "text": "put together to really test how we could tune tcp on linux to obtain higher",
+    "start": "67590",
+    "end": "74340"
+  },
+  {
+    "text": "levels of network performance and so as a little bit of a of a teaser in one of",
+    "start": "74340",
+    "end": "80070"
+  },
+  {
+    "text": "these applications later you'll see actually we found a way to increase network performance a hundred thirty-seven percent just with some",
+    "start": "80070",
+    "end": "85530"
+  },
+  {
+    "text": "simple tweaks that we did that I did to the Linux settings on the server so there is it is possible to really impact",
+    "start": "85530",
+    "end": "93090"
+  },
+  {
+    "text": "TCP meaningfully with just some simple tweaks and really understanding how your application works or and what you need",
+    "start": "93090",
+    "end": "99810"
+  },
+  {
+    "text": "out of the network and so that's really the focus of today's talk again we're going to dive super deep so so hang",
+    "start": "99810",
+    "end": "105180"
+  },
+  {
+    "text": "tight all right so first off yes I you know I've been at amazon for seven years",
+    "start": "105180",
+    "end": "111060"
+  },
+  {
+    "text": "i love the cloud but more than that i'm a network guy i really love tcp so this is going to be let's let's let's dive",
+    "start": "111060",
+    "end": "117240"
+  },
+  {
+    "text": "deep into tcp you know just to get started tcp is a transmission control protocol i'm sure lots of you can you",
+    "start": "117240",
+    "end": "124560"
+  },
+  {
+    "text": "know sort of name off the the usual sort of three-way handshake about TCP most people know that TCP has a three-way",
+    "start": "124560",
+    "end": "131069"
+  },
+  {
+    "text": "handshake there's a lot more that's going on under under the hood and you know but",
+    "start": "131069",
+    "end": "137239"
+  },
+  {
+    "text": "hopefully most of you many of you may recognize tcp really does underlie almost all of the protocols that we use",
+    "start": "137239",
+    "end": "144150"
+  },
+  {
+    "text": "to deliver application data so whether that's you know management thrust this age delivering content through HTTP or",
+    "start": "144150",
+    "end": "151379"
+  },
+  {
+    "text": "HTTPS accessing a database server from an application server sending email you",
+    "start": "151379",
+    "end": "157439"
+  },
+  {
+    "text": "know you name it there's there's only a few protocols really in widespread use that don't use TCP and one of the",
+    "start": "157439",
+    "end": "164189"
+  },
+  {
+    "text": "primary reasons for that is because TCP does provide stream-based delivery of content so TCP is responsible for",
+    "start": "164189",
+    "end": "171150"
+  },
+  {
+    "text": "maintaining in order delivery of your your messages making sure your your messages on your network sockets are",
+    "start": "171150",
+    "end": "176849"
+  },
+  {
+    "text": "delivered in the same order that they're sent it also performs flow control to try to speed up or slow down a",
+    "start": "176849",
+    "end": "182340"
+  },
+  {
+    "text": "connection based on what it's perceiving in the network in terms of congestion so you know a lot of the internet uses tcp",
+    "start": "182340",
+    "end": "188609"
+  },
+  {
+    "text": "and the mechanisms here are obviously have pretty widespread applicability all",
+    "start": "188609",
+    "end": "195719"
+  },
+  {
+    "text": "right so throughout today we're going to be talking primarily about just some you know very simple test bed and and and you know this is the kind of thing that",
+    "start": "195719",
+    "end": "201709"
+  },
+  {
+    "text": "you know I spun up in an ending them in a few minutes with VC to something that",
+    "start": "201709",
+    "end": "207510"
+  },
+  {
+    "text": "you can obviously spin up as well so we're gonna have Jack and Jill and let's say that Jack and Jill want to connect",
+    "start": "207510",
+    "end": "213060"
+  },
+  {
+    "text": "with each other they want to have a TCP connection between them and exchange of data for whatever purpose now the first",
+    "start": "213060",
+    "end": "219510"
+  },
+  {
+    "text": "thing you realize with with TCP is that although we often commonly talk about a connection between Jo to to institute",
+    "start": "219510",
+    "end": "228419"
+  },
+  {
+    "text": "instances or two servers or a client and server we often talk about it as a connection you know really when we are",
+    "start": "228419",
+    "end": "235409"
+  },
+  {
+    "text": "digging the next level deep we really want to be thinking about the fact that it is a pair of unidirectional",
+    "start": "235409",
+    "end": "241370"
+  },
+  {
+    "text": "connections so Jack may want to send some data to Jill Jill may want to send some data back to Jack on the same",
+    "start": "241370",
+    "end": "247859"
+  },
+  {
+    "text": "connection but when you think about when we look at all the TCP parameters and the mechanisms involved there we really",
+    "start": "247859",
+    "end": "254370"
+  },
+  {
+    "text": "should separate out the set you know the path in one direction from the path back",
+    "start": "254370",
+    "end": "259620"
+  },
+  {
+    "text": "in the opposite direction because they can operate alright so we're going to be talking",
+    "start": "259620",
+    "end": "267669"
+  },
+  {
+    "start": "266000",
+    "end": "266000"
+  },
+  {
+    "text": "about several of the aspects of tcp and well one thing sort of the next the next",
+    "start": "267669",
+    "end": "274900"
+  },
+  {
+    "text": "level of detail in the next level that we're going to dig into is how does TCP control you how much data is in flight",
+    "start": "274900",
+    "end": "283810"
+  },
+  {
+    "text": "at any one time and as you'll see in a moment you know the amount of data you have in flight at one time between Jack",
+    "start": "283810",
+    "end": "290650"
+  },
+  {
+    "text": "and Jill or Jill and Jack that has a direct correlation to your bandwidth to",
+    "start": "290650",
+    "end": "296440"
+  },
+  {
+    "text": "how much throughput you actually do perceive in the end so you know typically we often get the final number",
+    "start": "296440",
+    "end": "301600"
+  },
+  {
+    "text": "we see oh this connection you know was a it was operating at 100 megabits per second or is operating at 20 megabits",
+    "start": "301600",
+    "end": "307330"
+  },
+  {
+    "text": "per second but but the the sort of the inputs the next level of inputs to that",
+    "start": "307330",
+    "end": "312639"
+  },
+  {
+    "text": "are basically the amount of data that is being sent at any one time or is in",
+    "start": "312639",
+    "end": "318460"
+  },
+  {
+    "text": "flight between these two machines and there's there's really two ways that TCP",
+    "start": "318460",
+    "end": "324340"
+  },
+  {
+    "text": "controls that or to two inputs to control that amount of data and those are the receive window and the",
+    "start": "324340",
+    "end": "330430"
+  },
+  {
+    "text": "congestion window so the receive window is essentially what Jack is signaling to",
+    "start": "330430",
+    "end": "338169"
+  },
+  {
+    "text": "Jill to say this is how much data you can send me at one time before I send",
+    "start": "338169",
+    "end": "344260"
+  },
+  {
+    "text": "you an acknowledgement because as as Jill is sending data to Jack Jack needs",
+    "start": "344260",
+    "end": "349930"
+  },
+  {
+    "text": "to queue that data and deliver it to an application and so that TCP status is",
+    "start": "349930",
+    "end": "355060"
+  },
+  {
+    "text": "signaling back to Jill saying you know you can send me this amount of data before you get an acknowledgement back",
+    "start": "355060",
+    "end": "360699"
+  },
+  {
+    "text": "for me and that will make sure that I don't over on my buffers on Jack's side so that's one of the two mechanisms",
+    "start": "360699",
+    "end": "366669"
+  },
+  {
+    "text": "that's used to control the amount of data in flight the second is this congestion window and the congestion",
+    "start": "366669",
+    "end": "372789"
+  },
+  {
+    "text": "window is managed on the sender side so Jill is as jilla sending data to jack",
+    "start": "372789",
+    "end": "379389"
+  },
+  {
+    "text": "the tcp stack on Jill is watching what's happening on that connection you know",
+    "start": "379389",
+    "end": "385000"
+  },
+  {
+    "text": "specifically it's watching am I seeing time out to my perceiving loss and",
+    "start": "385000",
+    "end": "392219"
+  },
+  {
+    "text": "adjusting the amount of data it's willing in this case Jill is willing to put on the network until an",
+    "start": "392219",
+    "end": "399490"
+  },
+  {
+    "text": "acknowledgment comes back from Jack so these are two mechanisms that are really operating in parallel and you are as",
+    "start": "399490",
+    "end": "406060"
+  },
+  {
+    "text": "Jill is sending then Jill is responsible for making sure that both the receive window and the congestion window are",
+    "start": "406060",
+    "end": "412360"
+  },
+  {
+    "text": "being adhered to and that I mentioned as well you know bandwidth is really is a",
+    "start": "412360",
+    "end": "418210"
+  },
+  {
+    "text": "function of how much data is in flight it's also a function of the round-trip time between Jack and Jill and we'll dig",
+    "start": "418210",
+    "end": "424600"
+  },
+  {
+    "text": "into that a little bit more here in a moment specifically you know here's an",
+    "start": "424600",
+    "end": "431170"
+  },
+  {
+    "start": "429000",
+    "end": "429000"
+  },
+  {
+    "text": "example you know of that so the term for this is the bandwidth delay product right and that is essentially how much",
+    "start": "431170",
+    "end": "438730"
+  },
+  {
+    "text": "data is in flight and what is the round-trip time so I have an example here again Jill is sending data to Jack",
+    "start": "438730",
+    "end": "445030"
+  },
+  {
+    "text": "and let's say they have a 2 millisecond round-trip time you know this would be for example if I was operating in the",
+    "start": "445030",
+    "end": "450160"
+  },
+  {
+    "text": "same availability zone or or you know or even it within the same region I may see up to about it you know I mean I may see",
+    "start": "450160",
+    "end": "456520"
+  },
+  {
+    "text": "about a 2 millisecond trip time sometimes a little bit more but but you know that's fairly typical and so if",
+    "start": "456520",
+    "end": "462640"
+  },
+  {
+    "text": "Jack has a 100 kilobyte receive window and I have a 2 millisecond round-trip",
+    "start": "462640",
+    "end": "468010"
+  },
+  {
+    "text": "time you can do the math fairly easily it's it's shown here it's worked out that you basically convert that and you",
+    "start": "468010",
+    "end": "473860"
+  },
+  {
+    "text": "can see that that works out to a maximum throughput of 400 megabits per second",
+    "start": "473860",
+    "end": "480250"
+  },
+  {
+    "text": "and that is so again that is simply a function of how big is the receive window on Jack and what is the",
+    "start": "480250",
+    "end": "485920"
+  },
+  {
+    "text": "round-trip time between Jack and Jill and the reason we use the round-trip time is because again Jill is not going",
+    "start": "485920",
+    "end": "491320"
+  },
+  {
+    "text": "to send another piece of data until an acknowledgment comes back so from the time jail sends a piece of data that has",
+    "start": "491320",
+    "end": "497770"
+  },
+  {
+    "text": "to go to Jack and then jack will send the end acknowledgement back to Jill and that's what then triggers Jill to say",
+    "start": "497770",
+    "end": "503110"
+  },
+  {
+    "text": "okay I'll send some more data so we look at the round-trip time as the as one of the inputs to this function alright so",
+    "start": "503110",
+    "end": "509590"
+  },
+  {
+    "text": "that's one example foreigner megabits per second sounds pretty good if I'm trying to transfer a fair bit of data",
+    "start": "509590",
+    "end": "514990"
+  },
+  {
+    "text": "you know foreign megabits per second is is okay it's not bad we could do better but you know it'll suffice but let's say",
+    "start": "514990",
+    "end": "521950"
+  },
+  {
+    "text": "that Jack and Jill are actually separated by a much larger distance you know let's say they're going across country where we might see up to 100",
+    "start": "521950",
+    "end": "528460"
+  },
+  {
+    "text": "millisecond around time across the united states depending on where you're going a hundred milliseconds might be your round trip",
+    "start": "528460",
+    "end": "533830"
+  },
+  {
+    "text": "time well now you're talking about a much different output you're talking",
+    "start": "533830",
+    "end": "539050"
+  },
+  {
+    "text": "about a maximum potential throughput of around eight megabits per second and so you can see that Jack's receive window",
+    "start": "539050",
+    "end": "546760"
+  },
+  {
+    "text": "the amount of data jack is willing to send at anyone or receive rather at any one time has a has a huge impact on the",
+    "start": "546760",
+    "end": "553540"
+  },
+  {
+    "text": "peak throughput that we can obtain so we'll look into this in a little more detail so again the receive window is",
+    "start": "553540",
+    "end": "561910"
+  },
+  {
+    "start": "560000",
+    "end": "560000"
+  },
+  {
+    "text": "controlled by the by the receiver and then the receiver has to signal that to",
+    "start": "561910",
+    "end": "567220"
+  },
+  {
+    "text": "the sender and throughout the day I'm going to show you plenty of examples these are all on linux and typically",
+    "start": "567220",
+    "end": "573310"
+  },
+  {
+    "text": "I've done these all on the you know if many of these are long-standing tweaks you can do on many versions of Linux but",
+    "start": "573310",
+    "end": "579820"
+  },
+  {
+    "text": "in general I've been looking at these recently on the most recent amazon linux of am i so but if i want to interrogate",
+    "start": "579820",
+    "end": "587650"
+  },
+  {
+    "text": "the colonel to see you know what is the maximum size of the receive window i can",
+    "start": "587650",
+    "end": "592870"
+  },
+  {
+    "text": "look at this this versus CTL and you can see here that it's saying the maximum it will allow is 11 megabytes you know and",
+    "start": "592870",
+    "end": "600670"
+  },
+  {
+    "text": "that this is the analogous to that 100 kilobyte buffer that i mentioned on the previous slide so this is obviously",
+    "start": "600670",
+    "end": "605680"
+  },
+  {
+    "text": "quite you know this is fairly generous again it's fairly generous particularly",
+    "start": "605680",
+    "end": "610720"
+  },
+  {
+    "text": "if i have a very low latency connection but again that the longer your that the larger the latency the larger the",
+    "start": "610720",
+    "end": "616930"
+  },
+  {
+    "text": "round-trip time to between your two machines the larger you need to make this to ink to get to increase your",
+    "start": "616930",
+    "end": "624070"
+  },
+  {
+    "text": "maximum possible t speed performance so that's the first command the second",
+    "start": "624070",
+    "end": "629950"
+  },
+  {
+    "text": "command is specifically for tcp and it's a little bit more complicated because in in linux it has three settings that are",
+    "start": "629950",
+    "end": "636940"
+  },
+  {
+    "text": "all sort of combined together into one sis et al and that is essentially what is the minimum the default and the",
+    "start": "636940",
+    "end": "643630"
+  },
+  {
+    "text": "maximum buffer size that will be allocated and linux then we'll automatically manage the buffer sizes",
+    "start": "643630",
+    "end": "650260"
+  },
+  {
+    "text": "for you you know based on on other inputs and other algorithms but but",
+    "start": "650260",
+    "end": "656260"
+  },
+  {
+    "text": "essentially here we're saying i think probably the most interesting thing to look at here is the default which is to say we will default in this case",
+    "start": "656260",
+    "end": "662720"
+  },
+  {
+    "text": "allocate a half mega byte buffer 524 288 bytes for my receive window and so again",
+    "start": "662720",
+    "end": "671620"
+  },
+  {
+    "text": "if whoops so again if I if I wanted to",
+    "start": "671620",
+    "end": "676959"
+  },
+  {
+    "text": "increase my performance for particularly for a high latency a high round trip",
+    "start": "676959",
+    "end": "682279"
+  },
+  {
+    "text": "time connection these would be some  tl's that we could change to to increase the the receive window okay so",
+    "start": "682279",
+    "end": "691189"
+  },
+  {
+    "text": "we talked a little bit about the receive window and now we're going to shift focus and talk a little bit about the congestion window because again there's",
+    "start": "691189",
+    "end": "698269"
+  },
+  {
+    "text": "you know both windows are have a both windows need to be respected as we're",
+    "start": "698269",
+    "end": "704629"
+  },
+  {
+    "text": "sending data across a TCP connection so it you know even if we've adjusted the receive window to give ourselves more",
+    "start": "704629",
+    "end": "710750"
+  },
+  {
+    "text": "room to receive data we might be facing if we're looking at a performance bottleneck or we want to increase TCP",
+    "start": "710750",
+    "end": "716779"
+  },
+  {
+    "text": "performance we need to make sure that we do so in the congestion window as well so the congestion window is is one of",
+    "start": "716779",
+    "end": "724490"
+  },
+  {
+    "text": "these things it's a little bit of a little bit of magic and it will go through that but it's controlled by the",
+    "start": "724490",
+    "end": "729709"
+  },
+  {
+    "text": "sender and is managed by the congestion control algorithm this is the TCP",
+    "start": "729709",
+    "end": "735620"
+  },
+  {
+    "text": "congestion control algorithm and this is where we get some of the magic in TCP so",
+    "start": "735620",
+    "end": "740839"
+  },
+  {
+    "text": "the key inputs to the congestion window typically it does vary by algorithm but",
+    "start": "740839",
+    "end": "747230"
+  },
+  {
+    "text": "the two key inputs tend to be loss you know that is the sender's perception of",
+    "start": "747230",
+    "end": "754610"
+  },
+  {
+    "text": "packets that are lost between the sender and the receiver and and latency what is",
+    "start": "754610",
+    "end": "760910"
+  },
+  {
+    "text": "the you know the round-trip time basically how long does it take for a packet to get to the destination and",
+    "start": "760910",
+    "end": "766309"
+  },
+  {
+    "text": "then it's an acknowledgement to come back and and some protocols actually do have other inputs I should note but I'm",
+    "start": "766309",
+    "end": "771740"
+  },
+  {
+    "text": "not going to go into a ton of detail today the other input that you sometimes see is explicit signaling there are",
+    "start": "771740",
+    "end": "777620"
+  },
+  {
+    "text": "protocols to do explicit signaling of congestion or congestion or other or",
+    "start": "777620",
+    "end": "784819"
+  },
+  {
+    "text": "loss and those can be explicitly signaled back to the sender but for today's purposes we're going to focus really on loss and latency so when",
+    "start": "784819",
+    "end": "795470"
+  },
+  {
+    "start": "792000",
+    "end": "792000"
+  },
+  {
+    "text": "when when a tcp connection is first established the congestion window is not",
+    "start": "795470",
+    "end": "800750"
+  },
+  {
+    "text": "yet under complete control of the congestion control algorithm because the algorithm doesn't have the inputs you",
+    "start": "800750",
+    "end": "806930"
+  },
+  {
+    "text": "know the loss or the latency data necessarily to make a decision about how fast or slow should I go how big should",
+    "start": "806930",
+    "end": "812930"
+  },
+  {
+    "text": "my congestion window be so one of the settings that actually does have some potentially a meaningful impact on your",
+    "start": "812930",
+    "end": "818900"
+  },
+  {
+    "text": "application is the initial congestion window and that is basically the default initial size the amount of data that we",
+    "start": "818900",
+    "end": "827180"
+  },
+  {
+    "text": "that the TCP will allow to be put on the network before it starts to get the inputs back about data being",
+    "start": "827180",
+    "end": "833180"
+  },
+  {
+    "text": "successfully sent or received successfully received specifically so in Linux the default you know the way you",
+    "start": "833180",
+    "end": "839810"
+  },
+  {
+    "text": "see this the initial congestion window is actually by using the looking at the routes the reason for that is that you",
+    "start": "839810",
+    "end": "845690"
+  },
+  {
+    "text": "can actually set this on a per route basis I'll show you how to do that in a moment and so you look at the route",
+    "start": "845690",
+    "end": "851180"
+  },
+  {
+    "text": "table and you don't see anything here that really calls out as an initial congestion window and again that's",
+    "start": "851180",
+    "end": "856430"
+  },
+  {
+    "text": "because it's just defaulted and so the default and Linux is 33 frames or 33",
+    "start": "856430",
+    "end": "862670"
+  },
+  {
+    "text": "packet switch for a 15 if you have a 1500 bite maximum transmission unit",
+    "start": "862670",
+    "end": "867700"
+  },
+  {
+    "text": "which connections to the internet typically do that's going to work out to about 4,300 bytes and that means that in",
+    "start": "867700",
+    "end": "875930"
+  },
+  {
+    "text": "the immediate moment after TCP is connection at TCP connection is established TCP is not going to put more",
+    "start": "875930",
+    "end": "883130"
+  },
+  {
+    "text": "than 4,300 bites on to the wire until it starts to get acknowledgments back you know which again could be fairly",
+    "start": "883130",
+    "end": "888680"
+  },
+  {
+    "text": "meaningful we'll talk about how that really has impact in a little bit so some you know if you if you look around",
+    "start": "888680",
+    "end": "895130"
+  },
+  {
+    "text": "some people recommend increasing this window size again particularly if you",
+    "start": "895130",
+    "end": "900710"
+  },
+  {
+    "text": "have a you know a particular you have a small amount of data that if you're if",
+    "start": "900710",
+    "end": "906290"
+  },
+  {
+    "text": "you have a lot of TCP connections that are very short-lived an exchange a small amount of data and and your round trip",
+    "start": "906290",
+    "end": "913310"
+  },
+  {
+    "text": "time can be high you can actually see some pretty meaningful impact as well because I'll show later by increasing",
+    "start": "913310",
+    "end": "919160"
+  },
+  {
+    "text": "your initial congestion window and again all this is doing is telling TCP that in that very first moment after a",
+    "start": "919160",
+    "end": "924980"
+  },
+  {
+    "text": "connection is established I want you to put more day on the wire waiting you know and then",
+    "start": "924980",
+    "end": "930400"
+  },
+  {
+    "text": "wait for the acknowledgments to come back so here i show an example of how i can update a route and say I'd like to",
+    "start": "930400",
+    "end": "936970"
+  },
+  {
+    "text": "increase the initial congestion window from 3 up to 16 packets and that gets me",
+    "start": "936970",
+    "end": "942190"
+  },
+  {
+    "text": "instead of that 4300 bytes in that initial congestion window I'm now increasing that to 23 23 k so imagine if",
+    "start": "942190",
+    "end": "949570"
+  },
+  {
+    "text": "you have a you know application that's doing some heart beating or something where the response payload is less than",
+    "start": "949570",
+    "end": "956589"
+  },
+  {
+    "text": "23 k you know now suddenly you've changed this from being it so let's say let's assume that it's between 4k and 23",
+    "start": "956589",
+    "end": "963370"
+  },
+  {
+    "text": "k now what you've done is you potentially eliminated you know one one half of a round trip of latency to to",
+    "start": "963370",
+    "end": "973990"
+  },
+  {
+    "text": "deliver your result on this on this socket alright so we've talked a little",
+    "start": "973990",
+    "end": "982870"
+  },
+  {
+    "start": "981000",
+    "end": "981000"
+  },
+  {
+    "text": "bit about the initial congestion window now I want to focus a little bit on unlost know again loss is one of these",
+    "start": "982870",
+    "end": "988210"
+  },
+  {
+    "text": "inputs to congestion and you know this is a this is a this chart as the result",
+    "start": "988210",
+    "end": "994060"
+  },
+  {
+    "text": "of some experiments I did and you know it's actually did this a few years ago and it's one of these things that is has",
+    "start": "994060",
+    "end": "999970"
+  },
+  {
+    "text": "had a big impression on me because previously I sort of thought well you know if you know one percent loss it",
+    "start": "999970",
+    "end": "1006420"
+  },
+  {
+    "text": "doesn't sound so bad or two percent loss doesn't it sort of sound so bad but if you actually measure the impact on TCP",
+    "start": "1006420",
+    "end": "1012690"
+  },
+  {
+    "text": "throughput loss has a hugely impactful has huge impact on TCP throughput and",
+    "start": "1012690",
+    "end": "1018779"
+  },
+  {
+    "text": "again this is just sort of doing a normal is normalized 100 if I if I have a zero lost connection you know that's",
+    "start": "1018779",
+    "end": "1024540"
+  },
+  {
+    "text": "normalized to 100 what is my throughput look like as I increase the loss rate you can see that by the time you get to",
+    "start": "1024540",
+    "end": "1030808"
+  },
+  {
+    "text": "five or six percent you are basically dead in the water I mean this is you know you the amount of data that the",
+    "start": "1030809",
+    "end": "1036510"
+  },
+  {
+    "text": "amount of throughput you can get through TCP once you get to five percent or six percent error rate is just way way lower",
+    "start": "1036510",
+    "end": "1043140"
+  },
+  {
+    "text": "than what you can get at a completely clean zero percent loss so again loss",
+    "start": "1043140",
+    "end": "1048750"
+  },
+  {
+    "text": "has a you know this and all of this really is because loss is one of these inputs to the congestion control",
+    "start": "1048750",
+    "end": "1054090"
+  },
+  {
+    "text": "algorithm and then adds it to text loss it's going to it's going to pull the it's going to close that window it's",
+    "start": "1054090",
+    "end": "1059280"
+  },
+  {
+    "text": "going to keep that window to try to avoid creating more congestion in the network and so you know again it",
+    "start": "1059280",
+    "end": "1065759"
+  },
+  {
+    "text": "has a fairly significant human and essentially the takeaway for me is if",
+    "start": "1065759",
+    "end": "1072389"
+  },
+  {
+    "text": "you're having you know if I'm having a TCP throughput issue a network performance issue you know I can look at",
+    "start": "1072389",
+    "end": "1078840"
+  },
+  {
+    "text": "the receive window we talked about that earlier but one of the first leading suspects is no are we sensing loss on",
+    "start": "1078840",
+    "end": "1084659"
+  },
+  {
+    "text": "this path so if i want to start investigating this let's say i have that",
+    "start": "1084659",
+    "end": "1091200"
+  },
+  {
+    "start": "1087000",
+    "end": "1087000"
+  },
+  {
+    "text": "complaint i'm being told hey you know my performance is bad i'm seeing queuing i might be seeing data you know i'm trying",
+    "start": "1091200",
+    "end": "1097470"
+  },
+  {
+    "text": "to transfer data and it's just not transferring very quickly or it's potentially it's you know i have data backing up how do i investigate this",
+    "start": "1097470",
+    "end": "1104549"
+  },
+  {
+    "text": "well the first thing you can do on linux and there's a rough equivalent on windows as well for that matter you can",
+    "start": "1104549",
+    "end": "1110669"
+  },
+  {
+    "text": "use netstat and you can just nuts FS you can look for the retransmission counters",
+    "start": "1110669",
+    "end": "1115739"
+  },
+  {
+    "text": "and these are these are OS wide counters so it's pretty coarse course data you don't necessarily have this it doesn't",
+    "start": "1115739",
+    "end": "1124049"
+  },
+  {
+    "text": "necessarily help identify exactly what's going on or where it's going on but it does give you some clue that something's",
+    "start": "1124049",
+    "end": "1129899"
+  },
+  {
+    "text": "going awry you're seeing retransmissions and retransmissions are done typically",
+    "start": "1129899",
+    "end": "1135149"
+  },
+  {
+    "text": "in response to sense loss so so if you see a retransmission TCP thinks there's",
+    "start": "1135149",
+    "end": "1140700"
+  },
+  {
+    "text": "lost somewhere and now again keep in mind these are counters that are initialized to zero when your instance",
+    "start": "1140700",
+    "end": "1147090"
+  },
+  {
+    "text": "is booted so you know 58,000 might seem high but it might that might have been two weeks ago and right now you might",
+    "start": "1147090",
+    "end": "1153869"
+  },
+  {
+    "text": "not be seeing it so you know typically what I would do with this is just watch this over a few seconds or a few minutes",
+    "start": "1153869",
+    "end": "1159179"
+  },
+  {
+    "text": "and see you know are my counter is increasing right now am i sensing loss right now but we can do better we can",
+    "start": "1159179",
+    "end": "1166950"
+  },
+  {
+    "text": "actually dig a little bit deeper than just at the the macro OS level and to do that there's a command in in linux",
+    "start": "1166950",
+    "end": "1173899"
+  },
+  {
+    "start": "1171000",
+    "end": "1171000"
+  },
+  {
+    "text": "installed by default typically and certainly it's available in the amazon linux am I the SS command and what SS",
+    "start": "1173899",
+    "end": "1183029"
+  },
+  {
+    "text": "does is actually gives you an the next level of detail it really shows you on a per connection basis what are you seeing",
+    "start": "1183029",
+    "end": "1190499"
+  },
+  {
+    "text": "right now you know essentially this is giving you an bit of visibility into the TCP algorithm",
+    "start": "1190499",
+    "end": "1197860"
+  },
+  {
+    "text": "the congestion control algorithm in the state machine to really see what's going on with the socket now the downside is",
+    "start": "1197860",
+    "end": "1203290"
+  },
+  {
+    "text": "you have to you have to watch us in real time this is with netstat you can get a historical view of what's going on with",
+    "start": "1203290",
+    "end": "1209530"
+  },
+  {
+    "text": "SS you're going to see what am i seeing right this very moment but certainly if you're actively trouble shooting something it's a great way to really get",
+    "start": "1209530",
+    "end": "1216280"
+  },
+  {
+    "text": "some insight know what's going on so you know I won't necessarily call out every little bit in here that's you know that",
+    "start": "1216280",
+    "end": "1223090"
+  },
+  {
+    "text": "can be look you can look that up but you know a few things I will call out first off in the upper left you see the TCP",
+    "start": "1223090",
+    "end": "1228700"
+  },
+  {
+    "text": "state and that just tells you what is the the TCP stack think the state of",
+    "start": "1228700",
+    "end": "1234010"
+  },
+  {
+    "text": "this connection is right now in this case it's established so that's good that means we can send data back and",
+    "start": "1234010",
+    "end": "1239380"
+  },
+  {
+    "text": "forth we see the send queue so we see that actually the application whatever",
+    "start": "1239380",
+    "end": "1246070"
+  },
+  {
+    "text": "this this is no you can see actually in the next bit you can see that this is an HTTPS port locally so you know so what",
+    "start": "1246070",
+    "end": "1253540"
+  },
+  {
+    "text": "presumably this is my web server my web server has written some data into my kernel into my TCP socket and it's",
+    "start": "1253540",
+    "end": "1260650"
+  },
+  {
+    "text": "queued for transmission at this moment I actually have you know almost 4 megabytes ready to be transmitted just sitting there waiting for the",
+    "start": "1260650",
+    "end": "1266470"
+  },
+  {
+    "text": "acknowledgments to come back I can see that the word cubic here we're going to",
+    "start": "1266470",
+    "end": "1272710"
+  },
+  {
+    "text": "dig and look into this a little bit later but cubic is actually the name of the TCP congestion control algorithm",
+    "start": "1272710",
+    "end": "1278080"
+  },
+  {
+    "text": "that we're using on this socket and cubic is the default and Linux at this point so this basically means i'm using",
+    "start": "1278080",
+    "end": "1283690"
+  },
+  {
+    "text": "the default TCP congestion control algorithm but i'm going to show you later how we can actually tweak this RTO",
+    "start": "1283690",
+    "end": "1292720"
+  },
+  {
+    "text": "stands for retransmission timeout and so what that means is this is measured in",
+    "start": "1292720",
+    "end": "1298390"
+  },
+  {
+    "text": "milliseconds and so what this indicates is that this for this socket the",
+    "start": "1298390",
+    "end": "1303490"
+  },
+  {
+    "text": "congestion control algorithm is going to wait up to two hundred and four milliseconds at this moment it's going",
+    "start": "1303490",
+    "end": "1308500"
+  },
+  {
+    "text": "to wait up to 240 milliseconds after a packet is transmitted before it considers it to have been lost and will",
+    "start": "1308500",
+    "end": "1313990"
+  },
+  {
+    "text": "then initiate a retransmission and so we'll talk a little bit about that actually in a few more slides but again",
+    "start": "1313990",
+    "end": "1320650"
+  },
+  {
+    "text": "this is measured in milliseconds and then cwnd stands for congestion window",
+    "start": "1320650",
+    "end": "1326690"
+  },
+  {
+    "text": "and so just like we talked about earlier we talked about the size of the congestion no here I can see that my congestion window is 138 bytes long and",
+    "start": "1326690",
+    "end": "1334790"
+  },
+  {
+    "text": "so you can then do the math actually on the the MSS is actually the oops is actually the previous field so you can",
+    "start": "1334790",
+    "end": "1342020"
+  },
+  {
+    "text": "do the math to figure out basically the size the total bite size of your congestion window as we as we talked",
+    "start": "1342020",
+    "end": "1347360"
+  },
+  {
+    "text": "about earlier all right and then finally you know again there's lots of stuff here you can dig into more detail but",
+    "start": "1347360",
+    "end": "1353660"
+  },
+  {
+    "text": "finally we'll look at the retransmission counter and see that we have seen some retransmissions on this socket so again",
+    "start": "1353660",
+    "end": "1359330"
+  },
+  {
+    "text": "this is an indication that TCP has previously seen loss on this socket and",
+    "start": "1359330",
+    "end": "1366470"
+  },
+  {
+    "text": "it's initiated it's retransmitted data to accommodate that loss to account for that loss alright and then the next",
+    "start": "1366470",
+    "end": "1375410"
+  },
+  {
+    "start": "1374000",
+    "end": "1374000"
+  },
+  {
+    "text": "level of detail so so you know what thats ask you again you can get a bunch of really really helpful information to",
+    "start": "1375410",
+    "end": "1380690"
+  },
+  {
+    "text": "see what's going on with my my tcp state right now there's a tool that i actually have the URL to this tool here it's",
+    "start": "1380690",
+    "end": "1386990"
+  },
+  {
+    "text": "brendan greg is you know one of the engineers at netflix actually and he has",
+    "start": "1386990",
+    "end": "1392210"
+  },
+  {
+    "text": "some some pretty nice performance diagnostic tools one of them at sorry these tools in general all use the linux",
+    "start": "1392210",
+    "end": "1398990"
+  },
+  {
+    "text": "kernel tracing capabilities to get more insight as far as what's going on with",
+    "start": "1398990",
+    "end": "1404000"
+  },
+  {
+    "text": "my network right now and so he is a there's a tool in his toolbox ecp retrans and what this does is simply",
+    "start": "1404000",
+    "end": "1410950"
+  },
+  {
+    "text": "monitors the what it actually does is hooks into the literally the kernel function that controls retransmissions",
+    "start": "1410950",
+    "end": "1419240"
+  },
+  {
+    "text": "and it's essentially just watching for initiations you know four hits on that",
+    "start": "1419240",
+    "end": "1424610"
+  },
+  {
+    "text": "function so this will actually give you essentially a real-time view of which",
+    "start": "1424610",
+    "end": "1429910"
+  },
+  {
+    "text": "sockets are seeing retransmissions you know i mean again in near real time so",
+    "start": "1429910",
+    "end": "1435890"
+  },
+  {
+    "text": "in this case you know as I I ran this it'll just sit there and as you're sending data back and forth it will you",
+    "start": "1435890",
+    "end": "1441920"
+  },
+  {
+    "text": "know print out when it sees a retransmission event so this can be a super valuable way to just watching in",
+    "start": "1441920",
+    "end": "1448160"
+  },
+  {
+    "text": "real-time what sockets are seeing retransmissions a que los you know at this at this time and again when you",
+    "start": "1448160",
+    "end": "1455360"
+  },
+  {
+    "text": "when it sees that it gives you a little bit of metadata tell you the source port and destination port that's that's so you get the local",
+    "start": "1455360",
+    "end": "1462330"
+  },
+  {
+    "text": "address oops wrong button there so you get the local address you get the port number you know obviously 443 would be",
+    "start": "1462330",
+    "end": "1468410"
+  },
+  {
+    "text": "https court and then you get the remote address remote port number and the state",
+    "start": "1468410",
+    "end": "1473760"
+  },
+  {
+    "text": "of the socket and the this method there this tool tries to correlate the socket",
+    "start": "1473760",
+    "end": "1481650"
+  },
+  {
+    "text": "back to a particular process ID running on your machine so you can see it's showing this process ID 10 6 55 or 588",
+    "start": "1481650",
+    "end": "1488850"
+  },
+  {
+    "text": "and so this is giving me an indication that you know this that process ID owns this socket and is seeing a",
+    "start": "1488850",
+    "end": "1495809"
+  },
+  {
+    "text": "retransmission right now ok so super valuable this is giving me nice you know good data to figure out where am I",
+    "start": "1495809",
+    "end": "1502470"
+  },
+  {
+    "text": "seeing a retransmission at this moment so we're going to talk you know now we're going to talk about you know what",
+    "start": "1502470",
+    "end": "1507780"
+  },
+  {
+    "text": "can we do about it how can we respond to loss or retransmissions and so I mentioned earlier that you know the",
+    "start": "1507780",
+    "end": "1513480"
+  },
+  {
+    "text": "congestion control algorithm is a little bit of the magic that goes on here and",
+    "start": "1513480",
+    "end": "1519620"
+  },
+  {
+    "start": "1519000",
+    "end": "1519000"
+  },
+  {
+    "text": "so you know I'm not going to go i could probably have a you know a multi-hour",
+    "start": "1519620",
+    "end": "1524760"
+  },
+  {
+    "text": "talk on congestion control algorithms and the details here there's a lot of complex math that goes into these",
+    "start": "1524760",
+    "end": "1530880"
+  },
+  {
+    "text": "algorithms which and i encourage you to to look up if you're really if you're interested but you know what we need to",
+    "start": "1530880",
+    "end": "1536700"
+  },
+  {
+    "text": "for our purposes you know what I what I want to do is systems engineers be able to tweak my congestion control",
+    "start": "1536700",
+    "end": "1543720"
+  },
+  {
+    "text": "algorithms to increase my performance that's ultimately my goal so so let's let's do enough to do that well you know",
+    "start": "1543720",
+    "end": "1551160"
+  },
+  {
+    "text": "a little bit of history the congestion control algorithm in Linux before the 268 Colonel was what was known as New",
+    "start": "1551160",
+    "end": "1558179"
+  },
+  {
+    "text": "Reno these algorithms all have various names there's one name Vegas you'll see",
+    "start": "1558179",
+    "end": "1563400"
+  },
+  {
+    "text": "that I you know I don't guess it was designed maybe in a casino I don't know but before 268 you know New Reno is the",
+    "start": "1563400",
+    "end": "1571679"
+  },
+  {
+    "text": "default in 26 data was changed to a protocol called BIC and then most recently you know or after 26 19 it was",
+    "start": "1571679",
+    "end": "1579630"
+  },
+  {
+    "text": "changed to cubic which remains the default algorithm that we see in Ian's amazon linux and other linux kernel's",
+    "start": "1579630",
+    "end": "1585660"
+  },
+  {
+    "text": "today but but the cool thing here is that Linux has a pretty pluggable architecture for the",
+    "start": "1585660",
+    "end": "1590780"
+  },
+  {
+    "text": "algorithm and in fact every single socket can have a different algorithm you can use different algorithms on",
+    "start": "1590780",
+    "end": "1596630"
+  },
+  {
+    "text": "different sockets if you desire so there's there's a variety of algorithms",
+    "start": "1596630",
+    "end": "1601970"
+  },
+  {
+    "text": "that are that are typically available and again if you use Amazon Linux these are all available by default no code",
+    "start": "1601970",
+    "end": "1608810"
+  },
+  {
+    "text": "compilation required you can actually turn these on there's a variety of other protocols you know Vegas Illinois",
+    "start": "1608810",
+    "end": "1614120"
+  },
+  {
+    "text": "westwood high speed scalable and others so how do I actually do that well",
+    "start": "1614120",
+    "end": "1621440"
+  },
+  {
+    "start": "1619000",
+    "end": "1619000"
+  },
+  {
+    "text": "because you're going to see later actually I did this and and in fact found some pretty amazing results by",
+    "start": "1621440",
+    "end": "1627320"
+  },
+  {
+    "text": "able by tweaking my algorithm so to figure out what you have currently",
+    "start": "1627320",
+    "end": "1632470"
+  },
+  {
+    "text": "loaded in the kernel and available you can use the topsis CTL and that's just",
+    "start": "1632470",
+    "end": "1637850"
+  },
+  {
+    "text": "interrogating the kernel to say what congestion control algorithms are currently loaded if you want to find all",
+    "start": "1637850",
+    "end": "1643820"
+  },
+  {
+    "text": "of the ones that you can load the second command just looks at you're literally just looks at your kernel module",
+    "start": "1643820",
+    "end": "1649780"
+  },
+  {
+    "text": "directories to see what's there looks for the tcp prefix which which will",
+    "start": "1649780",
+    "end": "1656240"
+  },
+  {
+    "text": "indicate that it's a TCP congestion algorithm and in this case I've decided I want to try out the TCP the Illinois",
+    "start": "1656240",
+    "end": "1663440"
+  },
+  {
+    "text": "algorithm and and the reason I've chosen this one in particular is that I've done",
+    "start": "1663440",
+    "end": "1668480"
+  },
+  {
+    "text": "a little bit of a research and reading and identified that the Illinois algorithm is one that was was actually",
+    "start": "1668480",
+    "end": "1673640"
+  },
+  {
+    "text": "designed to respond more favorably to lost to to to react a little bit",
+    "start": "1673640",
+    "end": "1680240"
+  },
+  {
+    "text": "differently and potentially better in cases where we're seeing a low level of packet loss so I've gone ahead and used",
+    "start": "1680240",
+    "end": "1687740"
+  },
+  {
+    "text": "the you know colonel the modprobe command just to load up by Illinois module and now if i reek weary the",
+    "start": "1687740",
+    "end": "1693890"
+  },
+  {
+    "text": "colonel you can see that it's telling me that hey now I have all three of these algorithms available for my use in the",
+    "start": "1693890",
+    "end": "1699620"
+  },
+  {
+    "text": "colonel all right so now what I've what I want to do you know again I indicated",
+    "start": "1699620",
+    "end": "1705650"
+  },
+  {
+    "text": "that every every single socket can use a different algorithm if you so choose but",
+    "start": "1705650",
+    "end": "1711410"
+  },
+  {
+    "text": "but typically I you know I I haven't done a ton of research but I haven't come across too many pieces of software",
+    "start": "1711410",
+    "end": "1716720"
+  },
+  {
+    "text": "or web servers or what have you that they give me this ability to control it because the way that the way that it",
+    "start": "1716720",
+    "end": "1723020"
+  },
+  {
+    "text": "would be controlled is by the the software signalling as such like",
+    "start": "1723020",
+    "end": "1728630"
+  },
+  {
+    "text": "doing the the right system call to change the algorithm and so you know I haven't found much software that can",
+    "start": "1728630",
+    "end": "1733970"
+  },
+  {
+    "text": "allows me to do this so what I'm going to do for my test today is I'm just going to override it system-wide I'm",
+    "start": "1733970",
+    "end": "1739670"
+  },
+  {
+    "text": "just going to tell my linux system I want all new connections by default to",
+    "start": "1739670",
+    "end": "1745010"
+  },
+  {
+    "text": "be established using the Illinois algorithm and I do that with the first command and and now now that's set every",
+    "start": "1745010",
+    "end": "1752030"
+  },
+  {
+    "text": "single new connection that comes through unless it's overridden again which most software does not unless it's overridden",
+    "start": "1752030",
+    "end": "1758270"
+  },
+  {
+    "text": "it'll it'll go ahead and use Illinois and then if I really want to force Illinois to be used permanently on my",
+    "start": "1758270",
+    "end": "1765110"
+  },
+  {
+    "text": "system I do need to write it to disk so that it gets set when the the colonel reboots but you know the first command",
+    "start": "1765110",
+    "end": "1771530"
+  },
+  {
+    "text": "changes it in memory for for my current run of the of the operating system and",
+    "start": "1771530",
+    "end": "1777830"
+  },
+  {
+    "text": "then i can write it to disk to to be permanent all right so we're going to",
+    "start": "1777830",
+    "end": "1784880"
+  },
+  {
+    "text": "see some results from that in a little bit but I have a few other things we want to touch on before we get to the results a little bit earlier I talked",
+    "start": "1784880",
+    "end": "1792380"
+  },
+  {
+    "text": "about the retransmission timer that's the RTO value and so you know the retransmission timer also plays a pretty",
+    "start": "1792380",
+    "end": "1798650"
+  },
+  {
+    "text": "critical role you know when you think about latency of your application because what this does is it controls",
+    "start": "1798650",
+    "end": "1804500"
+  },
+  {
+    "text": "when the the algorithm considers that a packet has been lost and so the you know",
+    "start": "1804500",
+    "end": "1810710"
+  },
+  {
+    "text": "you this is actually a little bit tricky to get set i mean again tcp manages this dynamically for you and in most cases",
+    "start": "1810710",
+    "end": "1817100"
+  },
+  {
+    "text": "does a fairly good job but again depending on your network application may may not be the right setting for you",
+    "start": "1817100",
+    "end": "1823910"
+  },
+  {
+    "text": "and so the retransmission timer if it gets too low you can lead to can lead to",
+    "start": "1823910",
+    "end": "1830930"
+  },
+  {
+    "text": "a little bit you know what could lead to a packet that's delayed just a little bit too long and triggering a",
+    "start": "1830930",
+    "end": "1836150"
+  },
+  {
+    "text": "retransmission and also tricking the algorithm to really close down and slow down you close the congestion window and",
+    "start": "1836150",
+    "end": "1842210"
+  },
+  {
+    "text": "really slow your connection down so if it's too low you know you run into the danger that that happens but if it gets",
+    "start": "1842210",
+    "end": "1847970"
+  },
+  {
+    "text": "too high then you can be essentially waiting around waiting for that timer to",
+    "start": "1847970",
+    "end": "1854990"
+  },
+  {
+    "text": "run out if you actually experience loss of a package so imagine that you have a retransmission timer that's one second",
+    "start": "1854990",
+    "end": "1861440"
+  },
+  {
+    "text": "and you are you know sending to something that's 10 milliseconds away and you experience loss well that loss",
+    "start": "1861440",
+    "end": "1869300"
+  },
+  {
+    "text": "will happen within that first 10 milliseconds and then you're waiting another 990 milliseconds for that timer",
+    "start": "1869300",
+    "end": "1874820"
+  },
+  {
+    "text": "to fire before you just do that one retransmission and you know that might get your packet through and you'd be on",
+    "start": "1874820",
+    "end": "1880370"
+  },
+  {
+    "text": "your way so if you you know if the timer gets too high that can really increase",
+    "start": "1880370",
+    "end": "1885500"
+  },
+  {
+    "text": "the latency for your for your socket as well you know when when you see loss now",
+    "start": "1885500",
+    "end": "1891740"
+  },
+  {
+    "start": "1891000",
+    "end": "1891000"
+  },
+  {
+    "text": "in Linux you know just like we saw earlier with the initial congestion window you can set the default minimum",
+    "start": "1891740",
+    "end": "1897430"
+  },
+  {
+    "text": "retransmission timer on your sockets the default in or you can set the minimum rather the default is 200 milliseconds",
+    "start": "1897430",
+    "end": "1904010"
+  },
+  {
+    "text": "and it's set on the route level just like the congestion window so if you if you look at your route list you won't",
+    "start": "1904010",
+    "end": "1909320"
+  },
+  {
+    "text": "see anything for the default but you know but but if I if I want to change it",
+    "start": "1909320",
+    "end": "1915290"
+  },
+  {
+    "text": "on my route list I look at my routes and this is you know this is a default this is my default set of routes that I would",
+    "start": "1915290",
+    "end": "1921980"
+  },
+  {
+    "text": "see you know running my instance in virtual private cloud and the 10 dot 16",
+    "start": "1921980",
+    "end": "1927260"
+  },
+  {
+    "text": "dot 16 route is is a local route to other things in the in the same subnet that I'm in so you know I could set this",
+    "start": "1927260",
+    "end": "1933620"
+  },
+  {
+    "text": "as I could change that timer for my my local for the route for this you know",
+    "start": "1933620",
+    "end": "1939380"
+  },
+  {
+    "text": "the local subnet route I could change it from my default route or I could add a route if I wanted to have a different",
+    "start": "1939380",
+    "end": "1944870"
+  },
+  {
+    "text": "time around a specific set of destinations and so one of the things I'm going to do here is I'm actually",
+    "start": "1944870",
+    "end": "1950570"
+  },
+  {
+    "text": "just going to go ahead and change my minimum retransmission timer just for my",
+    "start": "1950570",
+    "end": "1956480"
+  },
+  {
+    "text": "local subnet route because I know that you know my local subnet route it's in the same availability zone and if I see",
+    "start": "1956480",
+    "end": "1962120"
+  },
+  {
+    "text": "loss then I'm almost surely going to see that within 10 milliseconds so having a",
+    "start": "1962120",
+    "end": "1969260"
+  },
+  {
+    "text": "200 millisecond timer you know may simply cause me to wait an extra 190",
+    "start": "1969260",
+    "end": "1974750"
+  },
+  {
+    "text": "milliseconds so I'm going to go ahead and change it using the route command i'm going to add an RTO min of 10",
+    "start": "1974750",
+    "end": "1980210"
+  },
+  {
+    "text": "milliseconds on my route and then if i reek weary the route you'll see that then that is that shows up in the route",
+    "start": "1980210",
+    "end": "1986390"
+  },
+  {
+    "text": "output so i can confirm it set alright so few other topics and then",
+    "start": "1986390",
+    "end": "1993140"
+  },
+  {
+    "start": "1990000",
+    "end": "1990000"
+  },
+  {
+    "text": "we're going to some of the applications another thing that that researchers have identified that can potentially be",
+    "start": "1993140",
+    "end": "2000010"
+  },
+  {
+    "text": "problematic for for TCP connections is essentially the the queuing that might",
+    "start": "2000010",
+    "end": "2005830"
+  },
+  {
+    "text": "happen along the intermediate network path between these two hosts and so when",
+    "start": "2005830",
+    "end": "2011230"
+  },
+  {
+    "text": "you when you look at particularly longer pads when you have multiple routers or network devices between two hosts",
+    "start": "2011230",
+    "end": "2018090"
+  },
+  {
+    "text": "typically those devices are built to have interface buffers you know essentially data comes in one side and",
+    "start": "2018090",
+    "end": "2025050"
+  },
+  {
+    "text": "then will be routed and store it in an interface buffer an output buffer just",
+    "start": "2025050",
+    "end": "2030340"
+  },
+  {
+    "text": "waiting for available time on the the port to transmit you know now obviously if the port has time right now that'll",
+    "start": "2030340",
+    "end": "2036700"
+  },
+  {
+    "text": "just be transmitted out you'll be done but as the load increases on an individual port you know that can lead",
+    "start": "2036700",
+    "end": "2043450"
+  },
+  {
+    "text": "to that buffer increasing in length of the queue length increasing and that is really where you then start to see",
+    "start": "2043450",
+    "end": "2048700"
+  },
+  {
+    "text": "latency that's what introduces latency on your on your path and again the",
+    "start": "2048700",
+    "end": "2053940"
+  },
+  {
+    "text": "problem here can be that a little bit of latency if if particularly you know even",
+    "start": "2053940",
+    "end": "2059980"
+  },
+  {
+    "text": "if you just have two computers you just have Jack and Jill sending data let's say that jill has a bunch of data to",
+    "start": "2059980",
+    "end": "2065770"
+  },
+  {
+    "text": "send just starts dumping that data on the network in one shot as fast as you possibly can you know that could lead to",
+    "start": "2065770",
+    "end": "2072639"
+  },
+  {
+    "text": "some intermediate port buffer filling or certainly being longer you know getting",
+    "start": "2072640",
+    "end": "2079210"
+  },
+  {
+    "text": "longer which then increases latency for those individual packets and then that might actually end up triggering it",
+    "start": "2079210",
+    "end": "2084879"
+  },
+  {
+    "text": "could end up triggering a retransmission timeout and so there's a there's a whole",
+    "start": "2084880",
+    "end": "2090370"
+  },
+  {
+    "text": "body of research around this but the team actually the folks that have doing doing some research here have actually",
+    "start": "2090370",
+    "end": "2096310"
+  },
+  {
+    "text": "done a pretty nice job of trying to simplify this down to a set of or a simple algorithm that you can apply",
+    "start": "2096310",
+    "end": "2103420"
+  },
+  {
+    "text": "again in Linux this is actually available to you out of the box and Linux you can turn this on it's called",
+    "start": "2103420",
+    "end": "2108640"
+  },
+  {
+    "text": "the coddle algorithm and what this does is actually pieces the rate that packets",
+    "start": "2108640",
+    "end": "2115780"
+  },
+  {
+    "text": "are put on to the network to try to avoid creating these intermediate buffers",
+    "start": "2115780",
+    "end": "2121350"
+  },
+  {
+    "text": "creating you know along gating the intermediate buffers along the path from two to machines and so you'll see that",
+    "start": "2121350",
+    "end": "2128310"
+  },
+  {
+    "text": "this is this command the first command is actually just to list what is my current configuration for what linux",
+    "start": "2128310",
+    "end": "2135510"
+  },
+  {
+    "text": "calls traffic control that is basically how it manages its outgoing Q is coming off of the box and so I can just list",
+    "start": "2135510",
+    "end": "2142800"
+  },
+  {
+    "text": "and this is really the default you'll see this top one and then if I want to activate this coddle algorithm it's it's",
+    "start": "2142800",
+    "end": "2148470"
+  },
+  {
+    "text": "literally just one command this this last command you see and that turns on this coddle algorithm to try to pace how",
+    "start": "2148470",
+    "end": "2154890"
+  },
+  {
+    "text": "quickly packets are written to the network and this whole sort of the soul sort of space is called active queue",
+    "start": "2154890",
+    "end": "2161100"
+  },
+  {
+    "text": "management and this is something that we'll see in a moment actually does improve network performance in some",
+    "start": "2161100",
+    "end": "2166860"
+  },
+  {
+    "text": "cases all right a few other a few of the things I want to cover before we get to",
+    "start": "2166860",
+    "end": "2172530"
+  },
+  {
+    "start": "2169000",
+    "end": "2169000"
+  },
+  {
+    "text": "some of the applications so you know most of my test is I've explained I've run been running these tests in ec2 and",
+    "start": "2172530",
+    "end": "2179160"
+  },
+  {
+    "text": "Amazon ec2 I ran all of these tests on a pretty modern machine that had enhanced",
+    "start": "2179160",
+    "end": "2185280"
+  },
+  {
+    "text": "networking configured if you're not familiar with enhanced networking I strongly recommend looking at one of",
+    "start": "2185280",
+    "end": "2190940"
+  },
+  {
+    "text": "there was a talk last year at me invent this STD 419 talk they're really deep",
+    "start": "2190940",
+    "end": "2196590"
+  },
+  {
+    "text": "Tove on unenhanced networking there's lots of documentation online as well but enhance networking really is a in almost",
+    "start": "2196590",
+    "end": "2204150"
+  },
+  {
+    "text": "every care in every case I've seen enhanced networking is an improvement it reduces the cpu utilization of your",
+    "start": "2204150",
+    "end": "2211080"
+  },
+  {
+    "text": "instance reduces latency and jitter and gives you overall hire packet rate performance and when you have we have",
+    "start": "2211080",
+    "end": "2217740"
+  },
+  {
+    "text": "enhanced networking available on all of our modern instance families as you can see here the drivers it does require",
+    "start": "2217740",
+    "end": "2224070"
+  },
+  {
+    "text": "special drivers to activate those drivers have been baked in Tammuz on linux and windows for a while so really",
+    "start": "2224070",
+    "end": "2230520"
+  },
+  {
+    "text": "using enhanced networking now is as simple as launching the right amies on modern instance types but if you're not",
+    "start": "2230520",
+    "end": "2236940"
+  },
+  {
+    "text": "you have any questions about this i definitely recommend taking a look at one of the past talks another thing to",
+    "start": "2236940",
+    "end": "2245640"
+  },
+  {
+    "text": "note is that mark more the modern instance types in easy to also have increased the maximum transmission unit",
+    "start": "2245640",
+    "end": "2251130"
+  },
+  {
+    "text": "so for those of you who aren't familiar with this this concept you know historically on",
+    "start": "2251130",
+    "end": "2256770"
+  },
+  {
+    "text": "the internet we've seen a 1500 bite em tu as kind of the standard default which",
+    "start": "2256770",
+    "end": "2262680"
+  },
+  {
+    "text": "if you look at how much data is available for tcp that ends up being 1448 bytes so you end up with about a",
+    "start": "2262680",
+    "end": "2269310"
+  },
+  {
+    "text": "three and a half percent overhead on every single packet for all the headers on your mt you know conure on your",
+    "start": "2269310",
+    "end": "2275400"
+  },
+  {
+    "text": "frames but with with it with enhanced networking and some of the modern instance types we've pushed up the MTU",
+    "start": "2275400",
+    "end": "2282660"
+  },
+  {
+    "text": "to 9001 bites and that obviously just because that gives you more payload with no additional headers required that does",
+    "start": "2282660",
+    "end": "2289200"
+  },
+  {
+    "text": "actually reduce the amount of overhead you have and so that can be an improvement as well come as well see again the good news here is envy pc with",
+    "start": "2289200",
+    "end": "2298740"
+  },
+  {
+    "text": "with modern instance types this is just done by default for you the 9000 bite 9001 bite mt was just done by default",
+    "start": "2298740",
+    "end": "2305880"
+  },
+  {
+    "text": "there's really nothing to think about but it's worth just understanding what's going on there if i want to confirm this",
+    "start": "2305880",
+    "end": "2313080"
+  },
+  {
+    "start": "2311000",
+    "end": "2311000"
+  },
+  {
+    "text": "i can actually just use the IP linked list command and i'll just confirm what my MTU is so in this case I've looked and I've confirmed that I have a 9000",
+    "start": "2313080",
+    "end": "2320280"
+  },
+  {
+    "text": "one bite MTU you can you can tune this on an individual route level if you like",
+    "start": "2320280",
+    "end": "2325680"
+  },
+  {
+    "text": "and again this isn't really required the the MTU will be signaled automatically",
+    "start": "2325680",
+    "end": "2331800"
+  },
+  {
+    "text": "to you if you're sending data out to the internet you will have to still use a 1500 bite MTU but that will be signaled",
+    "start": "2331800",
+    "end": "2338220"
+  },
+  {
+    "text": "when when you try to initiate a connection to the internet but if you",
+    "start": "2338220",
+    "end": "2343260"
+  },
+  {
+    "text": "wanted to override if you wanted to force it yourself you can actually do that again through the IP route command just for completeness sake I because i",
+    "start": "2343260",
+    "end": "2349530"
+  },
+  {
+    "text": "am going to be tuning this myself a little bit and this just shows how you can tune that alright so at long last",
+    "start": "2349530",
+    "end": "2358440"
+  },
+  {
+    "text": "you know I've been highlighting this for the entire talk I want to apply some of our new knowledge and just see how we",
+    "start": "2358440",
+    "end": "2364260"
+  },
+  {
+    "text": "can take everything we just talked about which is I know a ton of content and very dense and we can apply it to actually achieving some improvements in",
+    "start": "2364260",
+    "end": "2371400"
+  },
+  {
+    "text": "you know some applications that we might have on the network so just for background this is a little bit of",
+    "start": "2371400",
+    "end": "2377220"
+  },
+  {
+    "start": "2375000",
+    "end": "2375000"
+  },
+  {
+    "text": "science here so I want to be really clear about how I've done this if you want to replicate this or try it out yourself you know I strongly encourage",
+    "start": "2377220",
+    "end": "2383790"
+  },
+  {
+    "text": "you if you're concerned about network performance heard you to set up a test bed and",
+    "start": "2383790",
+    "end": "2389489"
+  },
+  {
+    "text": "really experiment with this so you you understand how the network is going to perform with your application so what I",
+    "start": "2389489",
+    "end": "2395970"
+  },
+  {
+    "text": "did I did was I just had a pair of instances I'm running you know the most recent amazon Linux Tommy and for my",
+    "start": "2395970",
+    "end": "2402599"
+  },
+  {
+    "text": "tests i'm just using engine X as a web server and i'm using the apache bench tool as my client apache bench is a",
+    "start": "2402599",
+    "end": "2409140"
+  },
+  {
+    "text": "pretty simple tool that can concurrently pull several requests and and repeat",
+    "start": "2409140",
+    "end": "2415799"
+  },
+  {
+    "text": "requests i actually did this entirely well i have four applications three of",
+    "start": "2415799",
+    "end": "2422970"
+  },
+  {
+    "text": "them i did with with HTTPS and i'll explain the fourth in a minute but you know my theory here is that increasingly",
+    "start": "2422970",
+    "end": "2429029"
+  },
+  {
+    "text": "everything needs to be encrypted that is a meaningful part of our network connections we need to make sure that we",
+    "start": "2429029",
+    "end": "2434220"
+  },
+  {
+    "text": "can not just transmit data but we can do so securely with with things like TLS so I'm using that you know TLS v1 some",
+    "start": "2434220",
+    "end": "2440880"
+  },
+  {
+    "text": "modern ciphers and for purposes of my tests I'm just doing random data i'm transferring random data and I'm",
+    "start": "2440880",
+    "end": "2447450"
+  },
+  {
+    "text": "ensuring that I'm not hitting any other disk i/o I really wanted for this test I really want to just isolate the network",
+    "start": "2447450",
+    "end": "2453509"
+  },
+  {
+    "text": "and so I'm even using a rama fest so all of the data that's being transmitted is",
+    "start": "2453509",
+    "end": "2459359"
+  },
+  {
+    "text": "coming straight out of memory i'm guaranteeing it's coming out of memory and then once i'm receiving it I'm not trying to write it I'm just throwing it",
+    "start": "2459359",
+    "end": "2465359"
+  },
+  {
+    "text": "away as I get it so really just to try to isolate the network performance so that i can i can be clear what's going",
+    "start": "2465359",
+    "end": "2470880"
+  },
+  {
+    "text": "on so if you if you do run apache bench you'll see it gives you some output this",
+    "start": "2470880",
+    "end": "2476940"
+  },
+  {
+    "start": "2472000",
+    "end": "2472000"
+  },
+  {
+    "text": "is the this is just a snippet of the output there's there's much more here as well but you know this gives you some basic metrics about your transmission",
+    "start": "2476940",
+    "end": "2483450"
+  },
+  {
+    "text": "how many requests were completed your average time per request and your transfer rate so this is the kind of",
+    "start": "2483450",
+    "end": "2489089"
+  },
+  {
+    "text": "output that I I was then using to generate all the metrics you're going to see here in a moment all right so my",
+    "start": "2489089",
+    "end": "2495599"
+  },
+  {
+    "text": "first application that I really wanted to test was you know I want to see an example where there's a little bit of",
+    "start": "2495599",
+    "end": "2501749"
+  },
+  {
+    "text": "loss you know we saw earlier that the huge impact that loss can have on your tcp performance and you know certainly",
+    "start": "2501749",
+    "end": "2508200"
+  },
+  {
+    "text": "AWS engineers are networks to have you know very very low loss and very tight",
+    "start": "2508200",
+    "end": "2513809"
+  },
+  {
+    "text": "tolerances on the amount of loss that we that we are we allow and and we monitor",
+    "start": "2513809",
+    "end": "2519359"
+  },
+  {
+    "text": "very that very carefully but if I'm going out on the internet I'm you know if I have mobile clients or I",
+    "start": "2519359",
+    "end": "2525380"
+  },
+  {
+    "text": "have clients that might be in a remote geography I really want to make sure that my application does well even with",
+    "start": "2525380",
+    "end": "2531410"
+  },
+  {
+    "text": "a little bit of loss so for this test I'm basically simulating point2 percent",
+    "start": "2531410",
+    "end": "2536450"
+  },
+  {
+    "text": "loss you know which again doesn't sound very much but just wait so again I have",
+    "start": "2536450",
+    "end": "2542060"
+  },
+  {
+    "text": "a pair of instances I'm doing this across an a path that has around an email a second round trip time and I'm",
+    "start": "2542060",
+    "end": "2548840"
+  },
+  {
+    "text": "setting up this test to just parallel pull 100 megabyte object you know a few",
+    "start": "2548840",
+    "end": "2553850"
+  },
+  {
+    "text": "times and again in Linux I'm actually simulating the loss here just to make",
+    "start": "2553850",
+    "end": "2559520"
+  },
+  {
+    "text": "sure that I am really getting my point two percent loss that I want and linux actually makes it super easy if you want",
+    "start": "2559520",
+    "end": "2564860"
+  },
+  {
+    "text": "to run this experiment and simulate some loss and see what happens it's it's literally one command and you can do",
+    "start": "2564860",
+    "end": "2569870"
+  },
+  {
+    "text": "that and so my goal here what I'm trying to achieve is I want to I want to see what happens in a clean network and then",
+    "start": "2569870",
+    "end": "2576680"
+  },
+  {
+    "text": "I want to add my loss and I want to try to get my performance back up as close to that clean network performance as i",
+    "start": "2576680",
+    "end": "2582080"
+  },
+  {
+    "text": "can because again point two percent loss is pretty minimal but I do expect it you",
+    "start": "2582080",
+    "end": "2588260"
+  },
+  {
+    "text": "know if I'm serving mobile customers or going to her mo geography this might just be a fact of life that I need to live with all right so what are my",
+    "start": "2588260",
+    "end": "2596090"
+  },
+  {
+    "start": "2595000",
+    "end": "2595000"
+  },
+  {
+    "text": "results well I started by doing you know no loss just at all defaults out of the",
+    "start": "2596090",
+    "end": "2601670"
+  },
+  {
+    "text": "box no tweaking what am I getting and with this test I was achieving around four gigabits per second and the mean",
+    "start": "2601670",
+    "end": "2608450"
+  },
+  {
+    "text": "request time was you know around 28 seconds so pretty good then I introduced",
+    "start": "2608450",
+    "end": "2613820"
+  },
+  {
+    "text": "my loss and boom 1.5 gigabits point two percent loss is all it took now I'm",
+    "start": "2613820",
+    "end": "2619430"
+  },
+  {
+    "text": "seeing you know less than half the performance and it is more than twice as",
+    "start": "2619430",
+    "end": "2625010"
+  },
+  {
+    "text": "long mean to to obtain this you know for this for the requests so clearly loss is",
+    "start": "2625010",
+    "end": "2630830"
+  },
+  {
+    "text": "a pretty big impact so I started experimenting let's I was I started",
+    "start": "2630830",
+    "end": "2635960"
+  },
+  {
+    "text": "playing with these and I started I sort of hypothesized what the problem might be played around with some settings to",
+    "start": "2635960",
+    "end": "2642350"
+  },
+  {
+    "text": "see if it would improve it or not I you know one of the first things i tried was i'm just going to increase my initial",
+    "start": "2642350",
+    "end": "2647720"
+  },
+  {
+    "text": "congestion window i'm going to going to try to get more data in the transmitted earlier maybe prime that",
+    "start": "2647720",
+    "end": "2653409"
+  },
+  {
+    "text": "congestion we know it to be a little bit higher turns out I was wrong it made my",
+    "start": "2653409",
+    "end": "2658479"
+  },
+  {
+    "text": "performance worse 1.3 gigabits per second and now an 81 second meantime so",
+    "start": "2658479",
+    "end": "2664329"
+  },
+  {
+    "text": "I got rid of that I scratch that off and I then I went to another approach I decided well what if I were to just",
+    "start": "2664329",
+    "end": "2670179"
+  },
+  {
+    "text": "double my my buffers on the server side you know and i will say in this test in",
+    "start": "2670179",
+    "end": "2675759"
+  },
+  {
+    "text": "general i was trying to do things mostly on the server side on the theory that you know it's way easier for me to tweak",
+    "start": "2675759",
+    "end": "2681699"
+  },
+  {
+    "text": "something on the server side then go tell a bunch of clients to make a change on their infrastructure so so i try to",
+    "start": "2681699",
+    "end": "2688059"
+  },
+  {
+    "text": "do as much as i can on the server in this case you know i tried to increase my tcp buffers just to see if you know",
+    "start": "2688059",
+    "end": "2694029"
+  },
+  {
+    "text": "if making more data available to the bar to to the tcp would would help and again",
+    "start": "2694029",
+    "end": "2699249"
+  },
+  {
+    "text": "the milk doesn't help ended up being a little bit worse than my my default with just some loss so now this this was a",
+    "start": "2699249",
+    "end": "2708189"
+  },
+  {
+    "text": "real interesting insight I or the experiment i hypothesized that maybe if",
+    "start": "2708189",
+    "end": "2713199"
+  },
+  {
+    "text": "i use this illinois congestion control algorithm which speaks to being able to",
+    "start": "2713199",
+    "end": "2718329"
+  },
+  {
+    "text": "work around some loss more effectively and maybe that would help and sure",
+    "start": "2718329",
+    "end": "2723880"
+  },
+  {
+    "text": "enough actually this helped a bunch so again all i did was i swapped out the",
+    "start": "2723880",
+    "end": "2729219"
+  },
+  {
+    "text": "default congestion control algorithm in my linux OS and sure enough got to",
+    "start": "2729219",
+    "end": "2735369"
+  },
+  {
+    "text": "three-point got nearly 3.5 gigabits per second and my meantime was within a second or actually 300 milliseconds of",
+    "start": "2735369",
+    "end": "2742539"
+  },
+  {
+    "text": "where i was before so this this was pretty meaningful i still have point two percent loss and my mean time is very",
+    "start": "2742539",
+    "end": "2750039"
+  },
+  {
+    "text": "similar to what it was without any loss so that's my that's my rabbit coming out",
+    "start": "2750039",
+    "end": "2755409"
+  },
+  {
+    "text": "of the hat that was my you know that the congestion control algorithms a little bit of magic and and I think I found a",
+    "start": "2755409",
+    "end": "2761049"
+  },
+  {
+    "text": "rabbit coming out of the Hat in this one so you know in this case just by turning this algorithm on using this by default",
+    "start": "2761049",
+    "end": "2766390"
+  },
+  {
+    "text": "i increased my performance from that that initial baseline of loss by by one hundred thirty-seven percent alright so",
+    "start": "2766390",
+    "end": "2775809"
+  },
+  {
+    "text": "so I was pretty excited about that that's a pretty good result and so I wanted to try some additional applications and just see you know what",
+    "start": "2775809",
+    "end": "2781809"
+  },
+  {
+    "text": "else I could do with with other applications so in this case this application I decided you know it's",
+    "start": "2781809",
+    "end": "2787420"
+  },
+  {
+    "text": "a pretty common use case for someone to want to just transmit a bunch of data you know bulk amount of data from one",
+    "start": "2787420",
+    "end": "2793090"
+  },
+  {
+    "text": "hose to the other and just do it as fast as possible right the previous one really was sort of simulating a lot of",
+    "start": "2793090",
+    "end": "2798610"
+  },
+  {
+    "text": "clients this one is about you know larger data set with fewer number of clients so again i reset my test again",
+    "start": "2798610",
+    "end": "2806890"
+  },
+  {
+    "text": "in this test 0 loss so I'm just starting with you know assuming the network is operating you know perfectly no laws I",
+    "start": "2806890",
+    "end": "2814960"
+  },
+  {
+    "text": "know what can I do what can I achieve I want to increase my throughput to to the max so out of the box default I ended up",
+    "start": "2814960",
+    "end": "2824140"
+  },
+  {
+    "start": "2821000",
+    "end": "2821000"
+  },
+  {
+    "text": "with getting about two gigabits per second in this application and it took about 30 seconds to transfer so I",
+    "start": "2824140",
+    "end": "2831910"
+  },
+  {
+    "text": "decided okay I want to go ahead and try to again I want to do as much as I can to to manage this from the server end so",
+    "start": "2831910",
+    "end": "2838660"
+  },
+  {
+    "text": "I tried to increase my mighty CP buffers on the server side ended up you know not doing not doing great i ended up going",
+    "start": "2838660",
+    "end": "2844330"
+  },
+  {
+    "text": "backwards so yeah I reduced my performance then I decided okay this is",
+    "start": "2844330",
+    "end": "2850420"
+  },
+  {
+    "text": "a kind of the example where I might have control of both the sender and the receiver if I'm actually trying to",
+    "start": "2850420",
+    "end": "2855790"
+  },
+  {
+    "text": "transfer a bulk amount of data from sender to receiver you know maybe that maybe I'll have control of the the",
+    "start": "2855790",
+    "end": "2860890"
+  },
+  {
+    "text": "receiver and can tweak things there so i went ahead and i increased the tcp buffers on the client side and again",
+    "start": "2860890",
+    "end": "2867670"
+  },
+  {
+    "text": "this would be increasing the receive window and sure enough that actually helped that helped quite a bit i got you",
+    "start": "2867670",
+    "end": "2873100"
+  },
+  {
+    "text": "know i got an extra 300 megabits per second and decreased my my mean transmission time as well so you know",
+    "start": "2873100",
+    "end": "2880480"
+  },
+  {
+    "text": "that's one setting that ended up you know helping me out here I then decided I wanted to try the active queue",
+    "start": "2880480",
+    "end": "2886359"
+  },
+  {
+    "text": "management you know i apophis eyes that maybe my performance was being limited by by the you know intermediate router",
+    "start": "2886359",
+    "end": "2892270"
+  },
+  {
+    "text": "buffers filling up wanted to give active queue management a try now to be clear I've tried this in isolation so this is",
+    "start": "2892270",
+    "end": "2898810"
+  },
+  {
+    "text": "active queue management in isolation without the extra buffers on the client side and and you can see that actually",
+    "start": "2898810",
+    "end": "2904359"
+  },
+  {
+    "text": "you know that that actually also increases performance it actually does increase performance over the baseline though not as much as doubling the TCP",
+    "start": "2904359",
+    "end": "2912070"
+  },
+  {
+    "text": "buffers on the client and did as well so I've got 22 things now to changes that have both",
+    "start": "2912070",
+    "end": "2918499"
+  },
+  {
+    "text": "increased performance and so then i said",
+    "start": "2918499",
+    "end": "2923660"
+  },
+  {
+    "text": "ok well let's turn both on a natural next step is I got two things that seem to do have a little bit of improvement let's turn them both on together and",
+    "start": "2923660",
+    "end": "2930019"
+  },
+  {
+    "text": "sure enough fatty that increased my performance even more now I'm up to 2.7 gigabits per second and 24 seconds of 24",
+    "start": "2930019",
+    "end": "2937009"
+  },
+  {
+    "text": "half seconds meantime using the two of these settings together and then I",
+    "start": "2937009",
+    "end": "2942349"
+  },
+  {
+    "text": "decided all right I've had some success with this Illinois congestion control algorithm I don't have a bunch a loss here but I'm curious what it does I",
+    "start": "2942349",
+    "end": "2948710"
+  },
+  {
+    "text": "turned that on as well with the client buffers and queue management and now i'm getting i got myself an extra hundred",
+    "start": "2948710",
+    "end": "2954440"
+  },
+  {
+    "text": "megabytes per second as i as i turned this on and reduce my meantime even further so now i'm actually transmitting",
+    "start": "2954440",
+    "end": "2960349"
+  },
+  {
+    "text": "the same amount of data in you know six and a half seconds less than i did previously sona again pulled my little",
+    "start": "2960349",
+    "end": "2968359"
+  },
+  {
+    "text": "rabbit out of the Hat and then finally I decided well you know I got all three of",
+    "start": "2968359",
+    "end": "2974029"
+  },
+  {
+    "text": "those turned on those are working pretty well what if I now increase the TCP buffer on the server side just to give",
+    "start": "2974029",
+    "end": "2979400"
+  },
+  {
+    "text": "myself a little bit of extra capacity on the server side for transmission and that ended up in you know what with the",
+    "start": "2979400",
+    "end": "2985519"
+  },
+  {
+    "text": "other parameters all turned on that ended up bumping me up just a little bit more although it actually interesting",
+    "start": "2985519",
+    "end": "2990829"
+  },
+  {
+    "text": "they bumped up my bandwidth performance but ended up my meantime actually snuck up a little bit I think we saw a few",
+    "start": "2990829",
+    "end": "2996769"
+  },
+  {
+    "text": "additional outliers in this because of turning on the server side buffers but",
+    "start": "2996769",
+    "end": "3001960"
+  },
+  {
+    "text": "all told you know with with some tweaks again none all of this is really out of the box i was able to tweak this out of",
+    "start": "3001960",
+    "end": "3008140"
+  },
+  {
+    "text": "the box ended up increasing my network performance by thirty two percent all",
+    "start": "3008140",
+    "end": "3013630"
+  },
+  {
+    "text": "right two additional applications that i wanted to want to talk about zero wanted to test so the next is I decided that I",
+    "start": "3013630",
+    "end": "3020230"
+  },
+  {
+    "text": "really wanted to test you know the previous the previous example was over a long rtt path as we talked about earlier",
+    "start": "3020230",
+    "end": "3026829"
+  },
+  {
+    "text": "that's where those extra buffers really matter but what I wanted to do now was to test it on a low RTT path where both",
+    "start": "3026829",
+    "end": "3033640"
+  },
+  {
+    "text": "instances might be in the same VPC and so in this case I had two instances they add about a 1.2 millisecond round trip",
+    "start": "3033640",
+    "end": "3041049"
+  },
+  {
+    "text": "time and I just wanted to see you know really what what was the I expected that the MTU would have a pretty significant",
+    "start": "3041049",
+    "end": "3047170"
+  },
+  {
+    "text": "impact to your you know how big of an impact with the mt you really have so what I",
+    "start": "3047170",
+    "end": "3052910"
+  },
+  {
+    "text": "did was I actually started by just taking the defaults out of the box and putting in place a 1500 bite em to you",
+    "start": "3052910",
+    "end": "3058850"
+  },
+  {
+    "text": "because you know again although this is not the default at this point in v pc i did want to see you know what's the",
+    "start": "3058850",
+    "end": "3064160"
+  },
+  {
+    "text": "difference in the MTU setting how does that change things so out of the box with 15 herb item to you it got pretty",
+    "start": "3064160",
+    "end": "3070070"
+  },
+  {
+    "text": "good performance already 8.8 gigabits per second on an instance that has a 10",
+    "start": "3070070",
+    "end": "3075290"
+  },
+  {
+    "text": "gig Nick that's that's pretty good and then if I go back to that 9001 bite em",
+    "start": "3075290",
+    "end": "3081170"
+  },
+  {
+    "text": "to you though I see that now I do bump up I do get a little bit of boost in performance by reducing the amount of",
+    "start": "3081170",
+    "end": "3086300"
+  },
+  {
+    "text": "overhead in my in every single packet I get my performance up to about 9.3 gigabits per second and then I went",
+    "start": "3086300",
+    "end": "3094910"
+  },
+  {
+    "text": "ahead and tried you know how much does active queue management work when I'm you know operating in this low RTT",
+    "start": "3094910",
+    "end": "3100490"
+  },
+  {
+    "text": "environment in the same data center and as it turned out basically zero didn't didn't actually help me very much given",
+    "start": "3100490",
+    "end": "3107000"
+  },
+  {
+    "text": "how you know these are two instances with a low RTT operating in the same availability zone ended up active queue",
+    "start": "3107000",
+    "end": "3113450"
+  },
+  {
+    "text": "management didn't play a cute huge role here but you know again with with just",
+    "start": "3113450",
+    "end": "3118520"
+  },
+  {
+    "text": "by having that larger mt you ended up with about a five percent increase in performance over the the baseline 1500",
+    "start": "3118520",
+    "end": "3123980"
+  },
+  {
+    "text": "bytes so again although the 9000 one byte MTU really is the default today in",
+    "start": "3123980",
+    "end": "3129140"
+  },
+  {
+    "text": "some cases I know in some cases",
+    "start": "3129140",
+    "end": "3134210"
+  },
+  {
+    "text": "customers or engineers have thought maybe I should tune back to 15 under bite em to you since the sort of the Internet at large operates at that and",
+    "start": "3134210",
+    "end": "3140330"
+  },
+  {
+    "text": "and you know that is in some cases that might be the right decision but it does but we do end up with increased",
+    "start": "3140330",
+    "end": "3147080"
+  },
+  {
+    "text": "performance using the larger 9001 bite em to you all right so last last test I",
+    "start": "3147080",
+    "end": "3154130"
+  },
+  {
+    "text": "wanted to do now for this test i wanted to simulate something that had simulate",
+    "start": "3154130",
+    "end": "3159560"
+  },
+  {
+    "text": "a web service that was transmitting a very small amount of data where the payload was very small the response size",
+    "start": "3159560",
+    "end": "3165950"
+  },
+  {
+    "text": "was very small because particularly i wanted to see what are the impacts of the initial congestion window and would",
+    "start": "3165950",
+    "end": "3171800"
+  },
+  {
+    "text": "that really meaningfully change performances i as i tweaked that so you know in the previous test I did HTTPS",
+    "start": "3171800",
+    "end": "3178790"
+  },
+  {
+    "text": "the major so you do a lot of background reading on https but essentially it boils down to",
+    "start": "3178790",
+    "end": "3184460"
+  },
+  {
+    "text": "now being a case where HTTPS does require a few round trips on initial connection establishment just to get",
+    "start": "3184460",
+    "end": "3191060"
+  },
+  {
+    "text": "https established so I wanted to simulate something where there you know literally the entire response size could",
+    "start": "3191060",
+    "end": "3198020"
+  },
+  {
+    "text": "fit into the initial packets that are being sent from server to client and so",
+    "start": "3198020",
+    "end": "3203750"
+  },
+  {
+    "text": "I couldn't do that with HTTPS I did that with HTTP and interestingly enough hdtb 2 point 0 seems like it will actually",
+    "start": "3203750",
+    "end": "3210470"
+  },
+  {
+    "text": "allow me potentially to run the same test with with HTTP with with TLS",
+    "start": "3210470",
+    "end": "3216290"
+  },
+  {
+    "text": "enabled but we're not quite there yet so so I ran this with HTTP and real and",
+    "start": "3216290",
+    "end": "3221750"
+  },
+  {
+    "text": "again so my object size was 10k I just want to transfer a 10k object as to as many parallel clients in this case of",
+    "start": "3221750",
+    "end": "3228740"
+  },
+  {
+    "text": "6,400 simulated parallel clients and I just want to transfer this with his low latency as possible so again i started",
+    "start": "3228740",
+    "end": "3237320"
+  },
+  {
+    "start": "3235000",
+    "end": "3235000"
+  },
+  {
+    "text": "with out-of-the-box ended up get seeing about 2.6 gigabits of total throughput but really in this case I was focused on",
+    "start": "3237320",
+    "end": "3243110"
+  },
+  {
+    "text": "the meantime of 195 milliseconds you know to to transmit them to respond to",
+    "start": "3243110",
+    "end": "3248930"
+  },
+  {
+    "text": "my client like my my client simulated clients so then I decided to go ahead",
+    "start": "3248930",
+    "end": "3255710"
+  },
+  {
+    "text": "and bump up the initial congestion window again I wanted to see if my default congestion window would be less",
+    "start": "3255710",
+    "end": "3261590"
+  },
+  {
+    "text": "than that 10k object size but now with this this increase can initial congestion window it will be larger my",
+    "start": "3261590",
+    "end": "3267860"
+  },
+  {
+    "text": "initial congestion window will be larger than 10k and sure enough that actually does mean you know does improve",
+    "start": "3267860",
+    "end": "3273200"
+  },
+  {
+    "text": "performance I my bandwidth increase to 2.7 gigabits and I shaved up five and a",
+    "start": "3273200",
+    "end": "3280040"
+  },
+  {
+    "text": "half milliseconds off the response time so you know a win for my initial",
+    "start": "3280040",
+    "end": "3286490"
+  },
+  {
+    "text": "congestion window I then decided I wanted to go ahead and turn on I wanted to try my Illinois congestion control algorithm see what sort of changed that",
+    "start": "3286490",
+    "end": "3293120"
+  },
+  {
+    "text": "that had on it and although the end of it ended up reducing sort of the the peak bandwidth we saw it did actually",
+    "start": "3293120",
+    "end": "3299890"
+  },
+  {
+    "text": "reduce the the meantime I think we we pulled off some of the outliers on the on the transfer time here by turning",
+    "start": "3299890",
+    "end": "3306260"
+  },
+  {
+    "text": "this on so that was a little bit of a win and you know in total i achieved",
+    "start": "3306260",
+    "end": "3312410"
+  },
+  {
+    "text": "about a four point six percent decrease but tuning these two settings so you know",
+    "start": "3312410",
+    "end": "3317730"
+  },
+  {
+    "text": "decreased our our response time bye bye four point six percent and if you actually look at the meantime what's",
+    "start": "3317730",
+    "end": "3322829"
+  },
+  {
+    "text": "interesting about this is again this was done over an 80 ml a second round trip time so the the mean time is up is sort",
+    "start": "3322829",
+    "end": "3329849"
+  },
+  {
+    "text": "of about two and a half round trips which is pretty good I mean that implies that that I'm establishing a TCP",
+    "start": "3329849",
+    "end": "3337740"
+  },
+  {
+    "text": "connection and transferring data and closing that with about two and a half round trip times on average so pretty",
+    "start": "3337740",
+    "end": "3345240"
+  },
+  {
+    "text": "happy with these results alright so that was the these were the four experiments I ran and I just want to kind of",
+    "start": "3345240",
+    "end": "3351930"
+  },
+  {
+    "text": "summarize all you know the content of this talk you know hey oftentimes I",
+    "start": "3351930",
+    "end": "3357810"
+  },
+  {
+    "text": "think you know even I can think about the networks as being a little bit of a black box if I'm seeing a performance issue you know how do i really know",
+    "start": "3357810",
+    "end": "3363720"
+  },
+  {
+    "text": "what's going on and and what's impacting my performance and you know I think that as I showed with some of the tools",
+    "start": "3363720",
+    "end": "3369780"
+  },
+  {
+    "text": "earlier the network really doesn't have to be a black box you can interrogate it and get the you know figure out exactly",
+    "start": "3369780",
+    "end": "3375540"
+  },
+  {
+    "text": "what's going on figure out what timers are being used and what retransmissions are being seen and how that's impacting",
+    "start": "3375540",
+    "end": "3381180"
+  },
+  {
+    "text": "your performance I you know and then I think I hope I've demonstrated that through a few simple changes to the",
+    "start": "3381180",
+    "end": "3387810"
+  },
+  {
+    "text": "parameters that are used with TCP you can actually see meaningful improvements in performance and really what this you",
+    "start": "3387810",
+    "end": "3394319"
+  },
+  {
+    "text": "know the way I did this was just by setting up with some testbed testing it measuring my results and then tweaking",
+    "start": "3394319",
+    "end": "3400440"
+  },
+  {
+    "text": "one parameter at a time and seeing you know how my performance changed over time so I strongly encourage you you",
+    "start": "3400440",
+    "end": "3406109"
+  },
+  {
+    "text": "know if you're if you're worried about network performance you know understand what is your workload how does it use the network and you know tune your",
+    "start": "3406109",
+    "end": "3412500"
+  },
+  {
+    "text": "network stack accordingly so please complete the evaluations for this course",
+    "start": "3412500",
+    "end": "3417630"
+  },
+  {
+    "text": "they help us improve the content and keep it high quality at reinvent and really appreciate you coming to the talk",
+    "start": "3417630",
+    "end": "3423270"
+  },
+  {
+    "text": "so thank you you",
+    "start": "3423270",
+    "end": "3427190"
+  }
+]

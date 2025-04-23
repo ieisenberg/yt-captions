@@ -1,0 +1,1742 @@
+[
+  {
+    "start": "0",
+    "end": "0"
+  },
+  {
+    "text": "hello everybody my name is tony allen i'm a software engineer at lyft i work in the resilience group on envoy",
+    "start": "80",
+    "end": "7680"
+  },
+  {
+    "text": "related things and i'm going to talk a little bit about what we've been working on for the past year which is",
+    "start": "7680",
+    "end": "13120"
+  },
+  {
+    "text": "the adaptive concurrency control filter and envoy so the adaptive concurrency filter is an",
+    "start": "13120",
+    "end": "20560"
+  },
+  {
+    "text": "http filter that was implemented in envoy it measures request latency baselines",
+    "start": "20560",
+    "end": "28840"
+  },
+  {
+    "text": "and samples requests that are coming in after that and compares it to the",
+    "start": "28840",
+    "end": "34880"
+  },
+  {
+    "text": "baseline so if sampled latencies are increasing",
+    "start": "34880",
+    "end": "40160"
+  },
+  {
+    "text": "from what the baseline would be then we'll allow less requests through the filter so this was inspired",
+    "start": "40160",
+    "end": "46960"
+  },
+  {
+    "text": "by a 2018 blog post from netflix engineering so we took",
+    "start": "46960",
+    "end": "53680"
+  },
+  {
+    "text": "those ideas and implemented them inside of envoy with a few changes that i'll talk about later on",
+    "start": "53680",
+    "end": "61760"
+  },
+  {
+    "start": "61000",
+    "end": "61000"
+  },
+  {
+    "text": "the way we're going to do things here is we're going to talk a little bit about simulating traffic so that's how i was able to test various",
+    "start": "61760",
+    "end": "70000"
+  },
+  {
+    "text": "workloads and develop the filter so i'm going to show various concepts using simulations and",
+    "start": "70000",
+    "end": "76960"
+  },
+  {
+    "text": "i'll describe what the graphs look like first off and then we'll talk about concurrency and circuit breaking",
+    "start": "76960",
+    "end": "83680"
+  },
+  {
+    "text": "so why would one want to limit concurrency requests where latency is coming from that sort",
+    "start": "83680",
+    "end": "89119"
+  },
+  {
+    "text": "of stuff kind of detour go off into a little bit about envoy",
+    "start": "89119",
+    "end": "94799"
+  },
+  {
+    "text": "and envoy filters which leads into adaptive concurrency control how that",
+    "start": "94799",
+    "end": "100000"
+  },
+  {
+    "text": "was implemented and then tails from lift infrastructure so the simulation framework that i'm",
+    "start": "100000",
+    "end": "107280"
+  },
+  {
+    "start": "104000",
+    "end": "104000"
+  },
+  {
+    "text": "using is something called buffer bloater i wrote it to test the adaptive concurrency filter",
+    "start": "107280",
+    "end": "114079"
+  },
+  {
+    "text": "while developing it the way it works is it spins up a client and a server locally on the machine and",
+    "start": "114079",
+    "end": "121920"
+  },
+  {
+    "text": "i'd spin up a envoy process the client would send requests to the envoy process",
+    "start": "121920",
+    "end": "127600"
+  },
+  {
+    "text": "which would route it to the server the server would take the request sleep for some",
+    "start": "127600",
+    "end": "133920"
+  },
+  {
+    "text": "configurable amount of time and then send a http 200 reply back",
+    "start": "133920",
+    "end": "139120"
+  },
+  {
+    "text": "through the envoy to the client so you'll have control over the",
+    "start": "139120",
+    "end": "145920"
+  },
+  {
+    "text": "rps coming from the client and how long so you can do this in stages",
+    "start": "145920",
+    "end": "151120"
+  },
+  {
+    "text": "you can say i want 100 rps and then bump up to 200 rps for some amount of time",
+    "start": "151120",
+    "end": "156160"
+  },
+  {
+    "text": "the server also will have a configurable latency distribution so you can specify",
+    "start": "156160",
+    "end": "162720"
+  },
+  {
+    "text": "you know what percentile you want to have what latency it'll gather snaps and plot them which",
+    "start": "162720",
+    "end": "168959"
+  },
+  {
+    "text": "we'll see later on and it allows for uh cool simulations like serger",
+    "start": "168959",
+    "end": "174879"
+  },
+  {
+    "text": "server degradations uh ramp ups and rps and that sort of stuff the adaptive",
+    "start": "174879",
+    "end": "181040"
+  },
+  {
+    "text": "currency filter really relies on or to understand it you need to look at",
+    "start": "181040",
+    "end": "186239"
+  },
+  {
+    "text": "temporal behaviors so this really helps out with that the source code can be found at the link",
+    "start": "186239",
+    "end": "191519"
+  },
+  {
+    "text": "in the bottom left there so this is a configuration file",
+    "start": "191519",
+    "end": "197120"
+  },
+  {
+    "text": "for this thing the only things to note are that the client has an rps and a",
+    "start": "197120",
+    "end": "202560"
+  },
+  {
+    "text": "duration that you can specify and this can be staged so you can simulate burst in traffic or ramp down",
+    "start": "202560",
+    "end": "210640"
+  },
+  {
+    "text": "that sort of stuff the server itself will have a latency profile",
+    "start": "210640",
+    "end": "217360"
+  },
+  {
+    "text": "and that also is staged the output from the simulations looks a",
+    "start": "217360",
+    "end": "224879"
+  },
+  {
+    "text": "little bit like this so at the very top you're going to have request latencies so each blue point",
+    "start": "224879",
+    "end": "230000"
+  },
+  {
+    "text": "represents a request and the y-axis would be request latency and some unit of time",
+    "start": "230000",
+    "end": "236799"
+  },
+  {
+    "text": "the unit of time is really important for the stuff i'm trying to show the rps",
+    "start": "236799",
+    "end": "242239"
+  },
+  {
+    "text": "is the second line there the rps is static it doesn't change for the duration of that simulation and then",
+    "start": "242239",
+    "end": "248720"
+  },
+  {
+    "text": "timeouts below that there were no timeouts in this one so you can see that there's a p99 that's",
+    "start": "248720",
+    "end": "255680"
+  },
+  {
+    "text": "very obvious in the request latencies you can see the p95 and the bulk of the requests after that that profile didn't change",
+    "start": "255680",
+    "end": "263680"
+  },
+  {
+    "text": "through the simulation",
+    "start": "263680",
+    "end": "268960"
+  },
+  {
+    "start": "267000",
+    "end": "267000"
+  },
+  {
+    "text": "and then furthermore there's 503s that would show up below the request timeouts the number of requests that are in",
+    "start": "268960",
+    "end": "275440"
+  },
+  {
+    "text": "flight from the perspective of the client and then the request success rate so",
+    "start": "275440",
+    "end": "281120"
+  },
+  {
+    "text": "this is all the information i'm going to try and point out what the relevant pieces of info",
+    "start": "281120",
+    "end": "286400"
+  },
+  {
+    "text": "are for this as we move on",
+    "start": "286400",
+    "end": "292880"
+  },
+  {
+    "start": "293000",
+    "end": "293000"
+  },
+  {
+    "text": "so in the netflix blog post in 2018 there was this interesting diagram so on",
+    "start": "293360",
+    "end": "299600"
+  },
+  {
+    "text": "the y-axis you have rps and on the x-axis you have time and what it's trying to show is that",
+    "start": "299600",
+    "end": "305840"
+  },
+  {
+    "text": "there's some capacity that let's say a server would have",
+    "start": "305840",
+    "end": "311039"
+  },
+  {
+    "text": "and that's you know unknowable for the purposes of you know any configurations",
+    "start": "311039",
+    "end": "317600"
+  },
+  {
+    "text": "so the rps is stable in the beginning and it's below what the capacity the server is and then about halfway through",
+    "start": "317600",
+    "end": "325680"
+  },
+  {
+    "text": "it bumps up beyond what this capacity is and you'll notice that this latency in the blue line begins to increase",
+    "start": "325680",
+    "end": "331919"
+  },
+  {
+    "text": "at that halfway point and as it increases it's going to go into timeout town and then at some point it's",
+    "start": "331919",
+    "end": "338960"
+  },
+  {
+    "text": "just gonna have this comic book explosion so i wanted to kind of understand",
+    "start": "338960",
+    "end": "344320"
+  },
+  {
+    "text": "what's going on there can the simulation framework reproduce this uh long story short it can so the",
+    "start": "344320",
+    "end": "351520"
+  },
+  {
+    "text": "latency at the top is steadily increasing from that midway point that the rps",
+    "start": "351520",
+    "end": "357600"
+  },
+  {
+    "text": "increases beyond what the capacity that server would be about three quarters the way through",
+    "start": "357600",
+    "end": "363039"
+  },
+  {
+    "text": "we're seeing timeouts which will cause a success rate to plummet to zero and that's what we're seeing when",
+    "start": "363039",
+    "end": "369840"
+  },
+  {
+    "text": "there's that comic book explosion nice so let's talk about",
+    "start": "369840",
+    "end": "376880"
+  },
+  {
+    "text": "cues and concurrency uh now that the simulation has been explained",
+    "start": "376880",
+    "end": "382010"
+  },
+  {
+    "start": "382000",
+    "end": "382000"
+  },
+  {
+    "text": "[Music] so there's some fixed number of requests",
+    "start": "382010",
+    "end": "387440"
+  },
+  {
+    "text": "that a system can handle at any time and that's dictated by various resources available to whatever",
+    "start": "387440",
+    "end": "393840"
+  },
+  {
+    "text": "computer is running on right so cpu storage network that sort of stuff anything",
+    "start": "393840",
+    "end": "399520"
+  },
+  {
+    "text": "beyond that as in like if requests come in and need more",
+    "start": "399520",
+    "end": "406319"
+  },
+  {
+    "text": "resources that are available to that machine a queue is going to start to form if the incoming rate of request doesn't",
+    "start": "406319",
+    "end": "413520"
+  },
+  {
+    "text": "change so that's what we're seeing here about the halfway point we're seeing",
+    "start": "413520",
+    "end": "420000"
+  },
+  {
+    "text": "the outstanding request count just steadily increase and as it steadily increases we see the",
+    "start": "420000",
+    "end": "426000"
+  },
+  {
+    "text": "latencies steadily increase until some point all the requests just start timing out",
+    "start": "426000",
+    "end": "433759"
+  },
+  {
+    "text": "so not all this cueing is bad uh temporary increases in queuing delays are totally okay this",
+    "start": "434319",
+    "end": "441120"
+  },
+  {
+    "text": "happens in real life all the time right uh there's unexpected bursts",
+    "start": "441120",
+    "end": "446720"
+  },
+  {
+    "text": "we recover from them so what you see here is a simulation where i bumped up the",
+    "start": "446720",
+    "end": "452880"
+  },
+  {
+    "start": "448000",
+    "end": "448000"
+  },
+  {
+    "text": "rps to the same amount that we saw on the first simulation but then quickly dropped it back down to normal levels",
+    "start": "452880",
+    "end": "459199"
+  },
+  {
+    "text": "and you'll see that at the bottom there the request queue begins to form",
+    "start": "459199",
+    "end": "464479"
+  },
+  {
+    "text": "but then just as the rps goes back down to normal levels the queues burn down and then latencies",
+    "start": "464479",
+    "end": "470639"
+  },
+  {
+    "text": "return back to normal the success rate was unaffected there",
+    "start": "470639",
+    "end": "475360"
+  },
+  {
+    "text": "now trouble kind of starts to form when latencies get too high the latencies increase due to cueing",
+    "start": "476479",
+    "end": "482879"
+  },
+  {
+    "text": "delays and if we have a burst as we saw earlier that just doesn't go away it'll begin to",
+    "start": "482879",
+    "end": "489759"
+  },
+  {
+    "text": "negatively affect the callers which lead to cascading failures and what we mean by this is",
+    "start": "489759",
+    "end": "495919"
+  },
+  {
+    "text": "your server is going to be inundated with requests a queue is going to start to form",
+    "start": "495919",
+    "end": "500960"
+  },
+  {
+    "text": "latencies are going to increase all the callers to that service",
+    "start": "500960",
+    "end": "506240"
+  },
+  {
+    "text": "are also going to start to form queues because they're dependent on that service so that they can service their own",
+    "start": "506240",
+    "end": "511440"
+  },
+  {
+    "text": "requests and then all the callers depend on that and then next thing you know everyone has cues",
+    "start": "511440",
+    "end": "517120"
+  },
+  {
+    "text": "all the latencies have increased timeout town comic book explosion",
+    "start": "517120",
+    "end": "522479"
+  },
+  {
+    "text": "so how do we fix this circuit breaking is the answer in envoy today and the way",
+    "start": "522479",
+    "end": "529120"
+  },
+  {
+    "start": "529000",
+    "end": "529000"
+  },
+  {
+    "text": "those work there are five different circuit breakers but the one we really care about is this max request circuit breaker",
+    "start": "529120",
+    "end": "534720"
+  },
+  {
+    "text": "which will limit the number of outstanding requests allowed to a particular cluster so",
+    "start": "534720",
+    "end": "540959"
+  },
+  {
+    "text": "if i'm an envoy i receive a request and i need to route it to a cluster",
+    "start": "540959",
+    "end": "546080"
+  },
+  {
+    "text": "if that cluster has an upper bound on the number of outstanding requests and i have that many outstanding",
+    "start": "546080",
+    "end": "552080"
+  },
+  {
+    "text": "requests to that cluster i'm just going to return a 503 to whoever sent the request that's",
+    "start": "552080",
+    "end": "559360"
+  },
+  {
+    "text": "routed there so let's revisit that traffic overload",
+    "start": "559360",
+    "end": "564560"
+  },
+  {
+    "start": "561000",
+    "end": "561000"
+  },
+  {
+    "text": "scenario and see how circuit breaking would have affected this simulation",
+    "start": "564560",
+    "end": "570640"
+  },
+  {
+    "text": "you'll notice that with a well-configured circuit breaker the latencies are under control so if",
+    "start": "570720",
+    "end": "576720"
+  },
+  {
+    "text": "you pay attention to scales there at the top if you can see it uh the p99 latency doesn't really",
+    "start": "576720",
+    "end": "582480"
+  },
+  {
+    "text": "increase half of what the request latency in the non-circuit breaker simulation",
+    "start": "582480",
+    "end": "588839"
+  },
+  {
+    "text": "shows now you can look at the timeout frequencies there's no timeouts with a well-configured circuit breaker scenario",
+    "start": "588839",
+    "end": "595839"
+  },
+  {
+    "text": "there are 503 responses and that's due to the circuit breaker rejecting requests",
+    "start": "595839",
+    "end": "602240"
+  },
+  {
+    "text": "that would have otherwise contributed to the queue that would have formed",
+    "start": "602240",
+    "end": "607600"
+  },
+  {
+    "text": "and you'll see that the active requests count for the well configured circuit breaker doesn't exceed whatever",
+    "start": "607600",
+    "end": "613519"
+  },
+  {
+    "text": "the max request setting was for this particular simulation so the success rate doesn't doesn't uh",
+    "start": "613519",
+    "end": "620000"
+  },
+  {
+    "text": "plummet down to zero at about three quarters of the way",
+    "start": "620000",
+    "end": "625200"
+  },
+  {
+    "text": "now not all circuit breakers are configured well in real life they're",
+    "start": "626320",
+    "end": "632240"
+  },
+  {
+    "text": "notoriously hard to configure so if we have a poorly configured circuit breaker that's still better than",
+    "start": "632240",
+    "end": "638399"
+  },
+  {
+    "text": "having no circuit breakers at all you'll see that in the poorly configured case the",
+    "start": "638399",
+    "end": "644160"
+  },
+  {
+    "text": "request latencies are much higher we're still getting some timeouts",
+    "start": "644160",
+    "end": "649279"
+  },
+  {
+    "text": "or rather we're getting timeouts that we weren't seeing in the well-configured case and the queue size is going to be much",
+    "start": "649279",
+    "end": "656000"
+  },
+  {
+    "text": "larger right because we overshot what the circuit breaker setting should have been",
+    "start": "656000",
+    "end": "661519"
+  },
+  {
+    "text": "and the success rate suffers because of the timeouts in conjunction with the 503s but it's still better than what we saw",
+    "start": "661519",
+    "end": "668480"
+  },
+  {
+    "text": "originally when there was no circuit breaking so how do we configure these things you",
+    "start": "668480",
+    "end": "675519"
+  },
+  {
+    "start": "672000",
+    "end": "672000"
+  },
+  {
+    "text": "need to understand the service limitations and this is done by performance testing profiling of a",
+    "start": "675519",
+    "end": "681200"
+  },
+  {
+    "text": "particular application or service you can ramp up the traffic you can pay attention to the latencies",
+    "start": "681200",
+    "end": "686399"
+  },
+  {
+    "text": "see when it tips over see what the q was at that particular time and then set the limit to that you'll",
+    "start": "686399",
+    "end": "693120"
+  },
+  {
+    "text": "also want to allow headroom for births as we saw earlier we have bursts they're",
+    "start": "693120",
+    "end": "698320"
+  },
+  {
+    "text": "okay if they go away quickly and we want to keep the currency values up to date",
+    "start": "698320",
+    "end": "703519"
+  },
+  {
+    "text": "now this is pretty hard uh system topologies change people push code that affects the",
+    "start": "703519",
+    "end": "709920"
+  },
+  {
+    "text": "performance characteristics of an application this is very hard so service owners",
+    "start": "709920",
+    "end": "717440"
+  },
+  {
+    "start": "713000",
+    "end": "713000"
+  },
+  {
+    "text": "really shouldn't have to profile a concurrency their application ideally they would just focus on the",
+    "start": "717440",
+    "end": "723440"
+  },
+  {
+    "text": "application and not have to think about network-related things the whole point in envoy is to",
+    "start": "723440",
+    "end": "729120"
+  },
+  {
+    "text": "abstract the network so it's hard also to account for bursts",
+    "start": "729120",
+    "end": "734880"
+  },
+  {
+    "text": "it's unclear what is acceptable like what is the time length for a burst",
+    "start": "734880",
+    "end": "740959"
+  },
+  {
+    "text": "uh how big can these cues get how do we measure when it burns down the queue if things",
+    "start": "740959",
+    "end": "746160"
+  },
+  {
+    "text": "return back to normal and manually keeping the concurrency value or manually keeping the",
+    "start": "746160",
+    "end": "751760"
+  },
+  {
+    "text": "circuit breaker values up to date is very hard",
+    "start": "751760",
+    "end": "756480"
+  },
+  {
+    "text": "so in an ideal world we wouldn't have to do this manual configuration",
+    "start": "757040",
+    "end": "762959"
+  },
+  {
+    "start": "758000",
+    "end": "758000"
+  },
+  {
+    "text": "uh the system would figure out its own limits there's no need to know about system topology or hardware",
+    "start": "762959",
+    "end": "769279"
+  },
+  {
+    "text": "and then a lot of cases we can't know this if you're in a cloud vendor who knows what these things are running on",
+    "start": "769279",
+    "end": "774800"
+  },
+  {
+    "text": "and what abstractions they put in place we would also want it to adapt to changes so if i push a commit",
+    "start": "774800",
+    "end": "783440"
+  },
+  {
+    "text": "that makes the performance characteristics of an application suffer or",
+    "start": "783440",
+    "end": "788480"
+  },
+  {
+    "text": "uh dramatically benefits the performance characteristics such that i can handle more requests simultaneously we want",
+    "start": "788480",
+    "end": "795279"
+  },
+  {
+    "text": "this thing to adapt to it and we want it to be cheap to compute because the purpose is to run an",
+    "start": "795279",
+    "end": "800399"
+  },
+  {
+    "text": "application not just to run envoy",
+    "start": "800399",
+    "end": "804959"
+  },
+  {
+    "text": "we can do this in an envoy filter but first we must talk about envoy filters and how",
+    "start": "805680",
+    "end": "811200"
+  },
+  {
+    "start": "809000",
+    "end": "809000"
+  },
+  {
+    "text": "they work so an analogy i like to use here is uh",
+    "start": "811200",
+    "end": "816560"
+  },
+  {
+    "text": "pasta sauce is the pasta noodle what envoy filters are to envoy so the pasta noodle is just",
+    "start": "816560",
+    "end": "822800"
+  },
+  {
+    "text": "a vessel for the pasta sauce an envoy is just a vessel for envoy filters",
+    "start": "822800",
+    "end": "829040"
+  },
+  {
+    "text": "so here's a basic envoy config okay we don't have any filters configured here and i'm just",
+    "start": "829040",
+    "end": "836079"
+  },
+  {
+    "text": "going to spin up an envoy with this configuration and run our quest through it and see what it does",
+    "start": "836079",
+    "end": "842639"
+  },
+  {
+    "text": "and what ends up happening is that envoy closes the connection because it has no filters",
+    "start": "842639",
+    "end": "848079"
+  },
+  {
+    "text": "so it has nothing to do",
+    "start": "848079",
+    "end": "851120"
+  },
+  {
+    "text": "so let's zoom in on an envoy process and see what's going on in there so you'll see the greatest hits of envoy",
+    "start": "854160",
+    "end": "861920"
+  },
+  {
+    "text": "they're the listener the listener filters network filters the listener is a construct inside of envoy that",
+    "start": "861920",
+    "end": "869440"
+  },
+  {
+    "text": "you just tell it i'd like to listen on some port and all the requests that come in that",
+    "start": "869440",
+    "end": "874480"
+  },
+  {
+    "text": "are destined to that port hit that listener and then they kick off the chain of events that",
+    "start": "874480",
+    "end": "880320"
+  },
+  {
+    "text": "send things through the filters the listener filters are something that allows code to be",
+    "start": "880320",
+    "end": "888079"
+  },
+  {
+    "text": "executed upon accepting a connection so upon the first except",
+    "start": "888079",
+    "end": "896320"
+  },
+  {
+    "text": "on that socket we can run some code in these listener filters so something that would change connection metadata",
+    "start": "896320",
+    "end": "903680"
+  },
+  {
+    "text": "if i wanted to change the remote ip or determine if something is a tls connection or not",
+    "start": "903680",
+    "end": "910399"
+  },
+  {
+    "text": "this is where that kind of stuff would happen you can also rate limit connection so the local rate",
+    "start": "910399",
+    "end": "917199"
+  },
+  {
+    "text": "limit filter in envoy is implemented as a listener filter",
+    "start": "917199",
+    "end": "922240"
+  },
+  {
+    "text": "now the network filters are envoy filters that operate on",
+    "start": "923839",
+    "end": "928880"
+  },
+  {
+    "text": "bytes that are coming in over a connection so there's read and write filters and the",
+    "start": "928880",
+    "end": "934800"
+  },
+  {
+    "text": "read filters execute code when data is received",
+    "start": "934800",
+    "end": "940480"
+  },
+  {
+    "text": "over a connection and the right filter just does something when data is written",
+    "start": "940480",
+    "end": "948639"
+  },
+  {
+    "start": "950000",
+    "end": "950000"
+  },
+  {
+    "text": "now a really important network filter is the http connection manager filter and this is what has",
+    "start": "950240",
+    "end": "957759"
+  },
+  {
+    "text": "the http filters that everyone knows and loves so it'll parse raw bytes over the",
+    "start": "957759",
+    "end": "963440"
+  },
+  {
+    "text": "connection like any network filter but those bytes are converted into",
+    "start": "963440",
+    "end": "968720"
+  },
+  {
+    "text": "http message objects and this is going to allow envoy to operate at a higher level of abstraction",
+    "start": "968720",
+    "end": "974880"
+  },
+  {
+    "text": "so we can do things on a per request basis instead of a per series of bytes basis",
+    "start": "974880",
+    "end": "983120"
+  },
+  {
+    "text": "inside the http connection manager we have an http filter chain",
+    "start": "983120",
+    "end": "988639"
+  },
+  {
+    "text": "and that's going to be agnostic to whatever the underlying request protocol is whether it be",
+    "start": "988639",
+    "end": "994000"
+  },
+  {
+    "text": "h1h2 grpc quick whatever and these http filters are going to have",
+    "start": "994000",
+    "end": "1000320"
+  },
+  {
+    "text": "a decode step which is what which is uh what's going to operate on inbound requests so",
+    "start": "1000320",
+    "end": "1006560"
+  },
+  {
+    "text": "imagine i'm an envoy i receive an http request then i'm going to decode it and then",
+    "start": "1006560",
+    "end": "1014240"
+  },
+  {
+    "text": "send it along it'll go somewhere i'm going to get a reply back and then i'm going to perform the encode step and then return it where it needs to go not all",
+    "start": "1014240",
+    "end": "1020639"
+  },
+  {
+    "text": "http filters need to do things on the d code or the end code right they can do one or the other or",
+    "start": "1020639",
+    "end": "1025918"
+  },
+  {
+    "text": "both so now that we're all experts in envoy",
+    "start": "1025919",
+    "end": "1031839"
+  },
+  {
+    "text": "filters let's talk a little bit about adaptive concurrency i'm going to keep this as simple as i",
+    "start": "1031839",
+    "end": "1038160"
+  },
+  {
+    "text": "can it's it's a complicated concept but i'm gonna talk a little bit of a high level and gloss over some of the nitty gritty",
+    "start": "1038160",
+    "end": "1044240"
+  },
+  {
+    "text": "details perhaps at a future time i can talk about envoy for evil wizards or something but not today",
+    "start": "1044240",
+    "end": "1053200"
+  },
+  {
+    "text": "so the adaptive currency filter is implemented as an http filter since we're operating on a per request",
+    "start": "1053200",
+    "end": "1060240"
+  },
+  {
+    "text": "basis right we don't really care about bytes over the connection we care about what those bytes represent so it protects",
+    "start": "1060240",
+    "end": "1068080"
+  },
+  {
+    "text": "a upstream server by enforcing an upper bound on outstanding",
+    "start": "1068080",
+    "end": "1073280"
+  },
+  {
+    "text": "requests similar to what a circuit breaker is going to do so we can turn away excessive traffic by",
+    "start": "1073280",
+    "end": "1078320"
+  },
+  {
+    "text": "returning 503s and not forwarding it along to the application we're trying to protect and this",
+    "start": "1078320",
+    "end": "1084400"
+  },
+  {
+    "text": "filter can sit in front of the circuit breaker and be used in conjunction with it so one reason you'd want to do this is",
+    "start": "1084400",
+    "end": "1091039"
+  },
+  {
+    "text": "if you want to toggle the adaptive concurrency filter on or off then you still have circuit breakers protecting you in that case or you can",
+    "start": "1091039",
+    "end": "1097840"
+  },
+  {
+    "text": "compare the two so one important concept with the",
+    "start": "1097840",
+    "end": "1104080"
+  },
+  {
+    "start": "1101000",
+    "end": "1101000"
+  },
+  {
+    "text": "adaptive concurrency filter is this gradient so this was discussed in that 2018 netflix blog post",
+    "start": "1104080",
+    "end": "1111840"
+  },
+  {
+    "text": "it's inspired from latency based tcp congestion control algorithms so you know everyone's first",
+    "start": "1111840",
+    "end": "1118480"
+  },
+  {
+    "text": "introduction to tcp is that we'll you know adjust our uh our tcp window",
+    "start": "1118480",
+    "end": "1124080"
+  },
+  {
+    "text": "if we drop packets or something like that but there's a drop base that means some nick buffer somewhere has filled up",
+    "start": "1124080",
+    "end": "1129760"
+  },
+  {
+    "text": "full of packets right and then a request was dropped so we're adjusting",
+    "start": "1129760",
+    "end": "1134880"
+  },
+  {
+    "text": "it then the latency based algorithms are going to prevent that from happening or try to",
+    "start": "1134880",
+    "end": "1140400"
+  },
+  {
+    "text": "by observing whatever latency was measured during the handshake and adjusting",
+    "start": "1140400",
+    "end": "1148000"
+  },
+  {
+    "text": "the tcp window based on how long it takes requests to go over",
+    "start": "1148000",
+    "end": "1154640"
+  },
+  {
+    "text": "the network so we're kind of doing the same thing here we're going to measure some kind of ideal latency and use that as our",
+    "start": "1154640",
+    "end": "1161200"
+  },
+  {
+    "text": "baseline and that's what we'll call the rtt ideal or the ideal round trip time and then we're",
+    "start": "1161200",
+    "end": "1166640"
+  },
+  {
+    "text": "also going to measure just sampled requests right so once we",
+    "start": "1166640",
+    "end": "1171760"
+  },
+  {
+    "text": "have this ideal as we move forward sampling requests we can slice up",
+    "start": "1171760",
+    "end": "1176960"
+  },
+  {
+    "text": "various time windows and then we can summarize them and call this an rtt sample",
+    "start": "1176960",
+    "end": "1183440"
+  },
+  {
+    "text": "now this gradient value which is related to these round trip times is",
+    "start": "1184240",
+    "end": "1190160"
+  },
+  {
+    "text": "nice because it informs what direction we want to take our concurrency limit in this filter",
+    "start": "1190160",
+    "end": "1196480"
+  },
+  {
+    "text": "so if the ideal round trip time is less than the sampled round trip time we know a q is formed",
+    "start": "1196480",
+    "end": "1201919"
+  },
+  {
+    "text": "right the sampled latencies are increasing from what is ideal so we want to lower the concurrency",
+    "start": "1201919",
+    "end": "1209520"
+  },
+  {
+    "text": "limit if the ideal is roughly equal to the sampled or the ideal is greater than the sampled",
+    "start": "1209520",
+    "end": "1216640"
+  },
+  {
+    "text": "latencies right we're doing pretty good so we can increase the concurrency limit and see what",
+    "start": "1216640",
+    "end": "1223760"
+  },
+  {
+    "text": "happens so we can represent the new limit like",
+    "start": "1223760",
+    "end": "1229840"
+  },
+  {
+    "text": "this we'll have the current limit you just multiply it by the gradient and you get the behavior i mentioned a moment ago",
+    "start": "1229840",
+    "end": "1236480"
+  },
+  {
+    "text": "uh you also need to think what about headroom for bursts and also what if the rtt ideal is",
+    "start": "1236480",
+    "end": "1242880"
+  },
+  {
+    "text": "roughly equal to the rtt sampled your gradient's going to be about one we're not really going to be changing the concurrency limit so we need a",
+    "start": "1242880",
+    "end": "1249120"
+  },
+  {
+    "text": "mechanism to push the concurrency limit wider",
+    "start": "1249120",
+    "end": "1254240"
+  },
+  {
+    "text": "and we can do that by just adding some headroom value right which i think by default is going",
+    "start": "1254240",
+    "end": "1259520"
+  },
+  {
+    "text": "to be the square root of what the concurrency limit is or what the new concurrency limit is",
+    "start": "1259520",
+    "end": "1266960"
+  },
+  {
+    "start": "1267000",
+    "end": "1267000"
+  },
+  {
+    "text": "so this behavior of having a currency value and then probing into or basically",
+    "start": "1268720",
+    "end": "1275200"
+  },
+  {
+    "text": "widening the concurrency limit and allowing more requests through until the latency begins to deviate",
+    "start": "1275200",
+    "end": "1282400"
+  },
+  {
+    "text": "in which case we close it as shown in this netflix blog post figure and a",
+    "start": "1282400",
+    "end": "1288159"
+  },
+  {
+    "text": "simulation i performed in python i just scripted this up so",
+    "start": "1288159",
+    "end": "1293280"
+  },
+  {
+    "text": "you'll see an actual limit in blue on the left side and then the same thing in orange on the right side",
+    "start": "1293280",
+    "end": "1300240"
+  },
+  {
+    "text": "uh the way i simulated this was if uh the concurrency limit was",
+    "start": "1300240",
+    "end": "1306960"
+  },
+  {
+    "text": "larger than what the actual limits should be right then inject latency into this and then",
+    "start": "1306960",
+    "end": "1313200"
+  },
+  {
+    "text": "see what happens so what you end up having is the scenario where we widen the concurrency limit wait for",
+    "start": "1313200",
+    "end": "1319679"
+  },
+  {
+    "text": "some kind of latency deviation to occur close the limit and then wait for things",
+    "start": "1319679",
+    "end": "1325840"
+  },
+  {
+    "text": "to return back to normal so you'll see this bobbing motion and it tends to hover around what the",
+    "start": "1325840",
+    "end": "1331280"
+  },
+  {
+    "text": "actual limit should be this also adjusts itself uh to service",
+    "start": "1331280",
+    "end": "1338080"
+  },
+  {
+    "text": "degradations so you can imagine a scenario where the ideal concurrency",
+    "start": "1338080",
+    "end": "1344240"
+  },
+  {
+    "text": "will be lower or higher in the case of a patch that changes the performance characteristics",
+    "start": "1344240",
+    "end": "1349600"
+  },
+  {
+    "text": "for the better this methodology still ends up finding what the ideal concurrency is",
+    "start": "1349600",
+    "end": "1356000"
+  },
+  {
+    "text": "in these simulations it's a little more complicated as i said",
+    "start": "1356000",
+    "end": "1361039"
+  },
+  {
+    "start": "1359000",
+    "end": "1359000"
+  },
+  {
+    "text": "earlier right there's this buffer value and there's all kinds of stuff in there but",
+    "start": "1361039",
+    "end": "1366240"
+  },
+  {
+    "text": "i'm not going to talk about that maybe folks have questions after i can answer them",
+    "start": "1366240",
+    "end": "1372840"
+  },
+  {
+    "start": "1372000",
+    "end": "1372000"
+  },
+  {
+    "text": "so let's run through a life of a packet or a life of a request for the adaptive concurrency",
+    "start": "1372840",
+    "end": "1379600"
+  },
+  {
+    "text": "filter you remember our fellow from earlier very smart",
+    "start": "1379600",
+    "end": "1384799"
+  },
+  {
+    "text": "he has an adapt currency filter a circuit breaker which we'll ignore and we'll call this the lime surface so",
+    "start": "1384799",
+    "end": "1392480"
+  },
+  {
+    "text": "this lime service can handle one request at a time you can see the concurrency limits one",
+    "start": "1392480",
+    "end": "1398720"
+  },
+  {
+    "text": "we have no outstanding requests so when a request is coming in through",
+    "start": "1398720",
+    "end": "1403760"
+  },
+  {
+    "text": "the filter it's going to hit the decode step in the filter and in there we're going to mark a time",
+    "start": "1403760",
+    "end": "1410000"
+  },
+  {
+    "text": "stamp we're going to say what time is it right now and then we're going to check against",
+    "start": "1410000",
+    "end": "1415280"
+  },
+  {
+    "text": "how many outstanding requests we have right and if the outstanding requests are less than the concurrency limit",
+    "start": "1415280",
+    "end": "1420559"
+  },
+  {
+    "text": "we can go ahead and just forward that request along so while the lime service is inspecting this line or whatever it does",
+    "start": "1420559",
+    "end": "1427440"
+  },
+  {
+    "text": "another request is going to come in now our concurrency limits one our outstanding requests are won",
+    "start": "1427440",
+    "end": "1434159"
+  },
+  {
+    "text": "so we can't let this through we've already hit our concurrency limit",
+    "start": "1434159",
+    "end": "1440000"
+  },
+  {
+    "text": "so we just reject it with a 503 now the line service is done doing",
+    "start": "1440080",
+    "end": "1445679"
+  },
+  {
+    "text": "whatever it does and then it's going to send a reply back and that's going to go through the encode",
+    "start": "1445679",
+    "end": "1451760"
+  },
+  {
+    "text": "step and we can derive the request latency at this point",
+    "start": "1451760",
+    "end": "1457200"
+  },
+  {
+    "text": "so we know when the request went through the filter and was forwarded along to the line service and then we know when",
+    "start": "1457200",
+    "end": "1462400"
+  },
+  {
+    "text": "the reply is coming back so we can just subtract the two and then get what the request latency is",
+    "start": "1462400",
+    "end": "1468799"
+  },
+  {
+    "text": "sample the value",
+    "start": "1468799",
+    "end": "1473840"
+  },
+  {
+    "text": "now our rtt ideal uh we're going to want to periodically",
+    "start": "1473840",
+    "end": "1479120"
+  },
+  {
+    "text": "recalculate this and the way that this works is we're going to fix the concurrency limit to",
+    "start": "1479120",
+    "end": "1485120"
+  },
+  {
+    "text": "some low value that we can either specify because we know what our application should be able to",
+    "start": "1485120",
+    "end": "1491360"
+  },
+  {
+    "text": "handle at uh in the worst case like there's no reason that our application cannot handle",
+    "start": "1491360",
+    "end": "1497760"
+  },
+  {
+    "text": "whatever this low value is and then we'll aggregate all the samples and summarize it",
+    "start": "1497760",
+    "end": "1504960"
+  },
+  {
+    "text": "or you can just leave it at the default which i believe is three",
+    "start": "1504960",
+    "end": "1509440"
+  },
+  {
+    "text": "and then it's going to periodically recalculate the concurrency limit at another interval",
+    "start": "1510400",
+    "end": "1516240"
+  },
+  {
+    "text": "and that's also sampled or that's also summarized via percentiles",
+    "start": "1516240",
+    "end": "1521279"
+  },
+  {
+    "text": "so here's a basic config we'll have our concurrency limit update interval which",
+    "start": "1521279",
+    "end": "1526720"
+  },
+  {
+    "text": "in this case would be 500 milliseconds and then our min rtt recalculation which is that rtt ideal",
+    "start": "1526720",
+    "end": "1534399"
+  },
+  {
+    "text": "and that's at about 300 seconds there so given these two things we've only",
+    "start": "1534720",
+    "end": "1542240"
+  },
+  {
+    "text": "specified two pieces of data how often am i updating my concurrency limit how often am i recalculating the ideal around trip",
+    "start": "1542240",
+    "end": "1548960"
+  },
+  {
+    "text": "time just in case service characteristic change or i have a noisy neighbor or something like that",
+    "start": "1548960",
+    "end": "1555919"
+  },
+  {
+    "start": "1555000",
+    "end": "1555000"
+  },
+  {
+    "text": "so here's the adaptive currency filter in action compared to a well configured circuit breaker",
+    "start": "1555919",
+    "end": "1561200"
+  },
+  {
+    "text": "you'll see that in the middle there in our scenario the rps is going to bump up and",
+    "start": "1561200",
+    "end": "1567120"
+  },
+  {
+    "text": "then a q is going to begin to form and then the filter is going to react to",
+    "start": "1567120",
+    "end": "1572159"
+  },
+  {
+    "text": "this increased latency due that q lower the concurrency limit and you can see there that",
+    "start": "1572159",
+    "end": "1578000"
+  },
+  {
+    "text": "there's increased 503s there's a higher rate than there would be for the rest of the simulation",
+    "start": "1578000",
+    "end": "1583679"
+  },
+  {
+    "text": "the cue size burns down because we're not letting as many requests through and then latencies return back to normal",
+    "start": "1583679",
+    "end": "1590320"
+  },
+  {
+    "text": "and then we're periodically just uh returning 503s in scenarios where the latency gets",
+    "start": "1590320",
+    "end": "1596400"
+  },
+  {
+    "text": "higher than we would like now compare this with the well-configured circuit breaker",
+    "start": "1596400",
+    "end": "1601919"
+  },
+  {
+    "text": "uh the the latencies are tighter in the adaptive concurrent currency filter the success rate's mostly the same",
+    "start": "1601919",
+    "end": "1610559"
+  },
+  {
+    "text": "and the cue sizes are roughly equivalent as well but what's interesting is that the adaptive currency filter only needed",
+    "start": "1610559",
+    "end": "1617279"
+  },
+  {
+    "text": "two pieces of information it didn't need to know how many requests the service can handle",
+    "start": "1617279",
+    "end": "1623679"
+  },
+  {
+    "text": "we didn't have to do any kind of measurements of that kind we just had to know how often should it",
+    "start": "1623679",
+    "end": "1629760"
+  },
+  {
+    "text": "calculate what the ideal latency is and how often should it update the concurrency limit",
+    "start": "1629760",
+    "end": "1636559"
+  },
+  {
+    "start": "1635000",
+    "end": "1635000"
+  },
+  {
+    "text": "i think that's awesome forget about circuit breakers i'm just kidding we should probably use both if",
+    "start": "1636559",
+    "end": "1643120"
+  },
+  {
+    "text": "you want to toggle the haptic concurrency on and off uh the configuration for adaptive",
+    "start": "1643120",
+    "end": "1648159"
+  },
+  {
+    "text": "currency can get more complicated if you want it to right there's all kinds of values like a jitter a buffer value",
+    "start": "1648159",
+    "end": "1654000"
+  },
+  {
+    "text": "all that kind of stuff that you can specify but one thing i want to zoom in on is this min concurrency",
+    "start": "1654000",
+    "end": "1659600"
+  },
+  {
+    "text": "setting and that's just going to specify the minimum allowed concurrency limit",
+    "start": "1659600",
+    "end": "1665039"
+  },
+  {
+    "text": "okay so when you're recalculating the min rtt or the ideal round trip time",
+    "start": "1665039",
+    "end": "1671279"
+  },
+  {
+    "text": "the filter will pin the concurrency limit to this value and then make its measurements",
+    "start": "1671279",
+    "end": "1678480"
+  },
+  {
+    "start": "1679000",
+    "end": "1679000"
+  },
+  {
+    "text": "if that value is too low what you can end up with the scenario you can end up with is that the success rate is going to",
+    "start": "1679200",
+    "end": "1686480"
+  },
+  {
+    "text": "drop because we're rejecting lots of requests during the measurement window so you'll see this periodic drop there",
+    "start": "1686480",
+    "end": "1694080"
+  },
+  {
+    "text": "now this can be mitigated with retries okay so if i have a fleet of servers",
+    "start": "1694080",
+    "end": "1699360"
+  },
+  {
+    "text": "that are all going through this min rtt calculation i'll send a request to one it's going to",
+    "start": "1699360",
+    "end": "1704799"
+  },
+  {
+    "text": "return a 503 and then you can just retry somewhere else and hopefully they're not in a measurement window",
+    "start": "1704799",
+    "end": "1711360"
+  },
+  {
+    "start": "1710000",
+    "end": "1710000"
+  },
+  {
+    "text": "we can help that along by introducing this jitter value which is going to randomly delay the",
+    "start": "1711360",
+    "end": "1717200"
+  },
+  {
+    "text": "calculations to prevent an entire fleet from sinking you can imagine some scenario where you",
+    "start": "1717200",
+    "end": "1723120"
+  },
+  {
+    "text": "scale up and you have lots of servers that came up at the exact same time and started their",
+    "start": "1723120",
+    "end": "1728720"
+  },
+  {
+    "text": "min rtt measurements at the exact same time so what this jitter value is going to do",
+    "start": "1728720",
+    "end": "1733919"
+  },
+  {
+    "text": "is introduce a random timer and then make sure that things don't line up so you can see here over",
+    "start": "1733919",
+    "end": "1739919"
+  },
+  {
+    "text": "multiple simulations the bursts and uh 503s during the min rtt",
+    "start": "1739919",
+    "end": "1746480"
+  },
+  {
+    "text": "measurement window they don't line up right so if you hit one and you're rejected and you retry on another",
+    "start": "1746480",
+    "end": "1752320"
+  },
+  {
+    "text": "the chances are very high that you're not going to hit a mid-rtt window",
+    "start": "1752320",
+    "end": "1757919"
+  },
+  {
+    "start": "1757000",
+    "end": "1757000"
+  },
+  {
+    "text": "so i'll talk about our experiences at lift and default settings so we track the p95",
+    "start": "1757919",
+    "end": "1765520"
+  },
+  {
+    "text": "latencies and we find that that's uh that's what we want but that's for",
+    "start": "1765520",
+    "end": "1772399"
+  },
+  {
+    "text": "the rtt ideal and the sampled latencies um and i didn't put this here but we by",
+    "start": "1772399",
+    "end": "1778640"
+  },
+  {
+    "text": "default uh take a measurement of 500 requests to calculate that p95 for the min rtt",
+    "start": "1778640",
+    "end": "1785279"
+  },
+  {
+    "text": "we have a 500 millisecond sampling window so that's every 500 milliseconds we're updating the concurrency limit",
+    "start": "1785279",
+    "end": "1791679"
+  },
+  {
+    "text": "there's a 50 jitter and a three minute min rtt window so that means every three to",
+    "start": "1791679",
+    "end": "1799760"
+  },
+  {
+    "text": "four and a half minutes there's going to be a in rtt measurement window we have 100 buffer which means we'll",
+    "start": "1799760",
+    "end": "1808000"
+  },
+  {
+    "text": "allow a doubling of what the ideal latency is in our samples",
+    "start": "1808000",
+    "end": "1815440"
+  },
+  {
+    "text": "anything beyond that then we'll start to clamp down on the concurrency limit and we have a minimum currency of 25 by",
+    "start": "1815440",
+    "end": "1821919"
+  },
+  {
+    "text": "default some services change many of these",
+    "start": "1821919",
+    "end": "1827120"
+  },
+  {
+    "text": "values but the thing we find that people tend to change the most is the minimum concurrency",
+    "start": "1827120",
+    "end": "1832240"
+  },
+  {
+    "text": "this is actually pretty easy to change folks will just look in their dashboards and look at",
+    "start": "1832240",
+    "end": "1838000"
+  },
+  {
+    "text": "their service at steady state when it's not on fire see what the number of active requests",
+    "start": "1838000",
+    "end": "1843440"
+  },
+  {
+    "text": "is over you know seven days or so and then just pick something that's about that value because you know that things are",
+    "start": "1843440",
+    "end": "1849279"
+  },
+  {
+    "text": "fine there and we want to keep the latencies about where they would be there",
+    "start": "1849279",
+    "end": "1854480"
+  },
+  {
+    "text": "before adopting the feature for a new service we always verify that the downstream",
+    "start": "1854480",
+    "end": "1859840"
+  },
+  {
+    "text": "callers to that service are retrying on 503s it'd be unfortunate",
+    "start": "1859840",
+    "end": "1865120"
+  },
+  {
+    "text": "if they sent to requests were rejected by the filter because of some mnrt calculation window and then never retried somewhere",
+    "start": "1865120",
+    "end": "1871919"
+  },
+  {
+    "text": "else where it most likely would have succeeded so we have an increased success rate with that",
+    "start": "1871919",
+    "end": "1877760"
+  },
+  {
+    "text": "because of this we use retry budgets in lieu of retry circuit breakers",
+    "start": "1877760",
+    "end": "1883440"
+  },
+  {
+    "text": "you can imagine a scenario where you have very high rps service and you enter a min rtt measurement",
+    "start": "1883440",
+    "end": "1889600"
+  },
+  {
+    "text": "window and lots of requests get rejected so you have lots of retries and by default",
+    "start": "1889600",
+    "end": "1894880"
+  },
+  {
+    "text": "envoys retry circuit breaker uh setting is is three active retries",
+    "start": "1894880",
+    "end": "1901519"
+  },
+  {
+    "text": "that are allowed the retry budgets do this as a percentage so you can say 25 of my outstanding",
+    "start": "1901519",
+    "end": "1908799"
+  },
+  {
+    "text": "requests are allowed to be retries and you still get the protection from retry storms this way",
+    "start": "1908799",
+    "end": "1913840"
+  },
+  {
+    "text": "but it will scale with the number of outstanding requests you have for a service um",
+    "start": "1913840",
+    "end": "1920000"
+  },
+  {
+    "text": "we then set the min concurrency to roughly what the steady state number of active requests was as i said earlier",
+    "start": "1920000",
+    "end": "1928000"
+  },
+  {
+    "start": "1928000",
+    "end": "1928000"
+  },
+  {
+    "text": "some general observations almost all adapted concurrency events that i've",
+    "start": "1928000",
+    "end": "1933600"
+  },
+  {
+    "text": "witnessed are due to a service degradation not spikes in rps",
+    "start": "1933600",
+    "end": "1939679"
+  },
+  {
+    "text": "so a bad deploy or an upstream dependency or like a third party",
+    "start": "1939679",
+    "end": "1946559"
+  },
+  {
+    "text": "that's having a latency or an outage that's where it's coming from it's never",
+    "start": "1946559",
+    "end": "1951679"
+  },
+  {
+    "text": "too much traffic is coming into an instance causing the latencies to increase",
+    "start": "1951679",
+    "end": "1957440"
+  },
+  {
+    "start": "1958000",
+    "end": "1958000"
+  },
+  {
+    "text": "so let's take a look at that bad deploy scenario this was a situation where a service at lyft had",
+    "start": "1958640",
+    "end": "1965120"
+  },
+  {
+    "text": "done a deployment and it had caused cpu utilization to increase on the",
+    "start": "1965120",
+    "end": "1971679"
+  },
+  {
+    "text": "majority of the nodes in that cluster and it was",
+    "start": "1971679",
+    "end": "1976720"
+  },
+  {
+    "text": "independent of the number of requests that were coming in so if you just sent it no requests the cpu would still be redlining",
+    "start": "1976720",
+    "end": "1984720"
+  },
+  {
+    "text": "so adaptive currency in this scenario notices that oh okay so it doesn't know that the cpu utilization",
+    "start": "1985600",
+    "end": "1991519"
+  },
+  {
+    "text": "is increasing but it is seeing that the latencies are beginning to increase",
+    "start": "1991519",
+    "end": "1997200"
+  },
+  {
+    "text": "so it starts shedding tons of load and what it's doing is it it's keeping",
+    "start": "1997200",
+    "end": "2003760"
+  },
+  {
+    "text": "the sampled round trip times within 2x of the min rtt because we have 100",
+    "start": "2003760",
+    "end": "2011679"
+  },
+  {
+    "text": "buffer value so the average min rtt is in yellow there and in green those are our sampled",
+    "start": "2011679",
+    "end": "2017600"
+  },
+  {
+    "text": "round trip times and it stays roughly within uh",
+    "start": "2017600",
+    "end": "2023519"
+  },
+  {
+    "text": "well within 100 of what the min rtt is there so all that load shedding was just for",
+    "start": "2023519",
+    "end": "2030320"
+  },
+  {
+    "text": "the purposes of keeping those two lines close together but as you can see you know 100 cpu",
+    "start": "2030320",
+    "end": "2036399"
+  },
+  {
+    "text": "utilization isn't doing any favors to the request latencies there",
+    "start": "2036399",
+    "end": "2042000"
+  },
+  {
+    "text": "so thanks i'll take questions",
+    "start": "2042000",
+    "end": "2047519"
+  }
+]

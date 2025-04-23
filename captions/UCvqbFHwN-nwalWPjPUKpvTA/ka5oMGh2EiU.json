@@ -1,0 +1,1752 @@
+[
+  {
+    "text": "hello everyone I am Aur and this is Shashank and we appreciate you taking the time to be here today we are going",
+    "start": "520",
+    "end": "7839"
+  },
+  {
+    "text": "to talk about our implementation of multi-tenancy in kubernetes at Uber this is a brief agenda for the talk",
+    "start": "7839",
+    "end": "17279"
+  },
+  {
+    "text": "first we will introduce the compute platform at Uber then we discuss what multi-tenancy means at",
+    "start": "17279",
+    "end": "24680"
+  },
+  {
+    "text": "Uber then we discuss a simple solution and present the challenges we faced with it",
+    "start": "24680",
+    "end": "30759"
+  },
+  {
+    "text": "and then we introduce a multi-tenant single cluster solution discuss its design and finally talk about the",
+    "start": "30759",
+    "end": "37239"
+  },
+  {
+    "text": "challenges we faced while implementing it first let me introduce a compute",
+    "start": "37239",
+    "end": "43239"
+  },
+  {
+    "text": "platform at Uber Uber operates its own private data",
+    "start": "43239",
+    "end": "48320"
+  },
+  {
+    "text": "centers but it's in the process of replicating them away in favor of oci and",
+    "start": "48320",
+    "end": "54800"
+  },
+  {
+    "text": "gcp on top of the physical machines and VMS we have a layer which we refer to as",
+    "start": "54840",
+    "end": "61160"
+  },
+  {
+    "text": "crane which essentially implements host as a service and is responsible for providing",
+    "start": "61160",
+    "end": "67640"
+  },
+  {
+    "text": "an abstraction to hide away all the underlying providers from the",
+    "start": "67640",
+    "end": "73159"
+  },
+  {
+    "text": "platforms on top of crane we have a container orchestration platform layer which is based on kubernetes it is our",
+    "start": "73159",
+    "end": "80439"
+  },
+  {
+    "text": "own distribution of kubernetes fed from open source with the uh the basic components being exactly the same as",
+    "start": "80439",
+    "end": "86960"
+  },
+  {
+    "text": "open source on top top of kubernetes we have user facing um",
+    "start": "86960",
+    "end": "94320"
+  },
+  {
+    "text": "platforms for example we have up which is what developers use to manage all the",
+    "start": "94320",
+    "end": "100200"
+  },
+  {
+    "text": "stateless microservices we have Michelangelo which uses R to manage machine learning workflows data Sciences",
+    "start": "100200",
+    "end": "106520"
+  },
+  {
+    "text": "workbench to run jobs spark and so on here is a brief summary of the scale",
+    "start": "106520",
+    "end": "114759"
+  },
+  {
+    "text": "of the kubernetes installation at Uber it manages more than 4 and a half",
+    "start": "114759",
+    "end": "119880"
+  },
+  {
+    "text": "ion cores with more than 4,000 microservices being deployed more than",
+    "start": "119880",
+    "end": "125159"
+  },
+  {
+    "text": "100,000 times every day and across stateless and batch we have more than",
+    "start": "125159",
+    "end": "130440"
+  },
+  {
+    "text": "million and a half containers being launched every day on the",
+    "start": "130440",
+    "end": "135280"
+  },
+  {
+    "text": "platform next let me introduce what multi-tenancy means for Uber note that",
+    "start": "136640",
+    "end": "142000"
+  },
+  {
+    "text": "Uber is a consumer company and not a SAS Enterprise company so we have no",
+    "start": "142000",
+    "end": "147040"
+  },
+  {
+    "text": "requirement or no concerns around having to run untrust third party software in our clusters so",
+    "start": "147040",
+    "end": "153560"
+  },
+  {
+    "text": "the definition of multi-tenancy will be slightly different from what we traditionally see in a SAS",
+    "start": "153560",
+    "end": "161200"
+  },
+  {
+    "text": "company so Uber's definition of multitenancy can be captured as the following three requirements the first",
+    "start": "161239",
+    "end": "167239"
+  },
+  {
+    "text": "requirement is data play and isolation which essentially states that",
+    "start": "167239",
+    "end": "172519"
+  },
+  {
+    "text": "workloads belonging to different tenants cannot be collocated on the same machine",
+    "start": "172519",
+    "end": "178280"
+  },
+  {
+    "text": "of course workloads belonging to the same same machine to the same tenant can run on the same host but they cannot be",
+    "start": "178280",
+    "end": "183840"
+  },
+  {
+    "text": "collocated with workloads of other tenants if you define not poool as an",
+    "start": "183840",
+    "end": "189640"
+  },
+  {
+    "text": "abstraction to capture a group of host managed together similar to ASG or vmss",
+    "start": "189640",
+    "end": "195360"
+  },
+  {
+    "text": "or Mig then this requirement essentially says that each tenant gets its own note",
+    "start": "195360",
+    "end": "201720"
+  },
+  {
+    "text": "pool the second requirement is access isolation a tenant can of course read",
+    "start": "201720",
+    "end": "207239"
+  },
+  {
+    "text": "and manage its own resources in etcd however it should not be able to access",
+    "start": "207239",
+    "end": "213080"
+  },
+  {
+    "text": "any resource information like nodes pods spark application Ray cluster nodes Etc",
+    "start": "213080",
+    "end": "219799"
+  },
+  {
+    "text": "of any other tenant the third and final requirement is control plan isolation which in some",
+    "start": "219799",
+    "end": "227319"
+  },
+  {
+    "text": "sense is a more generic implementation of the previous requirement and it states that a tenant running on a",
+    "start": "227319",
+    "end": "233480"
+  },
+  {
+    "text": "kubernetes cluster should not be impacted in any way by other tenants which may be running in the same CL",
+    "start": "233480",
+    "end": "241480"
+  },
+  {
+    "text": "for example attendant attendant rning workloads with a high scheduling",
+    "start": "241480",
+    "end": "247079"
+  },
+  {
+    "text": "throughput should not impact the scheduling latency of another tenant",
+    "start": "247079",
+    "end": "252599"
+  },
+  {
+    "text": "running low scheduling throughput workloads with a low scheduling latency",
+    "start": "252599",
+    "end": "258320"
+  },
+  {
+    "text": "requirement now there's a very simple way to solve this problem let's give each tenant its own kubernetes cluster",
+    "start": "258720",
+    "end": "265639"
+  },
+  {
+    "text": "and its own dedicated not poool and attach the not poool to the cluster and we are done uh we get data plane",
+    "start": "265639",
+    "end": "271840"
+  },
+  {
+    "text": "isolation because each tenant has its own note pool we get control plane and access isolation because each tenant has",
+    "start": "271840",
+    "end": "278199"
+  },
+  {
+    "text": "its own cluster this is a fairly simple solution and when we started off this is what we",
+    "start": "278199",
+    "end": "283560"
+  },
+  {
+    "text": "did now to understand why we ran into problems with this solution let's take a step back and understand what use cases",
+    "start": "283560",
+    "end": "291759"
+  },
+  {
+    "text": "can potentially be solved with such a solution of course when we started off we had certain workloads with certain",
+    "start": "291759",
+    "end": "298560"
+  },
+  {
+    "text": "security concerns which required us to solve all the three requirements stated",
+    "start": "298560",
+    "end": "305520"
+  },
+  {
+    "text": "above but once we solve these three requirements over time we figured that",
+    "start": "305520",
+    "end": "311280"
+  },
+  {
+    "text": "we could solve more and more use cases um with the same solution and as those",
+    "start": "311280",
+    "end": "316479"
+  },
+  {
+    "text": "use cases came up for ease we just uses we just kept applying the same solution",
+    "start": "316479",
+    "end": "321720"
+  },
+  {
+    "text": "to them uh for example let's say there is a workload which acts as a Noisy",
+    "start": "321720",
+    "end": "326800"
+  },
+  {
+    "text": "Neighbor to others in either the data plane or the control plane or in both",
+    "start": "326800",
+    "end": "332840"
+  },
+  {
+    "text": "since this solution provides us both data plane and control plane isolation we could apply the same solution for",
+    "start": "332840",
+    "end": "338400"
+  },
+  {
+    "text": "them uh similarly if you have a workload which is very susceptible to noisy",
+    "start": "338400",
+    "end": "344160"
+  },
+  {
+    "text": "neighbors because of low latency requirements we could isolate them through the same solution as",
+    "start": "344160",
+    "end": "350319"
+  },
+  {
+    "text": "well any workload which requires its own dedicated Hardware like",
+    "start": "350319",
+    "end": "355360"
+  },
+  {
+    "text": "gpus again like we use the same solution to isolate them away onto the hardware that they want to run on thus over time",
+    "start": "355360",
+    "end": "362600"
+  },
+  {
+    "text": "the number of use cases which we could solve using the same solution kept on growing and as the number of use cases",
+    "start": "362600",
+    "end": "368199"
+  },
+  {
+    "text": "grow grew using a solution of building a different cluster for each tenant or",
+    "start": "368199",
+    "end": "373880"
+  },
+  {
+    "text": "each use case started running into multiple challenges and here's a quick run through of those challenges the",
+    "start": "373880",
+    "end": "380479"
+  },
+  {
+    "text": "first one was manageability so the way we modeled each use case was that each cluster had its",
+    "start": "380479",
+    "end": "387639"
+  },
+  {
+    "text": "own cluster type or rather each use case had its own cluster type and each cluster type had its own configuration",
+    "start": "387639",
+    "end": "394160"
+  },
+  {
+    "text": "thus there was a configuration bloat where every use case or every tenant has",
+    "start": "394160",
+    "end": "400000"
+  },
+  {
+    "text": "its own rback and limit configuration its own network and service Discovery configuration its own observability",
+    "start": "400000",
+    "end": "405880"
+  },
+  {
+    "text": "configuration its own uh host maintenance and um node upgrade configuration and so on as you can guess",
+    "start": "405880",
+    "end": "413400"
+  },
+  {
+    "text": "this was fairly error prone and misconfigurations and completely misconfigurations was fairly common",
+    "start": "413400",
+    "end": "421120"
+  },
+  {
+    "text": "another issue was feature mismatch where any feature which required us to roll out a new operator new crd new",
+    "start": "421120",
+    "end": "427720"
+  },
+  {
+    "text": "controller new configuration it started off with rolling out to the use cases which had",
+    "start": "427720",
+    "end": "434280"
+  },
+  {
+    "text": "an immediate demand for it and due to roll out fatigue it would stop and never get rolled out to all cluster",
+    "start": "434280",
+    "end": "441840"
+  },
+  {
+    "text": "types this also led to a lot of operational concerns especially during incident mitigation because whenever an",
+    "start": "441840",
+    "end": "447759"
+  },
+  {
+    "text": "incident happened the first the on call had to to figure out okay like what feature is enabled in this cluster what",
+    "start": "447759",
+    "end": "452960"
+  },
+  {
+    "text": "configuration does this cluster have before they could take any steps to mitigate the third and in our opinion",
+    "start": "452960",
+    "end": "460479"
+  },
+  {
+    "text": "the biggest issue was user experience for the tenants themselves the overhead",
+    "start": "460479",
+    "end": "465840"
+  },
+  {
+    "text": "the operational overhead to manage and grow their clusters was fairly High where most tenant operations",
+    "start": "465840",
+    "end": "473319"
+  },
+  {
+    "text": "required a multi-step run book uh let me give an example let's say a tenant want",
+    "start": "473319",
+    "end": "479599"
+  },
+  {
+    "text": "to grow into a new availability Zone um for context at Uber each kubernetes",
+    "start": "479599",
+    "end": "484919"
+  },
+  {
+    "text": "cluster is scoped to one AZ for blast radius reasons so let's say in a particular",
+    "start": "484919",
+    "end": "491680"
+  },
+  {
+    "text": "region we have three azs and Uber if infrastructure has set up Three",
+    "start": "491680",
+    "end": "497240"
+  },
+  {
+    "text": "A's a tenant is running in two of them and now wants to grow in the third one because there's a glut of capacity in",
+    "start": "497240",
+    "end": "502759"
+  },
+  {
+    "text": "third a and it wants to access it now what they would have to do is to",
+    "start": "502759",
+    "end": "508319"
+  },
+  {
+    "text": "reach out to multiple teams manually get their cluster set up their not pool set up all the resources they",
+    "start": "508319",
+    "end": "513440"
+  },
+  {
+    "text": "require set up before they could actually get access to that",
+    "start": "513440",
+    "end": "520159"
+  },
+  {
+    "text": "capacity another issue was uh efficiency of course we have the control",
+    "start": "520240",
+    "end": "525839"
+  },
+  {
+    "text": "plane overhead for every cluster but more than that the another issue was the free pool buffer so let me first Define",
+    "start": "525839",
+    "end": "532760"
+  },
+  {
+    "text": "what that means to minimize scheduling latency during scale of operations we",
+    "start": "532760",
+    "end": "537839"
+  },
+  {
+    "text": "always maintain some HSE in a free pool buffer and during scale up what we did is to merely move the hose from the free",
+    "start": "537839",
+    "end": "544480"
+  },
+  {
+    "text": "pool buffer into the appropriate note pool whoever needed it now due to the time it took to",
+    "start": "544480",
+    "end": "550200"
+  },
+  {
+    "text": "transfer machines between clusters we had to maintain a free pool buffer per tenant for each cluster rather than",
+    "start": "550200",
+    "end": "557040"
+  },
+  {
+    "text": "being able to maintain a much smaller shared free pool buffer so due to these reasons we looked",
+    "start": "557040",
+    "end": "564120"
+  },
+  {
+    "text": "for a different solution which could help reduce if not completely eliminate all these challenges and the solution we",
+    "start": "564120",
+    "end": "570320"
+  },
+  {
+    "text": "settled upon was a multi-tenant single cluster architecture in this solution we have one big giant kubernetes cluster",
+    "start": "570320",
+    "end": "577160"
+  },
+  {
+    "text": "and within that cluster all tenants decide they get their own name space and they go get their own dedicated note",
+    "start": "577160",
+    "end": "583120"
+  },
+  {
+    "text": "pool and there's a onetoone mapping between namespaces and node",
+    "start": "583120",
+    "end": "588399"
+  },
+  {
+    "text": "pools so when a node or a machine joins a node pool the cuet registers itself",
+    "start": "589480",
+    "end": "595320"
+  },
+  {
+    "text": "with the API server and when it does so it adds a label to the note object to identify which tenant does that node",
+    "start": "595320",
+    "end": "603200"
+  },
+  {
+    "text": "belong to now from a user point of view whenever they submit a workload they",
+    "start": "603200",
+    "end": "608519"
+  },
+  {
+    "text": "just they have to submit it to their namespace and when they do that the system automatically adds a node",
+    "start": "608519",
+    "end": "613920"
+  },
+  {
+    "text": "selector to ensure that the workload gets launched in on a note belonging to the",
+    "start": "613920",
+    "end": "620320"
+  },
+  {
+    "text": "tenants note pool now when we create a new a we",
+    "start": "620320",
+    "end": "627839"
+  },
+  {
+    "text": "always create this cluster because this cluster is also running the services to bootstrap the rest of the infrastructure",
+    "start": "627839",
+    "end": "633760"
+  },
+  {
+    "text": "so this cluster always exists so when this cluster exists we are going to create all the name spaces and note",
+    "start": "633760",
+    "end": "639959"
+  },
+  {
+    "text": "pools up front because if the cluster already exists there is zero CA to actually create these no spaces name",
+    "start": "639959",
+    "end": "645839"
+  },
+  {
+    "text": "spaces and not pools if they have zero capacity so we only pay when we add capacity to the note pool so what we do",
+    "start": "645839",
+    "end": "652880"
+  },
+  {
+    "text": "is that we create the cluster we create all the name spaces and note pool so that they are always available for use",
+    "start": "652880",
+    "end": "658360"
+  },
+  {
+    "text": "except that they have zero capacity now let's go back to the previous example of what happens when a",
+    "start": "658360",
+    "end": "664680"
+  },
+  {
+    "text": "tenant wants to grow into a new a right so what they would do is that they would",
+    "start": "664680",
+    "end": "670040"
+  },
+  {
+    "text": "just go and submit their workloads into their namespace in the new AZ the system would add a note selector",
+    "start": "670040",
+    "end": "677480"
+  },
+  {
+    "text": "which would force them to land on their own note pool but that note pool has zero capacity so the parts will be",
+    "start": "677480",
+    "end": "682560"
+  },
+  {
+    "text": "pending the cluster Autos Skiller will kick in it will see that pods are pending it will transfer machines from",
+    "start": "682560",
+    "end": "689320"
+  },
+  {
+    "text": "the free pool buffer into the tenant not pool and that's it the pods get placed and start running so from a user point",
+    "start": "689320",
+    "end": "697519"
+  },
+  {
+    "text": "of view after the initial onboarding of a tenant is complete in all scenarios We",
+    "start": "697519",
+    "end": "704200"
+  },
+  {
+    "text": "have replaced that multi-step manual run books which they used to have with the simple stop step of just submit your",
+    "start": "704200",
+    "end": "711240"
+  },
+  {
+    "text": "worklow to your namespace and that's it so everything else is taken care of by the infrastructure",
+    "start": "711240",
+    "end": "717800"
+  },
+  {
+    "text": "underneath so this was was a very high level and hopefully intuitive overview of the solution now I'm going to hand",
+    "start": "717800",
+    "end": "723360"
+  },
+  {
+    "text": "off to Shashank to talk about the intricacies of the design and also discuss some of the challenges we face",
+    "start": "723360",
+    "end": "729279"
+  },
+  {
+    "text": "while implementing and rolling out the solution thank",
+    "start": "729279",
+    "end": "733560"
+  },
+  {
+    "text": "you let me start with how we achieve access isolation we use native support provided",
+    "start": "734800",
+    "end": "741720"
+  },
+  {
+    "text": "by kubernetes in the form of rbags using rols and Ro bindings to restrict access",
+    "start": "741720",
+    "end": "748920"
+  },
+  {
+    "text": "to tenant specific resources only obviously now with a single cluster",
+    "start": "748920",
+    "end": "756120"
+  },
+  {
+    "text": "manageability and operational challenges mentioned prior are no longer an issue",
+    "start": "756120",
+    "end": "762600"
+  },
+  {
+    "text": "however the complexity Now lies in solving the control plane isolation we achieved this through a mix",
+    "start": "762600",
+    "end": "770000"
+  },
+  {
+    "text": "of native isolation support provided by kubernetes along with extended support",
+    "start": "770000",
+    "end": "776440"
+  },
+  {
+    "text": "for some API priority and fairness we configured tenant and user specific API",
+    "start": "776440",
+    "end": "784440"
+  },
+  {
+    "text": "rate limits using flow schemas so that we can assign requests and control the",
+    "start": "784440",
+    "end": "790920"
+  },
+  {
+    "text": "fair resource sharing and then we used priority settings for tenant where we configured",
+    "start": "790920",
+    "end": "798160"
+  },
+  {
+    "text": "concurrency shares and cues to ensure that each tenant only consumes a certain",
+    "start": "798160",
+    "end": "805000"
+  },
+  {
+    "text": "amount of the control plan resources we also refine them over time",
+    "start": "805000",
+    "end": "810279"
+  },
+  {
+    "text": "by monitoring their behavior Network policies we assigned",
+    "start": "810279",
+    "end": "815920"
+  },
+  {
+    "text": "each tenant a separate namespace and leverage the use of network policies to",
+    "start": "815920",
+    "end": "822040"
+  },
+  {
+    "text": "generally prevent cross namespace communication thereby effectively isolating tenants at the network",
+    "start": "822040",
+    "end": "829920"
+  },
+  {
+    "text": "layer we also provide support for configurable Network policies to enable",
+    "start": "829920",
+    "end": "836160"
+  },
+  {
+    "text": "cross namespace communication as and when needed",
+    "start": "836160",
+    "end": "841040"
+  },
+  {
+    "text": "scheduling we leverage the default scheduler with extended support for node",
+    "start": "841360",
+    "end": "846480"
+  },
+  {
+    "text": "specific labels however we do have a problem where scheduling cues are not namespace",
+    "start": "846480",
+    "end": "855199"
+  },
+  {
+    "text": "isolated we are trying to tackle this problem and we are open to",
+    "start": "855199",
+    "end": "860720"
+  },
+  {
+    "text": "ideas now let me talk about how we match capacity requirements of",
+    "start": "860800",
+    "end": "866880"
+  },
+  {
+    "text": "tenants we have two different components that together ensure the appropriate",
+    "start": "866880",
+    "end": "873040"
+  },
+  {
+    "text": "placement of workloads the Federation layer this is the tenant facing interface that the",
+    "start": "873040",
+    "end": "879759"
+  },
+  {
+    "text": "users interact with this has a global view of capacity",
+    "start": "879759",
+    "end": "885720"
+  },
+  {
+    "text": "allocated and are available for each tenant across all the",
+    "start": "885720",
+    "end": "891000"
+  },
+  {
+    "text": "as's the resource controller this generates the zonal",
+    "start": "891000",
+    "end": "896040"
+  },
+  {
+    "text": "capacity overview of each tenant it's a custom controller which",
+    "start": "896040",
+    "end": "901759"
+  },
+  {
+    "text": "calculates the total available and used capacity for each tenant Nam",
+    "start": "901759",
+    "end": "908079"
+  },
+  {
+    "text": "space we leverage native resource quoda object and Associated a on toone mapping",
+    "start": "908079",
+    "end": "915240"
+  },
+  {
+    "text": "for each tenant Nam space to provide a complete view the",
+    "start": "915240",
+    "end": "921199"
+  },
+  {
+    "text": "Federation layer asynchronously queries the zonal kubernetes Clusters to fetch",
+    "start": "921199",
+    "end": "928040"
+  },
+  {
+    "text": "the available capacity from the resource quota of each name space and then when placing a workload",
+    "start": "928040",
+    "end": "936120"
+  },
+  {
+    "text": "it picks the least loaded Zone in terms of CPU and memory allocation for that",
+    "start": "936120",
+    "end": "942600"
+  },
+  {
+    "text": "specific tenant this sums up how we achieve control plane",
+    "start": "942600",
+    "end": "949959"
+  },
+  {
+    "text": "isolation now let's move on to data plane isolation we primarily rely on node",
+    "start": "950000",
+    "end": "956279"
+  },
+  {
+    "text": "pools to achieve hard isolation of sharing resources across tenant",
+    "start": "956279",
+    "end": "962560"
+  },
+  {
+    "text": "workloads at the node level each tenant is associated with a",
+    "start": "962560",
+    "end": "967920"
+  },
+  {
+    "text": "dedicated node pool these node pools are one to one mapped to the corresponding",
+    "start": "967920",
+    "end": "973800"
+  },
+  {
+    "text": "tenant name spaces every node in the cluster is",
+    "start": "973800",
+    "end": "978839"
+  },
+  {
+    "text": "mapped to a node pool how is this achieved the cuet running on every node",
+    "start": "978839",
+    "end": "985839"
+  },
+  {
+    "text": "registers the node with a new node label specifying the tenant namespace as value",
+    "start": "985839",
+    "end": "992560"
+  },
+  {
+    "text": "of the label when registering with the API server there are multiple ways on how",
+    "start": "992560",
+    "end": "999399"
+  },
+  {
+    "text": "each cuet node identifies the name space to which it belongs one option is we are config",
+    "start": "999399",
+    "end": "1008120"
+  },
+  {
+    "text": "provided as environmental variable during the host provisioning process the",
+    "start": "1008120",
+    "end": "1013639"
+  },
+  {
+    "text": "other option is to call a metadata service that provides the needed",
+    "start": "1013639",
+    "end": "1020079"
+  },
+  {
+    "text": "info we chose the environmental variable option to reduce the number of online",
+    "start": "1020079",
+    "end": "1028199"
+  },
+  {
+    "text": "dependencies over the next few slides I will cover some of the custom components",
+    "start": "1028520",
+    "end": "1034600"
+  },
+  {
+    "text": "that help us in achieving full data plane isolation because of data plane",
+    "start": "1034600",
+    "end": "1041480"
+  },
+  {
+    "text": "isolation we now have multiple node pools that we need to manage per cluster",
+    "start": "1041480",
+    "end": "1047918"
+  },
+  {
+    "text": "rather than having one node pool per cluster as seen in the prior multicluster",
+    "start": "1047919",
+    "end": "1055039"
+  },
+  {
+    "text": "architecture this added more complexity into managing day-to-day operations like",
+    "start": "1055039",
+    "end": "1061520"
+  },
+  {
+    "text": "maintenance activities related to upgrades bados remediation",
+    "start": "1061520",
+    "end": "1067000"
+  },
+  {
+    "text": "Etc now one of the workflow I will cover here is node",
+    "start": "1067000",
+    "end": "1072799"
+  },
+  {
+    "text": "maintenance this is basically ensuring safe replacement of nodes to handle",
+    "start": "1072799",
+    "end": "1078360"
+  },
+  {
+    "text": "operations like kernel upgrades cubet upgrades or bad host remediation Etc so",
+    "start": "1078360",
+    "end": "1085400"
+  },
+  {
+    "text": "as to ensure the fleet of nodes are secure stable and performant all the",
+    "start": "1085400",
+    "end": "1092520"
+  },
+  {
+    "text": "time traditionally we Ed to allocate a percentage of the cluster to undergo",
+    "start": "1092520",
+    "end": "1099520"
+  },
+  {
+    "text": "maintenance at any point of time we call this internally as drain",
+    "start": "1099520",
+    "end": "1104600"
+  },
+  {
+    "text": "limit this was a cluster specific setting but now now we support tenant",
+    "start": "1104600",
+    "end": "1110840"
+  },
+  {
+    "text": "specific drain limits this is to ensure every tenant is",
+    "start": "1110840",
+    "end": "1116240"
+  },
+  {
+    "text": "isolated and we did not take Beyond a configured percentage of capacity away",
+    "start": "1116240",
+    "end": "1122240"
+  },
+  {
+    "text": "from the tenant we introduced an admission controller plug-in that validates every",
+    "start": "1122240",
+    "end": "1128919"
+  },
+  {
+    "text": "node maintenance request received by the API server this effectively verifies that",
+    "start": "1128919",
+    "end": "1136000"
+  },
+  {
+    "text": "the total number of nodes in maintenance for the tenant remains below the",
+    "start": "1136000",
+    "end": "1141480"
+  },
+  {
+    "text": "configured drain limit threshold again we use node labels to",
+    "start": "1141480",
+    "end": "1147520"
+  },
+  {
+    "text": "filter the nodes per tenant along with tains for detecting the nodes in",
+    "start": "1147520",
+    "end": "1155679"
+  },
+  {
+    "text": "maintenance often times when the allocation percentage of a cluster drops",
+    "start": "1155880",
+    "end": "1161919"
+  },
+  {
+    "text": "we use to reclaim certain capacity to increase our allocation efficiency",
+    "start": "1161919",
+    "end": "1168919"
+  },
+  {
+    "text": "there are several attributes like allocation percentage Max SP topology",
+    "start": "1168919",
+    "end": "1174320"
+  },
+  {
+    "text": "spread failure domain Etc that holistically determine the number of",
+    "start": "1174320",
+    "end": "1179960"
+  },
+  {
+    "text": "nodes that are safe to be returned this workflow is also modified",
+    "start": "1179960",
+    "end": "1186159"
+  },
+  {
+    "text": "to be tenant aware this ensured a similar validation check on returning nodes as what we have",
+    "start": "1186159",
+    "end": "1192600"
+  },
+  {
+    "text": "seen prior now the last component in the data plane isolation is the capacity",
+    "start": "1192600",
+    "end": "1200520"
+  },
+  {
+    "text": "autoscaler this is a global component that dynamically manages capacity across",
+    "start": "1200520",
+    "end": "1206880"
+  },
+  {
+    "text": "tenants and clusters in all the zones this is similar to the native kubernetes",
+    "start": "1206880",
+    "end": "1214080"
+  },
+  {
+    "text": "cluster autoscaler but with more complex logic so it validates demand what's a",
+    "start": "1214080",
+    "end": "1222240"
+  },
+  {
+    "text": "supply and dynamically adjust capacity according to the needs where it pulls in",
+    "start": "1222240",
+    "end": "1228720"
+  },
+  {
+    "text": "capacity when there are unscheduled parts and returns nodes when the",
+    "start": "1228720",
+    "end": "1234480"
+  },
+  {
+    "text": "allocation percentage drops below a certain percentage it internally maintains a",
+    "start": "1234480",
+    "end": "1241159"
+  },
+  {
+    "text": "small hot standby buffer pool of nodes to reduce the scheduling latency instead",
+    "start": "1241159",
+    "end": "1247640"
+  },
+  {
+    "text": "of provisioning everything on demand the inter node pool capacity",
+    "start": "1247640",
+    "end": "1254400"
+  },
+  {
+    "text": "swaps are now trivial with merely node label swap spping compared to the",
+    "start": "1254400",
+    "end": "1260520"
+  },
+  {
+    "text": "traditional reimaging workflow for cluster swaps as you can see in this diagram",
+    "start": "1260520",
+    "end": "1267960"
+  },
+  {
+    "text": "since we maintain all the node pools and namespaces config identical by pre-re",
+    "start": "1267960",
+    "end": "1274400"
+  },
+  {
+    "text": "them in all the zones the whole capacity scaling workflow is seamless and fast",
+    "start": "1274400",
+    "end": "1280919"
+  },
+  {
+    "text": "enough across the zones let me quickly recap how the user",
+    "start": "1280919",
+    "end": "1286200"
+  },
+  {
+    "text": "experience workflow would look like on a standard deploy when the user initiates the",
+    "start": "1286200",
+    "end": "1292840"
+  },
+  {
+    "text": "application deploy the Federation layer identifies the tenant namespace to which",
+    "start": "1292840",
+    "end": "1299120"
+  },
+  {
+    "text": "the application belongs it then creates a partspec object with the tenant namespace as the",
+    "start": "1299120",
+    "end": "1306159"
+  },
+  {
+    "text": "label in the not in the node selector field and then hands it over to the",
+    "start": "1306159",
+    "end": "1312159"
+  },
+  {
+    "text": "zonal control plane the zonal control plane filters all the nodes matching the",
+    "start": "1312159",
+    "end": "1317480"
+  },
+  {
+    "text": "specified name space node label scores the node and then picks the right top",
+    "start": "1317480",
+    "end": "1322720"
+  },
+  {
+    "text": "node and and assigns it now let me give you an update on the",
+    "start": "1322720",
+    "end": "1328600"
+  },
+  {
+    "text": "current production status of this single cluster architecture currently we have 100%",
+    "start": "1328600",
+    "end": "1336120"
+  },
+  {
+    "text": "migrated nearly 10 to 15 tenants to this new",
+    "start": "1336120",
+    "end": "1341720"
+  },
+  {
+    "text": "architecture we have reduced the overall clusters by 30%",
+    "start": "1341720",
+    "end": "1347200"
+  },
+  {
+    "text": "globally and we we plan to complete the 100% Migration by end of",
+    "start": "1347200",
+    "end": "1354120"
+  },
+  {
+    "text": "2025 now let me cover the aspects that worked well for us and those that",
+    "start": "1354120",
+    "end": "1359880"
+  },
+  {
+    "text": "remained challenging operational ease we have less number of clusters Now to turn up",
+    "start": "1359880",
+    "end": "1367360"
+  },
+  {
+    "text": "there aren't any custom binaries or configs for control plane components",
+    "start": "1367360",
+    "end": "1372480"
+  },
+  {
+    "text": "that we need to maintain scheduling we haven't seen any",
+    "start": "1372480",
+    "end": "1378039"
+  },
+  {
+    "text": "impact on scheduling latency even with tens of name spaces our pod binding rate",
+    "start": "1378039",
+    "end": "1384000"
+  },
+  {
+    "text": "is still identical with our multicluster architecture the capacity management",
+    "start": "1384000",
+    "end": "1390720"
+  },
+  {
+    "text": "with configs now being identical across zones adding and removing capacity has",
+    "start": "1390720",
+    "end": "1396600"
+  },
+  {
+    "text": "been seamless without the overhead of creating a cluster efficiency wise with a single",
+    "start": "1396600",
+    "end": "1405039"
+  },
+  {
+    "text": "control plane across tenants we reduce the control plane cost by tens of hosts",
+    "start": "1405039",
+    "end": "1411640"
+  },
+  {
+    "text": "per cluster effectively 3 to 4X per Zone we have a single standby buffer",
+    "start": "1411640",
+    "end": "1418440"
+  },
+  {
+    "text": "pool of hosts without the need for dedicated pool per tenent as per the",
+    "start": "1418440",
+    "end": "1423799"
+  },
+  {
+    "text": "prior architecture API priority and fairness we with that we have a good control over",
+    "start": "1423799",
+    "end": "1430880"
+  },
+  {
+    "text": "resource contention preventing cross tenant impact now let's talk about the",
+    "start": "1430880",
+    "end": "1436760"
+  },
+  {
+    "text": "interesting challenges firstly there is no native support for a node object to",
+    "start": "1436760",
+    "end": "1442880"
+  },
+  {
+    "text": "be namespaced we ended up managing the node life cycle with custom controllers",
+    "start": "1442880",
+    "end": "1449240"
+  },
+  {
+    "text": "so as to ensure the correctness of the bindings V belt monitoring around",
+    "start": "1449240",
+    "end": "1455600"
+  },
+  {
+    "text": "detection of these wrong bindings and then we needed to aggregate resource quotas per node pools we even managed",
+    "start": "1455600",
+    "end": "1463960"
+  },
+  {
+    "text": "node remediation workflows with custom drain configurations pertinent as mentioned in the previous",
+    "start": "1463960",
+    "end": "1470960"
+  },
+  {
+    "text": "slides let me cover the remaining challenges in the upcoming slides scheduler",
+    "start": "1470960",
+    "end": "1478039"
+  },
+  {
+    "text": "isolation well there is no native support for scheduler isolation a bad",
+    "start": "1478039",
+    "end": "1483399"
+  },
+  {
+    "text": "tenant could merely impact or starve the scheduling latency of other tenant",
+    "start": "1483399",
+    "end": "1490640"
+  },
+  {
+    "text": "workloads there are no pertinent scheduling cues since nodes aren",
+    "start": "1490640",
+    "end": "1495679"
+  },
+  {
+    "text": "namespace there isn't an easy way to filter nodes some of the options that we are",
+    "start": "1495679",
+    "end": "1502640"
+  },
+  {
+    "text": "exploring include active active scheduler basically the idea here is we",
+    "start": "1502640",
+    "end": "1508080"
+  },
+  {
+    "text": "wanted to sh scheduler instances by tenant and have the corresponding instance actively schedule the",
+    "start": "1508080",
+    "end": "1515679"
+  },
+  {
+    "text": "designated tenants the idea is to ensure critical tenants get a dedicated",
+    "start": "1515679",
+    "end": "1521880"
+  },
+  {
+    "text": "scheduler instance another option includes enforcing pertinent schedule in",
+    "start": "1521880",
+    "end": "1528600"
+  },
+  {
+    "text": "use and have scheduler adere to tenant based priority similar to APF",
+    "start": "1528600",
+    "end": "1535200"
+  },
+  {
+    "text": "model of course any suggestions are",
+    "start": "1535200",
+    "end": "1539720"
+  },
+  {
+    "text": "welcome now the last challenge we have is the bootstrap clusters these are responsible for bringing up the lowlevel",
+    "start": "1540320",
+    "end": "1548080"
+  },
+  {
+    "text": "infrastructure components that are necessary for the regular clusters to operate the overhead in managing these",
+    "start": "1548080",
+    "end": "1554880"
+  },
+  {
+    "text": "bootstrap clusters is quite significant on top of the regular clusters as the",
+    "start": "1554880",
+    "end": "1560799"
+  },
+  {
+    "text": "number of zones are increasing these components namely the",
+    "start": "1560799",
+    "end": "1565960"
+  },
+  {
+    "text": "infra Services can be primarily categorized as native core compute",
+    "start": "1565960",
+    "end": "1571520"
+  },
+  {
+    "text": "components like API server scheduler and control",
+    "start": "1571520",
+    "end": "1576679"
+  },
+  {
+    "text": "manager and other components include custom controllers observability stag",
+    "start": "1576679",
+    "end": "1582080"
+  },
+  {
+    "text": "components software networking components Etc the idea that we have implemented is",
+    "start": "1582080",
+    "end": "1588360"
+  },
+  {
+    "text": "to introduce a new tenant namely a bootstrap tenant in the regular clusters",
+    "start": "1588360",
+    "end": "1594080"
+  },
+  {
+    "text": "that is responsible for bringing up majority of the infra components excluding the core compute components",
+    "start": "1594080",
+    "end": "1601880"
+  },
+  {
+    "text": "and then we plan to have a bootstrap light layer to bring up the core",
+    "start": "1601880",
+    "end": "1607520"
+  },
+  {
+    "text": "components this will not completely eliminate the need for an other cluster",
+    "start": "1607520",
+    "end": "1612880"
+  },
+  {
+    "text": "but at least reduces a significant overhead that we observed at Uber",
+    "start": "1612880",
+    "end": "1618399"
+  },
+  {
+    "text": "lastly I would like to thank all the members of various teams at Uber who helped in this",
+    "start": "1618399",
+    "end": "1624760"
+  },
+  {
+    "text": "journey thank",
+    "start": "1624760",
+    "end": "1627960"
+  },
+  {
+    "text": "[Applause] you uh thanks guys that was an excellent",
+    "start": "1632310",
+    "end": "1638520"
+  },
+  {
+    "text": "talk I think you guys have a very clever solution to uh multi- tendency I certainly haven't seen that model before",
+    "start": "1638520",
+    "end": "1645760"
+  },
+  {
+    "text": "uh it looks like because you're uh your tenants are able to work entirely within",
+    "start": "1645760",
+    "end": "1651159"
+  },
+  {
+    "text": "an namespace I'm assuming they're not needing to deploy crds or cluster rols or they're not deploying Helm charts",
+    "start": "1651159",
+    "end": "1656919"
+  },
+  {
+    "text": "that include those things have you bumped into challenges with your customers where they've asked for those",
+    "start": "1656919",
+    "end": "1662760"
+  },
+  {
+    "text": "sorts of things and how do you handle those situations that's a great question so um if a tenant wants a crd I mean we",
+    "start": "1662760",
+    "end": "1670559"
+  },
+  {
+    "text": "own and operate the crd not the tenant um and the crd is available to all",
+    "start": "1670559",
+    "end": "1676200"
+  },
+  {
+    "text": "tenants but the custom sources they create will be namespace coped and will be available only within that namespace",
+    "start": "1676200",
+    "end": "1682120"
+  },
+  {
+    "text": "for that tenant but the crd is not name namespace coped right thank",
+    "start": "1682120",
+    "end": "1687760"
+  },
+  {
+    "text": "you and maybe my turn good talk thank you uh can you speak to the scalability",
+    "start": "1687760",
+    "end": "1693279"
+  },
+  {
+    "text": "how many name spaces do you think this will scale",
+    "start": "1693279",
+    "end": "1699480"
+  },
+  {
+    "text": "to if I understand correctly you're asking about the number of name spaces that this model can scale to yeah yeah I",
+    "start": "1699480",
+    "end": "1705720"
+  },
+  {
+    "text": "mean currently we have around like uh hundreds of Nam space that we are trying to Target and our initial results does",
+    "start": "1705720",
+    "end": "1712760"
+  },
+  {
+    "text": "not I mean seem like anything out of the box it seems to be scalable um but we",
+    "start": "1712760",
+    "end": "1718039"
+  },
+  {
+    "text": "haven't tested Beyond 100 so I'm assuming you mean scalability in terms of API server and schedular scalability",
+    "start": "1718039",
+    "end": "1724080"
+  },
+  {
+    "text": "and we benchmarked and we didn't see as Shashank said we didn't see any impact okay and then the second question when",
+    "start": "1724080",
+    "end": "1730360"
+  },
+  {
+    "text": "you say note pool are you talking about the carpenter definition of Noe pool or something else that's a good question",
+    "start": "1730360",
+    "end": "1737200"
+  },
+  {
+    "text": "yeah we are current not using any cloud provider for our kubernetes cluster Turner but the nopull is something that",
+    "start": "1737200",
+    "end": "1743679"
+  },
+  {
+    "text": "you can correlate with what you see with the cloud providers so we have an internal group of nodes that is what we",
+    "start": "1743679",
+    "end": "1750320"
+  },
+  {
+    "text": "call at Uber as host group that is what we call here as nopol it's a it's a onet to one what you can think about what a",
+    "start": "1750320",
+    "end": "1756880"
+  },
+  {
+    "text": "node pull is so please keep in mind that we have on Prem data centers so we can't",
+    "start": "1756880",
+    "end": "1761919"
+  },
+  {
+    "text": "really you know like we have to like fall back to the lowest common denominator which is uh on Prem so we",
+    "start": "1761919",
+    "end": "1769840"
+  },
+  {
+    "text": "can't really use um any of such Cloud abstractions like not pool so we defined our own not poool which as sh say was",
+    "start": "1769840",
+    "end": "1776799"
+  },
+  {
+    "text": "group and that's what we use even in the cloud itself yeah makes sense",
+    "start": "1776799",
+    "end": "1781960"
+  },
+  {
+    "text": "thanks yeah uh my question was on kind of the tenant model um with the one toone mapping um if a tenant wanted to",
+    "start": "1781960",
+    "end": "1789679"
+  },
+  {
+    "text": "like write a platform that maybe other teams are developers use would they have to implement their own isolation",
+    "start": "1789679",
+    "end": "1795080"
+  },
+  {
+    "text": "mechanism or is this just not like a supported model yeah that's a great question so um as uh I think in one of",
+    "start": "1795080",
+    "end": "1802440"
+  },
+  {
+    "text": "the slides M shank saw there so for every tenant there is a federation layer which they come through and the user",
+    "start": "1802440",
+    "end": "1808640"
+  },
+  {
+    "text": "isolation happens at the at the Federation layer and not at the cluster layer so cluster layer you get a get",
+    "start": "1808640",
+    "end": "1814000"
+  },
+  {
+    "text": "your own um namespace U multiple tenants like up for stateless microservices they",
+    "start": "1814000",
+    "end": "1820039"
+  },
+  {
+    "text": "implement the isolation at the user level in up itself and some of them",
+    "start": "1820039",
+    "end": "1825120"
+  },
+  {
+    "text": "actually use namespaces to divide within themselves but uh that's outside the kubernetes",
+    "start": "1825120",
+    "end": "1831720"
+  },
+  {
+    "text": "cluster uh I had a followup on the same question so how large as a tenant in",
+    "start": "1831919",
+    "end": "1837600"
+  },
+  {
+    "text": "your definition because wouldn't having many tenants lead to effectively poor resource utilization on the nodes so um",
+    "start": "1837600",
+    "end": "1845880"
+  },
+  {
+    "text": "so we have different kinds of tenants um some tenants are pretty large right uh for example all stateless micro Services",
+    "start": "1845880",
+    "end": "1852440"
+  },
+  {
+    "text": "kind of constitute one tenant and that's pretty big the smaller tenants um I I",
+    "start": "1852440",
+    "end": "1857760"
+  },
+  {
+    "text": "think like you're thinking in terms of fragmentation that because of fragmentation uh the resource utilization can potentially go down and",
+    "start": "1857760",
+    "end": "1863799"
+  },
+  {
+    "text": "yes that is correct uh it can potentially go down but most of our tenants which suffer from fragmentation",
+    "start": "1863799",
+    "end": "1870279"
+  },
+  {
+    "text": "are large enough the tenants which are small tend to either use the complete machine for themselves or we kind of",
+    "start": "1870279",
+    "end": "1878880"
+  },
+  {
+    "text": "customize the hardware which we give them um to make sure that they get good",
+    "start": "1878880",
+    "end": "1884919"
+  },
+  {
+    "text": "utilization slash like don't suffer from fragmentation and just to follow up like the one thing",
+    "start": "1884919",
+    "end": "1891279"
+  },
+  {
+    "text": "if you have a tenant for all microservices how do you like you we talk about like P preemption and things",
+    "start": "1891279",
+    "end": "1897720"
+  },
+  {
+    "text": "like that so how do you worry about like Noisy Neighbor if all micros service in the same tenant and they're sharing",
+    "start": "1897720",
+    "end": "1903679"
+  },
+  {
+    "text": "that's that's that's correct right so basically there are a set of services which act as both noisy neighbors as",
+    "start": "1903679",
+    "end": "1909519"
+  },
+  {
+    "text": "well as are susceptible to noisy neighbors they get their own tenants so uh so they are there in their own tenant",
+    "start": "1909519",
+    "end": "1915600"
+  },
+  {
+    "text": "space and again like the way we work across is that we know like how much is the vertical size they need and we kind",
+    "start": "1915600",
+    "end": "1921480"
+  },
+  {
+    "text": "of get a VM which kind of matches um you know their requirement so that's how we",
+    "start": "1921480",
+    "end": "1926880"
+  },
+  {
+    "text": "optimize for fragmentation for them um the number is not very large but like",
+    "start": "1926880",
+    "end": "1932120"
+  },
+  {
+    "text": "there are a few which belongs to that category thank you my question is do you",
+    "start": "1932120",
+    "end": "1937279"
+  },
+  {
+    "text": "do right sizing within the Zone like when a when you bring up a new Zone the zone is obviously empty do you like",
+    "start": "1937279",
+    "end": "1943360"
+  },
+  {
+    "text": "automat do you try to right size it CD instance count or API show instance count or you just let them be the same",
+    "start": "1943360",
+    "end": "1949159"
+  },
+  {
+    "text": "and so we we don't try to right siize atcd or API server um because like it's",
+    "start": "1949159",
+    "end": "1954200"
+  },
+  {
+    "text": "just five machines so we just scheduled them to accommodate for the largest Zone",
+    "start": "1954200",
+    "end": "1959519"
+  },
+  {
+    "text": "most of our zones um again because of blast radius reasons are kind of equally size between 10 to 20% of a region um",
+    "start": "1959519",
+    "end": "1967760"
+  },
+  {
+    "text": "even though we may not get buy that capacity of front um they increase in",
+    "start": "1967760",
+    "end": "1973080"
+  },
+  {
+    "text": "size um to uh you know account and we have fairly like we have fairly",
+    "start": "1973080",
+    "end": "1978760"
+  },
+  {
+    "text": "sophisticated a lot of Engineers who basically do capacity projections based on the trip growth and uh we kind of",
+    "start": "1978760",
+    "end": "1986600"
+  },
+  {
+    "text": "account for the capacity increase of front and like build the zones and Etc like quite in advance and so we don't",
+    "start": "1986600",
+    "end": "1993960"
+  },
+  {
+    "text": "try to right siize the control plane according to Zone thank you hey I was",
+    "start": "1993960",
+    "end": "1999240"
+  },
+  {
+    "text": "wondering like uh how did you guys do a network isolation between the 10s yeah so that is something that we",
+    "start": "1999240",
+    "end": "2005679"
+  },
+  {
+    "text": "are actively looking into we are using cni based IP per pod but our current",
+    "start": "2005679",
+    "end": "2011679"
+  },
+  {
+    "text": "model is we have our own implementation of the uh discovery of the network routes so that is something that's",
+    "start": "2011679",
+    "end": "2018240"
+  },
+  {
+    "text": "coming in uh 2025 yeah to be like to add to it like so we have our own service Discovery layer which is different from",
+    "start": "2018240",
+    "end": "2025039"
+  },
+  {
+    "text": "uh IP per host model so uh every basically it's a host IP and then we",
+    "start": "2025039",
+    "end": "2030200"
+  },
+  {
+    "text": "have um uh we have a system which basically does the uh service discovery",
+    "start": "2030200",
+    "end": "2035480"
+  },
+  {
+    "text": "which implements service Discovery um the that particular component is also",
+    "start": "2035480",
+    "end": "2041559"
+  },
+  {
+    "text": "Nam space aware and has allows for policies to kind of do isolation Okay",
+    "start": "2041559",
+    "end": "2047000"
+  },
+  {
+    "text": "and uh I have one more question so for the node isolation you mentioned about custom controllers right I was wondering",
+    "start": "2047000",
+    "end": "2052440"
+  },
+  {
+    "text": "like is it any open source ones or like a customerly return for Uber yeah currently they're not open-",
+    "start": "2052440",
+    "end": "2058040"
+  },
+  {
+    "text": "sourced um they are within Uber at the moment uh in 2025 we can consider doing",
+    "start": "2058040",
+    "end": "2063878"
+  },
+  {
+    "text": "it because we are doing some some kind of enhancements on top of it but yes yes we will eventually try to open source",
+    "start": "2063879",
+    "end": "2070040"
+  },
+  {
+    "text": "them if you have a specific use case in mind please like let's talk after to see uh you know what because I don't think",
+    "start": "2070040",
+    "end": "2076560"
+  },
+  {
+    "text": "like if you need the entire system as open source or there specific components in it so we can discuss offline sure",
+    "start": "2076560",
+    "end": "2082679"
+  },
+  {
+    "text": "thank so I two parts to the question the first is how many tenants are you managing here so just in a raw number",
+    "start": "2082679",
+    "end": "2090079"
+  },
+  {
+    "text": "and do you have tenants outside the Uber you know kind of world or are there only",
+    "start": "2090079",
+    "end": "2095280"
+  },
+  {
+    "text": "inside the Uber world so so tenants only inside the Uber workload like so there",
+    "start": "2095280",
+    "end": "2100400"
+  },
+  {
+    "text": "is no external software like so we don't have to worry about running external third party software in our clust um",
+    "start": "2100400",
+    "end": "2106839"
+  },
+  {
+    "text": "number of tenants yeah right now uh we have around uh in the order of like 50",
+    "start": "2106839",
+    "end": "2112920"
+  },
+  {
+    "text": "to 100 tenants that we have all the way from products to um you know infra level",
+    "start": "2112920",
+    "end": "2118520"
+  },
+  {
+    "text": "stuff again these tenants are different from the the SAS kind of tenants that we were trying to mention um so right now",
+    "start": "2118520",
+    "end": "2125760"
+  },
+  {
+    "text": "uh we we have migrated like 10 to 20 that I've mentioned in the previous like currently into this new",
+    "start": "2125760",
+    "end": "2132000"
+  },
+  {
+    "text": "architecture and we have benchmarked for nearly like hundreds of tenants and we don't see any uh impact and and are the",
+    "start": "2132000",
+    "end": "2139079"
+  },
+  {
+    "text": "tenants Broken Out by business you know you mentioned products so I can Envision",
+    "start": "2139079",
+    "end": "2144760"
+  },
+  {
+    "text": "you know billing booking you know that sort of thing is that kind of how the tenants are broken up no not necessarily",
+    "start": "2144760",
+    "end": "2151040"
+  },
+  {
+    "text": "so it depends on use case to use case there are some tenants which have actually security concerns and they need to be isolated because of them uh so",
+    "start": "2151040",
+    "end": "2158119"
+  },
+  {
+    "text": "that number is fairly small like two tenants belong to that category um most",
+    "start": "2158119",
+    "end": "2163440"
+  },
+  {
+    "text": "of the use cases are around things like noisy neighbors wanting special Hardware um latency sensitive latency",
+    "start": "2163440",
+    "end": "2171520"
+  },
+  {
+    "text": "sensitive things like that so they get categorized into their own tenants and it's a mixture of um and also like uh so",
+    "start": "2171520",
+    "end": "2179480"
+  },
+  {
+    "text": "for example machine work machine learning workloads are their own tenant jobs is their own tenant um unless they",
+    "start": "2179480",
+    "end": "2185839"
+  },
+  {
+    "text": "want like some of them can be collocated um with for example the stateless services to kind of make use of the idle",
+    "start": "2185839",
+    "end": "2193160"
+  },
+  {
+    "text": "capacity in stateless so some of the machine learning workloads actually run in the stateless name space but like uh",
+    "start": "2193160",
+    "end": "2199319"
+  },
+  {
+    "text": "most of them run as their own tenant thank you uh we can we can take more",
+    "start": "2199319",
+    "end": "2204359"
+  },
+  {
+    "text": "questions offline okay thank you [Applause]",
+    "start": "2204359",
+    "end": "2213159"
+  }
+]

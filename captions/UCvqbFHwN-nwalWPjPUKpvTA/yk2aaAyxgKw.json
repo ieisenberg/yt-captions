@@ -1,0 +1,1647 @@
+[
+  {
+    "text": "name is Danny Clark I'm a software engineer at Google working on cloud monitoring specifically helping to build out Google",
+    "start": "0",
+    "end": "6480"
+  },
+  {
+    "text": "Cloud managed service for Prometheus Google Cloud's managed Prometheus offering",
+    "start": "6480",
+    "end": "12780"
+  },
+  {
+    "text": "in general I'm an avid geek for observability tools distributed systems and all things Cloud native",
+    "start": "12780",
+    "end": "18480"
+  },
+  {
+    "text": "and you can reach me on Twitter and GitHub at Pinto Hutch",
+    "start": "18480",
+    "end": "23599"
+  },
+  {
+    "text": "here's an outline of what we'll be going over today first I'll give a background into conventional ways to scale Prometheus",
+    "start": "24539",
+    "end": "30660"
+  },
+  {
+    "text": "today then I'll go into the trade-offs that we were making when we were analyzing those",
+    "start": "30660",
+    "end": "35880"
+  },
+  {
+    "text": "scenarios when setting out to build a managed service I'll then go into the finer details of",
+    "start": "35880",
+    "end": "41700"
+  },
+  {
+    "text": "our operator-based approach and custom resources and conclude with some future direction of the project",
+    "start": "41700",
+    "end": "48680"
+  },
+  {
+    "text": "some prerequisites for the audience you've run and configured Prometheus before even if only a little bit",
+    "start": "50460",
+    "end": "57539"
+  },
+  {
+    "text": "and you have some familiarity with kubernetes custom resource definitions or crds and the operator pattern",
+    "start": "57539",
+    "end": "66320"
+  },
+  {
+    "text": "so what is Prometheus specifically the Prometheus server it's a metrics-based monitoring and alerting Tool and what",
+    "start": "68040",
+    "end": "74700"
+  },
+  {
+    "text": "it's really good at what it was built to do was to be deployed as a single process running as a single server",
+    "start": "74700",
+    "end": "81060"
+  },
+  {
+    "text": "running alongside your workloads specifically tailored to monitor live",
+    "start": "81060",
+    "end": "87240"
+  },
+  {
+    "text": "numeric metric data through polling or scraping and by live I mean persistence on the",
+    "start": "87240",
+    "end": "93479"
+  },
+  {
+    "text": "order of weeks as opposed to months or years of data larger instances can be scaled pretty",
+    "start": "93479",
+    "end": "100259"
+  },
+  {
+    "text": "well via fine-tuning but what Prometheus is not at least out of the box is",
+    "start": "100259",
+    "end": "105299"
+  },
+  {
+    "text": "scalable long-term storage I like to think of Prometheus more like a traditional postgres database running",
+    "start": "105299",
+    "end": "111840"
+  },
+  {
+    "text": "on a single node in your cluster as opposed to something like Cassandra running on a fleet of nodes doing talks",
+    "start": "111840",
+    "end": "118380"
+  },
+  {
+    "text": "over the network and at this point it's really become a ubiquitous for metrics infrastructure in",
+    "start": "118380",
+    "end": "124680"
+  },
+  {
+    "text": "kubernetes in fact kubernetes components themselves use Prometheus to metrics format for their monitoring",
+    "start": "124680",
+    "end": "131899"
+  },
+  {
+    "text": "so how do we deploy Prometheus on kubernetes today we use Prometheus operators that de facto standard it's",
+    "start": "133379",
+    "end": "139319"
+  },
+  {
+    "text": "battle tested foundational was one of the first kubernetes operators and how most people tend to deploy",
+    "start": "139319",
+    "end": "145920"
+  },
+  {
+    "text": "Prometheus operators using the cube Prometheus stack which gives you a Soup To Nuts monitoring infrastructure in",
+    "start": "145920",
+    "end": "151440"
+  },
+  {
+    "text": "your cluster specifically Prometheus operator AJ Prometheus ha alert manager",
+    "start": "151440",
+    "end": "156900"
+  },
+  {
+    "text": "some grafana dashboarding common metrics exporters like Cube State metrics node exporter Etc",
+    "start": "156900",
+    "end": "164040"
+  },
+  {
+    "text": "as well as some recommended Prometheus recording and alerting rules and all that data",
+    "start": "164040",
+    "end": "170300"
+  },
+  {
+    "text": "so let's go over what this looks like from the user's perspective today I've installed Prometheus operator on my",
+    "start": "171180",
+    "end": "176400"
+  },
+  {
+    "text": "kubernetes cluster I then have my Prometheus custom resource in this case Prometheus a",
+    "start": "176400",
+    "end": "183660"
+  },
+  {
+    "text": "I've given it a replica of one just to have a single server and I've used a service monitor selector to match the",
+    "start": "183660",
+    "end": "190140"
+  },
+  {
+    "text": "workloads of one two three and four to configure scraping",
+    "start": "190140",
+    "end": "194659"
+  },
+  {
+    "text": "I apply this to my cluster the operator then sees that and reconciles that into a live Prometheus server running in the",
+    "start": "195420",
+    "end": "202200"
+  },
+  {
+    "text": "cluster configured to scrape those workloads pretty simple",
+    "start": "202200",
+    "end": "207739"
+  },
+  {
+    "text": "so this works pretty well for small to mid-size clusters but when we talk about scaling Prometheus we typically see that",
+    "start": "209700",
+    "end": "216599"
+  },
+  {
+    "text": "Ram is the bottleneck pretty quickly some official Benchmark numbers from the",
+    "start": "216599",
+    "end": "222120"
+  },
+  {
+    "text": "website consuming four million time series at a throughput of a hundred thousand samples",
+    "start": "222120",
+    "end": "227400"
+  },
+  {
+    "text": "per second we see usage somewhere in the realm of four cores and 25 gigs of RAM",
+    "start": "227400",
+    "end": "232980"
+  },
+  {
+    "text": "so what this might look like on a real production environment is say you're running 100 node kubernetes cluster with",
+    "start": "232980",
+    "end": "238200"
+  },
+  {
+    "text": "30 PODS of node each pod is emitting thousand times series and you're scraping every 30 seconds your",
+    "start": "238200",
+    "end": "243299"
+  },
+  {
+    "text": "Prometheus server might be chewing up resources in this realm to fix this well we could dedicate a",
+    "start": "243299",
+    "end": "249659"
+  },
+  {
+    "text": "monitoring node pool for our Prometheus server give it 32 gigs of memory and call it a day",
+    "start": "249659",
+    "end": "255900"
+  },
+  {
+    "text": "but what happens when we need more memory what happens when our workloads start to grow our metrics data starts to",
+    "start": "255900",
+    "end": "261299"
+  },
+  {
+    "text": "compound well we can vertically scale but this obviously has practical limits and",
+    "start": "261299",
+    "end": "266940"
+  },
+  {
+    "text": "requires constant observation to ensure that you're not redlining your resources",
+    "start": "266940",
+    "end": "272600"
+  },
+  {
+    "text": "what about horizontally scaling how does that work so the idea with horizontally scaling",
+    "start": "272880",
+    "end": "279540"
+  },
+  {
+    "text": "Prometheus is to logically Shard your scrape targets by deploying multiple Prometheus servers",
+    "start": "279540",
+    "end": "286620"
+  },
+  {
+    "text": "specifically we manually spread split out the scrape configs to select subsets",
+    "start": "286620",
+    "end": "291720"
+  },
+  {
+    "text": "of our total Target space so on the left I have a monolithic",
+    "start": "291720",
+    "end": "297960"
+  },
+  {
+    "text": "Prometheus server configured to scrape all workloads in the cluster I then break that into Prometheus a and",
+    "start": "297960",
+    "end": "304199"
+  },
+  {
+    "text": "Prometheus B on the right such that Prometheus a is scraping workloads one two and Prometheus B workloads three and",
+    "start": "304199",
+    "end": "310380"
+  },
+  {
+    "text": "four how do I do this with Prometheus operator",
+    "start": "310380",
+    "end": "317419"
+  },
+  {
+    "text": "instead of one custom resource I now have two Prometheus a using the service monitor selector I'm scraping workloads",
+    "start": "317460",
+    "end": "323820"
+  },
+  {
+    "text": "one and two and Prometheus B three and four I'm also giving it a replica count of",
+    "start": "323820",
+    "end": "328860"
+  },
+  {
+    "text": "two to demonstrate some ha I applied these to my cluster the operator sees those and reconciles that",
+    "start": "328860",
+    "end": "335520"
+  },
+  {
+    "text": "into two instances of Prometheus each configured to scrape their respective workloads",
+    "start": "335520",
+    "end": "341419"
+  },
+  {
+    "text": "but there's a problem here in order to query metric data that I care about I need to know which",
+    "start": "345479",
+    "end": "351180"
+  },
+  {
+    "text": "Prometheus server a given metric resides on now this might not be a big problem if",
+    "start": "351180",
+    "end": "357720"
+  },
+  {
+    "text": "we're talking about two Prometheus servers but when it grows beyond a handful of servers this quickly becomes cumbersome",
+    "start": "357720",
+    "end": "364500"
+  },
+  {
+    "text": "so it really behooves us to have a single pane of glass for querying a single entry point to run prompt ql",
+    "start": "364500",
+    "end": "371419"
+  },
+  {
+    "text": "what are the fixes for this well we could Federate and a federation setup we have parent Prometheus servers that are",
+    "start": "372900",
+    "end": "379680"
+  },
+  {
+    "text": "continuously scraping child servers in a tree-like structure against their Federate endpoint",
+    "start": "379680",
+    "end": "385380"
+  },
+  {
+    "text": "as they're scraping that data they're collecting it and aggregating it and moving it up to the next level of the tree",
+    "start": "385380",
+    "end": "391620"
+  },
+  {
+    "text": "you can picture this tree kind of growing and morphing to suit your infrastructure needs",
+    "start": "391620",
+    "end": "397080"
+  },
+  {
+    "text": "your query entry point would then point at the root or the roots of that tree and you would essentially have a global view of your data",
+    "start": "397080",
+    "end": "404900"
+  },
+  {
+    "text": "the downside here is wrangling deployment to configuration it's not trivial to ensure that all your servers",
+    "start": "405960",
+    "end": "411240"
+  },
+  {
+    "text": "are properly talking to each other and scraping and aggregating the right data so we'll want to probably have some",
+    "start": "411240",
+    "end": "416400"
+  },
+  {
+    "text": "Specialists or a team to to maintain this infrastructure",
+    "start": "416400",
+    "end": "421160"
+  },
+  {
+    "text": "you could also use remote read and in a remote read setup as Central Prometheus server at query time pulls in all that",
+    "start": "423360",
+    "end": "429900"
+  },
+  {
+    "text": "data as opposed to setting up a Federated tree",
+    "start": "429900",
+    "end": "434660"
+  },
+  {
+    "text": "the downside here is there's currently no support for query push down so larger queries could be potentially pulling in",
+    "start": "435600",
+    "end": "441240"
+  },
+  {
+    "text": "gigs of data over the network where you're extra susceptible to things like Network failures maybe some Ingress",
+    "start": "441240",
+    "end": "446639"
+  },
+  {
+    "text": "policies that prevent you from doing that so again we find ourselves in a situation where we need to dedicate some",
+    "start": "446639",
+    "end": "451979"
+  },
+  {
+    "text": "sres to the task of maintaining this infrastructure maybe introducing a caching layer for for client-side",
+    "start": "451979",
+    "end": "458099"
+  },
+  {
+    "text": "aggregation or something like that",
+    "start": "458099",
+    "end": "461419"
+  },
+  {
+    "text": "we could also use Thanos and Thanos works pretty well for this configuration it was built to solve this exact problem",
+    "start": "463440",
+    "end": "470580"
+  },
+  {
+    "text": "of scaling Prometheus Thanos is supported in Prometheus operator through the Prometheus custom",
+    "start": "470580",
+    "end": "476759"
+  },
+  {
+    "text": "resource and deploys the Sidecar you could then deploy deploy the Thanos",
+    "start": "476759",
+    "end": "482340"
+  },
+  {
+    "text": "queer component using a stack like Cube Thanos marry those two on your kubernetes",
+    "start": "482340",
+    "end": "487380"
+  },
+  {
+    "text": "cluster and you essentially have a functioning Thanos stack but you can see from the architecture",
+    "start": "487380",
+    "end": "493500"
+  },
+  {
+    "text": "diagram this isn't a trivial setup you'll again want to have some people that know what they're doing a team of",
+    "start": "493500",
+    "end": "499560"
+  },
+  {
+    "text": "Specialists to maintain this infrastructure and set you up to scale",
+    "start": "499560",
+    "end": "504560"
+  },
+  {
+    "text": "finally we have remote right in a remote rights situation we have each Prometheus server forwarding their metrics data off",
+    "start": "507360",
+    "end": "513539"
+  },
+  {
+    "text": "to some centralized Global back end over the network the downside here is maintaining that",
+    "start": "513539",
+    "end": "519839"
+  },
+  {
+    "text": "persistent and scalable back end is non-trivial additionally remote right uses around 25",
+    "start": "519839",
+    "end": "526260"
+  },
+  {
+    "text": "more memory than a standard Prometheus server now a fix here could be using the new Prometheus agent mode which uses",
+    "start": "526260",
+    "end": "532320"
+  },
+  {
+    "text": "much less resources at the trade-off of not having all the features of the traditional Prometheus server like local",
+    "start": "532320",
+    "end": "538019"
+  },
+  {
+    "text": "storage or querying",
+    "start": "538019",
+    "end": "540980"
+  },
+  {
+    "text": "so there's a fundamental problem with all these approaches and the need to rebalance shards and what I mean by that is specifically",
+    "start": "543420",
+    "end": "550140"
+  },
+  {
+    "text": "with Federation and remote read where each Prometheus server is maintaining State Once A Shard contains data it",
+    "start": "550140",
+    "end": "555959"
+  },
+  {
+    "text": "stays there scaling or rebalancing shards is a manual process and would require some",
+    "start": "555959",
+    "end": "563220"
+  },
+  {
+    "text": "manual orchestration maybe some back filling",
+    "start": "563220",
+    "end": "568440"
+  },
+  {
+    "text": "with Thanos and remote right where we're shipping our data off to a back end whether it be a blob store or a database",
+    "start": "568440",
+    "end": "573800"
+  },
+  {
+    "text": "we're still susceptible to being becoming overwhelmed at scrape time particularly in large scale",
+    "start": "573800",
+    "end": "580519"
+  },
+  {
+    "text": "Dynamic environments like large kubernetes and clusters where we have workloads that are scaling up coming and",
+    "start": "580519",
+    "end": "586380"
+  },
+  {
+    "text": "going as workloads do in kubernetes clusters",
+    "start": "586380",
+    "end": "591560"
+  },
+  {
+    "text": "so these are the scenarios we had in our mind when setting out to build a managed service for Prometheus",
+    "start": "593399",
+    "end": "599700"
+  },
+  {
+    "text": "we found shipping metrics off to a remote back-end appealing it allowed us to treat Prometheus in cluster as",
+    "start": "599700",
+    "end": "605220"
+  },
+  {
+    "text": "effectively stateless it also allowed us to separate the state side and the query the query side and",
+    "start": "605220",
+    "end": "611760"
+  },
+  {
+    "text": "the collection side concerns additionally at Google we were able to leverage our planet scale time series",
+    "start": "611760",
+    "end": "617940"
+  },
+  {
+    "text": "database and Monarch which had the capacity we needed to offer the service specifically being able to serve over 2",
+    "start": "617940",
+    "end": "624300"
+  },
+  {
+    "text": "trillion active time series and offer long-term retention of metrics so we could stand up a prom ql compatible API",
+    "start": "624300",
+    "end": "631800"
+  },
+  {
+    "text": "on top of Monarch and solve our query concerns but we still needed a stable scalable metrics ingestion approach to",
+    "start": "631800",
+    "end": "638399"
+  },
+  {
+    "text": "offer a seamless product experience",
+    "start": "638399",
+    "end": "641959"
+  },
+  {
+    "text": "so what if we leverage Prometheus as a node agent specifically we limit Prometheus to",
+    "start": "644220",
+    "end": "650760"
+  },
+  {
+    "text": "scraping only co-located Targets on the same node think of Prometheus as a pure collector",
+    "start": "650760",
+    "end": "657860"
+  },
+  {
+    "text": "this helps mitigate our scaling issues because the size of targets and metrics is naturally constrained by the capacity",
+    "start": "658500",
+    "end": "664800"
+  },
+  {
+    "text": "of a given node we've solved our single pane of glass querying problem because we're",
+    "start": "664800",
+    "end": "670980"
+  },
+  {
+    "text": "forwarding all of our metrics data to a remote back end and in terms of maintaining this",
+    "start": "670980",
+    "end": "676920"
+  },
+  {
+    "text": "Prometheus infrastructure kubernetes provides a built-in resource and then Daemon set to achieve this exact setup",
+    "start": "676920",
+    "end": "684259"
+  },
+  {
+    "text": "how do we implement this well each Prometheus server needs to know the node that it's on at runtime",
+    "start": "688200",
+    "end": "696660"
+  },
+  {
+    "text": "so we could leverage the kubernetes downward API where a container is exposed to meta information about itself",
+    "start": "696660",
+    "end": "702480"
+  },
+  {
+    "text": "at runtime we can then Mount that the node name as an environment variable for example",
+    "start": "702480",
+    "end": "709560"
+  },
+  {
+    "text": "to The Container manifest which is what's on the left and then we could use that in our",
+    "start": "709560",
+    "end": "716100"
+  },
+  {
+    "text": "Prometheus configuration now in Prometheus to do down selection or filtering of targets we use what are",
+    "start": "716100",
+    "end": "721440"
+  },
+  {
+    "text": "called relabel configs so in this case we have any incoming candidate Target that has the node name that matches my",
+    "start": "721440",
+    "end": "728160"
+  },
+  {
+    "text": "environment variable will keep everything else will implicitly drop",
+    "start": "728160",
+    "end": "733339"
+  },
+  {
+    "text": "okay so that's a functioning solution I'd like to briefly interlude into Prometheus service discovery on",
+    "start": "735660",
+    "end": "741839"
+  },
+  {
+    "text": "kubernetes in general so in order to discover targets to scrape Prometheus opens up watch",
+    "start": "741839",
+    "end": "748260"
+  },
+  {
+    "text": "connections against the kubernetes API server for various resources whether it be nodes pods endpoints Etc",
+    "start": "748260",
+    "end": "756480"
+  },
+  {
+    "text": "so whether you've known it or not whenever you've installed Prometheus on your cluster you've always given it a cluster role that looks something like",
+    "start": "756480",
+    "end": "762480"
+  },
+  {
+    "text": "this to allow it to do that",
+    "start": "762480",
+    "end": "765800"
+  },
+  {
+    "text": "but remember we're running Prometheus as a Daemon set which means we have a Prometheus server opening up these watch",
+    "start": "768240",
+    "end": "773700"
+  },
+  {
+    "text": "connections on every node in the cluster the number of watches compounds by n the",
+    "start": "773700",
+    "end": "779760"
+  },
+  {
+    "text": "number of nodes and on larger clusters where we have on the order of hundreds or thousands of",
+    "start": "779760",
+    "end": "784860"
+  },
+  {
+    "text": "nodes this puts considerable strain on the kubernetes API server",
+    "start": "784860",
+    "end": "790519"
+  },
+  {
+    "text": "every time you open up a watch connection on the API server it spawns two go routines",
+    "start": "790740",
+    "end": "796800"
+  },
+  {
+    "text": "it then needs to process all changes for objects of a given kind and then serialize and send those updates back to",
+    "start": "796800",
+    "end": "802920"
+  },
+  {
+    "text": "the watch client when an event happens additionally our approach of using",
+    "start": "802920",
+    "end": "808500"
+  },
+  {
+    "text": "relabel configs we're just doing a Last Mile filtering of this traffic we're not reducing any load against the kubernetes",
+    "start": "808500",
+    "end": "814560"
+  },
+  {
+    "text": "API server",
+    "start": "814560",
+    "end": "817339"
+  },
+  {
+    "text": "okay instead of using relatable configs what if we use field selectors to filter targets at Discovery Time",
+    "start": "819720",
+    "end": "827700"
+  },
+  {
+    "text": "this works because the kubernetes API server watch cache indexes pods specifically by node name",
+    "start": "827700",
+    "end": "834600"
+  },
+  {
+    "text": "which means that it only has to process changes for pods on that node as opposed to every single pod in the cluster and",
+    "start": "834600",
+    "end": "840540"
+  },
+  {
+    "text": "this greatly reduces the resource utilization there in fact the cubelet and Cube proxy",
+    "start": "840540",
+    "end": "846240"
+  },
+  {
+    "text": "components already use this pattern today to allow kubernetes to effectively scale",
+    "start": "846240",
+    "end": "852260"
+  },
+  {
+    "text": "so let's remove our relatable config and instead insert our environment variable in the service Discovery config",
+    "start": "852480",
+    "end": "860180"
+  },
+  {
+    "text": "this sets us up for a much nicer picture with respect to watches on the kubernetes API server each watch is",
+    "start": "861180",
+    "end": "867660"
+  },
+  {
+    "text": "effectively constrained",
+    "start": "867660",
+    "end": "870800"
+  },
+  {
+    "text": "so this deployment model is fundamentally different than anything offered by Prometheus operator today I",
+    "start": "873959",
+    "end": "879180"
+  },
+  {
+    "text": "do want to point out that there are discussions on GitHub about this idea though when we're trying to enforce the Pod",
+    "start": "879180",
+    "end": "884639"
+  },
+  {
+    "text": "role and node field selectors in our custom resources to handle these exact scaling challenges",
+    "start": "884639",
+    "end": "890639"
+  },
+  {
+    "text": "as well as to address some other things specifically our back and force tenancy and just having a simpler configuration",
+    "start": "890639",
+    "end": "896639"
+  },
+  {
+    "text": "service so we introduced pod monitoring as a",
+    "start": "896639",
+    "end": "902940"
+  },
+  {
+    "text": "custom resource to configure scraping",
+    "start": "902940",
+    "end": "906680"
+  },
+  {
+    "text": "it's closely modeled after the Prometheus operator service monitor or pod monitor with some differences pod",
+    "start": "908940",
+    "end": "915480"
+  },
+  {
+    "text": "monitorings on the left you can see it's a namespaced resource running in the namespace back end configure to scrape",
+    "start": "915480",
+    "end": "920760"
+  },
+  {
+    "text": "our prom example workload the analogous service monitor on the right it can be in any namespace you want so we can",
+    "start": "920760",
+    "end": "926579"
+  },
+  {
+    "text": "stick it in monitoring for example and then use a namespace selector to tell it go look in that namespace for targets to",
+    "start": "926579",
+    "end": "932519"
+  },
+  {
+    "text": "scrape in this case back end in pod monitoring we have strict",
+    "start": "932519",
+    "end": "938279"
+  },
+  {
+    "text": "namespace tenancy so a custom resource in one namespace cannot scrape workloads in another and this is in contrast to",
+    "start": "938279",
+    "end": "944760"
+  },
+  {
+    "text": "the namespace fields the namespace selector we just talked about",
+    "start": "944760",
+    "end": "949800"
+  },
+  {
+    "text": "this aligns well with kubernetes our back enforcement around namespaces as a cluster administrator I have full",
+    "start": "949800",
+    "end": "955620"
+  },
+  {
+    "text": "control over not only who can create and configure a pod monitoring but I'm effectively controlling which service accounts can scrape which workloads",
+    "start": "955620",
+    "end": "964339"
+  },
+  {
+    "text": "this has some nice properties so for example it prevents accidental metric blow up from inadvertently matching",
+    "start": "964440",
+    "end": "969660"
+  },
+  {
+    "text": "Targets in other namespaces this tendency is enforced at persistence",
+    "start": "969660",
+    "end": "975720"
+  },
+  {
+    "text": "time using your labeling so all um time series that are ingested using a pod monitoring are relabeled with the",
+    "start": "975720",
+    "end": "981480"
+  },
+  {
+    "text": "namespace and the cluster of where that pod monitoring resource exists",
+    "start": "981480",
+    "end": "987079"
+  },
+  {
+    "text": "now we realize that having a namespace scope for scraping isn't always convenient or appropriate so we have a",
+    "start": "987720",
+    "end": "993779"
+  },
+  {
+    "text": "dedicated customer resource and cluster pod monitoring to have a cluster-wide scope for scraping",
+    "start": "993779",
+    "end": "1000560"
+  },
+  {
+    "text": "this also works for certain exporters where we want to preserve the namespace label on our time series so for example",
+    "start": "1000560",
+    "end": "1006500"
+  },
+  {
+    "text": "Cube State metrics and again this is a dedicated custom resource so as a cluster administrator I",
+    "start": "1006500",
+    "end": "1012980"
+  },
+  {
+    "text": "can allocate only certain service accounts have this cluster-wide scope for scraping",
+    "start": "1012980",
+    "end": "1018819"
+  },
+  {
+    "text": "and with respect to tendency at persistence time all time series are just labeled with the cluster of where",
+    "start": "1019759",
+    "end": "1025459"
+  },
+  {
+    "text": "that custom resource is not the namespace it's noteworthy that pod monitoring is",
+    "start": "1025459",
+    "end": "1032540"
+  },
+  {
+    "text": "limited to scraping just pods and again this is because we can't constrain node local watches for things like service",
+    "start": "1032540",
+    "end": "1038600"
+  },
+  {
+    "text": "endpoints in a scalable way remember the kubernetes API server watch cache indexes pods and pods only by node name",
+    "start": "1038600",
+    "end": "1046899"
+  },
+  {
+    "text": "we were okay with this trade-off because a service monitor is usually used to scrape workloads pod workloads that are",
+    "start": "1047059",
+    "end": "1053360"
+  },
+  {
+    "text": "behind a service anyway it's less common to scrape Pure service endpoints with a service monitor you can",
+    "start": "1053360",
+    "end": "1060140"
+  },
+  {
+    "text": "even select multiple services at once to scrape from additionally we found a service level",
+    "start": "1060140",
+    "end": "1066620"
+  },
+  {
+    "text": "spec adds a layer of indirection for Target Discovery so for example if I have a service monitor selecting service",
+    "start": "1066620",
+    "end": "1072679"
+  },
+  {
+    "text": "workloads one two that has these pods behind it and then someone throws workload 7 into the mix that happens to",
+    "start": "1072679",
+    "end": "1078919"
+  },
+  {
+    "text": "be selected using some bad luck with label selectors we can have a hard time",
+    "start": "1078919",
+    "end": "1085039"
+  },
+  {
+    "text": "debugging what's going on and in the worst case have unintentional metric blow up",
+    "start": "1085039",
+    "end": "1090340"
+  },
+  {
+    "text": "okay so that's scraping Prometheus also offers recording and alerting rules",
+    "start": "1092960",
+    "end": "1098660"
+  },
+  {
+    "text": "now our Prometheus collectors are running effectively stateless on every node and it didn't really make sense to put",
+    "start": "1098660",
+    "end": "1105799"
+  },
+  {
+    "text": "the burden of analyzing recording and alerting rules on them so we wanted to deploy a separate workload whose sole",
+    "start": "1105799",
+    "end": "1111020"
+  },
+  {
+    "text": "concern it was to enforce recording and alerting rules",
+    "start": "1111020",
+    "end": "1116660"
+  },
+  {
+    "text": "so we have a workload called the rule evaluator that runs as a deployment it takes in Prometheus recording and",
+    "start": "1116660",
+    "end": "1122480"
+  },
+  {
+    "text": "alerting rules queries and writes recording rules to the remote back end and then sends any alerts to a",
+    "start": "1122480",
+    "end": "1129080"
+  },
+  {
+    "text": "configured Prometheus alert manager it's a similar idea to the Thanos ruler",
+    "start": "1129080",
+    "end": "1135700"
+  },
+  {
+    "text": "um to configure the rule evaluator we have a rules custom resource that looks basically the exact same as the",
+    "start": "1141320",
+    "end": "1147200"
+  },
+  {
+    "text": "Prometheus rule custom resource from Prometheus operator but with some differences at runtime",
+    "start": "1147200",
+    "end": "1153399"
+  },
+  {
+    "text": "so again rules have strict namespace tendency so a rules resource and namespace a cannot query or write to",
+    "start": "1153860",
+    "end": "1160520"
+  },
+  {
+    "text": "time series in namespace b this has some nice properties so for",
+    "start": "1160520",
+    "end": "1165620"
+  },
+  {
+    "text": "example we prevent expensive queries matching time series and other namespaces as well as preventing",
+    "start": "1165620",
+    "end": "1171380"
+  },
+  {
+    "text": "collisions when writing recording rules again the tenancy is enforce that",
+    "start": "1171380",
+    "end": "1178220"
+  },
+  {
+    "text": "persistence time with the namespace and the cluster of where that rules and resource exists",
+    "start": "1178220",
+    "end": "1183980"
+  },
+  {
+    "text": "and mirroring pod monitoring we recognize there are cases where it makes sense to allow users to scrape Beyond a",
+    "start": "1183980",
+    "end": "1189260"
+  },
+  {
+    "text": "single to query Beyond a single namespace so we offer cluster rules as a way to do that",
+    "start": "1189260",
+    "end": "1195460"
+  },
+  {
+    "text": "finally it's totally possible that you have multiple kubernetes clusters that are all writing metric data to this back end",
+    "start": "1195799",
+    "end": "1201799"
+  },
+  {
+    "text": "if you want to be able to query against all those time series we offer yet another scope in global rules that has",
+    "start": "1201799",
+    "end": "1206960"
+  },
+  {
+    "text": "no boundaries on what it can query your right to again the common theme Here is giving",
+    "start": "1206960",
+    "end": "1213380"
+  },
+  {
+    "text": "the cluster administrator the tools they need to control which service accounts have what level of scope",
+    "start": "1213380",
+    "end": "1219860"
+  },
+  {
+    "text": "with regard to metrics in your cluster",
+    "start": "1219860",
+    "end": "1223780"
+  },
+  {
+    "text": "so how do we control all these components what we've been calling managed collection we have yet another custom resource",
+    "start": "1226039",
+    "end": "1232340"
+  },
+  {
+    "text": "called the operator config now the operator config runs as a Singleton in your cluster and controls everything",
+    "start": "1232340",
+    "end": "1237860"
+  },
+  {
+    "text": "from collection so for example if you want to filter Data before sending it over the wire or compress it you could",
+    "start": "1237860",
+    "end": "1243559"
+  },
+  {
+    "text": "do that you can configure Prometheus alert manager endpoints to Route alerts to we even offer a managed alert manager",
+    "start": "1243559",
+    "end": "1250160"
+  },
+  {
+    "text": "that you can configure through this resource so let's walk through a little bit of",
+    "start": "1250160",
+    "end": "1256940"
+  },
+  {
+    "text": "what this looks like um so all managed components live in a dedicated system namespace alongside the",
+    "start": "1256940",
+    "end": "1263720"
+  },
+  {
+    "text": "operator the idea there being that users shouldn't have to modify anything in system",
+    "start": "1263720",
+    "end": "1270159"
+  },
+  {
+    "text": "the operator config Singleton lives in a dedicated uh sister namespace a public namespace that's watched by the operator",
+    "start": "1270260",
+    "end": "1277340"
+  },
+  {
+    "text": "so users are sort of intended to modify resources in that namespace to configure manage collection",
+    "start": "1277340",
+    "end": "1285020"
+  },
+  {
+    "text": "this has some nice properties so for example we can ship our managed components with more constrained our",
+    "start": "1285020",
+    "end": "1290600"
+  },
+  {
+    "text": "bags so for example our operator doesn't need cluster-wide read access on Secrets",
+    "start": "1290600",
+    "end": "1295640"
+  },
+  {
+    "text": "it can just watch secrets in these two namespaces",
+    "start": "1295640",
+    "end": "1299919"
+  },
+  {
+    "text": "so let's let's walk through an example so we want to send alerts to an alert manager service over TLS",
+    "start": "1302179",
+    "end": "1310460"
+  },
+  {
+    "text": "the conventional way to do this would be to use a kubernetes secret resource you would use a secret key selector in your",
+    "start": "1310460",
+    "end": "1317600"
+  },
+  {
+    "text": "custom resource which would fetch the secret in the contents you would Mount that to your workload and then use those",
+    "start": "1317600",
+    "end": "1323120"
+  },
+  {
+    "text": "credentials to do your TLS now the rule evaluator runs in a system",
+    "start": "1323120",
+    "end": "1328460"
+  },
+  {
+    "text": "namespace and in kubernetes you cannot Mount Secrets across namespaces",
+    "start": "1328460",
+    "end": "1334400"
+  },
+  {
+    "text": "since we don't want users to modify anything in the system namespace we propose that you create your secret in",
+    "start": "1334400",
+    "end": "1339500"
+  },
+  {
+    "text": "the public namespace the operator then reconciles that and mirrors it over to the system namespace",
+    "start": "1339500",
+    "end": "1344960"
+  },
+  {
+    "text": "to be mounted by the workload for for rtls",
+    "start": "1344960",
+    "end": "1350020"
+  },
+  {
+    "text": "throughout development we've really strive to minimize our configuration surface",
+    "start": "1353480",
+    "end": "1358640"
+  },
+  {
+    "text": "I guess as developers we're always trying to do that um but with um with pod monitoring and cluster",
+    "start": "1358640",
+    "end": "1365059"
+  },
+  {
+    "text": "pod monitoring specifically we provide label selectors for Target Target selection",
+    "start": "1365059",
+    "end": "1370880"
+  },
+  {
+    "text": "basic scrape configuration and very limited relabeling capabilities Prometheus for labeling is very powerful",
+    "start": "1370880",
+    "end": "1377600"
+  },
+  {
+    "text": "but it's really easy to shoot yourself in the foot and cause a metrics explosion through a bad relabeling rule",
+    "start": "1377600",
+    "end": "1383419"
+  },
+  {
+    "text": "or even have some collisions and drop a bunch of metrics um so we try to limit the configuration",
+    "start": "1383419",
+    "end": "1388580"
+  },
+  {
+    "text": "surface there to protect users when when setting up the configuration",
+    "start": "1388580",
+    "end": "1394658"
+  },
+  {
+    "text": "but notice there's no Prometheus custom resource Prometheus runs as a vanilla Daemon set",
+    "start": "1397280",
+    "end": "1404140"
+  },
+  {
+    "text": "there's no ruler custom resource rule evaluator runs as a deployment we've also brought broken the operator",
+    "start": "1404299",
+    "end": "1410120"
+  },
+  {
+    "text": "out from the reconcile Loop in a lot of respects where instead of reconciling the entire resource the entire Daemon",
+    "start": "1410120",
+    "end": "1416240"
+  },
+  {
+    "text": "set or the entire deployment the operator is just concerned with reconciling configuration",
+    "start": "1416240",
+    "end": "1421700"
+  },
+  {
+    "text": "we let kubernetes reconcile the managed resource at the infrastructure level so as a cluster administrator if I have",
+    "start": "1421700",
+    "end": "1427700"
+  },
+  {
+    "text": "some Custom Security profiles or volume mounts or certain quotas around CPU",
+    "start": "1427700",
+    "end": "1432799"
+  },
+  {
+    "text": "requests and limits I'm free to alter the damage that myself and the operator",
+    "start": "1432799",
+    "end": "1438140"
+  },
+  {
+    "text": "will not overwrite me this allows for deep customization of",
+    "start": "1438140",
+    "end": "1443539"
+  },
+  {
+    "text": "these resources while keeping our configuration surface super simple anything on the Pod template spec you",
+    "start": "1443539",
+    "end": "1449539"
+  },
+  {
+    "text": "can modify on the resource it doesn't need to be a part of the custom resources that the operator comes",
+    "start": "1449539",
+    "end": "1456140"
+  },
+  {
+    "text": "with some future direction of the product or",
+    "start": "1456140",
+    "end": "1462320"
+  },
+  {
+    "text": "the project the um so Prometheus supports authenticated scraping scrape and protected metrics endpoints",
+    "start": "1462320",
+    "end": "1469340"
+  },
+  {
+    "text": "with this setup collectors we need access to secrets in the cluster",
+    "start": "1469340",
+    "end": "1474740"
+  },
+  {
+    "text": "it's tempting to just say hey collectors you can have you can open a watch connection against every secret in the",
+    "start": "1474740",
+    "end": "1480200"
+  },
+  {
+    "text": "cluster and then retrieve it then but then we find ourselves back in the same scenario where we're overwhelming the API server with all these watch",
+    "start": "1480200",
+    "end": "1486020"
+  },
+  {
+    "text": "connections so we're working on ways around that now",
+    "start": "1486020",
+    "end": "1491200"
+  },
+  {
+    "text": "additionally Prometheus provides a collection side status apis basically any HTTP API that's not prom ql falls",
+    "start": "1492440",
+    "end": "1500600"
+  },
+  {
+    "text": "into this category and they're really helpful for debugging right so if you need to know like what's the status of some Targets in my cluster or what are",
+    "start": "1500600",
+    "end": "1507260"
+  },
+  {
+    "text": "the configured rules or build info or things like that these apis are really useful for users",
+    "start": "1507260",
+    "end": "1513679"
+  },
+  {
+    "text": "but remember since Prometheus is deployed as a Daemon set this status is effectively sharded throughout the",
+    "start": "1513679",
+    "end": "1519140"
+  },
+  {
+    "text": "cluster there's no central place where I can go to to get this information so we're working on ways to centralize",
+    "start": "1519140",
+    "end": "1525020"
+  },
+  {
+    "text": "it and surface it to users conveniently",
+    "start": "1525020",
+    "end": "1529000"
+  },
+  {
+    "text": "so in summary scaling Prometheus can be a challenge we found that separating a collection from querying can be",
+    "start": "1531620",
+    "end": "1537740"
+  },
+  {
+    "text": "advantageous here our approach is to run Prometheus as a node agent in this configuration it's",
+    "start": "1537740",
+    "end": "1543200"
+  },
+  {
+    "text": "fairly simple to maintain but you do need to watch out for scaling we've introduced a new operator and",
+    "start": "1543200",
+    "end": "1550039"
+  },
+  {
+    "text": "custom resources that emphasize tenancy around Target Discovery and Metric scope that we feel align well with kubernetes",
+    "start": "1550039",
+    "end": "1556100"
+  },
+  {
+    "text": "are back best practices this infrastructure straddles two",
+    "start": "1556100",
+    "end": "1561380"
+  },
+  {
+    "text": "namespace as a system and a public namespace that allow us to constrict the rbac necessary for our components to run",
+    "start": "1561380",
+    "end": "1567580"
+  },
+  {
+    "text": "users interact with the dedicated public namespace for configuration and we really strive to keep our",
+    "start": "1567580",
+    "end": "1573980"
+  },
+  {
+    "text": "configuration surfaced as simple as possible oftentimes trading Simplicity over",
+    "start": "1573980",
+    "end": "1579260"
+  },
+  {
+    "text": "configurability and the operator itself is really just concerned with reconciling metrics",
+    "start": "1579260",
+    "end": "1585320"
+  },
+  {
+    "text": "configuration not monitoring infrastructure",
+    "start": "1585320",
+    "end": "1589659"
+  },
+  {
+    "text": "um this code is all open source you can find it on GitHub at googlecloud platform slash Prometheus Dash engine",
+    "start": "1592400",
+    "end": "1597679"
+  },
+  {
+    "text": "and thanks for the time",
+    "start": "1597679",
+    "end": "1601179"
+  },
+  {
+    "text": "[Applause]",
+    "start": "1605010",
+    "end": "1608119"
+  },
+  {
+    "text": "um if anybody has any questions",
+    "start": "1612620",
+    "end": "1616240"
+  },
+  {
+    "text": "is there any limitation to the uh the back ends that you support yeah um so this this General so the",
+    "start": "1627860",
+    "end": "1635120"
+  },
+  {
+    "text": "question was are there any limitations to the back ends that we support so the code that it runs as it is on that",
+    "start": "1635120",
+    "end": "1640400"
+  },
+  {
+    "text": "repository just goes to Google's backend to uh Monarch um however this this approach uh would work in theory with",
+    "start": "1640400",
+    "end": "1647539"
+  },
+  {
+    "text": "any back end it's really just a way to deploy Prometheus and kubernetes in a different way so that's what I wanted to focus on",
+    "start": "1647539",
+    "end": "1654880"
+  },
+  {
+    "text": "hi um what is the cost overhead that we get for deploying a small Prometheus",
+    "start": "1659419",
+    "end": "1666559"
+  },
+  {
+    "text": "server on each node as opposed to one load server yeah the question was what",
+    "start": "1666559",
+    "end": "1671659"
+  },
+  {
+    "text": "is the cost I guess in terms of like uh CPU yeah um the cost is not zero right I mean",
+    "start": "1671659",
+    "end": "1678380"
+  },
+  {
+    "text": "it's you know it's kind of like that Meme like side cars sidecars everywhere um this you know it will it really",
+    "start": "1678380",
+    "end": "1684380"
+  },
+  {
+    "text": "highly depends on your your environment and the workloads and the metrics that you're producing so Prometheus will in",
+    "start": "1684380",
+    "end": "1691039"
+  },
+  {
+    "text": "kind use more resources if you have more rapid metrics right so it's it's definitely",
+    "start": "1691039",
+    "end": "1697580"
+  },
+  {
+    "text": "um I wouldn't say it's using more resources overall than a standard Prometheus server because that's effectively",
+    "start": "1697580",
+    "end": "1703580"
+  },
+  {
+    "text": "sharded throughout your cluster right so you're kind of dividing up those resources on every single node",
+    "start": "1703580",
+    "end": "1709778"
+  },
+  {
+    "text": "yeah it really just depends on your environment and your your workload size",
+    "start": "1710120",
+    "end": "1716620"
+  },
+  {
+    "text": "uh any other questions done",
+    "start": "1716720",
+    "end": "1722080"
+  },
+  {
+    "text": "I just have a follow-up question about this actually uh does it scale down very nicely Prometheus because we go from one",
+    "start": "1723620",
+    "end": "1731000"
+  },
+  {
+    "text": "giant Prometheus 200 I forget to one per node and if your node has",
+    "start": "1731000",
+    "end": "1736159"
+  },
+  {
+    "text": "small enough does Prometheus degrade to like is it linear probably not right so",
+    "start": "1736159",
+    "end": "1742400"
+  },
+  {
+    "text": "so you're asking if you if your node doesn't have enough resources to fit Prometheus on it just a small note as",
+    "start": "1742400",
+    "end": "1748039"
+  },
+  {
+    "text": "it's your large node yeah I mean you could set up Prometheus with whatever um requests and limits that you know you",
+    "start": "1748039",
+    "end": "1754460"
+  },
+  {
+    "text": "think are appropriate that could fit on that node um but it just kind of depends on again what what it's trying to scrape like is",
+    "start": "1754460",
+    "end": "1760940"
+  },
+  {
+    "text": "how much it'll consume it'll be related to how much it'll it'll consume in terms of metrics on that node",
+    "start": "1760940",
+    "end": "1768080"
+  },
+  {
+    "text": "but like if you're asking about like if the if Prometheus will be like evicted or something by the cubelet no it's more",
+    "start": "1768080",
+    "end": "1773899"
+  },
+  {
+    "text": "a question of let's say I I do",
+    "start": "1773899",
+    "end": "1777340"
+  },
+  {
+    "text": "you found up with one part and one Prometheus that I'm guessing there's a",
+    "start": "1779779",
+    "end": "1786279"
+  },
+  {
+    "text": "there's a an overhead to having just a single Prometheus scraping just very few metrics like",
+    "start": "1786380",
+    "end": "1792559"
+  },
+  {
+    "text": "like scale linearly it's probably the cost yeah totally yeah so I would say I think yeah so the what uh the question",
+    "start": "1792559",
+    "end": "1798559"
+  },
+  {
+    "text": "was um if you have a small cluster or a small workload is deploying this really necessary does it kind of Overkill in a",
+    "start": "1798559",
+    "end": "1805399"
+  },
+  {
+    "text": "lot of ways and I would say yeah I would say this is you know again we were trying to offer a managed service where",
+    "start": "1805399",
+    "end": "1810679"
+  },
+  {
+    "text": "we didn't have to think about the size of the cluster it'll just work and the trade-off there is you know it's all",
+    "start": "1810679",
+    "end": "1815960"
+  },
+  {
+    "text": "trade-offs and Engineering the trade-off there is yeah we'd probably use more resources than just a standalone server",
+    "start": "1815960",
+    "end": "1821240"
+  },
+  {
+    "text": "at the cost of being I guess frictionless yeah",
+    "start": "1821240",
+    "end": "1827480"
+  },
+  {
+    "text": "all right any other questions anyone else",
+    "start": "1827480",
+    "end": "1832360"
+  },
+  {
+    "text": "oh yes uh with the node agent",
+    "start": "1836539",
+    "end": "1843679"
+  },
+  {
+    "text": "implementation can I use grafana and the curry metrics from it how that can work",
+    "start": "1843679",
+    "end": "1849320"
+  },
+  {
+    "text": "you're asking if you can use grafana in this in this configuration yeah yeah yes you can so um the question was how can",
+    "start": "1849320",
+    "end": "1855559"
+  },
+  {
+    "text": "you use grafana with this setup again since all of our metrics are persisted centrally in a global back end you would",
+    "start": "1855559",
+    "end": "1861200"
+  },
+  {
+    "text": "essentially Point your grafana at the URL of the back end and then grafana interacts with that the the",
+    "start": "1861200",
+    "end": "1866539"
+  },
+  {
+    "text": "infrastructure I've described here is purely for collecting data and and also doing recording and learning rules so",
+    "start": "1866539",
+    "end": "1871640"
+  },
+  {
+    "text": "it's grafana is sort of concerned with the query side and that back end has to",
+    "start": "1871640",
+    "end": "1877279"
+  },
+  {
+    "text": "be in Google Cloud can it be like on premises so yeah so the idea here is that you can write to any any back end",
+    "start": "1877279",
+    "end": "1883640"
+  },
+  {
+    "text": "you would like the the code that as it sits on GitHub that we've been writing rights to Google Cloud but you could stand up the same exact sort of",
+    "start": "1883640",
+    "end": "1890240"
+  },
+  {
+    "text": "infrastructure pattern to write to any back end it's really just leveraging Prometheus as stateless in the cluster",
+    "start": "1890240",
+    "end": "1898360"
+  },
+  {
+    "text": "and that that metrics for the for the node are going to fit in one Prometheus",
+    "start": "1904580",
+    "end": "1911120"
+  },
+  {
+    "text": "can you say that again yeah so um you've mentioned demon sets and node agents and so on so um you have an assumption then",
+    "start": "1911120",
+    "end": "1917419"
+  },
+  {
+    "text": "there that everything that runs on that node is then going to fit one Prometheus",
+    "start": "1917419",
+    "end": "1922700"
+  },
+  {
+    "text": "right so you don't need to scale to more than one Prometheus per node yeah I mean so the question was like",
+    "start": "1922700",
+    "end": "1928880"
+  },
+  {
+    "text": "um is it possible for a single Prometheus server on a given node to essentially become overwhelmed because there could be a ton of targets on that",
+    "start": "1928880",
+    "end": "1935120"
+  },
+  {
+    "text": "node right and that's totally possible I mean it's you know it's again about like mitigating the need to manually scale",
+    "start": "1935120",
+    "end": "1942080"
+  },
+  {
+    "text": "um we've seen we've definitely seen heterogeneous usage of resources because of exact scenarios like that where a lot",
+    "start": "1942080",
+    "end": "1948200"
+  },
+  {
+    "text": "of workloads land on a given node um so in that case what we do is typically deploy your Daemon set with",
+    "start": "1948200",
+    "end": "1953720"
+  },
+  {
+    "text": "the high water mark of what you'd expect the usage to be you sort of over allocate on the other nodes at the cost of not having to think about maintaining",
+    "start": "1953720",
+    "end": "1960260"
+  },
+  {
+    "text": "the infrastructure so yeah it's totally possible and I'm sure it happens",
+    "start": "1960260",
+    "end": "1966398"
+  },
+  {
+    "text": "we have room",
+    "start": "1967059",
+    "end": "1970600"
+  },
+  {
+    "text": "have you guys um are you are you able to speak to any customer success stories where someone implemented this and then",
+    "start": "1974539",
+    "end": "1981860"
+  },
+  {
+    "text": "how how their infrastructure their workflow their whole system was improved I mean we've definitely we have a lot of",
+    "start": "1981860",
+    "end": "1987559"
+  },
+  {
+    "text": "customers using it that are that are happy with it because they don't need to think about managing Prometheus infrastructure themselves so the",
+    "start": "1987559",
+    "end": "1994039"
+  },
+  {
+    "text": "question was do we have customer success stories yeah I'm thinking about like the before and after right so before they had Prometheus he has some issues and",
+    "start": "1994039",
+    "end": "2000760"
+  },
+  {
+    "text": "then after how did him just make their life better yeah um I think that that's elaborated on",
+    "start": "2000760",
+    "end": "2006760"
+  },
+  {
+    "text": "there's like a Google Cloud podcast on a a particular customer who found Success",
+    "start": "2006760",
+    "end": "2012159"
+  },
+  {
+    "text": "Through adopting it um and I'd encourage you to go check that out for the exact uh transition that they made okay thanks",
+    "start": "2012159",
+    "end": "2018940"
+  },
+  {
+    "text": "yeah guess we're just time for one last",
+    "start": "2018940",
+    "end": "2023980"
+  },
+  {
+    "text": "question great talk so appreciate it it's",
+    "start": "2023980",
+    "end": "2030100"
+  },
+  {
+    "text": "interesting to hear a lot of different use cases with Thanos and Prometheus and you know your new service You're Building because we actually use Thanos",
+    "start": "2030100",
+    "end": "2035740"
+  },
+  {
+    "text": "uh for our use cases so it's cool to hear about that um but in relation to",
+    "start": "2035740",
+    "end": "2041019"
+  },
+  {
+    "text": "that actually I know with Thanos um with the rules deployment it can have performance issues when you're actually",
+    "start": "2041019",
+    "end": "2047200"
+  },
+  {
+    "text": "trying to evaluate the alerting rules right um have you guys run to that problem when you're not evaluing them on the actual Prometheus themselves but",
+    "start": "2047200",
+    "end": "2052960"
+  },
+  {
+    "text": "have a separate you know obviously that you're running so the question is like have we seen our",
+    "start": "2052960",
+    "end": "2058599"
+  },
+  {
+    "text": "rule evaluator become overwhelmed because exactly yeah we haven't yet we we anticipate it will but there hasn't",
+    "start": "2058599",
+    "end": "2064960"
+  },
+  {
+    "text": "been enough like noise from people saying hey this is getting overwhelmed yeah yeah I was just curious about that",
+    "start": "2064960",
+    "end": "2070480"
+  },
+  {
+    "text": "here like I was not gonna make an issue yeah Thanos deploys ha kind of",
+    "start": "2070480",
+    "end": "2075940"
+  },
+  {
+    "text": "like the ruler is AJ exactly yeah thank you",
+    "start": "2075940",
+    "end": "2082020"
+  },
+  {
+    "text": "so thank you for your presentation and uh yeah we're right on time for the",
+    "start": "2083740",
+    "end": "2089500"
+  },
+  {
+    "text": "closure cool thanks [Applause]",
+    "start": "2089500",
+    "end": "2096319"
+  }
+]

@@ -1,0 +1,1877 @@
+[
+  {
+    "text": "okay welcome to the very last session of the day thank you for thank you for sticking around what I want to do today",
+    "start": "359",
+    "end": "5879"
+  },
+  {
+    "text": "is to tell you a little bit about some work I've been doing to implement a new transport protocol and make that",
+    "start": "5879",
+    "end": "11519"
+  },
+  {
+    "text": "available through grpc that transport protocol is called",
+    "start": "11519",
+    "end": "16360"
+  },
+  {
+    "text": "home so just for background as I'm sure you all know grpc is based primarily on",
+    "start": "16560",
+    "end": "21920"
+  },
+  {
+    "text": "TCP it sends HTTP requests over TCP sockets in order to transport messages",
+    "start": "21920",
+    "end": "27240"
+  },
+  {
+    "text": "from the client to the server and Back Again and by and large that works fine",
+    "start": "27240",
+    "end": "32558"
+  },
+  {
+    "text": "particularly for Long Haul traffic where the latencies are already high but",
+    "start": "32559",
+    "end": "37680"
+  },
+  {
+    "text": "unfortunately TCP has pretty poor performance in data centers I'm going to come back and talk a little bit about that to explain that to you uh",
+    "start": "37680",
+    "end": "45039"
+  },
+  {
+    "text": "especially for really small messages the performance can be very very poor and so at Stanford we've developed a new",
+    "start": "45039",
+    "end": "51440"
+  },
+  {
+    "text": "transport protocol called H it's a clean slate design designed just for data",
+    "start": "51440",
+    "end": "56520"
+  },
+  {
+    "text": "centers and it is dramatically faster than TCP it's one to two orders of",
+    "start": "56520",
+    "end": "61640"
+  },
+  {
+    "text": "magnitude faster tail latency for short messages particularly when you're running under high load and there's",
+    "start": "61640",
+    "end": "67280"
+  },
+  {
+    "text": "contention and there's short traffic and long traffic all mixed together home is just way way way better than",
+    "start": "67280",
+    "end": "73439"
+  },
+  {
+    "text": "TCP the problem is though that H does not have tcp's API it's not API",
+    "start": "73439",
+    "end": "79920"
+  },
+  {
+    "text": "compatible uh with TCP I'll explain why in a second and so that makes it kind of",
+    "start": "79920",
+    "end": "85280"
+  },
+  {
+    "text": "hard for people to deploy hom so this this brought me to the idea integrating",
+    "start": "85280",
+    "end": "90479"
+  },
+  {
+    "text": "H with grpc which is kind of a win-win situation so the first thing is that H",
+    "start": "90479",
+    "end": "95720"
+  },
+  {
+    "text": "provides a considerable performance boost to grpc particularly for short messages but then the second thing is",
+    "start": "95720",
+    "end": "102680"
+  },
+  {
+    "text": "that grpc hides the socket level apis so people using grpc don't program to the",
+    "start": "102680",
+    "end": "108920"
+  },
+  {
+    "text": "TCP socket apis they program to the grpc apis and so that means that once hom has",
+    "start": "108920",
+    "end": "114600"
+  },
+  {
+    "text": "been integrated into grpc any grpc application can easily switch to using hom basically it's a oneline change",
+    "start": "114600",
+    "end": "121520"
+  },
+  {
+    "text": "right now so grpc masks all the API differences so it feels like it's a situation that's good for H and good for",
+    "start": "121520",
+    "end": "127479"
+  },
+  {
+    "text": "grpc and one of the reasons for talking today is to perhaps see if there's interest out there in people actually trying to use homo with",
+    "start": "127479",
+    "end": "134640"
+  },
+  {
+    "text": "grpc so what I'm going to do in the rest of this talk is I I have four sections of the talk first I'm gonna spend a",
+    "start": "134640",
+    "end": "141120"
+  },
+  {
+    "text": "little bit of time just talking about TCP and why TCP actually isn't a great protocol for data centers and I'll give",
+    "start": "141120",
+    "end": "147680"
+  },
+  {
+    "text": "a very very quick overview of hom just enough to confuse you about hom but just is a little bit of the flavor then I'll",
+    "start": "147680",
+    "end": "154400"
+  },
+  {
+    "text": "talk about how hom and grpc have been integrated how to use it that's pretty easy a little bit about how it's",
+    "start": "154400",
+    "end": "159640"
+  },
+  {
+    "text": "structured and then I want to talk a little bit about some sort of some lessons learned or some observations about grpc from this project in",
+    "start": "159640",
+    "end": "166560"
+  },
+  {
+    "text": "particularly the complexity of the grpc codebase and some performance issues some fairly serious performance issues",
+    "start": "166560",
+    "end": "172879"
+  },
+  {
+    "text": "with grpc so that's what you'll hear about over the next 15 or 20 minutes so let's start with TCP",
+    "start": "172879",
+    "end": "180440"
+  },
+  {
+    "text": "first before I I talk about problems with TCP I just want to say TCP is really a mindblowing engineering",
+    "start": "180440",
+    "end": "187080"
+  },
+  {
+    "text": "achievement you know it was designed 45 years ago I may be the only person in the room",
+    "start": "187080",
+    "end": "193519"
+  },
+  {
+    "text": "that was alive when TCP was designed and if you think about the",
+    "start": "193519",
+    "end": "198560"
+  },
+  {
+    "text": "network world then there were on the order of a 100 hosts and the total aggregate bandwidth of all links in the",
+    "start": "198560",
+    "end": "203959"
+  },
+  {
+    "text": "internet was something like 100 megabits or less the total Agate bandwidth and so",
+    "start": "203959",
+    "end": "209319"
+  },
+  {
+    "text": "to be ble to design a protocol for that world and have it almost 50 years later",
+    "start": "209319",
+    "end": "214640"
+  },
+  {
+    "text": "still widely used in surviving technology change after technology change it's really amazing really",
+    "start": "214640",
+    "end": "220439"
+  },
+  {
+    "text": "amazing so you kudos to the TCP designers but you know data centers",
+    "start": "220439",
+    "end": "225959"
+  },
+  {
+    "text": "didn't exist when TCP was designed and so there was no way they could have designed it for data centers and if you",
+    "start": "225959",
+    "end": "231200"
+  },
+  {
+    "text": "look at the design of TCP literally every major aspect of the TCP",
+    "start": "231200",
+    "end": "236599"
+  },
+  {
+    "text": "architecture is wrong for data centers I'll show you in a slide or two to and the result of that is you get bad",
+    "start": "236599",
+    "end": "242879"
+  },
+  {
+    "text": "performance particularly short messages get bad performance if the workloads are heavy that makes it even worse and if",
+    "start": "242879",
+    "end": "249319"
+  },
+  {
+    "text": "you care about tail latency you know not average latency but say 99th percentile tail latency then it's particularly",
+    "start": "249319",
+    "end": "256320"
+  },
+  {
+    "text": "problematic and so the bottom line is we have today we have amazing data center networks they're just the performance",
+    "start": "256320",
+    "end": "262520"
+  },
+  {
+    "text": "that our data center networks can provide is really mind-blowing TCP makes it impossible for applications to",
+    "start": "262520",
+    "end": "267639"
+  },
+  {
+    "text": "harness that performance get only a tiny fraction of the performance so I'm going to talk a",
+    "start": "267639",
+    "end": "273360"
+  },
+  {
+    "text": "little bit about this I've written an article with more details there's a link on the slide there you can go and look out if you want to see the full details",
+    "start": "273360",
+    "end": "279840"
+  },
+  {
+    "text": "so let's just take one particular aspect of tcp's design which is the data model",
+    "start": "279840",
+    "end": "285280"
+  },
+  {
+    "text": "that provides for applications the data model is a bite Street you know you open a connection you push bytes in one end",
+    "start": "285280",
+    "end": "291039"
+  },
+  {
+    "text": "the bytes come out the other end there is no structure of those btes there's no sort of boundaries or anything it's just",
+    "start": "291039",
+    "end": "298120"
+  },
+  {
+    "text": "bites well problem with that is that applications typically care about messages certainly grpc is entirely",
+    "start": "298120",
+    "end": "304360"
+  },
+  {
+    "text": "message-based the communication between a client server is a sort of series of messages sent in in both",
+    "start": "304360",
+    "end": "310240"
+  },
+  {
+    "text": "directions and so when grpc or another application uses TCP for the messages it",
+    "start": "310240",
+    "end": "316240"
+  },
+  {
+    "text": "pushes messages into the stream but the message boundaries are lost TCP has no",
+    "start": "316240",
+    "end": "321440"
+  },
+  {
+    "text": "knowledge of those boundaries and so when the btes come out the other end again no knowledge of the boundaries so",
+    "start": "321440",
+    "end": "328199"
+  },
+  {
+    "text": "typically you know receiver will typically write a buffer you know give me the next 4K or 64k bytes from this",
+    "start": "328199",
+    "end": "336199"
+  },
+  {
+    "text": "stream that could give you all of a message it could give you just part of a message or it could give you bits and",
+    "start": "336199",
+    "end": "342520"
+  },
+  {
+    "text": "pieces of several message you know this particular example here for example the green message is",
+    "start": "342520",
+    "end": "350600"
+  },
+  {
+    "text": "split across one two three four receive operations on the TCP Stream So the first problem is you need",
+    "start": "350600",
+    "end": "358280"
+  },
+  {
+    "text": "extra complexity in your app application to reimpose the message back you have to Output like length information in the",
+    "start": "358280",
+    "end": "363720"
+  },
+  {
+    "text": "Stream and when you receive things reassemble full messages that's an inconvenience but not",
+    "start": "363720",
+    "end": "370319"
+  },
+  {
+    "text": "a not an insurmountable problem a much bigger problem is load balancing so this",
+    "start": "370319",
+    "end": "377080"
+  },
+  {
+    "text": "lack of message boundary basically destroys load balancing you can't share",
+    "start": "377080",
+    "end": "383639"
+  },
+  {
+    "text": "one TCP stream across multiple threads what you'd like to do you know if you're building a high performance servers you",
+    "start": "383639",
+    "end": "389120"
+  },
+  {
+    "text": "want to have whole bunch of threads that are servicing incoming requests those requests arrive over one TCP connection",
+    "start": "389120",
+    "end": "394759"
+  },
+  {
+    "text": "or maybe many TCP connections and you'd like to load balance the requests and spread them out across all of these",
+    "start": "394759",
+    "end": "400599"
+  },
+  {
+    "text": "threads but if you have several threads try to read from the same TCP stream the",
+    "start": "400599",
+    "end": "406919"
+  },
+  {
+    "text": "problem is that chunks of messages could get spread across all of those threads like in this particular",
+    "start": "406919",
+    "end": "413840"
+  },
+  {
+    "text": "case the message chunks from the green message are spread across all three threads and in fact in this case there's",
+    "start": "413840",
+    "end": "419560"
+  },
+  {
+    "text": "no way for thread three and thread one to even tell which of those chunks was actually first in the",
+    "start": "419560",
+    "end": "424879"
+  },
+  {
+    "text": "message so basically you can't share a TCP stream across multiple threads",
+    "start": "424879",
+    "end": "431039"
+  },
+  {
+    "text": "reading from it concurrently it just doesn't work so that leaves you with some unpleasant Alternatives if you want",
+    "start": "431039",
+    "end": "436479"
+  },
+  {
+    "text": "to do load balancing then you have two choices the first one is you introduce a dispatcher thread so you have one thread",
+    "start": "436479",
+    "end": "443199"
+  },
+  {
+    "text": "that manages all of the incoming connections for your application and it reads from those",
+    "start": "443199",
+    "end": "448720"
+  },
+  {
+    "text": "those connections it reassembles messages and then it dispatches messages out to a collection of worker threads so",
+    "start": "448720",
+    "end": "455560"
+  },
+  {
+    "text": "you can do that and that gives you the load balancing and it deals with the problem about no message you know that",
+    "start": "455560",
+    "end": "461199"
+  },
+  {
+    "text": "you can't receive uh from one connection with multiple threads but it has a couple of problems first every message",
+    "start": "461199",
+    "end": "468319"
+  },
+  {
+    "text": "now has to pass through an extra thread has to go into the disector thread and then have a thread context switch to",
+    "start": "468319",
+    "end": "473360"
+  },
+  {
+    "text": "different thread to get processed and that's a pretty significant latency hit and the second thing is that the through",
+    "start": "473360",
+    "end": "479440"
+  },
+  {
+    "text": "put of your application is limited by the throughput of that one dispatcher thread fundamentally you can only handle messages as fast as that dispatcher",
+    "start": "479440",
+    "end": "485919"
+  },
+  {
+    "text": "thread can dispatch them and that's that can be a severe limit for",
+    "start": "485919",
+    "end": "491280"
+  },
+  {
+    "text": "applications the other alternative is you divide up the connections so get rid of the dispatcher thread and just",
+    "start": "491560",
+    "end": "498159"
+  },
+  {
+    "text": "statically allocate certain connections to each of your worker threads so each of them has a subset of the the",
+    "start": "498159",
+    "end": "504159"
+  },
+  {
+    "text": "connections so that gets rid of the problems associated with the dispatcher thread but the problem is that this load",
+    "start": "504159",
+    "end": "510800"
+  },
+  {
+    "text": "balancing is static now you assign connections to worker threads and the",
+    "start": "510800",
+    "end": "515880"
+  },
+  {
+    "text": "problem is that not all connections are equally active all the time you could end up in a situation where a few connections are very hot and a few other",
+    "start": "515880",
+    "end": "522440"
+  },
+  {
+    "text": "connections are idle and then you get poor load balancing across your threads by the way this is what second PR is",
+    "start": "522440",
+    "end": "528360"
+  },
+  {
+    "text": "what mcxi uses for example and it does have load balancing issues so the whole notion of using",
+    "start": "528360",
+    "end": "535399"
+  },
+  {
+    "text": "streams is just a bad idea you really want um a transport mechanism that's based on",
+    "start": "535399",
+    "end": "541360"
+  },
+  {
+    "text": "messages okay that's just one of of several things so we had been having issues with",
+    "start": "541360",
+    "end": "548600"
+  },
+  {
+    "text": "network transport building high performance data center applications in my research group and so five or 10 years ago we decided what would happen",
+    "start": "548600",
+    "end": "555680"
+  },
+  {
+    "text": "if we just stepped back and did a clean slate redesign of network transport so",
+    "start": "555680",
+    "end": "560800"
+  },
+  {
+    "text": "if we wanted the perfect transport for data center what would it look like and over the next year or two H emerged from",
+    "start": "560800",
+    "end": "567880"
+  },
+  {
+    "text": "that and what interesting is that H is different from TCP in every major aspect",
+    "start": "567880",
+    "end": "573959"
+  },
+  {
+    "text": "of its design I said earlier that all of the aspects of TCP were wrong so I'm just going to go through these very",
+    "start": "573959",
+    "end": "579120"
+  },
+  {
+    "text": "quickly yeah this probably is going to be too quick to make sense but just to give you a flavor so as I said TCP is",
+    "start": "579120",
+    "end": "584640"
+  },
+  {
+    "text": "based on streams home is based on messages you send and receive messages actually it's really based on rpcs the",
+    "start": "584640",
+    "end": "591399"
+  },
+  {
+    "text": "notion that you send a request message and you get a response message back second thing is TCP is connection",
+    "start": "591399",
+    "end": "598839"
+  },
+  {
+    "text": "oriented it H has no connections no concept of a connection there are a whole bunch of problems with connections",
+    "start": "598839",
+    "end": "605440"
+  },
+  {
+    "text": "actually it's been interesting because I've heard about them in various other talks today like for example connections get dropped and then you have to detect",
+    "start": "605440",
+    "end": "611440"
+  },
+  {
+    "text": "that and reopen them if you're not if you're connectionless it's not an issue there's nothing to drop connections have",
+    "start": "611440",
+    "end": "617120"
+  },
+  {
+    "text": "state and the state can be problematic if you don't have if you look you have thousands of connections open if you",
+    "start": "617120",
+    "end": "623720"
+  },
+  {
+    "text": "have no connections that state just goes away so home is connectionist you might think people seem to think you have to",
+    "start": "623720",
+    "end": "629519"
+  },
+  {
+    "text": "have connections to do anything good in the network you can't have a good you can't have nice behavior Network without connections it's actually not true uh",
+    "start": "629519",
+    "end": "636800"
+  },
+  {
+    "text": "you can still have for example reliable flow control delivery without",
+    "start": "636800",
+    "end": "641959"
+  },
+  {
+    "text": "connections third thing is fair scheduling so in TCP when there's a whole bunch of traffic",
+    "start": "641959",
+    "end": "647279"
+  },
+  {
+    "text": "incoming what will happen is the receiver tries to split its bandwidth across all of the the TCP streams that",
+    "start": "647279",
+    "end": "653200"
+  },
+  {
+    "text": "are open at the time that's well known to produce the worst possible result that that is if",
+    "start": "653200",
+    "end": "659560"
+  },
+  {
+    "text": "you have a whole bunch of large messages that means nobody finishes until the very end everybody waits we know from",
+    "start": "659560",
+    "end": "666200"
+  },
+  {
+    "text": "scheduling you're much better off letting somebody finish there's no point that everybody has to wait a long time",
+    "start": "666200",
+    "end": "671600"
+  },
+  {
+    "text": "to finish and so H users run to completion that is it will typically pick one message and finish it get that",
+    "start": "671600",
+    "end": "678600"
+  },
+  {
+    "text": "completely delivered so at least somebody can now make progress and in fact home prioritizes short messages",
+    "start": "678600",
+    "end": "684760"
+  },
+  {
+    "text": "that is even better because now you don't have short messages stuck behind long messages and get getting queued",
+    "start": "684760",
+    "end": "690959"
+  },
+  {
+    "text": "up the next aspect is how do you do congestion control when you have a whole bunch of senders sending to one receiver",
+    "start": "690959",
+    "end": "696279"
+  },
+  {
+    "text": "this is one of tcp's biggest problems you know if you follow the literature there have been dozens of Papers written over the last 20 years on how to improve",
+    "start": "696279",
+    "end": "703000"
+  },
+  {
+    "text": "tcp's congestion control has a whole bunch of bad properties and it's very difficult to make TCP Work Well turns",
+    "start": "703000",
+    "end": "710160"
+  },
+  {
+    "text": "out in TCP congestion control is driven from the sender the sender tries to detect that there's problems typically",
+    "start": "710160",
+    "end": "716839"
+  },
+  {
+    "text": "because packets get dropped or it gets get back notifications saying things are getting congested that makes it very difficult",
+    "start": "716839",
+    "end": "723760"
+  },
+  {
+    "text": "to do congestion control well H takes the opposite approach it actually does congestion control from the receiver",
+    "start": "723760",
+    "end": "729200"
+  },
+  {
+    "text": "turns out that's a good place to do it because congestion typically happens at the receiver at its down link that's the",
+    "start": "729200",
+    "end": "734240"
+  },
+  {
+    "text": "primary congestion point and the receiver is the one place where you happen to know about all of the traffic",
+    "start": "734240",
+    "end": "739360"
+  },
+  {
+    "text": "on that down link so so hom can do much more effective congestion",
+    "start": "739360",
+    "end": "744760"
+  },
+  {
+    "text": "control fifth PCP assumes that when you send when it issues a stream of packets",
+    "start": "744760",
+    "end": "750040"
+  },
+  {
+    "text": "that they will arrive at the destination in the same order they were transmitted",
+    "start": "750040",
+    "end": "755160"
+  },
+  {
+    "text": "that's just a bunch of assumptions about that in the TCP ecosystem that's a problem that restricts you in a whole",
+    "start": "755160",
+    "end": "762199"
+  },
+  {
+    "text": "bunch of different ways and in particular it affects load balancing but you can't do load balancing across your",
+    "start": "762199",
+    "end": "768199"
+  },
+  {
+    "text": "data center Fabrics effectively because all of the packets of one flow have to follow the exact same path for your",
+    "start": "768199",
+    "end": "774519"
+  },
+  {
+    "text": "fabric so they don't get reordered H eliminates that there are no ordering requirements so again you can do much more effective load balancing",
+    "start": "774519",
+    "end": "781279"
+  },
+  {
+    "text": "both in the fabric and also among cores processing incoming packets on the",
+    "start": "781279",
+    "end": "786600"
+  },
+  {
+    "text": "receiver and then last modern Network switches have priority cues for each",
+    "start": "786600",
+    "end": "792440"
+  },
+  {
+    "text": "egress Port there's typically eight or 16 priority cues you can specify a priority in your packets and they get",
+    "start": "792440",
+    "end": "798600"
+  },
+  {
+    "text": "sorted among those cues and the highest priority ones get delivered first TCP was designed before such things existed",
+    "start": "798600",
+    "end": "805160"
+  },
+  {
+    "text": "and so it doesn't take advantage of those H can take advantage of those Implement its run to completion and",
+    "start": "805160",
+    "end": "810279"
+  },
+  {
+    "text": "favor short messages and again provide some really nice performance advantages so that's a once over very",
+    "start": "810279",
+    "end": "816920"
+  },
+  {
+    "text": "quickly I give you the flavor of H there are various papers on it available if you want to learn more I'll have a link",
+    "start": "816920",
+    "end": "821959"
+  },
+  {
+    "text": "to the Homa Wiki at the end of the talk that where you can go to find out about all that stuff so the result is that",
+    "start": "821959",
+    "end": "827839"
+  },
+  {
+    "text": "homo way way out performs TCP in particular its latency is way lower and",
+    "start": "827839",
+    "end": "833519"
+  },
+  {
+    "text": "you see it even at low load if you're running in an unloaded Network home is basic roundtrip times for short messages",
+    "start": "833519",
+    "end": "839320"
+  },
+  {
+    "text": "are not just a little bit more than half those of TCP but it's under lad that H",
+    "start": "839320",
+    "end": "844600"
+  },
+  {
+    "text": "really outperforms TCP and on the right side of the slide I've shown the results of one measurement that was taken in a",
+    "start": "844600",
+    "end": "852360"
+  },
+  {
+    "text": "40 node cluster using a workload that was dered from a Facebook Ado cluster a few years ago so it's a sort of a data",
+    "start": "852360",
+    "end": "857759"
+  },
+  {
+    "text": "center workload and it has a messages of a whole bunch of different lengths that are getting sent the xaxis shows message",
+    "start": "857759",
+    "end": "863839"
+  },
+  {
+    "text": "length and then the Y AIS shows slowdown which is basically a measure of latency",
+    "start": "863839",
+    "end": "869040"
+  },
+  {
+    "text": "how long it took the packets to get through and notice that the y- axis is logarithmic",
+    "start": "869040",
+    "end": "874480"
+  },
+  {
+    "text": "scale so there's three curves on here one is for H which is the blue curve and TCP is the green curve and the brown",
+    "start": "874480",
+    "end": "880800"
+  },
+  {
+    "text": "curve is dctcp which is an improved version of TCP and the interesting thing is that the Slowdown for hom is better",
+    "start": "880800",
+    "end": "887720"
+  },
+  {
+    "text": "at every message size H provides better performance than TCP and it's not a little it's a lot",
+    "start": "887720",
+    "end": "893639"
+  },
+  {
+    "text": "this is more than an order of magnitude better performance in fact across all of",
+    "start": "893639",
+    "end": "898959"
+  },
+  {
+    "text": "the experiments we did the latency benefit from home a vary from a factor of seven to a factor of 83x depending on",
+    "start": "898959",
+    "end": "905320"
+  },
+  {
+    "text": "the particular application message length so it's a huge huge difference in",
+    "start": "905320",
+    "end": "911880"
+  },
+  {
+    "text": "performance okay so this was this work was originally done as part of the PHD dissertation of one of my graduate",
+    "start": "912920",
+    "end": "918199"
+  },
+  {
+    "text": "students benan moneri who by the way now works at Google in the the networking team and honestly the results were way",
+    "start": "918199",
+    "end": "926639"
+  },
+  {
+    "text": "better than my wildest dream you know if it had been a factor of two or three better than TCP I would have felt pretty",
+    "start": "926639",
+    "end": "932279"
+  },
+  {
+    "text": "good but a factor of 50 maybe 100x in some cases it's pretty amazing so I",
+    "start": "932279",
+    "end": "938160"
+  },
+  {
+    "text": "decided to make it my life mission to see is it possible to actually bring H",
+    "start": "938160",
+    "end": "943720"
+  },
+  {
+    "text": "into widespread usage in the data center and you know I I enter that sober minded",
+    "start": "943720",
+    "end": "949680"
+  },
+  {
+    "text": "and if you laughed at me as being a fool I I wouldn't blame you because you know there probably is no more entrenched",
+    "start": "949680",
+    "end": "955240"
+  },
+  {
+    "text": "standard in the history of the world than TCP and so they idea that you could displace this you know maybe that's a",
+    "start": "955240",
+    "end": "960880"
+  },
+  {
+    "text": "Fool's era but but I decided I'm going to try it until either it happens or I realize why it actually can't ever",
+    "start": "960880",
+    "end": "967759"
+  },
+  {
+    "text": "happen so I've been doing a bunch of things over the last few years first uh",
+    "start": "967759",
+    "end": "974000"
+  },
+  {
+    "text": "for those of you that know me you know that uh I I may be a professor but actually first and foremost I'm a coder",
+    "start": "974000",
+    "end": "979319"
+  },
+  {
+    "text": "I love programming I always code if I write less than five or 10, lines of code a year I feel like I'm disappointed",
+    "start": "979319",
+    "end": "985440"
+  },
+  {
+    "text": "in my year so I personally have built a Linux current driver for H to make it easy for people to use you can download",
+    "start": "985440",
+    "end": "991800"
+  },
+  {
+    "text": "it from GI from GitHub and install it it doesn't require any modifications to the",
+    "start": "991800",
+    "end": "996839"
+  },
+  {
+    "text": "Linux kernel it's just an installable driver so now people can run can use hom",
+    "start": "996839",
+    "end": "1002800"
+  },
+  {
+    "text": "but this brings us back to the API problem as I said earlier home API is",
+    "start": "1002800",
+    "end": "1007839"
+  },
+  {
+    "text": "not compatible with TCP and and it needs to be in compatible",
+    "start": "1007839",
+    "end": "1012920"
+  },
+  {
+    "text": "so it's not just that wasn't just a frivolous decision where we should have just made it compatible the thing is a lot of homeless benefit comes from",
+    "start": "1012920",
+    "end": "1019600"
+  },
+  {
+    "text": "having this message-based API and so if we want to fix all of tcp's problems we have to change the",
+    "start": "1019600",
+    "end": "1026798"
+  },
+  {
+    "text": "API but so what do you do now H you know nobody's going to go through and modify",
+    "start": "1026799",
+    "end": "1032558"
+  },
+  {
+    "text": "the I put thousands on the slide it's probably millions of TCP applications that just they're not all going to get",
+    "start": "1032559",
+    "end": "1037880"
+  },
+  {
+    "text": "changed to use Homa and probably many of them don't need to get changed anyhow TCP is probably adequate for many of the",
+    "start": "1037880",
+    "end": "1043720"
+  },
+  {
+    "text": "applications so what do we do and this is where I got the idea of integrating home with RPC",
+    "start": "1043720",
+    "end": "1050039"
+  },
+  {
+    "text": "Frameworks because the Frameworks tend to mask the underlying interfaces you see the framework interface and so if I",
+    "start": "1050039",
+    "end": "1056080"
+  },
+  {
+    "text": "can integrate homo with grpc and maybe there's a relatively small number of Frameworks out there a few others Thrift",
+    "start": "1056080",
+    "end": "1061840"
+  },
+  {
+    "text": "and so on then hopefully it could become really really easy to use hom with",
+    "start": "1061840",
+    "end": "1068280"
+  },
+  {
+    "text": "applications and so I decided to do grpc as the first one it seemed like I",
+    "start": "1068280",
+    "end": "1073559"
+  },
+  {
+    "text": "thought it was the I think nicest in terms of features it provides and it seemed like it had the potential for being being the most widely used so that",
+    "start": "1073559",
+    "end": "1080840"
+  },
+  {
+    "text": "leads us to the H to the grpc hom project so this is a library grpc is a",
+    "start": "1080840",
+    "end": "1087200"
+  },
+  {
+    "text": "library that you can allows H to hook into grpc and and be used with grpc",
+    "start": "1087200",
+    "end": "1093000"
+  },
+  {
+    "text": "there's a GitHub repo it's all open source you can grab it this is work in progress still so it supports C++",
+    "start": "1093000",
+    "end": "1099960"
+  },
+  {
+    "text": "applications uh Java support is not there yet but under Development I've not yet done anything with go yet and it",
+    "start": "1099960",
+    "end": "1106080"
+  },
+  {
+    "text": "doesn't support secure connections so it's only currently for in Secure connections and I should mention all of",
+    "start": "1106080",
+    "end": "1111880"
+  },
+  {
+    "text": "H H is only for data centers H doesn't really make sense for Long Haul networks the properties that make it so effective",
+    "start": "1111880",
+    "end": "1117880"
+  },
+  {
+    "text": "within a data center would cause problems if you tried to use it over a long haul Network so it's more for the apps running inside data",
+    "start": "1117880",
+    "end": "1126799"
+  },
+  {
+    "text": "centers okay so now the question how do you use H with grpc it's actually pretty",
+    "start": "1127240",
+    "end": "1133679"
+  },
+  {
+    "text": "straightforward first you compile and install the homac kernel module on your Linux system then you compile the hom",
+    "start": "1133679",
+    "end": "1139640"
+  },
+  {
+    "text": "library and you link your applications with the the H library and then it takes",
+    "start": "1139640",
+    "end": "1145640"
+  },
+  {
+    "text": "a oneline change on the client and a on line change on the server so right now the way H integrates",
+    "start": "1145640",
+    "end": "1152280"
+  },
+  {
+    "text": "is through the channel the the channel credentials mechanism of grpc so on",
+    "start": "1152280",
+    "end": "1158080"
+  },
+  {
+    "text": "client machines using C++ you typically have a call someplace where we call grpc create channel and you would normally",
+    "start": "1158080",
+    "end": "1164919"
+  },
+  {
+    "text": "pass in Channel credentials you got from grpc so instead you call a Homa method you get channel credentials that work",
+    "start": "1164919",
+    "end": "1171159"
+  },
+  {
+    "text": "for hom and that's it on the client side every all existing client code would work just fine if you do",
+    "start": "1171159",
+    "end": "1177360"
+  },
+  {
+    "text": "that similarly on the server side again when you create a you add a lisening port you pass in credentials instead of",
+    "start": "1177360",
+    "end": "1183440"
+  },
+  {
+    "text": "getting grpc credentials you call a different H method to get H credentials and you're done on the server side so",
+    "start": "1183440",
+    "end": "1189480"
+  },
+  {
+    "text": "the integration should be pretty easy and ideally I'd like to make it so you didn't even have to do that that you only effectively you pass in a different",
+    "start": "1189480",
+    "end": "1195720"
+  },
+  {
+    "text": "server name as you know command line parameter your application like a different internet address and would work with h I haven't figured out how to",
+    "start": "1195720",
+    "end": "1202159"
+  },
+  {
+    "text": "do that yet with grpc but with some discussions we were having beforehand there may be a way to make this even",
+    "start": "1202159",
+    "end": "1209360"
+  },
+  {
+    "text": "simpler so how is H integrated with grpc I'm not going to go over the details but just to give you a flavor there's",
+    "start": "1209360",
+    "end": "1215360"
+  },
+  {
+    "text": "basically a whole bunch of classes and and mechanisms you need to use in order to create a new transport the first one I already",
+    "start": "1215360",
+    "end": "1221799"
+  },
+  {
+    "text": "mentioned which is the credential mechanism so H generates credentials which get passed to the application and",
+    "start": "1221799",
+    "end": "1226919"
+  },
+  {
+    "text": "then it passes them down into G RPC and then once that happens grpc will use",
+    "start": "1226919",
+    "end": "1232159"
+  },
+  {
+    "text": "those credentials to communicate back with the transport there's a collection of classes Channel subchannel connector",
+    "start": "1232159",
+    "end": "1238280"
+  },
+  {
+    "text": "and and a couple of others that are used to open connections once that's done then",
+    "start": "1238280",
+    "end": "1244039"
+  },
+  {
+    "text": "there's two major interfaces between the main core of grpc and a transport the",
+    "start": "1244039",
+    "end": "1249400"
+  },
+  {
+    "text": "grpc transport mechanism and the grpc stream mechanism I put those in red because those are the the main ones",
+    "start": "1249400",
+    "end": "1255480"
+  },
+  {
+    "text": "those are pretty well- defined apis for communication and then finally to do a new transport",
+    "start": "1255480",
+    "end": "1261640"
+  },
+  {
+    "text": "you have to use a bunch of other apis that are a little bit less sort of wellknown for example H uses the grpc",
+    "start": "1261640",
+    "end": "1268400"
+  },
+  {
+    "text": "notification mechanism to find out when packets arrive when a h socket becomes readable needs to use a grpc mechanism",
+    "start": "1268400",
+    "end": "1274640"
+  },
+  {
+    "text": "for that there's a bunch of of utility classes used to pass information back",
+    "start": "1274640",
+    "end": "1279919"
+  },
+  {
+    "text": "and forth between transports and grpc the slice mechanism the metadata batch mechanism and so on so I'm not going to",
+    "start": "1279919",
+    "end": "1287799"
+  },
+  {
+    "text": "go through all the details of those but give you a very quick synopsis of of what it looks like so now I'd like to talk about two",
+    "start": "1287799",
+    "end": "1295720"
+  },
+  {
+    "text": "challenges that I encountered in working with grpc and the first one is the complexity",
+    "start": "1295720",
+    "end": "1303400"
+  },
+  {
+    "text": "of the grpc codebase so I I've been programming for a little bit more than",
+    "start": "1303400",
+    "end": "1309360"
+  },
+  {
+    "text": "50 years now I'm embarrassed to say and I think probably the grpc codebase is",
+    "start": "1309360",
+    "end": "1314480"
+  },
+  {
+    "text": "the most challenging one I've ever worked in my career it's it's it's very complex with a very large number of",
+    "start": "1314480",
+    "end": "1320919"
+  },
+  {
+    "text": "classes many layers very deep call chains as we're discussing before the",
+    "start": "1320919",
+    "end": "1326039"
+  },
+  {
+    "text": "the talk I at one point I was trying to figure out what was going on so I set a breakpoint in the socket open system at this lowest level socket open system",
+    "start": "1326039",
+    "end": "1332400"
+  },
+  {
+    "text": "call just to see how did grpc find its way from an application down to opening a socket and when I typed where in GDB",
+    "start": "1332400",
+    "end": "1339039"
+  },
+  {
+    "text": "there were 50 levels of method call between the application call and and the socket open",
+    "start": "1339039",
+    "end": "1345039"
+  },
+  {
+    "text": "call another problem is that that the G implementation is based very heavily on",
+    "start": "1345039",
+    "end": "1350279"
+  },
+  {
+    "text": "closures and what this means is that one when one method a wants to call a method B it doesn't actually call b instead it",
+    "start": "1350279",
+    "end": "1357520"
+  },
+  {
+    "text": "creates a closure which packages up the desire to someday call B and it hands that closure off to somebody else who",
+    "start": "1357520",
+    "end": "1363440"
+  },
+  {
+    "text": "hands it to somebody else and hands it to somebody else and then eventually somebody invokes that closure and B gets",
+    "start": "1363440",
+    "end": "1368600"
+  },
+  {
+    "text": "called the problem with this is you put a breakpoint in B and you have no idea",
+    "start": "1368600",
+    "end": "1374200"
+  },
+  {
+    "text": "who it was that actually who A was that's that's long gone so you have this closure in fact there are closures that",
+    "start": "1374200",
+    "end": "1379520"
+  },
+  {
+    "text": "invoke closures that invoke closures and so you're many levels deep in closure and the other problem is also when you",
+    "start": "1379520",
+    "end": "1385279"
+  },
+  {
+    "text": "invoke a closure on the other side you have no idea where it's going to go either so this makes it pretty difficult",
+    "start": "1385279",
+    "end": "1390520"
+  },
+  {
+    "text": "to see the structure of the code and then if one sort of one particular knit is that the metadata",
+    "start": "1390520",
+    "end": "1396600"
+  },
+  {
+    "text": "mechanism is a pretty complex mechanism took quite a while to understand once I understood it it wasn't that hard to use",
+    "start": "1396600",
+    "end": "1402360"
+  },
+  {
+    "text": "but trying to figure out exactly which three lines of code I had to write took several days of work",
+    "start": "1402360",
+    "end": "1408600"
+  },
+  {
+    "text": "so it's a complicated code base and there's a lot of dependencies that are non-obvious there to integrate a",
+    "start": "1408600",
+    "end": "1415320"
+  },
+  {
+    "text": "transport you have to do a lot more than just implement the stream mechanism it's a bunch of other things for example I",
+    "start": "1415320",
+    "end": "1420440"
+  },
+  {
+    "text": "had to figure out how do I get how do I get grpc to talk to my transport in the first place took weeks to figure out",
+    "start": "1420440",
+    "end": "1427000"
+  },
+  {
+    "text": "that oh you have to go through the credentials or maybe there's a better mechanism through resolvers that I haven't actually yet discovered so that",
+    "start": "1427000",
+    "end": "1432880"
+  },
+  {
+    "text": "was hard and things like when a transport calls back into into grpc to",
+    "start": "1432880",
+    "end": "1438919"
+  },
+  {
+    "text": "establish a channel it has to add additional arguments to the list that were passed in you know again the only",
+    "start": "1438919",
+    "end": "1444080"
+  },
+  {
+    "text": "way to figure that out is to look at existing transports and see that they do it I I tried it the obvious way without the arguments and of course didn't",
+    "start": "1444080",
+    "end": "1451159"
+  },
+  {
+    "text": "channels didn't work so I had to try to figure out what do I have to add so there's a lot of these internal dependencies that that uh you only kind",
+    "start": "1451159",
+    "end": "1458080"
+  },
+  {
+    "text": "of figure out through through difficult experience and then unfortunately there's almost no Internal Documentation",
+    "start": "1458080",
+    "end": "1465200"
+  },
+  {
+    "text": "in the grpc code base which is very sad the I I do want to say that there's",
+    "start": "1465200",
+    "end": "1470320"
+  },
+  {
+    "text": "external documentation for the API which is pretty good I I had no trouble learning how to write grpc applications",
+    "start": "1470320",
+    "end": "1476240"
+  },
+  {
+    "text": "and servers so that was easy to do great documentation for that but internally not much there was one web page that",
+    "start": "1476240",
+    "end": "1482840"
+  },
+  {
+    "text": "described that that transport the grpc transport and stream mechanisms djp wherever you are there's a place in",
+    "start": "1482840",
+    "end": "1489200"
+  },
+  {
+    "text": "heaven that's reserved with your name on it thank you very much that was super helpful but when looking at the code",
+    "start": "1489200",
+    "end": "1496039"
+  },
+  {
+    "text": "there's essentially zero com ments in the code and this was problematic because it makes it hard to figure out",
+    "start": "1496039",
+    "end": "1501919"
+  },
+  {
+    "text": "all these these subtle dependencies that you have to resolve I ended up having to just reverse engineer the existing chtp",
+    "start": "1501919",
+    "end": "1508320"
+  },
+  {
+    "text": "2 transport to figure this out uh and that was difficult uh because it was hard to figure out what's fundamental",
+    "start": "1508320",
+    "end": "1514679"
+  },
+  {
+    "text": "what things do all transports have to do versus things that are specific to uh to",
+    "start": "1514679",
+    "end": "1520559"
+  },
+  {
+    "text": "chp2 so I think I'm going to skip this slide running late on time I'm want to talk about my second challenge which is",
+    "start": "1520720",
+    "end": "1526120"
+  },
+  {
+    "text": "performance so I've done at least basic performance measurements here and this slide shows the performance for a really",
+    "start": "1526120",
+    "end": "1532360"
+  },
+  {
+    "text": "really simple RPC with a very short request message and a short response message and so you can see it takes 116",
+    "start": "1532360",
+    "end": "1539840"
+  },
+  {
+    "text": "microsc with TCP and 73 microsc with hom and I've broken that down so this shows",
+    "start": "1539840",
+    "end": "1546120"
+  },
+  {
+    "text": "the lifetime of the message so starting on the client side when the client makes the call to grpc this first green box is",
+    "start": "1546120",
+    "end": "1552640"
+  },
+  {
+    "text": "the code in grpc and the transport until it actually issues a kernel call to send",
+    "start": "1552640",
+    "end": "1558360"
+  },
+  {
+    "text": "something with TCP the brown Arrow shows time in the kernel and across the network and then once the select or the",
+    "start": "1558360",
+    "end": "1565440"
+  },
+  {
+    "text": "eole Returns on the server side the blue box shows how long it takes the server to process the incoming message hand it",
+    "start": "1565440",
+    "end": "1571720"
+  },
+  {
+    "text": "off to the application the application does essentially nothing except pass a response back in and it going to go",
+    "start": "1571720",
+    "end": "1577480"
+  },
+  {
+    "text": "through grpc across the network and then on the client side receive the message and back to the application so you can",
+    "start": "1577480",
+    "end": "1584399"
+  },
+  {
+    "text": "see all of those boxes are time spent in grpc so first thing you can see from this the",
+    "start": "1584399",
+    "end": "1590320"
+  },
+  {
+    "text": "good news is that H is quite a bit faster than TCP about 40% faster in fact every stage along the every one of those",
+    "start": "1590320",
+    "end": "1596840"
+  },
+  {
+    "text": "boxes is smaller in h not only is the hom protocol faster but actually the hom transport implementation in grpc is",
+    "start": "1596840",
+    "end": "1602799"
+  },
+  {
+    "text": "quite a bit faster than chtp that's the good news the bad news",
+    "start": "1602799",
+    "end": "1608000"
+  },
+  {
+    "text": "is that the grpc overheads are very very high unfortunately you know Google's",
+    "start": "1608000",
+    "end": "1613320"
+  },
+  {
+    "text": "invented the term data center tax to talk about the overhead imposed by Data Center Software Ware that helps us write",
+    "start": "1613320",
+    "end": "1619200"
+  },
+  {
+    "text": "applications Bo the grp C tax is is fairly breathtaking you know if you take",
+    "start": "1619200",
+    "end": "1624799"
+  },
+  {
+    "text": "how long it takes just in the kernel and the network you know if I was just to program to say the TCP socket interfaces",
+    "start": "1624799",
+    "end": "1631200"
+  },
+  {
+    "text": "it would take about 25 microseconds to do round trip time but using grpc it takes 116 so that's a 4.6x tax in h",
+    "start": "1631200",
+    "end": "1640279"
+  },
+  {
+    "text": "again using grpc versus Raw more than 5x slower so that's a pretty serious",
+    "start": "1640279",
+    "end": "1646679"
+  },
+  {
+    "text": "penalty and what's even uh more concerning is it's getting worse so I had been",
+    "start": "1646679",
+    "end": "1652919"
+  },
+  {
+    "text": "originally been working on grpc 1.43 and a few weeks ago I decided I should really upgrade before I come and give a",
+    "start": "1652919",
+    "end": "1658039"
+  },
+  {
+    "text": "talk at this conference so I upgraded to 1.57 and things got way worse and so if",
+    "start": "1658039",
+    "end": "1663880"
+  },
+  {
+    "text": "you take if you take the I've shown here you can see the the time before and the",
+    "start": "1663880",
+    "end": "1669240"
+  },
+  {
+    "text": "time after for grp for h and the time before and the time after for TCP and I separate out with the base time that's",
+    "start": "1669240",
+    "end": "1675279"
+  },
+  {
+    "text": "the time in the kernel and the network you know that's the in the hom stack same thing for TCP so the the lighter",
+    "start": "1675279",
+    "end": "1681279"
+  },
+  {
+    "text": "boxes this is all time spent in grpc so that went up by 44% for H and up by 40%",
+    "start": "1681279",
+    "end": "1689799"
+  },
+  {
+    "text": "for the TCP stack so that's so it's really",
+    "start": "1689799",
+    "end": "1695000"
+  },
+  {
+    "text": "concerning not only is it is it high overheads but they seem they're getting worse and furthermore I'm I'm a little",
+    "start": "1695000",
+    "end": "1700919"
+  },
+  {
+    "text": "worried that it's going to be really hard to fix this because the same things that make it slow are the same things",
+    "start": "1700919",
+    "end": "1706559"
+  },
+  {
+    "text": "that make it complicated this huge number of layers and classes and so it's not like there's one place you can go",
+    "start": "1706559",
+    "end": "1711640"
+  },
+  {
+    "text": "and suddenly speed it up by a factor of five it will take thousands of fixes in order to try and do that but very",
+    "start": "1711640",
+    "end": "1717880"
+  },
+  {
+    "text": "challenging to figure out how to solve that and I I'm worried actually that",
+    "start": "1717880",
+    "end": "1723159"
+  },
+  {
+    "text": "performance uh could be an existential threat to grpc in the data center",
+    "start": "1723159",
+    "end": "1728519"
+  },
+  {
+    "text": "because if you think about somebody trying to build a high performance application like if you if some if they took reddis and put redus on top of grpc",
+    "start": "1728519",
+    "end": "1735720"
+  },
+  {
+    "text": "replacing their homegrown transport protocol you would need four times as many red asserter as they need right now",
+    "start": "1735720",
+    "end": "1743200"
+  },
+  {
+    "text": "and so people building high performance applications I'm worried are going to see this performance and think they have",
+    "start": "1743200",
+    "end": "1748679"
+  },
+  {
+    "text": "to find some other solution which is not good I mean seem like want people using grpc so I think a challenge for the grpc",
+    "start": "1748679",
+    "end": "1755960"
+  },
+  {
+    "text": "team is see is is there something you can do to try and first prevent the escalation of the the problem and then",
+    "start": "1755960",
+    "end": "1761200"
+  },
+  {
+    "text": "second can you somehow buy back some of that performance to reduce the tax Okay so just to wrap up very quickly",
+    "start": "1761200",
+    "end": "1769120"
+  },
+  {
+    "text": "the good news is it is possible to add new transports to grpc so home grpc provides a a data point that you can do",
+    "start": "1769120",
+    "end": "1775360"
+  },
+  {
+    "text": "that and it is now possible to use home at least for C++ grpc applications and I",
+    "start": "1775360",
+    "end": "1781440"
+  },
+  {
+    "text": "I'm working on the other ones as well and you get significantly better performance by doing that uh as I",
+    "start": "1781440",
+    "end": "1787320"
+  },
+  {
+    "text": "mentioned there's two these two challenges with grpc about the difficulty of the codebase and the and the high overhead so I hope that there",
+    "start": "1787320",
+    "end": "1793600"
+  },
+  {
+    "text": "can be solutions for those in the years ahead and if you're interested in any of this I would love to have you try it out",
+    "start": "1793600",
+    "end": "1800000"
+  },
+  {
+    "text": "and I will be happy to do whatever I can to help you if you have run into any problems I will fix bugs for you and",
+    "start": "1800000",
+    "end": "1805360"
+  },
+  {
+    "text": "help you resolve any issues that come up and I consider myself one of the most promiscuous computer scientists in the",
+    "start": "1805360",
+    "end": "1811559"
+  },
+  {
+    "text": "world right now I really want to encourage people to use H and I'm happy to do anything and if if You' like me to to wash your car so you have a little",
+    "start": "1811559",
+    "end": "1817960"
+  },
+  {
+    "text": "bit more time to work on this just let me know where you live I'll be over there with brush and bucket so try it out and if if you're",
+    "start": "1817960",
+    "end": "1825559"
+  },
+  {
+    "text": "really ambitious I would love to have help on this there's still quite a bit of work to be done for example I haven't even thought about go support I'd love",
+    "start": "1825559",
+    "end": "1831799"
+  },
+  {
+    "text": "to see somebody do that and I have not addressed security issues that's going to be another big chunk of work if",
+    "start": "1831799",
+    "end": "1837080"
+  },
+  {
+    "text": "there's somebody that understands how security Works in grpc and would like to work with me on H I would love that so again if any of this is",
+    "start": "1837080",
+    "end": "1844120"
+  },
+  {
+    "text": "interesting there's a there's a Homa Wiki that kind of brings together all of the known information on H in one place",
+    "start": "1844120",
+    "end": "1849559"
+  },
+  {
+    "text": "where you can go to to get more information and sorry I've run a few minutes past my time but thank you for your attention and I'll be happy to take",
+    "start": "1849559",
+    "end": "1856240"
+  },
+  {
+    "text": "questions",
+    "start": "1856240",
+    "end": "1859240"
+  },
+  {
+    "text": "so the performance slide is very impressive uh I wonder if you have tested your performance when you have a",
+    "start": "1873880",
+    "end": "1879840"
+  },
+  {
+    "text": "mixed environment say 50% of traffic is TCP and the other half is Homer and",
+    "start": "1879840",
+    "end": "1885399"
+  },
+  {
+    "text": "what's going to happen to both Ty yeah that's a really good question i' I've been asked that question several",
+    "start": "1885399",
+    "end": "1890559"
+  },
+  {
+    "text": "times it's on my list of things to do I have not done that yet yeah because any any deployment of hom is probably going",
+    "start": "1890559",
+    "end": "1896279"
+  },
+  {
+    "text": "to involve a mixture of TCP and hom traffic initially so need to understand that",
+    "start": "1896279",
+    "end": "1901919"
+  },
+  {
+    "text": "y the current performance is yeah run everything's running H or everything's running TCP en I have a",
+    "start": "1904559",
+    "end": "1913120"
+  },
+  {
+    "text": "second a few times this is",
+    "start": "1913120",
+    "end": "1919158"
+  },
+  {
+    "text": "I think homo just won't work it yeah it'll just it'll get continuous timeouts and yeah I would not expect it would",
+    "start": "1925559",
+    "end": "1931919"
+  },
+  {
+    "text": "work at all because it's based on it assumes that the latency of communication between the two endpoints is low enough that it can do really",
+    "start": "1931919",
+    "end": "1938080"
+  },
+  {
+    "text": "rapid exchange of information in order to manage connections and that latency becomes milliseconds it won't work very",
+    "start": "1938080",
+    "end": "1943880"
+  },
+  {
+    "text": "well it'll be some combination of very very slow or just not",
+    "start": "1943880",
+    "end": "1949320"
+  },
+  {
+    "text": "functional sort of follow up to the the prev question but when you say long what kind of distance are we talking about",
+    "start": "1955559",
+    "end": "1962120"
+  },
+  {
+    "text": "are we talking about next availability zone is already a long hul or is it if",
+    "start": "1962120",
+    "end": "1967240"
+  },
+  {
+    "text": "different region you need over to yeah probably even availability zones if you're referring to a data center space",
+    "start": "1967240",
+    "end": "1973080"
+  },
+  {
+    "text": "a few miles apart a few tens of miles apart probably wouldn't want to use Homer for that probably better off with with TCP within within a foot football",
+    "start": "1973080",
+    "end": "1980720"
+  },
+  {
+    "text": "field size box is kind of The Sweet Spot for home right thank",
+    "start": "1980720",
+    "end": "1986039"
+  },
+  {
+    "text": "you uh so uh am I understand this correctly that uh the most benefit of of",
+    "start": "1993039",
+    "end": "1998799"
+  },
+  {
+    "text": "using H is for latency but how does it affect uh TCP usage well sorry CPU usage",
+    "start": "1998799",
+    "end": "2007519"
+  },
+  {
+    "text": "like uh if the bottleneck in our case is CPU utilization and not latency would",
+    "start": "2007519",
+    "end": "2013360"
+  },
+  {
+    "text": "you still advise us to use H yes yes in fact because the reason the well the",
+    "start": "2013360",
+    "end": "2019679"
+  },
+  {
+    "text": "improved latency comes from two things part of it is it's avoiding congestion in the network but part of it is it just uses less CPU time than TCP as well and",
+    "start": "2019679",
+    "end": "2028080"
+  },
+  {
+    "text": "particularly if you go back to the to the earlier slide",
+    "start": "2028080",
+    "end": "2033440"
+  },
+  {
+    "text": "well you and you compare the effect here again all of this difference between TCP",
+    "start": "2033440",
+    "end": "2039639"
+  },
+  {
+    "text": "and H that 116% almost all of that has reduced CPU time well actually 11 microsc is in the network although some",
+    "start": "2039639",
+    "end": "2046279"
+  },
+  {
+    "text": "of that's in the kernel and then sorry and then the rest of that is all reduced CPU time so this will actually affect",
+    "start": "2046279",
+    "end": "2052079"
+  },
+  {
+    "text": "throughput as well because hom uses less CPU time okay thank",
+    "start": "2052079",
+    "end": "2059000"
+  },
+  {
+    "text": "you um what's the length of the header the Homer header and how small is too",
+    "start": "2060280",
+    "end": "2066280"
+  },
+  {
+    "text": "small of message L uh the length of the H",
+    "start": "2066280",
+    "end": "2072000"
+  },
+  {
+    "text": "header it's on the order of 50 bytes I think it's a little I think it's a little larger than the TCP header but",
+    "start": "2072000",
+    "end": "2079960"
+  },
+  {
+    "text": "not it's less than twice the length of the TCP header and how small is too small in terms of the message the",
+    "start": "2079960",
+    "end": "2086599"
+  },
+  {
+    "text": "payload on the homework you can have a one bite payload you're still G to pay 50 bytes of header so yeah because I",
+    "start": "2086599",
+    "end": "2092520"
+  },
+  {
+    "text": "come from the ATM world when ATM link layer protocols existed um you had uh 64",
+    "start": "2092520",
+    "end": "2099880"
+  },
+  {
+    "text": "byte cells and 16 byte headers and 48 bytes of payload and all the service",
+    "start": "2099880",
+    "end": "2106160"
+  },
+  {
+    "text": "providers when they adopted it um they shut it down because of the size ratio of the payload to the to the header was",
+    "start": "2106160",
+    "end": "2113520"
+  },
+  {
+    "text": "was very cost prohibitive for them to scale up yeah so I think this depends on how big are the messages people are",
+    "start": "2113520",
+    "end": "2119680"
+  },
+  {
+    "text": "sending and and my sense is that um it's pretty common to see messages in data",
+    "start": "2119680",
+    "end": "2125119"
+  },
+  {
+    "text": "centers that are less than a kilobyte that's very common to see messages that are less than 50 to 100 byes is probably less common but but the head or",
+    "start": "2125119",
+    "end": "2132119"
+  },
+  {
+    "text": "overheads will be more expensive for those for those short",
+    "start": "2132119",
+    "end": "2137320"
+  },
+  {
+    "text": "messages uh so using homo uh requires the the kernel support um would it have",
+    "start": "2145480",
+    "end": "2152280"
+  },
+  {
+    "text": "been possible for for this to be a user thing would it be possible to done home",
+    "start": "2152280",
+    "end": "2158079"
+  },
+  {
+    "text": "at user level I debated about that the problem is there there's really no good way to do that that is widely usable as",
+    "start": "2158079",
+    "end": "2165240"
+  },
+  {
+    "text": "far as I know the only option I know of is dpdk but that's not very generalizable typically when you open a",
+    "start": "2165240",
+    "end": "2170839"
+  },
+  {
+    "text": "dpdk connection you grab the entire Nick and you own the Nick for one application so if you have multiple applications",
+    "start": "2170839",
+    "end": "2176920"
+  },
+  {
+    "text": "running on the same machine you need effectively multiple Nicks for them to run on so um I I thought about that and",
+    "start": "2176920",
+    "end": "2185119"
+  },
+  {
+    "text": "you're right putting something in the kernel uh so creates inertia that that will make it more difficult for some people",
+    "start": "2185119",
+    "end": "2190720"
+  },
+  {
+    "text": "to install but it seemed like the only way to really get the performance in generality",
+    "start": "2190720",
+    "end": "2197480"
+  },
+  {
+    "text": "thanks thank you for uh a very nice presentation we'll definitely follow up",
+    "start": "2203240",
+    "end": "2209000"
+  },
+  {
+    "text": "uh regarding these uh performance uh measurements that you have done and we'll want to understand and replicate",
+    "start": "2209000",
+    "end": "2215720"
+  },
+  {
+    "text": "and hopefully benefit from some of this work um regarding H itself um you",
+    "start": "2215720",
+    "end": "2221520"
+  },
+  {
+    "text": "mentioned that both the congestion control and flow control is new um what kind of scale has it been tested at",
+    "start": "2221520",
+    "end": "2228680"
+  },
+  {
+    "text": "because um previously when we have tried other congestion control protocols infin band Etc they have not scaled well",
+    "start": "2228680",
+    "end": "2236800"
+  },
+  {
+    "text": "beyond like a thousand node uh data center yeah so by Google standards the",
+    "start": "2236800",
+    "end": "2242280"
+  },
+  {
+    "text": "scale at which hom has been tested you'd probably label it pathetic it's the most notes I've been",
+    "start": "2242280",
+    "end": "2248000"
+  },
+  {
+    "text": "able to get it once is 40 notes so and I I think you're probably right",
+    "start": "2248000",
+    "end": "2253400"
+  },
+  {
+    "text": "that as it scales higher than I I'm sure some new problem at least some new problem will come out that I was not",
+    "start": "2253400",
+    "end": "2259160"
+  },
+  {
+    "text": "able to observe at 40 nodes but does happen at at higher scales but the only way to do that is to get enough to get",
+    "start": "2259160",
+    "end": "2265800"
+  },
+  {
+    "text": "some company with the resources interested enough at home to try the experiment so one thing I would love to do if Google or any other company would",
+    "start": "2265800",
+    "end": "2272480"
+  },
+  {
+    "text": "give me access to a cluster with thousands of nodes I would love to run those experiments and see see how it scales and to fix the inevitable bugs",
+    "start": "2272480",
+    "end": "2279680"
+  },
+  {
+    "text": "that will probably come up at that scale",
+    "start": "2279680",
+    "end": "2284280"
+  },
+  {
+    "text": "sure um as abashik said we would like to follow up on the performance issues over here especially grpc tax but a quick",
+    "start": "2286880",
+    "end": "2294599"
+  },
+  {
+    "text": "question um is the data does the RPC use utilized messages or if that do you",
+    "start": "2294599",
+    "end": "2301760"
+  },
+  {
+    "text": "think put above uh so H is using it's using",
+    "start": "2301760",
+    "end": "2307280"
+  },
+  {
+    "text": "serialized protuff right it gets all the data through this through the same uh",
+    "start": "2307280",
+    "end": "2313200"
+  },
+  {
+    "text": "channels through grpc that the CHT trans does so it's so I believe it's a protuff",
+    "start": "2313200",
+    "end": "2318400"
+  },
+  {
+    "text": "that that has been serialized by somebody above and passed down in serialized form tooma I see so this tax",
+    "start": "2318400",
+    "end": "2324040"
+  },
+  {
+    "text": "probably includes calization and dualization as well yes you actually when I started this I thought so we've",
+    "start": "2324040",
+    "end": "2330160"
+  },
+  {
+    "text": "used protuff before we always thought protuff were slow uh and and they actually are slow but protuff are",
+    "start": "2330160",
+    "end": "2336200"
+  },
+  {
+    "text": "basically Bally in the noise here protuff and this is maybe a microsc or two for prot I don't have measurements",
+    "start": "2336200",
+    "end": "2341560"
+  },
+  {
+    "text": "here I did separate measurements to see how because I was wondering how much of this was Proto buff serialization and der serialization it was on the order of",
+    "start": "2341560",
+    "end": "2347520"
+  },
+  {
+    "text": "one to two microseconds for the round trip so out of you know something like uh 100 microsc of total overhead very",
+    "start": "2347520",
+    "end": "2357200"
+  },
+  {
+    "text": "interesting the size of the message here was small you know 10 to 20 bytes something like really small",
+    "start": "2361119",
+    "end": "2368440"
+  }
+]

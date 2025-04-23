@@ -1,0 +1,1912 @@
+[
+  {
+    "text": "all right hi everyone i'm adam wolf gordon i'm an engineer at digitalocean i currently work as the tech lead for our kubernetes and",
+    "start": "160",
+    "end": "6560"
+  },
+  {
+    "text": "container registry products and i'm going to talk today about kubernetes upgrades and our experience",
+    "start": "6560",
+    "end": "11920"
+  },
+  {
+    "text": "with them i'm going to talk about how we do upgrades at digitalocean things that we got right and things that",
+    "start": "11920",
+    "end": "17680"
+  },
+  {
+    "text": "we got wrong in that process but more importantly what i want to talk about today is what we've learned",
+    "start": "17680",
+    "end": "23439"
+  },
+  {
+    "text": "about doing upgrades and some lessons that you can apply as either a cluster operator someone who could be upgrading",
+    "start": "23439",
+    "end": "28720"
+  },
+  {
+    "text": "clusters or as a developer who's deploying your applications into a kubernetes cluster that's going to be upgraded",
+    "start": "28720",
+    "end": "35120"
+  },
+  {
+    "text": "these are things that hopefully will help your upgrades be easier and keep your workloads running as",
+    "start": "35120",
+    "end": "40160"
+  },
+  {
+    "text": "expected as you do upgrades on your clusters i want to start with a little bit of a story about how this talk came to be",
+    "start": "40160",
+    "end": "47920"
+  },
+  {
+    "text": "so this talk really starts about a year ago in barcelona at kubecon eu 2019",
+    "start": "47920",
+    "end": "53440"
+  },
+  {
+    "text": "and in barcelona we announced the general availability of our managed kubernetes product",
+    "start": "53440",
+    "end": "58480"
+  },
+  {
+    "text": "and if you stopped by our lovely booth in barcelona one of the you would have one of the things we would have told you is that our product",
+    "start": "58480",
+    "end": "65119"
+  },
+  {
+    "text": "is now ga and you might have asked us what that meant we would have told you a bunch of things",
+    "start": "65119",
+    "end": "71280"
+  },
+  {
+    "text": "that we had in our ga blog post here um we would have told you that it's production ready ready for your",
+    "start": "71280",
+    "end": "77920"
+  },
+  {
+    "text": "workloads to be trusted we would have told you that it has an integrated monitoring service and",
+    "start": "77920",
+    "end": "85200"
+  },
+  {
+    "text": "right at the sort of end of the second paragraph we would have told you that it has automated patch version upgrades",
+    "start": "85200",
+    "end": "93680"
+  },
+  {
+    "text": "and what we didn't tell you was that you couldn't actually upgrade your cluster yet we hadn't enabled any upgrade paths for",
+    "start": "93680",
+    "end": "100880"
+  },
+  {
+    "text": "our customers um we had tested our upgrade process quite a bit we run lots of upgrades on",
+    "start": "100880",
+    "end": "107119"
+  },
+  {
+    "text": "test clusters but we hadn't exposed our upgrade process to the full richness of possible",
+    "start": "107119",
+    "end": "113439"
+  },
+  {
+    "text": "configurations and workloads that our customers might have and we didn't want to do that while we were all in",
+    "start": "113439",
+    "end": "118719"
+  },
+  {
+    "text": "barcelona we wanted to wait until we were back at normal work so uh we if you went to your control",
+    "start": "118719",
+    "end": "125119"
+  },
+  {
+    "text": "panel on digilotion at that time looked at your cluster it would have told you your cluster was up to date regardless of what version it was",
+    "start": "125119",
+    "end": "131120"
+  },
+  {
+    "text": "actually running so as you can probably guess when we did",
+    "start": "131120",
+    "end": "137360"
+  },
+  {
+    "text": "enable upgrades the next week or so we started learning things and that's when i had the idea that",
+    "start": "137360",
+    "end": "144160"
+  },
+  {
+    "text": "maybe i can give a talk about this one day uh and that's why this talk is lessons from a year managed kubernetes upgrades",
+    "start": "144160",
+    "end": "150480"
+  },
+  {
+    "text": "and when i wrote the the cfp for this talk the end of 2019 i ran some numbers and i",
+    "start": "150480",
+    "end": "157519"
+  },
+  {
+    "text": "figured that by kubecon amsterdam uh where we're supposed to give this talk um we",
+    "start": "157519",
+    "end": "163599"
+  },
+  {
+    "text": "would have done about 20 000 upgrades and that's a nice big round number so i put in the title of the talk and in preparation for today i ran the",
+    "start": "163599",
+    "end": "170640"
+  },
+  {
+    "text": "numbers again and um we've now done about 35 000 upgrades so we've accelerated a little",
+    "start": "170640",
+    "end": "176080"
+  },
+  {
+    "text": "bit over what i thought we would have done and uh that's we've had upgrades enabled for",
+    "start": "176080",
+    "end": "183440"
+  },
+  {
+    "text": "about a year so that's about 100 upgrades a day across thousands of clusters and i'm not",
+    "start": "183440",
+    "end": "188640"
+  },
+  {
+    "text": "saying this just to sort of brag about how many upgrades you've done although i think it's an interesting number i'm saying this mostly just to let you",
+    "start": "188640",
+    "end": "194879"
+  },
+  {
+    "text": "know that we have a pretty good set of data to draw some lessons from and i feel like we've done enough upgrades that we",
+    "start": "194879",
+    "end": "200879"
+  },
+  {
+    "text": "can really talk about what we've learned at this point",
+    "start": "200879",
+    "end": "205519"
+  },
+  {
+    "text": "so that uh leads me to my favorite slide which is disclaimers and i have two disclaimers for this talk",
+    "start": "206480",
+    "end": "212720"
+  },
+  {
+    "text": "one is that uh these are lessons from our upgrade process there are lots of different ways to upgrade kubernetes",
+    "start": "212720",
+    "end": "218959"
+  },
+  {
+    "text": "and i'm going to talk about how we do it but depending on how you choose to do it some of these lessons will be applicable",
+    "start": "218959",
+    "end": "224080"
+  },
+  {
+    "text": "to you and some of them won't and if what you take away from this talk is that you don't want to do it the way we do it because you don't want to hit",
+    "start": "224080",
+    "end": "230239"
+  },
+  {
+    "text": "those problems then that's a completely fair takeaway the other disclaimer is that",
+    "start": "230239",
+    "end": "236000"
+  },
+  {
+    "text": "this is things we've learned from upgrading our customers clusters and their workloads are probably different than your workloads they're",
+    "start": "236000",
+    "end": "241439"
+  },
+  {
+    "text": "definitely different than our workloads depending on your environment how you run things you might also hit different",
+    "start": "241439",
+    "end": "246959"
+  },
+  {
+    "text": "things so let's talk about how you upgrade kubernetes and what you actually do when",
+    "start": "246959",
+    "end": "252560"
+  },
+  {
+    "text": "you upgrade it there are basically two parts of the kubernetes cluster there's the control plane and there are the worker nodes",
+    "start": "252560",
+    "end": "258560"
+  },
+  {
+    "text": "so when you upgrade kubernetes first you're going to upgrade the control plane then you're going to upgrade the work",
+    "start": "258560",
+    "end": "264000"
+  },
+  {
+    "text": "nodes and that's it you're done you've upgraded group headings of course it's not actually quite that",
+    "start": "264000",
+    "end": "270400"
+  },
+  {
+    "text": "simple so here's an expanded set of steps of",
+    "start": "270400",
+    "end": "276080"
+  },
+  {
+    "text": "things that you have to do to upgrade when you're upgrading the control plane you're really upgrading a lot of things so the first thing you're going to do is",
+    "start": "276080",
+    "end": "282400"
+  },
+  {
+    "text": "update any resources that aren't supported in your target version then you're going to upgrade mcd if you need to then the actual control plane",
+    "start": "282400",
+    "end": "288960"
+  },
+  {
+    "text": "components first the api server then the controller manager then the scheduler then you can update your cni plug-in if",
+    "start": "288960",
+    "end": "295040"
+  },
+  {
+    "text": "you're using cni for networking finally you can upgrade any provider specific components",
+    "start": "295040",
+    "end": "300240"
+  },
+  {
+    "text": "of the cloud controller manager csi driver and then the cubelet and cubectl on the",
+    "start": "300240",
+    "end": "305360"
+  },
+  {
+    "text": "control plane assuming that you're running things using those once you've done that then you can upgrade the worker nodes into upgrade a",
+    "start": "305360",
+    "end": "311520"
+  },
+  {
+    "text": "worker node you're going to cordon and drain it so that there aren't any workloads running on it then you're going to update the cubic",
+    "start": "311520",
+    "end": "316720"
+  },
+  {
+    "text": "configuration uh if you need to upgrade the cubelet uncord in the node let worklets come back onto it",
+    "start": "316720",
+    "end": "322960"
+  },
+  {
+    "text": "and you're going to repeat for each node in your cluster if you're running kubernetes on virtual",
+    "start": "322960",
+    "end": "329600"
+  },
+  {
+    "text": "machines and not bare metal there's a bit of a shortcut you can take and that's rather than upgrading each",
+    "start": "329600",
+    "end": "335360"
+  },
+  {
+    "text": "individual software component in the cluster you're going to just replace all of the nodes with new ones that have the new",
+    "start": "335360",
+    "end": "342560"
+  },
+  {
+    "text": "software installed on them so that first step is still applicable you're still going to read the release notes find out",
+    "start": "342560",
+    "end": "347840"
+  },
+  {
+    "text": "that everything is supported in your new version update it if you need to but then to replace your control plane you're going to destroy the old control",
+    "start": "347840",
+    "end": "354320"
+  },
+  {
+    "text": "plane virtual machine and provision a brand new one with all the new software and new configuration",
+    "start": "354320",
+    "end": "359440"
+  },
+  {
+    "text": "this does assume that your xcd data is persisted somewhere outside of that control plane node or",
+    "start": "359440",
+    "end": "364560"
+  },
+  {
+    "text": "nodes so either you're replicating it across multiple nodes or you've got",
+    "start": "364560",
+    "end": "371280"
+  },
+  {
+    "text": "it stored on a persistent volume or you've got it stored somewhere entirely outside your cluster but assuming that's the case you can do it in this one step",
+    "start": "371280",
+    "end": "378000"
+  },
+  {
+    "text": "just provisioning a new node same with the worker nodes you're still going to coordinate and drain each one but then you can destroy a node",
+    "start": "378000",
+    "end": "384160"
+  },
+  {
+    "text": "provision a brand new one in its place if you've worked with kubernetes clusters quite a bit you can probably",
+    "start": "384160",
+    "end": "390720"
+  },
+  {
+    "text": "see some potential issues with this scheme of doing upgrades and there definitely are some issues but there are also some",
+    "start": "390720",
+    "end": "396000"
+  },
+  {
+    "text": "advantages and this is uh the upgrade process that we use at digitalocean for our managed product",
+    "start": "396000",
+    "end": "401759"
+  },
+  {
+    "text": "we replace all of the nodes in a cluster when we want to do an upgrade there's a few advantages to this and",
+    "start": "401759",
+    "end": "408639"
+  },
+  {
+    "text": "this is why we chose to do it this way first off it means that every node in the upgraded cluster is a clean slate",
+    "start": "408639",
+    "end": "414800"
+  },
+  {
+    "text": "there's no chance that there's been customized configuration on that node there's some customizations made to the node that's going to persist across an",
+    "start": "414800",
+    "end": "420960"
+  },
+  {
+    "text": "upgrade and cause problems in the new version it's also a nice process to automate",
+    "start": "420960",
+    "end": "427039"
+  },
+  {
+    "text": "there's not that many steps and if you've built any automation for managing your cluster",
+    "start": "427039",
+    "end": "432720"
+  },
+  {
+    "text": "you've probably already automated the steps that you need draining a node destroying a node creating a new one waiting for a node to join a cluster so",
+    "start": "432720",
+    "end": "440639"
+  },
+  {
+    "text": "automating this upgrade process is just a matter of combining those things that you've already automated into the right order adding some sanity",
+    "start": "440639",
+    "end": "447039"
+  },
+  {
+    "text": "checks and things and um that was the case for us we already had the the primitives that we",
+    "start": "447039",
+    "end": "452479"
+  },
+  {
+    "text": "needed to make this happen and automating it was pretty easy",
+    "start": "452479",
+    "end": "457680"
+  },
+  {
+    "text": "uh the other nice thing is that this works the same across all kinds of upgrades regardless of",
+    "start": "457680",
+    "end": "463360"
+  },
+  {
+    "text": "whether you're doing a patch version upgrade a minor version upgrade which components need to be upgraded it should all work i say it mostly works",
+    "start": "463360",
+    "end": "470960"
+  },
+  {
+    "text": "for all release types and all different kinds of upgrades because there are definitely some cases we've hit where we have to do really specific",
+    "start": "470960",
+    "end": "476800"
+  },
+  {
+    "text": "things but for the most part this process has worked for us regardless of what upgrade we're doing which version and i",
+    "start": "476800",
+    "end": "483919"
+  },
+  {
+    "text": "say all of these things that we decided to do are specific a little bit",
+    "start": "483919",
+    "end": "490960"
+  },
+  {
+    "text": "to our environment of running many many clusters and doing completely automated upgrades",
+    "start": "490960",
+    "end": "497120"
+  },
+  {
+    "text": "it's your trade-offs are going to be a little bit different depending on how many clusters in your operating environment",
+    "start": "497120",
+    "end": "504319"
+  },
+  {
+    "text": "so i said we were going to talk about things we got right and things we got wrong in building our upgrades and this is the first thing i think we",
+    "start": "505120",
+    "end": "510960"
+  },
+  {
+    "text": "really got right is we did our upgrades via node replacement um so it if you're going to upgrade if",
+    "start": "510960",
+    "end": "517039"
+  },
+  {
+    "text": "you're going to manage a lot of clusters and build automation i'd recommend considering this as a way to do your upgrades",
+    "start": "517039",
+    "end": "523919"
+  },
+  {
+    "text": "the downside of doing a node by node replacement upgrade is that once you've upgraded a node",
+    "start": "524959",
+    "end": "531120"
+  },
+  {
+    "text": "you're left with a brand new completely different node so any custom configuration on the node",
+    "start": "531120",
+    "end": "536959"
+  },
+  {
+    "text": "is going to be lost it's going to have a new name in kubernetes it's going to have a new ip address and if you had set any labels or any",
+    "start": "536959",
+    "end": "543200"
+  },
+  {
+    "text": "taints on it through kubernetes api those are going to be lost as well so",
+    "start": "543200",
+    "end": "549279"
+  },
+  {
+    "text": "this bit some of our customers um people who are scheduling their workloads to a specific node based on",
+    "start": "549279",
+    "end": "555279"
+  },
+  {
+    "text": "its name or who were accessing nodes directly by their ip because they were routing traffic to",
+    "start": "555279",
+    "end": "561200"
+  },
+  {
+    "text": "their cluster that way they they had some issues when they first did upgrades with this process",
+    "start": "561200",
+    "end": "569200"
+  },
+  {
+    "text": "so a lesson for for operators here other people who are upgrading kubernetes clusters is if you can it's great to reuse the",
+    "start": "569680",
+    "end": "576640"
+  },
+  {
+    "text": "node names and the ips of your nodes i even if you're replacing the nodes to upgrade them",
+    "start": "576640",
+    "end": "582480"
+  },
+  {
+    "text": "um this isn't really something that people should expect from their kubernetes cluster but",
+    "start": "582480",
+    "end": "587760"
+  },
+  {
+    "text": "it is a tool that's available in kubernetes so someone's going to use it and you'll make their life easier if you",
+    "start": "587760",
+    "end": "593920"
+  },
+  {
+    "text": "keep your note names and your ips stable regardless of whether you're keeping those node identities stable you",
+    "start": "593920",
+    "end": "601760"
+  },
+  {
+    "text": "definitely want to provide some way to set persistent labels and taints on nodes uh those are a great tool to use for",
+    "start": "601760",
+    "end": "608399"
+  },
+  {
+    "text": "scheduling in kubernetes and people expect them to work so providing some kind of abstraction",
+    "start": "608399",
+    "end": "614079"
+  },
+  {
+    "text": "to let people set labels and taints on their nodes is important that's something that we've done in the time since we initially",
+    "start": "614079",
+    "end": "620079"
+  },
+  {
+    "text": "introduced upgrades the other piece is provide some simple way to get traffic into a cluster",
+    "start": "620079",
+    "end": "627360"
+  },
+  {
+    "text": "getting traffic into a kubernetes cluster is worth its own talk and i'm not going to talk about all the details here but",
+    "start": "627360",
+    "end": "632720"
+  },
+  {
+    "text": "the easier you make it the less people less likely people are to build their own solution on top of their cluster and uh it's",
+    "start": "632720",
+    "end": "639680"
+  },
+  {
+    "text": "really people building their own solution that are going to run into trouble if their node ips change for example during an number",
+    "start": "639680",
+    "end": "647279"
+  },
+  {
+    "text": "there's also some lessons for developers here in terms of what you can but your workload can tolerate for change",
+    "start": "648160",
+    "end": "654880"
+  },
+  {
+    "text": "so the first lesson is if you do need to customize your nodes use kubernetes tools to do it there's two great ways to",
+    "start": "654880",
+    "end": "660880"
+  },
+  {
+    "text": "do this one is to deploy a privileged daemon set to your cluster and that's going to run",
+    "start": "660880",
+    "end": "666160"
+  },
+  {
+    "text": "on all the nodes when a node comes up it's going to make the necessary customization",
+    "start": "666160",
+    "end": "671279"
+  },
+  {
+    "text": "and then your node is in the state you expect the other way is within a net container on one of your workloads if you have a",
+    "start": "671279",
+    "end": "677200"
+  },
+  {
+    "text": "workload that requires specific node configuration you can do a configuration from an init",
+    "start": "677200",
+    "end": "682800"
+  },
+  {
+    "text": "container and when it's done your workloads are ready to run secondly please don't use node names for",
+    "start": "682800",
+    "end": "688959"
+  },
+  {
+    "text": "scheduling it is a tool you can use in kubernetes but at some point a node is going to go away that's",
+    "start": "688959",
+    "end": "695120"
+  },
+  {
+    "text": "kind of how kubernetes clusters are um you don't want your workload to be left unschedulable because a node with a",
+    "start": "695120",
+    "end": "701760"
+  },
+  {
+    "text": "particular name is going over there wherever possible use your provider supported or operator",
+    "start": "701760",
+    "end": "708079"
+  },
+  {
+    "text": "supported label and taint settings so on some providers that's going to be just setting",
+    "start": "708079",
+    "end": "713839"
+  },
+  {
+    "text": "labels and taints through the kubernetes api on other providers it might mean creating a node pool or some other",
+    "start": "713839",
+    "end": "718880"
+  },
+  {
+    "text": "abstraction to set labels and contains for your nodes and same with load balancing if",
+    "start": "718880",
+    "end": "724240"
+  },
+  {
+    "text": "you use your provider or operator supported load balancing then you're much less likely to run into problems during an upgrade",
+    "start": "724240",
+    "end": "730800"
+  },
+  {
+    "text": "because those are well integrated with your cluster",
+    "start": "730800",
+    "end": "734800"
+  },
+  {
+    "text": "there are definitely some things we got wrong in our upgrade process which i'll talk about next the first big one is doing we",
+    "start": "736560",
+    "end": "743200"
+  },
+  {
+    "text": "implemented our node replacement in a break before make fashion so uh we destroy a worker node and then we",
+    "start": "743200",
+    "end": "750639"
+  },
+  {
+    "text": "provision a replacement for it um we did this for some reasons that are specific to how our product works",
+    "start": "750639",
+    "end": "756639"
+  },
+  {
+    "text": "but this has definitely caused a lot of trouble for users and this is something that we're working on changing right now where we will create new nodes before we",
+    "start": "756639",
+    "end": "762480"
+  },
+  {
+    "text": "destroy old ones the basic problem that this causes for",
+    "start": "762480",
+    "end": "768639"
+  },
+  {
+    "text": "our customers is that i when they when we go to drain a node",
+    "start": "768639",
+    "end": "774800"
+  },
+  {
+    "text": "there might not be anywhere to drain that node too either because there's not enough capacity in the cluster or because they're running a single node",
+    "start": "774800",
+    "end": "780560"
+  },
+  {
+    "text": "cluster for whatever reason um and and so draining the the node can",
+    "start": "780560",
+    "end": "786079"
+  },
+  {
+    "text": "get stuck and that causes a problem for the upgrade um",
+    "start": "786079",
+    "end": "791519"
+  },
+  {
+    "text": "this also just causes extra churn for workloads when you drain the first node you're guaranteed that those workloads",
+    "start": "791519",
+    "end": "796560"
+  },
+  {
+    "text": "are going to end up on another node that's running that old version and those nodes are going to need to be drained right away as well",
+    "start": "796560",
+    "end": "802639"
+  },
+  {
+    "text": "so this your workloads are all going to end up being evicted from a node more than once instead of just once",
+    "start": "802639",
+    "end": "808000"
+  },
+  {
+    "text": "during the upgrade process and that's unfortunate for quotes",
+    "start": "808000",
+    "end": "812800"
+  },
+  {
+    "text": "so some lessons for operators here um if it's all possible figure out a way to",
+    "start": "813760",
+    "end": "819360"
+  },
+  {
+    "text": "create new nodes before you delete old ones um this might be a little bit more",
+    "start": "819360",
+    "end": "824639"
+  },
+  {
+    "text": "complicated for you to automate it is in our case because we want to keep the number of nodes sort of stable in the cluster",
+    "start": "824639",
+    "end": "830560"
+  },
+  {
+    "text": "but it is a better experience for users you're less likely to have workloads evicted more than once during",
+    "start": "830560",
+    "end": "835839"
+  },
+  {
+    "text": "the upgrade and if you really can't do that because you're on hardware or upgrading in place or whatever consider reserving",
+    "start": "835839",
+    "end": "841680"
+  },
+  {
+    "text": "some capacity in the cluster to make sure that you're always able to drain a node",
+    "start": "841680",
+    "end": "847279"
+  },
+  {
+    "text": "likewise for developers um if you're deploying things to kubernetes cluster try not to run it right to the limit",
+    "start": "848079",
+    "end": "855199"
+  },
+  {
+    "text": "leave some room so that you always can drain a whole node worth of workloads because at some point a node is going to",
+    "start": "855199",
+    "end": "860560"
+  },
+  {
+    "text": "go away even if it doesn't happen during upgrade it's going to happen some other time because of hardware failure maintenance or whatever and you just",
+    "start": "860560",
+    "end": "867440"
+  },
+  {
+    "text": "want to make sure that that's not going to cause a problem for your application",
+    "start": "867440",
+    "end": "873440"
+  },
+  {
+    "text": "another thing we got wrong is that we replace nodes exactly one by one so we destroy one node and then create",
+    "start": "875120",
+    "end": "880959"
+  },
+  {
+    "text": "one node then destroy one node and then create one node and this is where it works just fine in a three node cluster",
+    "start": "880959",
+    "end": "887600"
+  },
+  {
+    "text": "it's a lot less good in a 300 node cluster and it's really bad if we run into",
+    "start": "887600",
+    "end": "892800"
+  },
+  {
+    "text": "timeouts draining nodes we initially had set our drain time up to an hour and we dialed it back to 15 minutes",
+    "start": "892800",
+    "end": "898320"
+  },
+  {
+    "text": "but even at 15 minutes if you have a 20 node cluster and each node takes 15 minutes to drain that's a five hour upgrade at least",
+    "start": "898320",
+    "end": "905360"
+  },
+  {
+    "text": "right because that's just the time to drain the nodes um and that's not a good experience for for a user",
+    "start": "905360",
+    "end": "913839"
+  },
+  {
+    "text": "so to restate that problem a little more succinctly replacing nodes one by one is slow",
+    "start": "914079",
+    "end": "919519"
+  },
+  {
+    "text": "and it can be made even slower if you get stuck evicting a workload upgrades are going to take some time",
+    "start": "919519",
+    "end": "925440"
+  },
+  {
+    "text": "naturally because we do have to shuffle workloads around and wait for things to come up but you want them to be as fast as you can",
+    "start": "925440",
+    "end": "932800"
+  },
+  {
+    "text": "users are going to want to watch their upgrades happen and uh they're or they only want to watch",
+    "start": "932800",
+    "end": "938399"
+  },
+  {
+    "text": "for so long you don't want to have someone watching their upgrade happen for five hours",
+    "start": "938399",
+    "end": "943920"
+  },
+  {
+    "text": "so a lesson for cluster operators here um try and replace multiple nodes at once if you can",
+    "start": "944720",
+    "end": "951120"
+  },
+  {
+    "text": "this this will really help make an upgrade on a big cluster faster this kind of requires that you do make",
+    "start": "951120",
+    "end": "956800"
+  },
+  {
+    "text": "before break like i was talking about a minute ago your users",
+    "start": "956800",
+    "end": "962000"
+  },
+  {
+    "text": "might have set aside some capacity for a note to be drained but they're probably not expecting like 10 nodes at a time to be drained so",
+    "start": "962000",
+    "end": "968480"
+  },
+  {
+    "text": "you kind of have to add capacity to the cluster before you reduce it um also make sure that you set",
+    "start": "968480",
+    "end": "974240"
+  },
+  {
+    "text": "reasonable drain timeouts uh where it does take some time to drain a node but it shouldn't take an hour",
+    "start": "974240",
+    "end": "979360"
+  },
+  {
+    "text": "and uh that you kind of have to figure out the right balances for your workloads in your environment",
+    "start": "979360",
+    "end": "984639"
+  },
+  {
+    "text": "um but setting those timeouts to a reasonable value is going to help those upgrades be a little bit faster",
+    "start": "984639",
+    "end": "992079"
+  },
+  {
+    "text": "for developers there's not much you can do about how your provider or your operator",
+    "start": "992720",
+    "end": "998560"
+  },
+  {
+    "text": "replaces your the nodes in your cluster but there are a couple things you can do to make sure",
+    "start": "998560",
+    "end": "1003839"
+  },
+  {
+    "text": "that your workloads can be evicted you want to make sure of two things one that your workloads can be evicted",
+    "start": "1003839",
+    "end": "1009600"
+  },
+  {
+    "text": "safely so use pod disruption budgets make sure you understand how your workloads can be affected during an eviction",
+    "start": "1009600",
+    "end": "1016000"
+  },
+  {
+    "text": "and make sure that your workload can be evicted quickly so have your application respond to the signals that kubernetes sends when it depicts an app",
+    "start": "1016000",
+    "end": "1022399"
+  },
+  {
+    "text": "when it depicts evicts a pod so that you shut down as quickly as you can and let the with the draining process",
+    "start": "1022399",
+    "end": "1029600"
+  },
+  {
+    "text": "move on and my big tip is just test this at some point your workload is going to",
+    "start": "1029600",
+    "end": "1036480"
+  },
+  {
+    "text": "be evicted if you're running under kubernetes it's a great thing to test and just make sure that it works as you expect",
+    "start": "1036480",
+    "end": "1042959"
+  },
+  {
+    "text": "make sure that when you delete a node in a cluster your application keeps running as you expect and you don't have any unexpected",
+    "start": "1042959",
+    "end": "1050840"
+  },
+  {
+    "text": "problems back to the positive side of things this is another thing that we got wrong but",
+    "start": "1050840",
+    "end": "1056960"
+  },
+  {
+    "text": "we were actually pretty happy we got wrong i mentioned earlier that when we did rga we offered",
+    "start": "1056960",
+    "end": "1062400"
+  },
+  {
+    "text": "automated patch version upgrades so that means like 114 1 to 114 2",
+    "start": "1062400",
+    "end": "1067520"
+  },
+  {
+    "text": "not 114 2 to 15 0. um we started out that way because patch",
+    "start": "1067520",
+    "end": "1072720"
+  },
+  {
+    "text": "version upgrades are a little bit simpler resources aren't supposed to change between patch versions so everything that you have running in your",
+    "start": "1072720",
+    "end": "1079039"
+  },
+  {
+    "text": "cluster should continue working after the upgrade um and it was a good idea",
+    "start": "1079039",
+    "end": "1085360"
+  },
+  {
+    "text": "for us to start out that way but when we did get to doing minor version upgrades we discovered that everything pretty",
+    "start": "1085360",
+    "end": "1090799"
+  },
+  {
+    "text": "much worked as expected it was much less uh fraught than we expected so um",
+    "start": "1090799",
+    "end": "1098000"
+  },
+  {
+    "text": "that's that's the lesson here really is just don't worry too much about minor version upgrades they aren't",
+    "start": "1098000",
+    "end": "1103520"
+  },
+  {
+    "text": "as scary as you might think they are at least they weren't for us and assuming that you've designed a good process for doing upgrades",
+    "start": "1103520",
+    "end": "1109919"
+  },
+  {
+    "text": "i won't be that different from a patch version upgrade",
+    "start": "1109919",
+    "end": "1114080"
+  },
+  {
+    "text": "one thing we did do right that helped these minor version upgrades go well is that we leave",
+    "start": "1115200",
+    "end": "1120880"
+  },
+  {
+    "text": "alpha features disabled as much as we can alpha features are disabled by default in kubernetes",
+    "start": "1120880",
+    "end": "1126240"
+  },
+  {
+    "text": "and we try not to enable them unless we have a really good reason too alpha features are the most likely things to change between releases",
+    "start": "1126240",
+    "end": "1132799"
+  },
+  {
+    "text": "and leaving them disabled just eliminates a possible source of problems",
+    "start": "1132799",
+    "end": "1137840"
+  },
+  {
+    "text": "as you do upgrades especially lighter version upgrades so for operators the lesson here is really simple just wait until it",
+    "start": "1137840",
+    "end": "1143360"
+  },
+  {
+    "text": "features beta before you enable it and if you do really want to enable an alpha feature because you have a good",
+    "start": "1143360",
+    "end": "1148799"
+  },
+  {
+    "text": "business use case for it uh consider that the upgrade trade-off you are probably gonna have to",
+    "start": "1148799",
+    "end": "1154320"
+  },
+  {
+    "text": "put some work into upgrading clusters that have that alpha feature um that's the the trade-off that you're",
+    "start": "1154320",
+    "end": "1161120"
+  },
+  {
+    "text": "gonna make by enabling it for developers the blessing is similar just be aware of using alpha features if",
+    "start": "1161120",
+    "end": "1167440"
+  },
+  {
+    "text": "you are using alpha features uh really upgrade the release notes really carefully before you upgrade",
+    "start": "1167440",
+    "end": "1172720"
+  },
+  {
+    "text": "make sure you understand what's happening to the feature as it becomes beta and any changes that you might need to make any changes that your operator",
+    "start": "1172720",
+    "end": "1178799"
+  },
+  {
+    "text": "might need to make um as long as you you understand what's happening you should be okay",
+    "start": "1178799",
+    "end": "1186000"
+  },
+  {
+    "text": "so let's spend the rest of our time here on two common classes of problems that we've seen with upgrades",
+    "start": "1187760",
+    "end": "1194080"
+  },
+  {
+    "text": "and the first is problems around container storage interface or csi so for those of you who aren't familiar",
+    "start": "1194080",
+    "end": "1200240"
+  },
+  {
+    "text": "csi is a plugable way to allow workloads in in kubernetes or another container",
+    "start": "1200240",
+    "end": "1207200"
+  },
+  {
+    "text": "orchestrator to consume storage from an arbitrary storage system",
+    "start": "1207200",
+    "end": "1212480"
+  },
+  {
+    "text": "kubernetes clusters that are hosted in digitalocean whether they're part of our managed product or managed",
+    "start": "1212480",
+    "end": "1217679"
+  },
+  {
+    "text": "outside of it by a user can use our open source csi plugin to attach our block storage to their workloads",
+    "start": "1217679",
+    "end": "1223600"
+  },
+  {
+    "text": "and this is uh how we recommend our users get persistence if they need persistence for an application",
+    "start": "1223600",
+    "end": "1229200"
+  },
+  {
+    "text": "csi has been problem for us in a few different ways as it relates to upgrades",
+    "start": "1229200",
+    "end": "1235440"
+  },
+  {
+    "text": "the the biggest one is just the general immaturity of csi on the versions that we started with in",
+    "start": "1235440",
+    "end": "1241200"
+  },
+  {
+    "text": "our product so the first version of kubernetes that we supported",
+    "start": "1241200",
+    "end": "1246880"
+  },
+  {
+    "text": "at digital ocean was kubernetes 1.10 and that was the same release in which csi",
+    "start": "1246880",
+    "end": "1252320"
+  },
+  {
+    "text": "became a beta feature i moved out of alpha so in that 1.10 time frame the",
+    "start": "1252320",
+    "end": "1257440"
+  },
+  {
+    "text": "kubernetes components for csi were relatively new the csi drivers including ours were relatively new",
+    "start": "1257440",
+    "end": "1263520"
+  },
+  {
+    "text": "and there were some bugs there and basically the problem that we ran into in upgrades is that we hit bugs",
+    "start": "1263520",
+    "end": "1270159"
+  },
+  {
+    "text": "there's a lot of csi action going on during an upgrade because you are draining nodes and that means uh detaching volumes from",
+    "start": "1270159",
+    "end": "1276480"
+  },
+  {
+    "text": "workloads that are being evicted and reattaching them elsewhere as we schedule the workloads on other",
+    "start": "1276480",
+    "end": "1281600"
+  },
+  {
+    "text": "nodes um we would end up hitting bugs where the state of kubernetes and the state of the",
+    "start": "1281600",
+    "end": "1287679"
+  },
+  {
+    "text": "real world were out of sync and we couldn't drain a workload off of a node or we couldn't start a workflow",
+    "start": "1287679",
+    "end": "1293280"
+  },
+  {
+    "text": "on another node because the volumes aren't throwing place that's that's the basic problem that we",
+    "start": "1293280",
+    "end": "1299440"
+  },
+  {
+    "text": "hid luckily everything has matured a lot since those",
+    "start": "1299440",
+    "end": "1304720"
+  },
+  {
+    "text": "days i would say in kubernetes 114 plus we really see very few csi problems even",
+    "start": "1304720",
+    "end": "1309919"
+  },
+  {
+    "text": "during upgrades so if you're on a newer version you should be okay this is a good reason to upgrade in itself even though you might",
+    "start": "1309919",
+    "end": "1315440"
+  },
+  {
+    "text": "experience some pain on older releases um but yeah it really has sort of",
+    "start": "1315440",
+    "end": "1321440"
+  },
+  {
+    "text": "taken care of itself in more recent releases one other problem we hit and this is one",
+    "start": "1321440",
+    "end": "1327919"
+  },
+  {
+    "text": "place where we had to introduce version specific code for some of our minor version upgrades",
+    "start": "1327919",
+    "end": "1334159"
+  },
+  {
+    "text": "is the csi driver name change in earlier versions of the csi spec",
+    "start": "1334159",
+    "end": "1339200"
+  },
+  {
+    "text": "drivers were identified by reverse fqdn notation so com.example.csi in later",
+    "start": "1339200",
+    "end": "1345760"
+  },
+  {
+    "text": "versions of the spec they changed that to be forward fqdn so csi.example.com and this driver name gets used in",
+    "start": "1345760",
+    "end": "1353919"
+  },
+  {
+    "text": "various places in kubernetes including being attached to each volume that the driver creates that's how kubernetes maps between",
+    "start": "1353919",
+    "end": "1360080"
+  },
+  {
+    "text": "uh volumes and the drivers are supposed to manage them the this name for good reason is",
+    "start": "1360080",
+    "end": "1365280"
+  },
+  {
+    "text": "immutable in kubernetes so once you've installed a csi driver into your cluster you can't change its name",
+    "start": "1365280",
+    "end": "1371440"
+  },
+  {
+    "text": "um the problem that we ran into is we changed the name in our driver to match the new spec",
+    "start": "1371440",
+    "end": "1376640"
+  },
+  {
+    "text": "and uh we then weren't able to manage the old volumes that had been created by the previous driver",
+    "start": "1376640",
+    "end": "1382880"
+  },
+  {
+    "text": "um our solution was to just detect whether our an existing kubernetes cluster was",
+    "start": "1382880",
+    "end": "1388559"
+  },
+  {
+    "text": "using the old name or the new name and make our software configurable uh",
+    "start": "1388559",
+    "end": "1393600"
+  },
+  {
+    "text": "for the name so we can keep using the old name in a newer version of the driver when we need to",
+    "start": "1393600",
+    "end": "1400159"
+  },
+  {
+    "text": "um that's unfortunately a part of our upgrade process that will probably be with us forever in this little version specific thing so",
+    "start": "1400159",
+    "end": "1406960"
+  },
+  {
+    "text": "that's uh one place where the process didn't sort of just work",
+    "start": "1406960",
+    "end": "1412240"
+  },
+  {
+    "text": "the lesson here for both operators and developers is just be a little bit careful around csi",
+    "start": "1412640",
+    "end": "1418240"
+  },
+  {
+    "text": "your persistent data is probably important to you so you don't want to have csi problems and persistence problems during an",
+    "start": "1418240",
+    "end": "1424480"
+  },
+  {
+    "text": "upgrade um if you are using csi be careful with",
+    "start": "1424480",
+    "end": "1429600"
+  },
+  {
+    "text": "your upgrades make sure you test them watch for workloads getting stuck and use a newer version of kubernetes if",
+    "start": "1429600",
+    "end": "1435200"
+  },
+  {
+    "text": "at all possible uh like i said 114 plus we've really had basically no csi problems so i'd highly",
+    "start": "1435200",
+    "end": "1441200"
+  },
+  {
+    "text": "recommend if you have a choice using one of those newer versions",
+    "start": "1441200",
+    "end": "1447200"
+  },
+  {
+    "text": "the last problem i want to talk about is probably the most common problem we've",
+    "start": "1450880",
+    "end": "1456799"
+  },
+  {
+    "text": "seen with upgrades on our platform and that's problems with admission control web hooks these problems are",
+    "start": "1456799",
+    "end": "1462480"
+  },
+  {
+    "text": "possible in any environment and with any upgrade process they're really not specific to us so i'm going to spend a little bit of",
+    "start": "1462480",
+    "end": "1468480"
+  },
+  {
+    "text": "time going through what the problem is some ways to avoid it for anyone who hasn't seen your mission controlled by",
+    "start": "1468480",
+    "end": "1474400"
+  },
+  {
+    "text": "books i've got a really quick overview uh they're basically a configuration you can make to have the kubernetes api server call",
+    "start": "1474400",
+    "end": "1482559"
+  },
+  {
+    "text": "out to a service and decide whether a particular resource should be created or not",
+    "start": "1482559",
+    "end": "1488559"
+  },
+  {
+    "text": "so the sequence diagram here shows what happens i you go to create a resource in kubernetes it's going to",
+    "start": "1488559",
+    "end": "1494000"
+  },
+  {
+    "text": "ask the web hook service whether or not it should be created if it is then everything goes ahead as",
+    "start": "1494000",
+    "end": "1499360"
+  },
+  {
+    "text": "planned if not it gets rejected and it's very common to host these services inside your cluster although you can't host",
+    "start": "1499360",
+    "end": "1505120"
+  },
+  {
+    "text": "them externally",
+    "start": "1505120",
+    "end": "1507919"
+  },
+  {
+    "text": "the problems happen if the web hook service isn't running and it can't respond to the api server",
+    "start": "1510960",
+    "end": "1516559"
+  },
+  {
+    "text": "so what happens in this case where the service is not running and it's not able to respond",
+    "start": "1516559",
+    "end": "1521840"
+  },
+  {
+    "text": "what happens here depends and it depends on the failure policy configured for the",
+    "start": "1521840",
+    "end": "1527200"
+  },
+  {
+    "text": "web hook if the failure policy is fail then when the web hook service isn't available the",
+    "start": "1527200",
+    "end": "1532240"
+  },
+  {
+    "text": "api server will just disallow the creation if it's ignore then",
+    "start": "1532240",
+    "end": "1538400"
+  },
+  {
+    "text": "the api server is going to act as if the web hook wasn't there at all and allow the operation to go forward",
+    "start": "1538400",
+    "end": "1544320"
+  },
+  {
+    "text": "i'm going to come back to this in just a sec but i want to talk about how it affects upgrades",
+    "start": "1544320",
+    "end": "1549520"
+  },
+  {
+    "text": "the problem with web hook string upgrades is that during an upgrade we update various system components that",
+    "start": "1549679",
+    "end": "1555600"
+  },
+  {
+    "text": "run as workloads so things like coordinates or q proxy or our",
+    "start": "1555600",
+    "end": "1560799"
+  },
+  {
+    "text": "cni driver which is psyllium these are usually things that run in the cube system namespace but they could run on",
+    "start": "1560799",
+    "end": "1566640"
+  },
+  {
+    "text": "other namespaces too and the problem is that hooks can prevent updates to these services from happening",
+    "start": "1566640",
+    "end": "1572080"
+  },
+  {
+    "text": "and that causes a problem for the upgrade because now we're not able to update some of the managed components in",
+    "start": "1572080",
+    "end": "1578000"
+  },
+  {
+    "text": "the cluster so just to illustrate what can happen if",
+    "start": "1578000",
+    "end": "1584159"
+  },
+  {
+    "text": "we go back to this configuration we have this web hook that applies to pod creations in any namespace",
+    "start": "1584159",
+    "end": "1590640"
+  },
+  {
+    "text": "and let's say we have a cluster here that's running the webhook service on a node and also on that node are",
+    "start": "1590640",
+    "end": "1595760"
+  },
+  {
+    "text": "the normal cube system things q proxy and psyllium in this case when we go to do an upgrade we're going",
+    "start": "1595760",
+    "end": "1602480"
+  },
+  {
+    "text": "to drain that node and so it's going to evict the web hook service and the kubernetes scheduler is not",
+    "start": "1602480",
+    "end": "1611520"
+  },
+  {
+    "text": "going to be able to create a new pod for that service particularly specifically the the deployment controller isn't going to be able to create a new",
+    "start": "1611520",
+    "end": "1618880"
+  },
+  {
+    "text": "pod for that service because the web hook's not running so it tries to create a new pod with the api server the api",
+    "start": "1618880",
+    "end": "1624240"
+  },
+  {
+    "text": "server fails to reach the service because it just depicted the service and now we're not able to create a new",
+    "start": "1624240",
+    "end": "1630320"
+  },
+  {
+    "text": "pod for it now we create a new node and we go to schedule the system components on this",
+    "start": "1630320",
+    "end": "1636559"
+  },
+  {
+    "text": "node so things like cube proxy and psyllium and we also can't schedule those the daemon set controller can't create pods",
+    "start": "1636559",
+    "end": "1642159"
+  },
+  {
+    "text": "because the web hook services are writing so now we have a node that's essentially useless it's not running the stuff it needs to run",
+    "start": "1642159",
+    "end": "1648159"
+  },
+  {
+    "text": "to be a full part of the cluster um and if this happens your clusters can be",
+    "start": "1648159",
+    "end": "1653520"
+  },
+  {
+    "text": "in pretty bad shape because now you have no nodes that are usable um or at least your new nodes aren't usable",
+    "start": "1653520",
+    "end": "1659520"
+  },
+  {
+    "text": "your upgrades either going to be stuck or your clusters can be broken so the simple solution here is to change",
+    "start": "1659520",
+    "end": "1666080"
+  },
+  {
+    "text": "the failure policy to ignore um that actually can cause another problem that is not very obvious",
+    "start": "1666080",
+    "end": "1672799"
+  },
+  {
+    "text": "um that problem is the timeout it turns out that pretty much all the default timeouts in kubernetes",
+    "start": "1672799",
+    "end": "1677840"
+  },
+  {
+    "text": "are 30 seconds that includes the tempo for webhooks it also includes the api server timeout",
+    "start": "1677840",
+    "end": "1683279"
+  },
+  {
+    "text": "so if you have a webhook with the failure policy of ignore but its timeout is 30 seconds because you haven't specified one",
+    "start": "1683279",
+    "end": "1689120"
+  },
+  {
+    "text": "um you that timeout is not going to end up battering it's the api server is",
+    "start": "1689120",
+    "end": "1694480"
+  },
+  {
+    "text": "going to wait 30 seconds for your webhook service to return an answer but by the time it hits that timeout the",
+    "start": "1694480",
+    "end": "1700320"
+  },
+  {
+    "text": "request itself is timed out and it can't go ahead so the",
+    "start": "1700320",
+    "end": "1705440"
+  },
+  {
+    "text": "the recommendation here is to keep your timeouts much lower than 30 seconds regardless of",
+    "start": "1705440",
+    "end": "1711200"
+  },
+  {
+    "text": "what your failure policy is and this is actually the recommendation that's in the official kubernetes docs too uh so it's not just me saying this this",
+    "start": "1711200",
+    "end": "1718559"
+  },
+  {
+    "text": "is really the guidance from kubernetes upstream community as well and the configuration i'm showing on the",
+    "start": "1718559",
+    "end": "1724080"
+  },
+  {
+    "text": "slide now with the smaller timeout and failure policy of ignore that's never going to cause any problems during",
+    "start": "1724080",
+    "end": "1729520"
+  },
+  {
+    "text": "upgrade if you actually do want your failure policy to be fail you can",
+    "start": "1729520",
+    "end": "1736320"
+  },
+  {
+    "text": "configure your web hook to ignore the cube system namespace and any other critical namespaces you want to also make sure that you're",
+    "start": "1736320",
+    "end": "1742320"
+  },
+  {
+    "text": "ignoring the namespace that your webhook server itself runs in",
+    "start": "1742320",
+    "end": "1748240"
+  },
+  {
+    "text": "as long as you're doing that the the webhook won't apply to those things and you'll be able to schedule your important services on the cluster",
+    "start": "1748240",
+    "end": "1754640"
+  },
+  {
+    "text": "during an upgrade so the lesson for operators here webhooks can can be trouble",
+    "start": "1754640",
+    "end": "1760960"
+  },
+  {
+    "text": "you want to just make sure you check the configurations before you start an upgrade we use a tool we built called cluster",
+    "start": "1760960",
+    "end": "1766640"
+  },
+  {
+    "text": "link for this it's an open source tool it will throw a warning if we are likely",
+    "start": "1766640",
+    "end": "1772480"
+  },
+  {
+    "text": "to encounter problems with web folks during an upgrade the other solution to consider is having a mutating web hook that will mutate",
+    "start": "1772480",
+    "end": "1779760"
+  },
+  {
+    "text": "the web hook configurations as they come in and basically make sure that they ignore keep system make sure they ignore anything else have",
+    "start": "1779760",
+    "end": "1786000"
+  },
+  {
+    "text": "an appropriate timeout all of that stuff so that's a good way to avoid the problem in the first place",
+    "start": "1786000",
+    "end": "1793278"
+  },
+  {
+    "text": "lesson for developers is uh basically the manifest that was on the slide just be really careful with web hooks",
+    "start": "1793679",
+    "end": "1798799"
+  },
+  {
+    "text": "check your configuration um exclude cube system and the name space that the web hook service itself",
+    "start": "1798799",
+    "end": "1805039"
+  },
+  {
+    "text": "runs in exclude any other critical name namespaces and you you might want to again consider",
+    "start": "1805039",
+    "end": "1811520"
+  },
+  {
+    "text": "the mutating web book solution just to make sure that you don't configure a web hook that's",
+    "start": "1811520",
+    "end": "1818000"
+  },
+  {
+    "text": "going to cause problems later and you might want to also consider running your web hooks outside of your cluster if you can because that's less likely to cause problems",
+    "start": "1818000",
+    "end": "1825840"
+  },
+  {
+    "text": "so just to wrap up here's all the kind of advice that i gave today on one slide",
+    "start": "1826799",
+    "end": "1832320"
+  },
+  {
+    "text": "the first is to consider upgrading via node replacement and the kind of tips that i made gave to",
+    "start": "1832320",
+    "end": "1838159"
+  },
+  {
+    "text": "make that go smoothly secondly as a developer make sure that your workloads can be evicted",
+    "start": "1838159",
+    "end": "1844399"
+  },
+  {
+    "text": "when you're doing an upgrade try and upgrade more than one node at a time if you can minor versions are probably upgrade are",
+    "start": "1844399",
+    "end": "1851919"
+  },
+  {
+    "text": "probably easier than you think they are especially if you've avoided alpha features so don't be so scared of minor",
+    "start": "1851919",
+    "end": "1857360"
+  },
+  {
+    "text": "version upgrades um csi is i would say just now becoming mature it's really mature in the last",
+    "start": "1857360",
+    "end": "1863440"
+  },
+  {
+    "text": "few versions of kubernetes but you'll want to take extra special care when you're upgrading a cluster that uses csi",
+    "start": "1863440",
+    "end": "1870000"
+  },
+  {
+    "text": "and finally admission control books are lots of trouble uh you want to run some checks on those and",
+    "start": "1870000",
+    "end": "1875039"
+  },
+  {
+    "text": "make sure that you don't have any configurations that are going to cause that are going to prevent you from",
+    "start": "1875039",
+    "end": "1880320"
+  },
+  {
+    "text": "deploying your system components into the cluster as you do your upgrade um it's a big problem that we've seen",
+    "start": "1880320",
+    "end": "1885919"
+  },
+  {
+    "text": "with our customers clusters and that's all i have for today",
+    "start": "1885919",
+    "end": "1894240"
+  },
+  {
+    "text": "all right i think it's time for live questions so there's a bunch of questions that came",
+    "start": "1898640",
+    "end": "1903760"
+  },
+  {
+    "text": "in during the talk and i'll deal with those those first um",
+    "start": "1903760",
+    "end": "1910240"
+  },
+  {
+    "text": "so the first one is how often should we upgrade and what do i recommend in terms of which version to stay on that's going to",
+    "start": "1910240",
+    "end": "1916960"
+  },
+  {
+    "text": "depend a lot on your environment and your comfort level with taking up new versions and how",
+    "start": "1916960",
+    "end": "1922080"
+  },
+  {
+    "text": "disruptive your upgrades are for your your workloads um as a service provider",
+    "start": "1922080",
+    "end": "1927519"
+  },
+  {
+    "text": "and someone who's running a managed product for kubernetes we always try and provide the latest",
+    "start": "1927519",
+    "end": "1933120"
+  },
+  {
+    "text": "minor version so currently that's 118 soon that'll be 119. and then we support",
+    "start": "1933120",
+    "end": "1939440"
+  },
+  {
+    "text": "the two trailing versions uh just like the upstream kubernetes community does for bug fixes",
+    "start": "1939440",
+    "end": "1944720"
+  },
+  {
+    "text": "and security fixes so i would say you definitely want to stay within that supported range if you can",
+    "start": "1944720",
+    "end": "1951039"
+  },
+  {
+    "text": "um so like the current release or the the two previous ones in terms of like how quickly you want to",
+    "start": "1951039",
+    "end": "1957360"
+  },
+  {
+    "text": "upgrade when a new release comes out like i said that's going to depend a lot on how confident you are in your in your",
+    "start": "1957360",
+    "end": "1963039"
+  },
+  {
+    "text": "workloads tolerating the upgrade and uh whether you can test it",
+    "start": "1963039",
+    "end": "1968080"
+  },
+  {
+    "text": "um in your environment so i think that's that's a it's gonna depend a lot on on your own",
+    "start": "1968080",
+    "end": "1973600"
+  },
+  {
+    "text": "environment and how your team feels about your kubernetes clusters uh another question is how did we solve",
+    "start": "1973600",
+    "end": "1980000"
+  },
+  {
+    "text": "the taint problem so that i talked about persisting node pool labels and taints or node labels and taints",
+    "start": "1980000",
+    "end": "1986720"
+  },
+  {
+    "text": "we've done this in our managed product by allowing users to set uh persistent labels on a pool of nodes",
+    "start": "1986720",
+    "end": "1992799"
+  },
+  {
+    "text": "and so when we create a new node in the pool it'll get those labels uh we haven't actually rolled out the taint part of that yet but we are",
+    "start": "1992799",
+    "end": "1998720"
+  },
+  {
+    "text": "working on that right now so the idea is uh rather than setting them directly to kubernetes api you'll",
+    "start": "1998720",
+    "end": "2004640"
+  },
+  {
+    "text": "set them to a managed product and then any new nodes that we create for an upgrade or when you scale off a pool or any other",
+    "start": "2004640",
+    "end": "2011039"
+  },
+  {
+    "text": "reason we'll get the same labels and teams that you want",
+    "start": "2011039",
+    "end": "2016000"
+  },
+  {
+    "text": "uh what did we do to for a drain timeouts if you have a pod disruption budget set",
+    "start": "2016080",
+    "end": "2022240"
+  },
+  {
+    "text": "to one for example um what we the way that we drain a related question was",
+    "start": "2022240",
+    "end": "2027519"
+  },
+  {
+    "text": "uh around how we drain nodes um we when we drain a node",
+    "start": "2027519",
+    "end": "2033919"
+  },
+  {
+    "text": "we have two modes so initially we're in our eviction mode so we will just try",
+    "start": "2033919",
+    "end": "2040880"
+  },
+  {
+    "text": "we'll just mark each pawn for eviction and that's where we set a timeout so we we said we mark each pod for",
+    "start": "2040880",
+    "end": "2046559"
+  },
+  {
+    "text": "eviction we wait uh 30 minutes or 15 minutes whatever our timeout is and when we get to the",
+    "start": "2046559",
+    "end": "2052800"
+  },
+  {
+    "text": "end of that we're just going to delete the plot off the notes with a hard delete and uh then we're just going to",
+    "start": "2052800",
+    "end": "2058560"
+  },
+  {
+    "text": "delete the node so the font's going to go away um so that's that's what we do if you have a pod that just will not",
+    "start": "2058560",
+    "end": "2065040"
+  },
+  {
+    "text": "be evicted for whatever reason um it's going to go away eventually we're not going to",
+    "start": "2065040",
+    "end": "2070079"
+  },
+  {
+    "text": "keep the note around forever uh another good question is",
+    "start": "2070079",
+    "end": "2076480"
+  },
+  {
+    "text": "uh whether our upgrade tool lives inside the cluster or outside the cluster in our case it lives outside of the",
+    "start": "2076480",
+    "end": "2081599"
+  },
+  {
+    "text": "cluster we uh since it is a managed product we don't run",
+    "start": "2081599",
+    "end": "2086800"
+  },
+  {
+    "text": "we do have a component that runs in the cluster to make uh kubernetes changes to the api but um",
+    "start": "2086800",
+    "end": "2094480"
+  },
+  {
+    "text": "the the upgrade automation itself is outside of the cluster so it's it's operating on the cluster from the",
+    "start": "2094480",
+    "end": "2100839"
+  },
+  {
+    "text": "outside um there's another one around uh",
+    "start": "2100839",
+    "end": "2106079"
+  },
+  {
+    "text": "balancing the availability of applications as we upgrade nodes and replace nodes that's",
+    "start": "2106079",
+    "end": "2112320"
+  },
+  {
+    "text": "something that we as a managed provider we kind of leave that to the customer like we expect that",
+    "start": "2112320",
+    "end": "2117920"
+  },
+  {
+    "text": "the customer will have pod disruption budgets if they need them that they will have multiple replicas of uh their",
+    "start": "2117920",
+    "end": "2125200"
+  },
+  {
+    "text": "applications if they if they need availability and we respect all of that like it it",
+    "start": "2125200",
+    "end": "2130560"
+  },
+  {
+    "text": "when when we evict a pod um it is going to uh respect any affinity or anti-affinity",
+    "start": "2130560",
+    "end": "2137920"
+  },
+  {
+    "text": "it's going to respect the pod disruption budget so as long as it can be evicted and not like i said we do",
+    "start": "2137920",
+    "end": "2143599"
+  },
+  {
+    "text": "now um enable the the surge upgrade option so you can have new nodes created before we delete",
+    "start": "2143599",
+    "end": "2150160"
+  },
+  {
+    "text": "the old nodes all your pods are going to be drained to those hopefully to those new nodes um and that that will keep your app",
+    "start": "2150160",
+    "end": "2157920"
+  },
+  {
+    "text": "available um if you're doing your own upgrades that's just something to be mindful of that you want to make sure",
+    "start": "2157920",
+    "end": "2163359"
+  },
+  {
+    "text": "that you are leaving some time for nodes to be drained and applications to",
+    "start": "2163359",
+    "end": "2170320"
+  },
+  {
+    "text": "restart on new nodes before you can proceed with your upgrade basically",
+    "start": "2170320",
+    "end": "2177359"
+  },
+  {
+    "text": "um there are a couple around checks or tests that we might do to make",
+    "start": "2177760",
+    "end": "2184240"
+  },
+  {
+    "text": "sure that uh an upgrade is going well or that it's working um we kind of have a couple of phases in",
+    "start": "2184240",
+    "end": "2191200"
+  },
+  {
+    "text": "our upgrade so we we upgrade that control plane node and we won't start upgrading the [Music]",
+    "start": "2191200",
+    "end": "2197599"
+  },
+  {
+    "text": "worker nodes until we know that that's up and healthy and then likewise with worker nodes as",
+    "start": "2197599",
+    "end": "2202800"
+  },
+  {
+    "text": "we do each worker node or each set of worker nodes if we're doing a search upgrade we won't",
+    "start": "2202800",
+    "end": "2207920"
+  },
+  {
+    "text": "continue with doing more nodes until we until our new nodes are up and healthy so",
+    "start": "2207920",
+    "end": "2213200"
+  },
+  {
+    "text": "if something did go wrong with the control plane upgrade your workloads would still be running on the worker notes and you wouldn't have",
+    "start": "2213200",
+    "end": "2220160"
+  },
+  {
+    "text": "uh application unavailability it would basically pause and we would have to you know do",
+    "start": "2220160",
+    "end": "2226079"
+  },
+  {
+    "text": "something to resolve the issue we do take a",
+    "start": "2226079",
+    "end": "2231470"
+  },
+  {
+    "text": "[Music] snapshot of the etcd data before we",
+    "start": "2231470",
+    "end": "2236640"
+  },
+  {
+    "text": "start the upgrade so that if something really went wrong and the lcd volume was destroyed by",
+    "start": "2236640",
+    "end": "2243200"
+  },
+  {
+    "text": "a bad a bad upgrade in some way i've never had this actually happen but it's possible um",
+    "start": "2243200",
+    "end": "2250320"
+  },
+  {
+    "text": "we do take that snapshot so we could roll back to it if we needed to and uh we've only got a",
+    "start": "2250320",
+    "end": "2258160"
+  },
+  {
+    "text": "couple of minutes left so i'll maybe answer one more question but also feel free to hop on slack in the two kubecon",
+    "start": "2258160",
+    "end": "2265200"
+  },
+  {
+    "text": "operations channel and i'll hang out there for a while to answer some more questions um",
+    "start": "2265200",
+    "end": "2271838"
+  },
+  {
+    "text": "but uh let's see we have one one question around vm",
+    "start": "2271920",
+    "end": "2277200"
+  },
+  {
+    "text": "images um we build new vm images for each uh of our each version that we release",
+    "start": "2277200",
+    "end": "2285119"
+  },
+  {
+    "text": "and um that image is essentially like a golden image like we we don't",
+    "start": "2285119",
+    "end": "2291359"
+  },
+  {
+    "text": "make any any changes to it once it's deployed it's it's deployed as a worker node or has a control plane node",
+    "start": "2291359",
+    "end": "2297440"
+  },
+  {
+    "text": "and we do the setup once and then it lives for as long as the cluster lives",
+    "start": "2297440",
+    "end": "2303200"
+  },
+  {
+    "text": "so that's um yeah that's the that's how we deal with those images and",
+    "start": "2303200",
+    "end": "2310320"
+  },
+  {
+    "text": "we're always working on those images and updating them uh we try and release updates at least",
+    "start": "2310320",
+    "end": "2315440"
+  },
+  {
+    "text": "sort of once a month uh with any new kubernetes patch versions and also any general improvements we've made so i",
+    "start": "2315440",
+    "end": "2322240"
+  },
+  {
+    "text": "think we'll we'll wrap it up there like i said feel free to come and ask some questions on slack and",
+    "start": "2322240",
+    "end": "2327599"
+  },
+  {
+    "text": "uh also feel free to to find me on twitter or email or elsewhere and i'm",
+    "start": "2327599",
+    "end": "2332720"
+  },
+  {
+    "text": "happy to chat more about upgrades thanks everyone",
+    "start": "2332720",
+    "end": "2338000"
+  }
+]

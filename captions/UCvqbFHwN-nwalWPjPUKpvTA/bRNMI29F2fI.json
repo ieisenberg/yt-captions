@@ -1,0 +1,1447 @@
+[
+  {
+    "text": "am i on all right 2 15 let's get started um so hi everyone my name is michael",
+    "start": "1600",
+    "end": "8639"
+  },
+  {
+    "text": "crenshaw i'm on the argo cd team at intuit as a back-end software engineer",
+    "start": "8639",
+    "end": "14799"
+  },
+  {
+    "text": "i've been there for about a year now and my team supports our internal argo cd users such as folks who do",
+    "start": "14799",
+    "end": "22160"
+  },
+  {
+    "text": "builds and deployments for us so what i'm going to talk about today is",
+    "start": "22160",
+    "end": "27920"
+  },
+  {
+    "text": "what i call the bootstrap attack so argo cd as many of you probably",
+    "start": "27920",
+    "end": "33440"
+  },
+  {
+    "text": "already know has the ability to bootstrap itself to install itself",
+    "start": "33440",
+    "end": "38559"
+  },
+  {
+    "text": "so the way this works is you start with cubectl apply and you apply your initial manifest for argo cd once it's up and",
+    "start": "38559",
+    "end": "46079"
+  },
+  {
+    "text": "running argo cd is just kubernetes resources so you can create a new application point it to your manifest",
+    "start": "46079",
+    "end": "52960"
+  },
+  {
+    "text": "and now you're using git ops to deploy argo cd or to bootstrap it the fact that",
+    "start": "52960",
+    "end": "59039"
+  },
+  {
+    "text": "argo cd is just kubernetes resources means that all of its security config is stored in kubernetes um so this attack",
+    "start": "59039",
+    "end": "68479"
+  },
+  {
+    "text": "is about a user basically taking advantage of argo cd's power to",
+    "start": "68479",
+    "end": "74960"
+  },
+  {
+    "text": "maliciously change configuration files and escalate their privileges",
+    "start": "74960",
+    "end": "81360"
+  },
+  {
+    "text": "so to understand this mode of attack it's useful to understand the layers in the structure of argo cd so the thing",
+    "start": "81920",
+    "end": "89280"
+  },
+  {
+    "text": "that most developers are familiar with is the applications layer",
+    "start": "89280",
+    "end": "94400"
+  },
+  {
+    "text": "so each application is a custom resource definition which references a source of",
+    "start": "94400",
+    "end": "101040"
+  },
+  {
+    "text": "truth for your manifests and then a destination which is a kubernetes cluster and one or more",
+    "start": "101040",
+    "end": "108079"
+  },
+  {
+    "text": "namespaces that those resources will be deployed to",
+    "start": "108079",
+    "end": "113520"
+  },
+  {
+    "text": "each application must be grouped under a project and a project is just another",
+    "start": "113600",
+    "end": "119040"
+  },
+  {
+    "text": "custom resource definition defined and maintained by argo proj and you can think of a project as a",
+    "start": "119040",
+    "end": "125439"
+  },
+  {
+    "text": "group of rules about what the sources of truth are allowed to be for a set of applications what the allowed",
+    "start": "125439",
+    "end": "131440"
+  },
+  {
+    "text": "destinations are and a number of other rules just to restrict uh and make sure that your developers are only doing with",
+    "start": "131440",
+    "end": "138319"
+  },
+  {
+    "text": "their applications what they're supposed to be allowed to do and then the very bottom layer of the",
+    "start": "138319",
+    "end": "144720"
+  },
+  {
+    "text": "argo cd structure is the actual resources that you deploy and these are the things that you see when you click",
+    "start": "144720",
+    "end": "150160"
+  },
+  {
+    "text": "on an application in argo cd ui so config maps deployments etc all those",
+    "start": "150160",
+    "end": "155680"
+  },
+  {
+    "text": "things that were represented as manifests that are now deployed and monitored in your kubernetes cluster",
+    "start": "155680",
+    "end": "163840"
+  },
+  {
+    "text": "um so it's useful to see what visually a bootstrapped argo cd cluster looks like",
+    "start": "164319",
+    "end": "170239"
+  },
+  {
+    "text": "in argo cd if we're going to attack it so this is a screenshot of the application view of a bootstrap argo cd",
+    "start": "170239",
+    "end": "177760"
+  },
+  {
+    "text": "instance and i've filtered it down to just a few types of resources you've got config maps um stateful sets",
+    "start": "177760",
+    "end": "184879"
+  },
+  {
+    "text": "and secrets and the reason i filtered it to those is those are some of the juiciest targets",
+    "start": "184879",
+    "end": "190239"
+  },
+  {
+    "text": "for an attacker the things that we can modify and potentially escalate our privileges i've listed a few of the first things",
+    "start": "190239",
+    "end": "196879"
+  },
+  {
+    "text": "that i would attack but for this talk we're going to attack the argo cd rbac config map and that is",
+    "start": "196879",
+    "end": "203840"
+  },
+  {
+    "text": "the config map that stores the csv file which describes how users are allowed to use the api i.e the the cli and the ui",
+    "start": "203840",
+    "end": "212959"
+  },
+  {
+    "text": "to make changes in argo cd so by attacking this we can potentially escalate our privileges",
+    "start": "212959",
+    "end": "218480"
+  },
+  {
+    "text": "and do more interesting things the rbac config map matters because it",
+    "start": "218480",
+    "end": "225120"
+  },
+  {
+    "text": "is it basically governs a second source of truth for your manifest so you've got",
+    "start": "225120",
+    "end": "230319"
+  },
+  {
+    "text": "git you've got helm that's one source of truth but depending on how you configure your our back it can become uh the",
+    "start": "230319",
+    "end": "237840"
+  },
+  {
+    "text": "gatekeeper for the second source of truth the ui the cli the api",
+    "start": "237840",
+    "end": "243280"
+  },
+  {
+    "text": "and the rules are defined in csv like this so we have different types of resources in this case we're restricting",
+    "start": "243280",
+    "end": "251360"
+  },
+  {
+    "text": "the dev groups uh access to the applications resource and i've given this group",
+    "start": "251360",
+    "end": "258160"
+  },
+  {
+    "text": "access to get or to sync applications that are in the dev project so that's the dev slash star every",
+    "start": "258160",
+    "end": "264960"
+  },
+  {
+    "text": "application which is grouped under dev you're allowed to access",
+    "start": "264960",
+    "end": "269840"
+  },
+  {
+    "text": "what that ends up looking like in the ui and it would look the same if you use the cli or the api is",
+    "start": "270639",
+    "end": "277120"
+  },
+  {
+    "text": "when an admin logs into argo cd they see all of the applications and on the left",
+    "start": "277120",
+    "end": "282400"
+  },
+  {
+    "text": "side you see that bootstrapped argo cd application but when a developer logs in because",
+    "start": "282400",
+    "end": "288080"
+  },
+  {
+    "text": "they're under that dev role they only see applications that are grouped under um the dev project",
+    "start": "288080",
+    "end": "297000"
+  },
+  {
+    "text": "the attack if actually performed would look like this on the left side you're an attacker",
+    "start": "297440",
+    "end": "303520"
+  },
+  {
+    "text": "you've set up an application or suppose an admin has set up an application for you and what you're supposed to be deploying",
+    "start": "303520",
+    "end": "310000"
+  },
+  {
+    "text": "is those bottom two resources the guestbook ui uh service and the guestbook ui deployment",
+    "start": "310000",
+    "end": "316639"
+  },
+  {
+    "text": "but the nasty thing there is the config map which is the top resource argo cd",
+    "start": "316639",
+    "end": "322320"
+  },
+  {
+    "text": "rbac cm when you deploy an application you're allowed to specify in your",
+    "start": "322320",
+    "end": "328240"
+  },
+  {
+    "text": "resource what name space you want to deploy to so i can set in this argo cd rbac cm i want to deploy this to the",
+    "start": "328240",
+    "end": "335440"
+  },
+  {
+    "text": "argo cd namespace where all the good stuff lives so as an attacker i see the left side i've synced it",
+    "start": "335440",
+    "end": "341680"
+  },
+  {
+    "text": "my changes to the config map have been applied on the right side as an admin i'm scared to death because i see that",
+    "start": "341680",
+    "end": "348800"
+  },
+  {
+    "text": "argo cd is out of sync and there's a warning indicating that some other application",
+    "start": "348800",
+    "end": "355520"
+  },
+  {
+    "text": "is managing the same resource and if i want to figure out what exactly",
+    "start": "355520",
+    "end": "361520"
+  },
+  {
+    "text": "happened i could click the argo cd-rbacm resource and i'd see this on the left",
+    "start": "361520",
+    "end": "366960"
+  },
+  {
+    "text": "side what's currently deployed which gives everyone with a dev role full access to do anything that's what all",
+    "start": "366960",
+    "end": "373440"
+  },
+  {
+    "text": "the stars mean and what i should have deployed is on the right side",
+    "start": "373440",
+    "end": "378479"
+  },
+  {
+    "text": "pretty restricted our back i could hit sync and then the attacker could go back and hit sync and we could",
+    "start": "378479",
+    "end": "384639"
+  },
+  {
+    "text": "go back and forth like that there's no way that i could completely stop them at this point though from just",
+    "start": "384639",
+    "end": "390479"
+  },
+  {
+    "text": "managing their own uh our back and as a matter of fact at this point they could kick me out of the system and they'd",
+    "start": "390479",
+    "end": "396080"
+  },
+  {
+    "text": "take over the whole instance i really started thinking hard about",
+    "start": "396080",
+    "end": "401199"
+  },
+  {
+    "text": "this attack in march when the argo cd team got an email about a cve",
+    "start": "401199",
+    "end": "407600"
+  },
+  {
+    "text": "some organization had rules on their projects preventing users from deploying",
+    "start": "407600",
+    "end": "412800"
+  },
+  {
+    "text": "namespaces but one of their users added a namespace manifest to their manifest repository",
+    "start": "412800",
+    "end": "420639"
+  },
+  {
+    "text": "and they did a refresh in the argo cd ui and they saw the namespace which worried them a little bit and then",
+    "start": "420639",
+    "end": "426400"
+  },
+  {
+    "text": "they clicked the triple dots and realized they were now allowed to delete that namespace",
+    "start": "426400",
+    "end": "432080"
+  },
+  {
+    "text": "so the the bug was basically that argo cd let this resource into its internal",
+    "start": "432080",
+    "end": "438160"
+  },
+  {
+    "text": "representation of what is being managed by this application nine days later we fixed the bug we",
+    "start": "438160",
+    "end": "444479"
+  },
+  {
+    "text": "kicked those resources out of that internal resource tree and so if a user tried to sync this or",
+    "start": "444479",
+    "end": "450400"
+  },
+  {
+    "text": "if user tried to use the api ui or cli to modify or delete that resource they'd",
+    "start": "450400",
+    "end": "455919"
+  },
+  {
+    "text": "be prevented from doing that today but this attack was really interesting to me",
+    "start": "455919",
+    "end": "461759"
+  },
+  {
+    "text": "because i realized it started out as a fairly simple attack okay oh no someone can delete a namespace that's one",
+    "start": "461759",
+    "end": "467919"
+  },
+  {
+    "text": "problem but if a user can also use the api or the ui to modify the live manifest of",
+    "start": "467919",
+    "end": "475520"
+  },
+  {
+    "text": "something that they've just added to their repository then they could edit the live manifest of argo cd's own resources in the argo",
+    "start": "475520",
+    "end": "482960"
+  },
+  {
+    "text": "cd namespace and escalate their privileges so it took something like a 7 point something cvss",
+    "start": "482960",
+    "end": "489759"
+  },
+  {
+    "text": "vulnerability to 9.9 i believe is what we eventually settled on so i started wondering are there ways",
+    "start": "489759",
+    "end": "496240"
+  },
+  {
+    "text": "that people are misconfiguring argo cd they could let this stuff happen even when a bug doesn't exist",
+    "start": "496240",
+    "end": "503919"
+  },
+  {
+    "text": "so to avoid those type of misconfigurations we have a few lines of defense first we can use git based",
+    "start": "504560",
+    "end": "511120"
+  },
+  {
+    "text": "restrictions so for example in your source control management provider like github git lab you can set some",
+    "start": "511120",
+    "end": "516959"
+  },
+  {
+    "text": "restrictions and you can also do some r back restrictions in argo cd to complement",
+    "start": "516959",
+    "end": "522640"
+  },
+  {
+    "text": "those second type of defenses you can use argo cd's own project resource which",
+    "start": "522640",
+    "end": "527760"
+  },
+  {
+    "text": "we talked about as sort of a list of rules there are rules that can mitigate and even prevent this attack",
+    "start": "527760",
+    "end": "534000"
+  },
+  {
+    "text": "and then finally i'm going to spend a couple slides talking about the app of apps pattern and the app of projects",
+    "start": "534000",
+    "end": "539600"
+  },
+  {
+    "text": "pattern which are a little bit more advanced and require a little bit more effort to secure from particularly this",
+    "start": "539600",
+    "end": "545600"
+  },
+  {
+    "text": "type of attack so let's start with git based defenses which is basically restricting",
+    "start": "545600",
+    "end": "551760"
+  },
+  {
+    "text": "one of the two parts of an application source of truth and destination this is about restricting the source of truth",
+    "start": "551760",
+    "end": "560240"
+  },
+  {
+    "text": "so i'm going to ask you to imagine a hypothetical argo cd setup um and we're",
+    "start": "560800",
+    "end": "565839"
+  },
+  {
+    "text": "going to define three uh protections against attackers first",
+    "start": "565839",
+    "end": "571200"
+  },
+  {
+    "text": "our developers are only allowed to deploy from github github repos that require admin approval to push so as a",
+    "start": "571200",
+    "end": "578800"
+  },
+  {
+    "text": "developer you can't push straight to any branch on your deployment manifest repo you have to fork it you open a pr and",
+    "start": "578800",
+    "end": "585920"
+  },
+  {
+    "text": "then an argo cd admin reviews it rule number one pretty easy to do in github rule number two is um developers are",
+    "start": "585920",
+    "end": "593600"
+  },
+  {
+    "text": "going to be given their own rbac role and for this hypothetical i'm going to give them full access to any of the",
+    "start": "593600",
+    "end": "599519"
+  },
+  {
+    "text": "actions related to applications it's pretty common to want to give developers as much",
+    "start": "599519",
+    "end": "605519"
+  },
+  {
+    "text": "like broad access to their applications for example restricted to the dev project as possible because you want",
+    "start": "605519",
+    "end": "612160"
+  },
+  {
+    "text": "developers to be flexible and be able to respond to issues so we'll start there",
+    "start": "612160",
+    "end": "617600"
+  },
+  {
+    "text": "the third part is we're going to configure that dev project that devs are allowed",
+    "start": "617600",
+    "end": "622720"
+  },
+  {
+    "text": "to access um to access any source repo and deploy to any destination and some of you who",
+    "start": "622720",
+    "end": "628480"
+  },
+  {
+    "text": "are argo cd admins are already like that's a bad idea it is but we're going to poke holes in this first and then",
+    "start": "628480",
+    "end": "634240"
+  },
+  {
+    "text": "figure out where the holes are so that we can make sure they're always patched so the first attack that we can initiate",
+    "start": "634240",
+    "end": "641279"
+  },
+  {
+    "text": "against that hypothetical setup is we can change the app's source repo so remember we have restrictions to prevent",
+    "start": "641279",
+    "end": "647519"
+  },
+  {
+    "text": "users from just pushing to that source repo however i can use the cli or even the ui to patch",
+    "start": "647519",
+    "end": "654800"
+  },
+  {
+    "text": "this orders api application and just point it to a different repo that i control completely i can add an argo cd",
+    "start": "654800",
+    "end": "662240"
+  },
+  {
+    "text": "for example the rbac manifest to that repository push it and now i've taken over",
+    "start": "662240",
+    "end": "668720"
+  },
+  {
+    "text": "it's pretty easy to mitigate there are two different options i want to give you first is you can restrict the project",
+    "start": "668800",
+    "end": "675279"
+  },
+  {
+    "text": "sources in the app project crd there's a source repos field and it accepts a glob",
+    "start": "675279",
+    "end": "681920"
+  },
+  {
+    "text": "pattern so in this case i'm assuming your organization name is example",
+    "start": "681920",
+    "end": "687519"
+  },
+  {
+    "text": "and all of your deployment repos end with hyphen deploy so it intuit all of our deployment repos and with hyphen",
+    "start": "687519",
+    "end": "694079"
+  },
+  {
+    "text": "deployment so this would be a good pattern keep in mind if users can create",
+    "start": "694079",
+    "end": "700480"
+  },
+  {
+    "text": "repositories that match this pattern and they have control over the the push settings for that repository they can",
+    "start": "700480",
+    "end": "706560"
+  },
+  {
+    "text": "just bypass this they just match the pattern and they're in with whatever sources they want so make sure that for",
+    "start": "706560",
+    "end": "712560"
+  },
+  {
+    "text": "example in github in your organization users are restricted from creating arbitrary uh repositories with arbitrary",
+    "start": "712560",
+    "end": "720480"
+  },
+  {
+    "text": "names and uh control settings if we have this rule in place and we try",
+    "start": "720480",
+    "end": "726639"
+  },
+  {
+    "text": "that exact attack that we just showed um your the user is going to be stopped they're going to see an error from the",
+    "start": "726639",
+    "end": "732560"
+  },
+  {
+    "text": "cli saying that source is not allowed or the same error from the ui so we've defended",
+    "start": "732560",
+    "end": "738639"
+  },
+  {
+    "text": "against that attack in one way here's another way you could restrict the r back for",
+    "start": "738639",
+    "end": "745279"
+  },
+  {
+    "text": "applications which remember we had a star for because we want developers to have flexible access",
+    "start": "745279",
+    "end": "750800"
+  },
+  {
+    "text": "now we're going to remove a few things and the main one to focus on is update because that's what we were doing we were updating the application manifest",
+    "start": "750800",
+    "end": "757600"
+  },
+  {
+    "text": "to use a malicious source we just want to stop them from updating it instead our argo cd admins will create the",
+    "start": "757600",
+    "end": "763680"
+  },
+  {
+    "text": "application for them point it at something that we know is safe and then it just stays there and i went ahead and",
+    "start": "763680",
+    "end": "770160"
+  },
+  {
+    "text": "got rid of the delete and create permissions create because they could create an application with any source",
+    "start": "770160",
+    "end": "776480"
+  },
+  {
+    "text": "repo delete because if i'm not giving them update i probably don't want them just deleting",
+    "start": "776480",
+    "end": "782160"
+  },
+  {
+    "text": "applications anyway and they're going to hit a similar roadblock when they try to attack with",
+    "start": "782160",
+    "end": "788240"
+  },
+  {
+    "text": "this in place because they're going to run argo cd app patch and they're going to get an error this time slightly",
+    "start": "788240",
+    "end": "793760"
+  },
+  {
+    "text": "different it's not an invalid source instead it's you're just not allowed to update and they would see the same error",
+    "start": "793760",
+    "end": "799600"
+  },
+  {
+    "text": "in the user interface so either of those two defenses works you might want to use both of them",
+    "start": "799600",
+    "end": "805360"
+  },
+  {
+    "text": "in conjunction for example if you're worried you can't get a pattern that is sufficient to match and prevent",
+    "start": "805360",
+    "end": "810880"
+  },
+  {
+    "text": "malicious repos but either one should be able to work",
+    "start": "810880",
+    "end": "816320"
+  },
+  {
+    "text": "but there's still an attack available we've we've done all this we're protected against those attacks",
+    "start": "816320",
+    "end": "821519"
+  },
+  {
+    "text": "this is still vulnerable to a bootstrap attack because um the argo cdcli has a flag option that",
+    "start": "821519",
+    "end": "829360"
+  },
+  {
+    "text": "i think kind of gets overlooked it is hyphen hyphen local and what this",
+    "start": "829360",
+    "end": "834480"
+  },
+  {
+    "text": "does when you do argo cd app sync hyphen hyphen local it builds the manifest",
+    "start": "834480",
+    "end": "839920"
+  },
+  {
+    "text": "locally on your computer shoots those manifests up to argo cd and that's actually what gets synced to the cluster",
+    "start": "839920",
+    "end": "847519"
+  },
+  {
+    "text": "this is awesome for developers who just want to test something out real quick they make a quick change locally",
+    "start": "847519",
+    "end": "853760"
+  },
+  {
+    "text": "they do a local sync up to the cluster look at it in the ui looks great so now they do git commit fire it off put up a",
+    "start": "853760",
+    "end": "859279"
+  },
+  {
+    "text": "pr i like this tool for admin type people i",
+    "start": "859279",
+    "end": "864480"
+  },
+  {
+    "text": "don't love this um for just average developers because there's a reason we like get ops because you can trace what",
+    "start": "864480",
+    "end": "871040"
+  },
+  {
+    "text": "happens uh and see the entire history this flag is controlled by the over the",
+    "start": "871040",
+    "end": "878160"
+  },
+  {
+    "text": "override our back action so you remember where we had applications comma star comma etc",
+    "start": "878160",
+    "end": "884399"
+  },
+  {
+    "text": "where that star is is where the override application or the override action lives and where we can",
+    "start": "884399",
+    "end": "891040"
+  },
+  {
+    "text": "restrict it so here's your defense this is one of the four remaining actions that are allowed we just delete the",
+    "start": "891040",
+    "end": "897839"
+  },
+  {
+    "text": "override action when someone tries to do a local sync this is what they'll get permission",
+    "start": "897839",
+    "end": "903519"
+  },
+  {
+    "text": "denied you're not allowed to override i was chatting with someone yesterday who had never heard of this particular",
+    "start": "903519",
+    "end": "908959"
+  },
+  {
+    "text": "action that's available in our back so i think it gets overlooked and it's definitely worth looking at your r back and seeing",
+    "start": "908959",
+    "end": "915839"
+  },
+  {
+    "text": "one do you need that two if not can you eliminate it so that's git based defenses um so",
+    "start": "915839",
+    "end": "922320"
+  },
+  {
+    "text": "restrict pushes to your to your manifest repositories make sure users can't create repositories that match",
+    "start": "922320",
+    "end": "929279"
+  },
+  {
+    "text": "your glob patterns and then restrict rbac at the very least to prevent override but also probably to prevent",
+    "start": "929279",
+    "end": "936959"
+  },
+  {
+    "text": "creates updates and deletes on the application if you're not sure that you can secure",
+    "start": "936959",
+    "end": "942560"
+  },
+  {
+    "text": "the sources with just a glob pattern the problem with git based defenses is",
+    "start": "942560",
+    "end": "950079"
+  },
+  {
+    "text": "all of it relies on argo cd admins time and i don't know about y'all's",
+    "start": "950079",
+    "end": "956079"
+  },
+  {
+    "text": "organizations but a lot of orgs only have two or three people who really have in-depth knowledge of argo cd if even",
+    "start": "956079",
+    "end": "963519"
+  },
+  {
+    "text": "that so taking those folks time just to review prs to make sure no one's",
+    "start": "963519",
+    "end": "968959"
+  },
+  {
+    "text": "submitting anything nasty that's going to be a lot of time into it as 16 000 applications if the",
+    "start": "968959",
+    "end": "976880"
+  },
+  {
+    "text": "team of eight-ish people who know argo cd the best had to review all those pull requests we'd never do anything else so",
+    "start": "976880",
+    "end": "983199"
+  },
+  {
+    "text": "we need something besides just reviewing prs and we're going to do that with the app",
+    "start": "983199",
+    "end": "989120"
+  },
+  {
+    "text": "project crd so first we'll start with an initial setup only two rules this time",
+    "start": "989120",
+    "end": "994880"
+  },
+  {
+    "text": "we don't need the get restrictions because that's going to take too much time instead we're going to give people full",
+    "start": "994880",
+    "end": "1000160"
+  },
+  {
+    "text": "access again over all of the applications in the dev project and we're going to give the dev project full",
+    "start": "1000160",
+    "end": "1006000"
+  },
+  {
+    "text": "permissions to pull from any source pull from any destination we'll leave it nice and open we'll poke some holes in it and",
+    "start": "1006000",
+    "end": "1011680"
+  },
+  {
+    "text": "see how much we can leave open and still prevent a bootstrap attack",
+    "start": "1011680",
+    "end": "1017519"
+  },
+  {
+    "text": "so the attack at this point is the simple one we saw earlier we have no way of preventing someone from adding the",
+    "start": "1017519",
+    "end": "1023600"
+  },
+  {
+    "text": "argo cd rbac config map or some other sensitive resource to their manifests pushing it to a repo and hitting sync",
+    "start": "1023600",
+    "end": "1030160"
+  },
+  {
+    "text": "and taking everything over the way to stop this attack using an app",
+    "start": "1030160",
+    "end": "1036079"
+  },
+  {
+    "text": "project manifest is actually really simple um you edit the destinations field to",
+    "start": "1036079",
+    "end": "1042558"
+  },
+  {
+    "text": "prevent people from deploying to sensitive destinations in this case i've said okay i know i only want",
+    "start": "1042559",
+    "end": "1049919"
+  },
+  {
+    "text": "these resources going to the default namespace um if you have a very dynamic set of",
+    "start": "1049919",
+    "end": "1057120"
+  },
+  {
+    "text": "namespaces that you want to allow people to deploy to it could get really cumbersome to have to always update this",
+    "start": "1057120",
+    "end": "1062799"
+  },
+  {
+    "text": "so we do accept multiple destinations or we accept a glob pattern in that",
+    "start": "1062799",
+    "end": "1067919"
+  },
+  {
+    "text": "namespace field so you could do star hyphen dev um",
+    "start": "1067919",
+    "end": "1073280"
+  },
+  {
+    "text": "starting with 2.5 thanks to a pull request from blake pedersen we now have the ability to add an exclamation point",
+    "start": "1073280",
+    "end": "1079760"
+  },
+  {
+    "text": "to the beginning of the glob and that just means don't allow anything that matches this glob",
+    "start": "1079760",
+    "end": "1085360"
+  },
+  {
+    "text": "i would love to see people as soon as 2.5 comes out start adding exclamation",
+    "start": "1085360",
+    "end": "1091039"
+  },
+  {
+    "text": "points argo cd to all of their app projects because this",
+    "start": "1091039",
+    "end": "1096160"
+  },
+  {
+    "text": "absolutely prevents anyone from managing resources in that namespace there's no way for them to take over your argo cd",
+    "start": "1096160",
+    "end": "1102080"
+  },
+  {
+    "text": "instance and start doing bad things so this is what it looks like with that",
+    "start": "1102080",
+    "end": "1108000"
+  },
+  {
+    "text": "rule in place when someone tries to attack your cluster you can see the config map in the argo cd ui but that is",
+    "start": "1108000",
+    "end": "1115280"
+  },
+  {
+    "text": "it if you hit sync the sync will fail with the error that namespace isn't allowed and if you hit the three little",
+    "start": "1115280",
+    "end": "1121760"
+  },
+  {
+    "text": "dots and try to delete or you go to edit the live manifest all that'll be prevented you you get errors for each of",
+    "start": "1121760",
+    "end": "1127840"
+  },
+  {
+    "text": "those uh attempts so nice and easy way to prevent those",
+    "start": "1127840",
+    "end": "1133440"
+  },
+  {
+    "text": "attacks using um app projects now i want to talk about some advanced use cases",
+    "start": "1133440",
+    "end": "1138720"
+  },
+  {
+    "text": "i'd like to see hands how many people have used or are interested in using apps of apps or absolute projects",
+    "start": "1138720",
+    "end": "1145360"
+  },
+  {
+    "text": "okay a lot of folks so this isn't sort of the niche thing that uh you know a more advanced use case this is something",
+    "start": "1145360",
+    "end": "1150880"
+  },
+  {
+    "text": "that people are actually using a lot which i love but it is more difficult to secure and you'll see why",
+    "start": "1150880",
+    "end": "1157039"
+  },
+  {
+    "text": "for folks who aren't familiar with apps of apps it's kind of just what it sounds like you have an application",
+    "start": "1157039",
+    "end": "1163039"
+  },
+  {
+    "text": "and the source of truth contains manifests for other applications and when you look at it in the ui",
+    "start": "1163039",
+    "end": "1168720"
+  },
+  {
+    "text": "um you could have you know this main app of apps application and i'm deploying a couple of other applications",
+    "start": "1168720",
+    "end": "1175440"
+  },
+  {
+    "text": "using that root app um",
+    "start": "1175440",
+    "end": "1180480"
+  },
+  {
+    "text": "the the difficult thing about an app of apps is that project field",
+    "start": "1180480",
+    "end": "1185760"
+  },
+  {
+    "text": "so if my users are allowed to deploy arbitrary application manifests they",
+    "start": "1185760",
+    "end": "1190960"
+  },
+  {
+    "text": "pick their project and those projects are the rules that keep people from taking over your argo cd cluster",
+    "start": "1190960",
+    "end": "1197679"
+  },
+  {
+    "text": "so we have to protect that field and we'll talk about a couple different ways to",
+    "start": "1197679",
+    "end": "1203280"
+  },
+  {
+    "text": "protect it in argo cd 2.4 so the current release and prior um the only way to secure that",
+    "start": "1203280",
+    "end": "1211840"
+  },
+  {
+    "text": "project field is using the review pattern so you need to do everything that we discussed earlier under git",
+    "start": "1211840",
+    "end": "1217679"
+  },
+  {
+    "text": "based defenses you need to make sure that argo cd admins people who understand the importance of that",
+    "start": "1217679",
+    "end": "1223520"
+  },
+  {
+    "text": "project field you need to have them reviewing all the prs for apps of apps",
+    "start": "1223520",
+    "end": "1230240"
+  },
+  {
+    "text": "and you need to make sure that the sources of truth are limited to just the places that are being reviewed by those",
+    "start": "1230240",
+    "end": "1235520"
+  },
+  {
+    "text": "argo cd admins you also need to make sure you disable the update permissions because",
+    "start": "1235520",
+    "end": "1241919"
+  },
+  {
+    "text": "let me go back and show you what this would look like if you don't disable update users can click one of these",
+    "start": "1241919",
+    "end": "1248240"
+  },
+  {
+    "text": "applications they can click the orders api go to the live manifest and just edit it and change the project to",
+    "start": "1248240",
+    "end": "1253520"
+  },
+  {
+    "text": "whatever they want so in app apps prior to 2.4 you got to have people reviewing you have to",
+    "start": "1253520",
+    "end": "1258880"
+  },
+  {
+    "text": "disable the update permissions starting with argo cd 2.5 there's a new",
+    "start": "1258880",
+    "end": "1264240"
+  },
+  {
+    "text": "feature uh called applications in any namespace that",
+    "start": "1264240",
+    "end": "1269679"
+  },
+  {
+    "text": "it provides a model to allow self-service applications and restrict",
+    "start": "1269679",
+    "end": "1274840"
+  },
+  {
+    "text": "applications to particular projects that you can define in a way that's safe i'm not going to go in depth on that this is",
+    "start": "1274840",
+    "end": "1280240"
+  },
+  {
+    "text": "a brand new feature and it needs a lot of testing so when the rc comes out if",
+    "start": "1280240",
+    "end": "1285919"
+  },
+  {
+    "text": "you're interested in this pattern get in touch with me we'd love you to test the rc and see if you can secure this",
+    "start": "1285919",
+    "end": "1291679"
+  },
+  {
+    "text": "pattern apps of projects uh don't do self-service apps or projects um",
+    "start": "1291679",
+    "end": "1298080"
+  },
+  {
+    "text": "use your argo cd admins are gonna have to review every pull request for an app of projects and just to be clear apple",
+    "start": "1298080",
+    "end": "1305440"
+  },
+  {
+    "text": "projects is just what it sounds like it's an application that deploys projects",
+    "start": "1305440",
+    "end": "1310559"
+  },
+  {
+    "text": "there is currently no mechanism to prevent users from one creating new projects that allowed",
+    "start": "1310559",
+    "end": "1317280"
+  },
+  {
+    "text": "them to do things they shouldn't be allowed to do or two potentially just editing existing projects",
+    "start": "1317280",
+    "end": "1322960"
+  },
+  {
+    "text": "to allow them to do things that they previously weren't allowed to do so make sure your argo cd admins are",
+    "start": "1322960",
+    "end": "1329840"
+  },
+  {
+    "text": "reviewing all those pr's and you've used all the git-based restrictions there are discussions of making projects",
+    "start": "1329840",
+    "end": "1336880"
+  },
+  {
+    "text": "self-service but those haven't resulted in a really awesome proposal yet i tried to write",
+    "start": "1336880",
+    "end": "1343280"
+  },
+  {
+    "text": "one but it's still a work in progress so i'd love to see this happen down the road",
+    "start": "1343280",
+    "end": "1348960"
+  },
+  {
+    "text": "so to sum it up i've got sort of just the basics uh if you're trying to secure",
+    "start": "1348960",
+    "end": "1354000"
+  },
+  {
+    "text": "your argo cd instance this is what you need to do um a bootstrap attack is when you use argo cd's power to destroy argo",
+    "start": "1354000",
+    "end": "1362640"
+  },
+  {
+    "text": "cd's defenses by taking over sensitive resources you got a couple",
+    "start": "1362640",
+    "end": "1368159"
+  },
+  {
+    "text": "different ways you can defend one using restrictions in get and making sure that someone reviews all the changes and make",
+    "start": "1368159",
+    "end": "1374159"
+  },
+  {
+    "text": "sure they're safe for two you can use the app project manifest",
+    "start": "1374159",
+    "end": "1379360"
+  },
+  {
+    "text": "to restrict people to only deploy to places that you know are safe and finally there are a few",
+    "start": "1379360",
+    "end": "1384559"
+  },
+  {
+    "text": "extra mechanisms to to defend apps of apps and apps and projects so that's the bootstrap attack i hope people have",
+    "start": "1384559",
+    "end": "1390720"
+  },
+  {
+    "text": "found something useful and something that they can take back to your setups uh and analyze and see if you're secure",
+    "start": "1390720",
+    "end": "1397200"
+  },
+  {
+    "text": "so thank you for listening",
+    "start": "1397200",
+    "end": "1400919"
+  },
+  {
+    "text": "are there questions like how can i attack mine ed",
+    "start": "1404400",
+    "end": "1411280"
+  },
+  {
+    "text": "yeah let's see if we can find a mic uh",
+    "start": "1414720",
+    "end": "1418640"
+  },
+  {
+    "text": "shouldn't we exclude the argo cd namespace by default as a valid",
+    "start": "1425039",
+    "end": "1431520"
+  },
+  {
+    "text": "target so we ship argo cd with a default project",
+    "start": "1431520",
+    "end": "1436880"
+  },
+  {
+    "text": "which is wide open and we do that because we want folks to be able to test quickly on their local machines and see",
+    "start": "1436880",
+    "end": "1442480"
+  },
+  {
+    "text": "if argo cv is good for them um i mentioned in the workshop yesterday someone wrote an article uh dennis",
+    "start": "1442480",
+    "end": "1449440"
+  },
+  {
+    "text": "anastasio about how you should restrict that default project down the first thing you should do is try to limit it down to",
+    "start": "1449440",
+    "end": "1455840"
+  },
+  {
+    "text": "only what you need or even just completely restrict it and then use new projects uh to restrict out the argo cd namespace",
+    "start": "1455840",
+    "end": "1462960"
+  },
+  {
+    "text": "by default is something i would want to look at for 3.0 um i think that that's probably a good starting point it would",
+    "start": "1462960",
+    "end": "1469919"
+  },
+  {
+    "text": "make onboarding more difficult for people but we could we could include a demo naming space right that did we could include a",
+    "start": "1469919",
+    "end": "1477279"
+  },
+  {
+    "text": "demo namespace yep we could point the default project to that and know that people can't bootstrap attack your argo",
+    "start": "1477279",
+    "end": "1483840"
+  },
+  {
+    "text": "cd instance by default okay well thank you ann a great job of making a complicated",
+    "start": "1483840",
+    "end": "1489760"
+  },
+  {
+    "text": "topic understandable thank you i hope it was i hope it was clear other questions",
+    "start": "1489760",
+    "end": "1497360"
+  },
+  {
+    "text": "and just to expand on that i think there are a number of things that in like a major release 3.0 we'd want to change",
+    "start": "1497360",
+    "end": "1503919"
+  },
+  {
+    "text": "defaults maybe in ways that slow folks down a little bit but would help people you",
+    "start": "1503919",
+    "end": "1508960"
+  },
+  {
+    "text": "know take care of their setups a little bit more easily yes",
+    "start": "1508960",
+    "end": "1515200"
+  },
+  {
+    "text": "uh let's see if we can get a mic over to you",
+    "start": "1515200",
+    "end": "1518799"
+  },
+  {
+    "text": "um pardon me if it's kind of a weird question it's just you're good uh",
+    "start": "1522000",
+    "end": "1527679"
+  },
+  {
+    "text": "are you guys in connection with the rest of the industry other vendors providing technology also for securing kubernetes",
+    "start": "1527679",
+    "end": "1534799"
+  },
+  {
+    "text": "how is this research happening as an ecosystem sorry can you repeat just the last bit yeah",
+    "start": "1534799",
+    "end": "1540159"
+  },
+  {
+    "text": "what what's the relationship of the ecosystem of different vendors creating their own",
+    "start": "1540159",
+    "end": "1545200"
+  },
+  {
+    "text": "because i was exposed before with starboard from aqua and i always felt like they were kind of",
+    "start": "1545200",
+    "end": "1551279"
+  },
+  {
+    "text": "doing this in a canonical way but now that i'm seeing the bigger picture in devops and see different vendors creating their own",
+    "start": "1551279",
+    "end": "1558400"
+  },
+  {
+    "text": "things so for me as a newbies kind of different it's difficult to understand like where is the one place you can look for",
+    "start": "1558400",
+    "end": "1564400"
+  },
+  {
+    "text": "research and feel like this is it or it's always like this fragmented thing that's a good question um",
+    "start": "1564400",
+    "end": "1571120"
+  },
+  {
+    "text": "i mean argo cd is it's unique in a lot of ways like we do have our own our back system we we came",
+    "start": "1571120",
+    "end": "1578159"
+  },
+  {
+    "text": "up with our own names for like the resources and the actions uh as far as i know the app project",
+    "start": "1578159",
+    "end": "1584880"
+  },
+  {
+    "text": "concept is kind of a unique thing in the particular set of rules that we include in an app project",
+    "start": "1584880",
+    "end": "1591360"
+  },
+  {
+    "text": "so it's kind of difficult to generalize those structures",
+    "start": "1591360",
+    "end": "1597760"
+  },
+  {
+    "text": "i think the closest thing would be i know there are probably you know really excellent guides on how to secure kubernetes because it has its own model",
+    "start": "1597760",
+    "end": "1604960"
+  },
+  {
+    "text": "of here's what resources are here's what name sports name spaces are and here's our back model and how to keep yourself",
+    "start": "1604960",
+    "end": "1611120"
+  },
+  {
+    "text": "safe i think that someone thinking about argo cd",
+    "start": "1611120",
+    "end": "1617200"
+  },
+  {
+    "text": "in its relationship to basically how kubernetes asks people to secure things",
+    "start": "1617200",
+    "end": "1622480"
+  },
+  {
+    "text": "is probably a good way to to think about it um as far as just in general good ways to",
+    "start": "1622480",
+    "end": "1629039"
+  },
+  {
+    "text": "understand security with with ci cd tech a lot of it's very very new stuff and",
+    "start": "1629039",
+    "end": "1635520"
+  },
+  {
+    "text": "very very quickly evolving stuff i highly recommend thinking about how you would attack",
+    "start": "1635520",
+    "end": "1641440"
+  },
+  {
+    "text": "your cluster even if you're just a dev and you just use argo cd to like bump the tag on your",
+    "start": "1641440",
+    "end": "1648559"
+  },
+  {
+    "text": "on on one of your applications think about what you would do that's malicious and talk to your admins",
+    "start": "1648559",
+    "end": "1654880"
+  },
+  {
+    "text": "um about you know whether there's anything that they need to tighten up and then write a blog post and send me a",
+    "start": "1654880",
+    "end": "1661600"
+  },
+  {
+    "text": "link because i'd love to know about it and they'll know how to make argo cd you know move towards those more secure",
+    "start": "1661600",
+    "end": "1668080"
+  },
+  {
+    "text": "practices by default once we kind of understand the use cases hopefully that was helpful uh",
+    "start": "1668080",
+    "end": "1674320"
+  },
+  {
+    "text": "kind of touched a few things other questions",
+    "start": "1674320",
+    "end": "1680000"
+  },
+  {
+    "text": "yes",
+    "start": "1680000",
+    "end": "1683000"
+  },
+  {
+    "text": "oprah rules okay so the question is have we explored integrating oprah rules for our back the last part i'm not sure i",
+    "start": "1688799",
+    "end": "1694559"
+  },
+  {
+    "text": "understand though oh for argo users kind of so uh alex from acuity has an issue up",
+    "start": "1694559",
+    "end": "1702399"
+  },
+  {
+    "text": "and i think it's in the 2.6 milestone but it's basically a field and app project that",
+    "start": "1702399",
+    "end": "1708720"
+  },
+  {
+    "text": "is a jq query and any resource that you attempt to to apply that's under this",
+    "start": "1708720",
+    "end": "1714159"
+  },
+  {
+    "text": "project that jq query is going to run and if it returns a truthy result it's allowed if",
+    "start": "1714159",
+    "end": "1719760"
+  },
+  {
+    "text": "it returns a false result it's not allowed this was particularly going to be useful",
+    "start": "1719760",
+    "end": "1725120"
+  },
+  {
+    "text": "for restricting which custom resource definitions people could deploy because in that case the name is super important",
+    "start": "1725120",
+    "end": "1732320"
+  },
+  {
+    "text": "as far as integrating opa rules by default i think it's fine right now to kind of",
+    "start": "1732320",
+    "end": "1738399"
+  },
+  {
+    "text": "layer opa on top of argo cd stuff and i know that they're like uh i think caverno has some argo cd or",
+    "start": "1738399",
+    "end": "1745840"
+  },
+  {
+    "text": "even argo workflow specific rules um that you can apply and try to keep things safer",
+    "start": "1745840",
+    "end": "1751440"
+  },
+  {
+    "text": "i would like to see how the space evolves and what opa rules people define for themselves and find useful and then",
+    "start": "1751440",
+    "end": "1758399"
+  },
+  {
+    "text": "try to integrate that as a first class feature in argo cd that's kind of where i'd like to go",
+    "start": "1758399",
+    "end": "1764640"
+  },
+  {
+    "text": "okay i've got 30 seconds according this clock anything else yeah raymond",
+    "start": "1764640",
+    "end": "1770640"
+  },
+  {
+    "text": "uh was there any attack that you saw with um slash champion the repo",
+    "start": "1770960",
+    "end": "1776960"
+  },
+  {
+    "text": "cash sorry can the the what with the repo the repo server like uh slash temp is where",
+    "start": "1776960",
+    "end": "1782880"
+  },
+  {
+    "text": "all the uh repository information gets stored right and then and now you were trying to protect that",
+    "start": "1782880",
+    "end": "1789200"
+  },
+  {
+    "text": "mount point are we talking about the directory traversal problems in repo server yeah uh yeah so was there any",
+    "start": "1789200",
+    "end": "1795919"
+  },
+  {
+    "text": "sort of attack that people were doing with so i don't know of any attacks in the wild um we have been plagued with issues",
+    "start": "1795919",
+    "end": "1803279"
+  },
+  {
+    "text": "with sim links and directory traversal in the repo server um jake from cobalt put",
+    "start": "1803279",
+    "end": "1809760"
+  },
+  {
+    "text": "up a pr we now disable starting with 2.5 we're going to default to no sim links that point anywhere outside of your repo",
+    "start": "1809760",
+    "end": "1817679"
+  },
+  {
+    "text": "so i think that'll help a lot i'm not sure if that's the issue you're talking about but that's a huge improvement in 2.5 that i'm excited about",
+    "start": "1817679",
+    "end": "1824960"
+  },
+  {
+    "text": "cool thank you all so much",
+    "start": "1824960",
+    "end": "1828919"
+  }
+]

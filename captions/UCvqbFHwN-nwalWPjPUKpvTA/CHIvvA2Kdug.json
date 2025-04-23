@@ -1,0 +1,1442 @@
+[
+  {
+    "text": "hey everyone uh my name's Lucas I'm a software engineer working on a project called gvisor which is an application",
+    "start": "280",
+    "end": "6240"
+  },
+  {
+    "text": "kernel and oci compliant runtime for sandboxing containers I'm really excited to be here",
+    "start": "6240",
+    "end": "13000"
+  },
+  {
+    "text": "uh today I'm going to talk about uh Cloud native workloads how",
+    "start": "13000",
+    "end": "19439"
+  },
+  {
+    "text": "sorry okay uh yeah talk about sandboxing is a security layer for cloud native",
+    "start": "20439",
+    "end": "26320"
+  },
+  {
+    "text": "workloads how this fits into the AI language model machine learning world we find ourselves in so first I'll start um",
+    "start": "26320",
+    "end": "34200"
+  },
+  {
+    "text": "introduce sandboxing as a concept might be a little bit of review for some of you then we'll look at a couple different approaches to sandboxing and",
+    "start": "34200",
+    "end": "41120"
+  },
+  {
+    "text": "compare them after that I'll go a little bit deeper into the implementation of gvisor specifically what I work on and",
+    "start": "41120",
+    "end": "48399"
+  },
+  {
+    "text": "then I'll talk about some of this AI specific stuff and how sandboxing can be a really critical part of the security",
+    "start": "48399",
+    "end": "54480"
+  },
+  {
+    "text": "story of these kinds of workloads so an important question to ask rout the gate is why do we even need",
+    "start": "54480",
+    "end": "60320"
+  },
+  {
+    "text": "this uh isn't Cloud native security complicated enough what benefit are we going to get uh I'll try to explain like",
+    "start": "60320",
+    "end": "66240"
+  },
+  {
+    "text": "I said before it might be a bit of review but just bear with me uh so as we may or may not know containers are",
+    "start": "66240",
+    "end": "71680"
+  },
+  {
+    "text": "really just abstracted kernel environments that use features like name spaces cgroups pivot rootes and such to",
+    "start": "71680",
+    "end": "78080"
+  },
+  {
+    "text": "give a process some sense of isolation and in a lot of ways this isolation is very real you're not going to be able to",
+    "start": "78080",
+    "end": "83159"
+  },
+  {
+    "text": "access some other uh containers Mountain name space from a separate one and this is great but when you combine this with",
+    "start": "83159",
+    "end": "89520"
+  },
+  {
+    "text": "the fact that um every uh container or many containers are going to share the same uh node or VM or host machine or",
+    "start": "89520",
+    "end": "97079"
+  },
+  {
+    "text": "what have you uh and that host machine is going to have one kernel providing isolation for each of these containers",
+    "start": "97079",
+    "end": "102479"
+  },
+  {
+    "text": "and when you combine this with the fact that the kernel unfortunately has bugs and vulnerabilities and new ones are",
+    "start": "102479",
+    "end": "108479"
+  },
+  {
+    "text": "discovered every single day and although there are lots of really talented people who work really hard to uh patch and",
+    "start": "108479",
+    "end": "114719"
+  },
+  {
+    "text": "backport fixes and all that great stuff it's a huge attack surface and there's a lot of code and the surface area is",
+    "start": "114719",
+    "end": "121159"
+  },
+  {
+    "text": "massive and your uh containers are going to have basically full access to it um",
+    "start": "121159",
+    "end": "127399"
+  },
+  {
+    "text": "the whole time and then finally the last nail uh nail in the coffin is basically once you have a container scape or a bug",
+    "start": "127399",
+    "end": "133520"
+  },
+  {
+    "text": "that escalates to the category of vulnerability then you're basically owned all the containers that share the",
+    "start": "133520",
+    "end": "139360"
+  },
+  {
+    "text": "kernel um are all vulnerable they're going uh your attacker is going to have access to everything you're going to own",
+    "start": "139360",
+    "end": "144800"
+  },
+  {
+    "text": "all the containers running on that host any sensitive data is going to be fully exposed so like I said un sandbox",
+    "start": "144800",
+    "end": "151319"
+  },
+  {
+    "text": "container run times like run C expose your container to the threat of vulnerabilities in a shared kernel with",
+    "start": "151319",
+    "end": "157480"
+  },
+  {
+    "text": "multiple containers running on the same host and this threat is very real it's constant and by some measures it's",
+    "start": "157480",
+    "end": "163400"
+  },
+  {
+    "text": "growing um one such measure is SZ collar sis callar is an open source uh kernel",
+    "start": "163400",
+    "end": "168640"
+  },
+  {
+    "text": "fuzzing tool developed by Google but it runs continuously in the open U posting on a dashboard all these random C",
+    "start": "168640",
+    "end": "175080"
+  },
+  {
+    "text": "programs that it executes uh it generates and crashes the kernel in various different ways it posts these",
+    "start": "175080",
+    "end": "180200"
+  },
+  {
+    "text": "findings for everyone to see so these bugs are really easy to find and um like",
+    "start": "180200",
+    "end": "186040"
+  },
+  {
+    "text": "I said although there are lots of great people working hard to fix these issues constantly the sheer volume of the",
+    "start": "186040",
+    "end": "191440"
+  },
+  {
+    "text": "issues that come up uh make it so that kernel developers can't possibly address all of",
+    "start": "191440",
+    "end": "197000"
+  },
+  {
+    "text": "them and and the reality is we can't just ignore this this problem we need to run containers that are going to be",
+    "start": "197000",
+    "end": "202640"
+  },
+  {
+    "text": "inherently scary they're inherently going to pose risk to underlying systems software in the real world is going to",
+    "start": "202640",
+    "end": "208879"
+  },
+  {
+    "text": "have to handle trusted user generated content whether that's parsing storing or running it it's we're going to have",
+    "start": "208879",
+    "end": "214680"
+  },
+  {
+    "text": "to work with sensitive data uh maybe you're working with financial or Healthcare data or have strict data",
+    "start": "214680",
+    "end": "219840"
+  },
+  {
+    "text": "retention uh regulations or policies everybody has to run third party code unless you're a very special",
+    "start": "219840",
+    "end": "226599"
+  },
+  {
+    "text": "organization um not everyone can audit and physically know every single line of code that you're that you're running and",
+    "start": "226599",
+    "end": "233159"
+  },
+  {
+    "text": "related to that we all have to mitigate this uh supply chain risk so everybody has probably more dependencies than they",
+    "start": "233159",
+    "end": "239239"
+  },
+  {
+    "text": "want to have each of those dependencies is going to carry um its own set of security risks the good news is that at",
+    "start": "239239",
+    "end": "245959"
+  },
+  {
+    "text": "least for gvisor though I imagine this extends to U other ways of sandboxing as well the data we have show that the",
+    "start": "245959",
+    "end": "252319"
+  },
+  {
+    "text": "sandboxing really works so our internal tracking of of vulnerability show that gvis are protected against almost every",
+    "start": "252319",
+    "end": "258359"
+  },
+  {
+    "text": "pod to guest escalation in the past several years so in summary the kernel",
+    "start": "258359",
+    "end": "263680"
+  },
+  {
+    "text": "is a huge attack surface that is known to be buggy unfortunately uh that we depend on to isolate containers from",
+    "start": "263680",
+    "end": "269840"
+  },
+  {
+    "text": "each other that run on the same host uh we need to run containers that do inherently scary things that pose risk",
+    "start": "269840",
+    "end": "275320"
+  },
+  {
+    "text": "to other containers on our host system and sandboxing is a proven way uh to mitigate this risk and so to just to",
+    "start": "275320",
+    "end": "282160"
+  },
+  {
+    "text": "emphasize this point uh here are all the uh kernel bugs found it by CIS caller in the past few years sorted by month in",
+    "start": "282160",
+    "end": "288199"
+  },
+  {
+    "text": "category and like I mentioned before all it takes is one of these to rise to uh a",
+    "start": "288199",
+    "end": "293320"
+  },
+  {
+    "text": "vulnerability for all containers on the host to be faced with a real threat that you're going to have to have an answer",
+    "start": "293320",
+    "end": "298639"
+  },
+  {
+    "text": "for so I'll just show this diagram right now uh so we have a good reference of what the unsandboxed security model is",
+    "start": "298639",
+    "end": "305639"
+  },
+  {
+    "text": "and we'll build on this sort of throughout the uh presentation but basically you have your application it",
+    "start": "305639",
+    "end": "311039"
+  },
+  {
+    "text": "runs maybe in a pivot route some cgroup limits maybe a limited capability set um its own user Mount name spaces",
+    "start": "311039",
+    "end": "318199"
+  },
+  {
+    "text": "Etc um but other than that you have full access to the uh kernel user space ABI",
+    "start": "318199",
+    "end": "323400"
+  },
+  {
+    "text": "all CIS calls like map right uh get pit all that stuff um CIS calls proc files",
+    "start": "323400",
+    "end": "328840"
+  },
+  {
+    "text": "all that great stuff that you'd expect in a in a Linux uh environment and so hopefully at this",
+    "start": "328840",
+    "end": "334479"
+  },
+  {
+    "text": "point you can agree that there are many cases where sandboxing is can be a critical part of the security story uh",
+    "start": "334479",
+    "end": "340319"
+  },
+  {
+    "text": "now I want to get under the hood and and talk about a little bit how it actually works where do we get that security from",
+    "start": "340319",
+    "end": "346280"
+  },
+  {
+    "text": "a Sandbox where does the this extra magic come from that prevents those pod to guest escalations and so to answer",
+    "start": "346280",
+    "end": "352919"
+  },
+  {
+    "text": "that I'm going to dive into two of the most popular ways to sandbox um microv VMS and application kernels there are a",
+    "start": "352919",
+    "end": "359440"
+  },
+  {
+    "text": "lot of of other ways to sandbox like unic kernels uh maybe you've heard of them I just won't have time to get into",
+    "start": "359440",
+    "end": "364840"
+  },
+  {
+    "text": "that today but uh microv VMS and application kernels are two of the most popular methods so first I want to talk",
+    "start": "364840",
+    "end": "371520"
+  },
+  {
+    "text": "about microv VM based sandboxes uh the most popular implementation of this approach is piece of software called",
+    "start": "371520",
+    "end": "376800"
+  },
+  {
+    "text": "Kata uh firecracker is also really popular it's a hypervisor that's uh",
+    "start": "376800",
+    "end": "382280"
+  },
+  {
+    "text": "created with the focus to make this U approach as performant and lightweight as possible and the idea here basically",
+    "start": "382280",
+    "end": "388639"
+  },
+  {
+    "text": "is just you take each of your pods and run them in their own VM so the isolation and security comes from the",
+    "start": "388639",
+    "end": "395000"
+  },
+  {
+    "text": "fact that you're no longer sharing that host kernel across all your containers on your um host machine so the kernel is",
+    "start": "395000",
+    "end": "401599"
+  },
+  {
+    "text": "no longer shared you no longer have direct access to host resources any uh exploit or breakout you're soon to be",
+    "start": "401599",
+    "end": "408160"
+  },
+  {
+    "text": "just isolated and jailed in that micro VM and now let's look at the uh",
+    "start": "408160",
+    "end": "415479"
+  },
+  {
+    "text": "application kernel approach which is what gvisor is so gvisor like I said is",
+    "start": "415479",
+    "end": "420720"
+  },
+  {
+    "text": "an application kernel which basically just means it's a kernel that runs in user space rather than in ring zero with",
+    "start": "420720",
+    "end": "426319"
+  },
+  {
+    "text": "kernel privileges so gvisor is a process just like any other process scheduled by the kernel runs in a namespace cgroup",
+    "start": "426319",
+    "end": "433800"
+  },
+  {
+    "text": "limits um the way it provides security is really with with two layers of Defense so when you issue CIS calls that",
+    "start": "433800",
+    "end": "439759"
+  },
+  {
+    "text": "you expect to go to the host kernel instead of them being um handled by the by the colonel and the host gvisor",
+    "start": "439759",
+    "end": "446080"
+  },
+  {
+    "text": "intercepts those CIS calls and redirects them to what we call the G gvisor Century the gvisor century is uh just",
+    "start": "446080",
+    "end": "452800"
+  },
+  {
+    "text": "our imple what we call our implementation of the Linux csol ABI um",
+    "start": "452800",
+    "end": "458080"
+  },
+  {
+    "text": "this Sentry is written in go memory safe language that eliminates a few uh categories of bugs and the Sentry itself",
+    "start": "458080",
+    "end": "466919"
+  },
+  {
+    "text": "to do work on behalf of the application of course may need to reach out to the host Colonel itself um for mapping",
+    "start": "466919",
+    "end": "472960"
+  },
+  {
+    "text": "memory maybe doing um parallelism all that great stuff and so for their second layer of Defense we have a strict um",
+    "start": "472960",
+    "end": "479840"
+  },
+  {
+    "text": "layer of set comp filters set comp filters are basically you can think of them as a white list of what CIS calls",
+    "start": "479840",
+    "end": "485759"
+  },
+  {
+    "text": "are allowed to be made to the host kernel and U what arguments are allowed to be in those CIS calls so there's two",
+    "start": "485759",
+    "end": "492800"
+  },
+  {
+    "text": "layers of Defense here and again the security comes from the fact that we're no longer sharing that host kernel",
+    "start": "492800",
+    "end": "499360"
+  },
+  {
+    "text": "across our uh across our containers and so here's a general",
+    "start": "499360",
+    "end": "506319"
+  },
+  {
+    "text": "summary of the trade-offs between the two approaches so we're g or the application kernel approach really",
+    "start": "506319",
+    "end": "511840"
+  },
+  {
+    "text": "shines as on the sort of lightweight front it's super quick to start up basically the overhead is just the",
+    "start": "511840",
+    "end": "517120"
+  },
+  {
+    "text": "overhead of starting any other process on Linux and the resource footprint is uh relatively low so it can run anywhere",
+    "start": "517120",
+    "end": "524320"
+  },
+  {
+    "text": "just like your any statically compiled go binary can run um compare that back to the application uh compare that sorry",
+    "start": "524320",
+    "end": "531279"
+  },
+  {
+    "text": "to the microv VM approach where you're going to need a lot more sort of memory",
+    "start": "531279",
+    "end": "536360"
+  },
+  {
+    "text": "and CPU dedicated to hosting a whole uh VM M and so it's going to take a lot",
+    "start": "536360",
+    "end": "541440"
+  },
+  {
+    "text": "longer to start up that VM and build that and um uh just to go back again to the",
+    "start": "541440",
+    "end": "547480"
+  },
+  {
+    "text": "application kernel appro approach um where it tends to show its weaknesses any CIS call or IO heavy application so",
+    "start": "547480",
+    "end": "554600"
+  },
+  {
+    "text": "just by Nature um all these uh CIS calls are going to in incur the maximum CIS call interception overhead um and then",
+    "start": "554600",
+    "end": "561640"
+  },
+  {
+    "text": "there's going to be also some overhead just by nature of um being those CIS calls being um uh implemented in a GC",
+    "start": "561640",
+    "end": "568839"
+  },
+  {
+    "text": "language right another weakness of the application kernel approach is like um",
+    "start": "568839",
+    "end": "574360"
+  },
+  {
+    "text": "there may be just part portions of the Linux user space ABI that aren't implemented in gvisor yet right so the",
+    "start": "574360",
+    "end": "579680"
+  },
+  {
+    "text": "gvisor team is a small team and a lot of people working on the Kernel all the time um we sort of operate in the",
+    "start": "579680",
+    "end": "586320"
+  },
+  {
+    "text": "principle of 80% of these um programs are using 20% of the CIS calls but of",
+    "start": "586320",
+    "end": "591600"
+  },
+  {
+    "text": "course there's people need to do weird stuff all the time right um so in the uh",
+    "start": "591600",
+    "end": "598279"
+  },
+  {
+    "text": "micral or uh microv VM approach sorry performance once you o over come that",
+    "start": "598279",
+    "end": "604720"
+  },
+  {
+    "text": "slower startup time compared to the application kernel is going to be much closer to Native because you're running that uh you're running that same kernel",
+    "start": "604720",
+    "end": "612920"
+  },
+  {
+    "text": "but there can be some pitfalls right so uh there can be steady state um there can be a significant steady state",
+    "start": "612920",
+    "end": "618519"
+  },
+  {
+    "text": "performance degradation uh with nested virtualization so if you're already running in a VM and you need to use",
+    "start": "618519",
+    "end": "624240"
+  },
+  {
+    "text": "another uh layer of virtualization for that microv VM to provide that isolation you're going to see a really big big uh",
+    "start": "624240",
+    "end": "629760"
+  },
+  {
+    "text": "performance hit some Cloud providers provide bare metal but again you'll have to you'll have to pay for",
+    "start": "629760",
+    "end": "635320"
+  },
+  {
+    "text": "that so now that we have a General survey of sandboxing I want to dive deeper into how gvisor specifically",
+    "start": "635320",
+    "end": "640519"
+  },
+  {
+    "text": "works so we're going to look at two parts of the sandboxing first is the CIS call interception and redirection and",
+    "start": "640519",
+    "end": "646680"
+  },
+  {
+    "text": "the second we'll take a quick tour through some code and get a rough idea of how a Linux CIS call is actually",
+    "start": "646680",
+    "end": "651760"
+  },
+  {
+    "text": "implemented in go in the century so gvisor actually has a few different methods of intercepting CIS",
+    "start": "651760",
+    "end": "657760"
+  },
+  {
+    "text": "calls and handling user faults we call each of these platforms internally P trce used to be the default",
+    "start": "657760",
+    "end": "664519"
+  },
+  {
+    "text": "platform since it was the easiest to use on the widest set of environments uh but it had some uh performance issues we've",
+    "start": "664519",
+    "end": "670880"
+  },
+  {
+    "text": "since replaced p trce uh as a default platform in favor of Cy trrap since it is roughly just as portable but 10 times",
+    "start": "670880",
+    "end": "677639"
+  },
+  {
+    "text": "faster in our benchmarks that just run simple cyst calls in tight Loops so Cy strap works by utilizing a kernel set",
+    "start": "677639",
+    "end": "684480"
+  },
+  {
+    "text": "comp feature uh called set comp R trap on a parent stub thread that we call CIS message CIS message's only purpose is to",
+    "start": "684480",
+    "end": "692040"
+  },
+  {
+    "text": "facilitate switching between the guest colel Sentry all of which are hopefully familiar at this point and all these",
+    "start": "692040",
+    "end": "698240"
+  },
+  {
+    "text": "guest threads are uh Children of the CIS message parent thread so installing this set comp ret trap filter tells the",
+    "start": "698240",
+    "end": "704440"
+  },
+  {
+    "text": "colonel on All Guest CIS calls raise a Sig Cy signal to the CIS message thread",
+    "start": "704440",
+    "end": "709480"
+  },
+  {
+    "text": "with its configured Handler so in the application the guest or the application calls a cist call called like mount for",
+    "start": "709480",
+    "end": "715120"
+  },
+  {
+    "text": "example the colonel raises that signal and populates a signal handling data structure with all the guest State",
+    "start": "715120",
+    "end": "720639"
+  },
+  {
+    "text": "including registers sack pointers all that stuff that's going to contain the CIS call and all the CIS call arguments",
+    "start": "720639",
+    "end": "726760"
+  },
+  {
+    "text": "so the signal Handler um in CIS message actually shares a memory region with the Sentry",
+    "start": "726760",
+    "end": "732079"
+  },
+  {
+    "text": "process which enables it to uh easily pass the Sentry the CIS call arguments from from the guest so the Sentry gets",
+    "start": "732079",
+    "end": "739040"
+  },
+  {
+    "text": "those CIS call arguments and calls CIS call do CIS call um it implements in this case all",
+    "start": "739040",
+    "end": "746079"
+  },
+  {
+    "text": "the logic that for Mount and then returns you know if it was successful probably zero right success and then",
+    "start": "746079",
+    "end": "752760"
+  },
+  {
+    "text": "back in CIS message we restore uh put all that information returned from the uh senty so success uh return value um",
+    "start": "752760",
+    "end": "760279"
+  },
+  {
+    "text": "where to jump back to in the guest and uh put it all in this RT Sig return struct and then just yield back to the",
+    "start": "760279",
+    "end": "766240"
+  },
+  {
+    "text": "colonel colel looks at that RT Sig return struct and then restores back to",
+    "start": "766240",
+    "end": "771399"
+  },
+  {
+    "text": "the guest and from the guest perspective it's as if it was just handled in the kernel normally that's a lot of",
+    "start": "771399",
+    "end": "777399"
+  },
+  {
+    "text": "information hopefully you got it okay so now I want to uh talk",
+    "start": "777399",
+    "end": "783399"
+  },
+  {
+    "text": "about how the fun part of the story you know how these CIS calls are actually implemented in the century in go so in",
+    "start": "783399",
+    "end": "790079"
+  },
+  {
+    "text": "the next few slides I'm going to take you through a tour of some uh gvisor code to see how a mount system call is handled internally if you're not",
+    "start": "790079",
+    "end": "796399"
+  },
+  {
+    "text": "familiar I imagine most of you will be Mount system call uh just allows user to attach a file system at a new location",
+    "start": "796399",
+    "end": "801959"
+  },
+  {
+    "text": "in the directory tree um just a warning there's a bunch of code in the next few slides you're not expected to read it all it's all very abbreviated but I just",
+    "start": "801959",
+    "end": "808880"
+  },
+  {
+    "text": "want to to paint a general picture of what the system call handling code path looks like I've highlighted the most relevant uh Parts in red boxes so worst",
+    "start": "808880",
+    "end": "815560"
+  },
+  {
+    "text": "case just look at that um so first we have what's basically the entry point to",
+    "start": "815560",
+    "end": "821240"
+  },
+  {
+    "text": "the Sentry after passing through some basic uh safety checks it's called execute CIS call there's some tooling",
+    "start": "821240",
+    "end": "826680"
+  },
+  {
+    "text": "around tracing you can see there but the most important part to focus on is that it grabs a CIS call Handler from a",
+    "start": "826680",
+    "end": "832440"
+  },
+  {
+    "text": "predefined lookup table and executes um if we have a corresponding implementation in this case it's mount",
+    "start": "832440",
+    "end": "839199"
+  },
+  {
+    "text": "we do uh for reference here's what one of those csol tables looks like uh this one's for amd64 uh each architecture has",
+    "start": "839199",
+    "end": "845920"
+  },
+  {
+    "text": "a slightly different cisc call table but here's our Mount system call uh there in the corresponding function Handler so",
+    "start": "845920",
+    "end": "853040"
+  },
+  {
+    "text": "you see the Handler we saw in the previous slide and you see at the beginning we uh bail out if uh we don't",
+    "start": "853040",
+    "end": "858079"
+  },
+  {
+    "text": "have the required uh capsis admin capabilities with e perm same way Linux would uh we want to just completely",
+    "start": "858079",
+    "end": "864120"
+  },
+  {
+    "text": "emulate exactly what Linux is going to do and uh we should copy in the source string from the guest address space into",
+    "start": "864120",
+    "end": "869680"
+  },
+  {
+    "text": "the Sentry address space so we can handle it internally then finally we call into our uh virtual file system",
+    "start": "869680",
+    "end": "875240"
+  },
+  {
+    "text": "implementation to actually set up the mount and track it internally uh Linux has a very similar VFS abstraction so",
+    "start": "875240",
+    "end": "881839"
+  },
+  {
+    "text": "here we are in the actual VFS subsystem this is where the work gets done this code is super abbreviated so it can fit",
+    "start": "881839",
+    "end": "888440"
+  },
+  {
+    "text": "in this slide but really the point here of showing this is that we're just really doing normal modifying the state",
+    "start": "888440",
+    "end": "894519"
+  },
+  {
+    "text": "of internal data structures type stuff here to set up the new Mount we're not touching the host at all this is all hand handled inside the application",
+    "start": "894519",
+    "end": "900639"
+  },
+  {
+    "text": "kernel there's no magic other than that uh all of this code is available for you to play around with in our GitHub",
+    "start": "900639",
+    "end": "907320"
+  },
+  {
+    "text": "contributions welcome please help us cover more of the CIS call surface it's a lot of fun okay so now that we have somewhat of",
+    "start": "907320",
+    "end": "914360"
+  },
+  {
+    "text": "an idea of how sandboxing Works internally uh let's shift gears again and look at a couple different uh",
+    "start": "914360",
+    "end": "920399"
+  },
+  {
+    "text": "scenarios and evaluate how sandboxing might help us or whether it's use worth using at all given the tradeoffs we",
+    "start": "920399",
+    "end": "926320"
+  },
+  {
+    "text": "discussed a bit earlier so let's say you're building an llm chat app that",
+    "start": "926320",
+    "end": "932440"
+  },
+  {
+    "text": "allows users to ask a language model to generate and execute code so you could say language model write me some python",
+    "start": "932440",
+    "end": "939639"
+  },
+  {
+    "text": "to generate the nth number in the Fibonacci sequence and execute it for n equals 2000 so do we need sandboxing is this a",
+    "start": "939639",
+    "end": "947839"
+  },
+  {
+    "text": "situation where the cost of sandboxing increased resource use maybe decreased performance are going to be worth it",
+    "start": "947839",
+    "end": "954440"
+  },
+  {
+    "text": "what do you all think security conference probably yes so I think yeah",
+    "start": "954440",
+    "end": "959639"
+  },
+  {
+    "text": "the threat is pretty obvious here we're basically running untrusted code on our own uh systems um so a malicious user",
+    "start": "959639",
+    "end": "965920"
+  },
+  {
+    "text": "could get the language model to generate some sneaky script that escapes the container uh or maybe the language model",
+    "start": "965920",
+    "end": "972920"
+  },
+  {
+    "text": "um becomes sentient decides it hates us right uh either way we would like some some level of Defense",
+    "start": "972920",
+    "end": "979680"
+  },
+  {
+    "text": "here uh we should also be sort of thinking uh if we're thinking about sandboxing think about the kind of environment we're running in whether we",
+    "start": "979680",
+    "end": "985560"
+  },
+  {
+    "text": "have to use uh have access to nested virtualization whether they have have to use it or have bare metal machines um in",
+    "start": "985560",
+    "end": "992279"
+  },
+  {
+    "text": "this case it's hard to say that the Situation's sort of vague but uh we probably running in some VM or more",
+    "start": "992279",
+    "end": "998199"
+  },
+  {
+    "text": "likely pod or or on some uh kubernetes node U nested VMS maybe but it's hard to",
+    "start": "998199",
+    "end": "1004000"
+  },
+  {
+    "text": "say hard to assume anything another important to consider is like the kind of work that's being done so is it going to be very IO and",
+    "start": "1004000",
+    "end": "1010680"
+  },
+  {
+    "text": "dis heavy or networking IO heavy is it going to be more something more CPU bound like video encoding uh again it's",
+    "start": "1010680",
+    "end": "1016759"
+  },
+  {
+    "text": "it's hard to limit because it's so open-ended but it's probably not going to be used for like uh long running workloads or you know production systems",
+    "start": "1016759",
+    "end": "1024520"
+  },
+  {
+    "text": "I imagine it's going to be people sort of individually asking this language model to generate short scripts or or do",
+    "start": "1024520",
+    "end": "1030678"
+  },
+  {
+    "text": "some sort of useful um analyzing CSV data kind of kind of thing um and finally we want to think about the uh",
+    "start": "1030679",
+    "end": "1037199"
+  },
+  {
+    "text": "lifetime of these containers and where we can afford to take on that extra hhe head so in this case you know you're",
+    "start": "1037199",
+    "end": "1042520"
+  },
+  {
+    "text": "going to get a request maybe spin up um a container to handle a uh executing",
+    "start": "1042520",
+    "end": "1049720"
+  },
+  {
+    "text": "this code and then destroy it all so startup latency per container overhead",
+    "start": "1049720",
+    "end": "1055960"
+  },
+  {
+    "text": "are going to be huge factors that we want to think about uh we want to minimize resources spent on things that",
+    "start": "1055960",
+    "end": "1061200"
+  },
+  {
+    "text": "aren't doing anything useful for our end users so again probably an application kernel approach gvisor is probably a",
+    "start": "1061200",
+    "end": "1066919"
+  },
+  {
+    "text": "good solution here uh it's probably the best fit and it turns out that uh you know",
+    "start": "1066919",
+    "end": "1072160"
+  },
+  {
+    "text": "the big kids in the real world uh thought the same thing so you can see um",
+    "start": "1072160",
+    "end": "1077480"
+  },
+  {
+    "text": "we're going to prove that's gvisor people use this in the real world",
+    "start": "1077480",
+    "end": "1083240"
+  },
+  {
+    "text": "actually so those are gvisor D message messages and this was uh super fun to",
+    "start": "1083240",
+    "end": "1089559"
+  },
+  {
+    "text": "find out uh the team it was a surprise to the team we just were playing around and was like oh I think I think Chad GPT",
+    "start": "1089559",
+    "end": "1096720"
+  },
+  {
+    "text": "is executing code using gvisor so super cool so one more scenario um imagine",
+    "start": "1096720",
+    "end": "1103919"
+  },
+  {
+    "text": "you're uh offering a service to Medical providers where they can upload medical images and notes and run it through some",
+    "start": "1103919",
+    "end": "1110480"
+  },
+  {
+    "text": "sort of multimodal model and give you a DI diagnosis and you've you've trained",
+    "start": "1110480",
+    "end": "1115600"
+  },
+  {
+    "text": "this model using tensorflow every time someone uploads some data you run inference against this model using tensor flow as well um any issues with",
+    "start": "1115600",
+    "end": "1123760"
+  },
+  {
+    "text": "that well here's an issue you're handling sensitive Medical Data it's",
+    "start": "1123760",
+    "end": "1129000"
+  },
+  {
+    "text": "really important to have our security story dialed in how are we going to protect against vulnerabilities in our runtime sandboxing could be useful here",
+    "start": "1129000",
+    "end": "1136919"
+  },
+  {
+    "text": "so we'll run through the same exercise as before for quickly the landscape we've discussed some sort of",
+    "start": "1136919",
+    "end": "1142559"
+  },
+  {
+    "text": "vulnerability in pie torch Jacks tensor flow um that's going to expose your",
+    "start": "1142559",
+    "end": "1147960"
+  },
+  {
+    "text": "containers to risk what environment are you running in uh we're probably running in like doing",
+    "start": "1147960",
+    "end": "1153000"
+  },
+  {
+    "text": "inference running powerful uh servers connected to beefy gpus uh we'll be looking",
+    "start": "1153000",
+    "end": "1158640"
+  },
+  {
+    "text": "to minimize runtime overhead uh what are these uh containers is going to be doing",
+    "start": "1158640",
+    "end": "1163720"
+  },
+  {
+    "text": "well they're going to be spinning up again handling these requests maybe you tear them down um per container overhead",
+    "start": "1163720",
+    "end": "1170120"
+  },
+  {
+    "text": "and startup latency could be important considerations what kind of work are we going to be doing uh probably a lot of",
+    "start": "1170120",
+    "end": "1176039"
+  },
+  {
+    "text": "dma a lot of allocating memory um moving that memory from host to GPU from GPU",
+    "start": "1176039",
+    "end": "1181400"
+  },
+  {
+    "text": "back to host spinning waiting for the GPU to do some real work and then just returning that result so given the GPU",
+    "start": "1181400",
+    "end": "1188799"
+  },
+  {
+    "text": "do as the bulk of the work here we really want to minimize what we're doing in the CPU side and the host kernel uh",
+    "start": "1188799",
+    "end": "1194200"
+  },
+  {
+    "text": "again I think application kernel is a is a good um approach here problem is gvisor as it's implemented today or as",
+    "start": "1194200",
+    "end": "1201360"
+  },
+  {
+    "text": "it was implemented doesn't really have a device model you know it doesn't have driver code for your favorite Bluetooth",
+    "start": "1201360",
+    "end": "1207640"
+  },
+  {
+    "text": "mouth well that is until recently as of the last year we've introduced GPU",
+    "start": "1207640",
+    "end": "1214000"
+  },
+  {
+    "text": "access from inside the sandbox it's officially supported with a uh future that we called EnV proxy and the way",
+    "start": "1214000",
+    "end": "1220120"
+  },
+  {
+    "text": "this works I've sort of overlaid it on our uh old diagram there but I'll go to a little bit of how uh gpus work",
+    "start": "1220120",
+    "end": "1227080"
+  },
+  {
+    "text": "themselves so gpus B basically they have two components that make them work a user space driver and a kernel space",
+    "start": "1227080",
+    "end": "1232880"
+  },
+  {
+    "text": "driver uh the user space driver for the purposes of this presentation you can think of as basically just like lib Cuda",
+    "start": "1232880",
+    "end": "1238880"
+  },
+  {
+    "text": ".o if you're familiar um and the and lib Cuda translates your user space Cuda",
+    "start": "1238880",
+    "end": "1244400"
+  },
+  {
+    "text": "code into uh CIS calls called ioctls and issues those to the host uh kernel space driver the kernel space driver takes",
+    "start": "1244400",
+    "end": "1251159"
+  },
+  {
+    "text": "those ioctls and then translates That Into You Know Hardware instructions and kernel space Etc uh so Envy proxy",
+    "start": "1251159",
+    "end": "1257280"
+  },
+  {
+    "text": "doesn't really do much more than then just intercept those ioctls using the same method we discussed before um and",
+    "start": "1257280",
+    "end": "1263200"
+  },
+  {
+    "text": "then you know forwards those to the Sentry Sentry does some translation works and then issues those same ioctls",
+    "start": "1263200",
+    "end": "1269400"
+  },
+  {
+    "text": "through the setcom filters which are adjusted uh when MV proxy is enabled uh to the to the host kernel and",
+    "start": "1269400",
+    "end": "1277200"
+  },
+  {
+    "text": "so you know in inside the Sentry it just translates some file descriptors remaps some memory so it's all continuous in",
+    "start": "1277200",
+    "end": "1282919"
+  },
+  {
+    "text": "the Sentry address space and so from the uh kernel mode driver's perspective it uh GPU commands are just coming from",
+    "start": "1282919",
+    "end": "1290120"
+  },
+  {
+    "text": "this this Sentry process but really it's on behalf of this this guest and we",
+    "start": "1290120",
+    "end": "1295159"
+  },
+  {
+    "text": "found this approach is uh really effective uh we were really able to quickly build out compatibility with all",
+    "start": "1295159",
+    "end": "1300679"
+  },
+  {
+    "text": "of contain uh nvidia's container tooling and our benchmarks so a negligible",
+    "start": "1300679",
+    "end": "1306039"
+  },
+  {
+    "text": "overhead when compared to unsandboxed GPU so you can see we've got tokens per",
+    "start": "1306039",
+    "end": "1312600"
+  },
+  {
+    "text": "second and model size scales well over time but I also think uh it's important",
+    "start": "1312600",
+    "end": "1318640"
+  },
+  {
+    "text": "to sort of discuss the limitations here what you're getting in terms of protection is not exactly the same as",
+    "start": "1318640",
+    "end": "1323760"
+  },
+  {
+    "text": "our regular two layers of fence in the in the in the kernel side we still have to rely on nvidia's kernel mode driver",
+    "start": "1323760",
+    "end": "1330440"
+  },
+  {
+    "text": "which is running in kernel space closed Source it's a big piece of code that's going to have security bugs uh we're",
+    "start": "1330440",
+    "end": "1335679"
+  },
+  {
+    "text": "also at the mercy of driver Updates this API between user space and kernel space",
+    "start": "1335679",
+    "end": "1340720"
+  },
+  {
+    "text": "is not stable so we the way we handle this internally is we have a rolling window of supported GPU driver versions",
+    "start": "1340720",
+    "end": "1346480"
+  },
+  {
+    "text": "that we've tested um but the interace face can change under our feet at any time and this also means that keeping MV",
+    "start": "1346480",
+    "end": "1352520"
+  },
+  {
+    "text": "proxy working is generally a continuous effort again the challenge is that we don't really have uh control of this",
+    "start": "1352520",
+    "end": "1358039"
+  },
+  {
+    "text": "part of the software with that being said this is still I think very useful generally there are still tons of host",
+    "start": "1358039",
+    "end": "1364600"
+  },
+  {
+    "text": "uh system vulnerabilities that we're going to you know in those like machine learning training libraries and such that we're going to want to protect",
+    "start": "1364600",
+    "end": "1369840"
+  },
+  {
+    "text": "against um and we still do offer a good level of protection against GPU vulnerabilities if we don't build out",
+    "start": "1369840",
+    "end": "1376320"
+  },
+  {
+    "text": "that cisal translation layer in the entry and we don't add those CIS calls to the setc comp filters uh they're",
+    "start": "1376320",
+    "end": "1382320"
+  },
+  {
+    "text": "going to not be allowed to be issued to the host kernel so we reduce the uh attack surface of the uh Nvidia kernel",
+    "start": "1382320",
+    "end": "1389320"
+  },
+  {
+    "text": "mode driver uh significantly and if we look back at the past several years uh most cves actually more than 50% are um",
+    "start": "1389320",
+    "end": "1397600"
+  },
+  {
+    "text": "uh were mitigated by gvisor just by this reducing the attack surface uh approach",
+    "start": "1397600",
+    "end": "1403880"
+  },
+  {
+    "text": "every level of protection is is important uh even we can get there marginally um um with things like",
+    "start": "1403880",
+    "end": "1410200"
+  },
+  {
+    "text": "running in the host Kel so we think this Envy proxy stuff is really exciting it's all available in",
+    "start": "1410200",
+    "end": "1415720"
+  },
+  {
+    "text": "open source we have some great collaborators who are already building on top of it and they're giving us great",
+    "start": "1415720",
+    "end": "1420840"
+  },
+  {
+    "text": "feedback and we think there's a lot of cool opportunities here you know um you might be able to schedule more pod more",
+    "start": "1420840",
+    "end": "1427200"
+  },
+  {
+    "text": "pods on a single node um with this sandboxing because you have more confidence in in the isolation right uh",
+    "start": "1427200",
+    "end": "1433600"
+  },
+  {
+    "text": "you may be able to more confidently serve untrusted models people upload models and uh do",
+    "start": "1433600",
+    "end": "1439360"
+  },
+  {
+    "text": "inference there's also a gvisor checkpoint restore is something that works similar to creu basically it just",
+    "start": "1439360",
+    "end": "1446200"
+  },
+  {
+    "text": "saves the all the state of the Sentry and the application uh to an image file and allows you to restore from this",
+    "start": "1446200",
+    "end": "1452120"
+  },
+  {
+    "text": "image uh Nvidia also has a tool called cuda checkpoint and when you combine these together you have suddenly have uh",
+    "start": "1452120",
+    "end": "1459039"
+  },
+  {
+    "text": "super easily checkpoint and restorable uh GPU containers and so this is something we're just beginning to play around with but we think it's got a lot",
+    "start": "1459039",
+    "end": "1465279"
+  },
+  {
+    "text": "of uh cool potential um you know you may be able to save one uh container and",
+    "start": "1465279",
+    "end": "1470559"
+  },
+  {
+    "text": "restore on a thousand or do something like um fast rewind or uh",
+    "start": "1470559",
+    "end": "1476880"
+  },
+  {
+    "text": "experimentation where you checkpoint on a training and then um rewind restore to an earlier State and",
+    "start": "1476880",
+    "end": "1484840"
+  },
+  {
+    "text": "uh try different experiments that way so again we're just we're just playing around with this now but uh we think",
+    "start": "1484840",
+    "end": "1489880"
+  },
+  {
+    "text": "there's a lot of cool potential here and then finally you could also build out like a defense in depth solution for for",
+    "start": "1489880",
+    "end": "1496880"
+  },
+  {
+    "text": "uh GPU containers so you know tracking ioctls seeing what arguments are passed with them seeing um maybe you can set up",
+    "start": "1496880",
+    "end": "1503799"
+  },
+  {
+    "text": "some alerting on on what you expect to be a GPU container to be doing and what octal it's issuing um again lots of",
+    "start": "1503799",
+    "end": "1511000"
+  },
+  {
+    "text": "possibilities here so that's it for me again I just want to uh plug uh gvisor dodev is our website",
+    "start": "1511000",
+    "end": "1518960"
+  },
+  {
+    "text": "it's got all this information and more and um we love external contributions we",
+    "start": "1518960",
+    "end": "1524240"
+  },
+  {
+    "text": "love contributing to open source and uh that's it for me thanks",
+    "start": "1524240",
+    "end": "1530320"
+  },
+  {
+    "text": "yeah I'm curious about how you think",
+    "start": "1533720",
+    "end": "1538200"
+  },
+  {
+    "text": "about yeah um so could you could you so you asked",
+    "start": "1540600",
+    "end": "1546720"
+  },
+  {
+    "text": "about web assembly and how how we think of it could you be a little bit more specific what do you what do you mean by",
+    "start": "1546720",
+    "end": "1551960"
+  },
+  {
+    "text": "that well I mean it's it's just another method for you know isolating",
+    "start": "1551960",
+    "end": "1559720"
+  },
+  {
+    "text": "yeah so I'm not familiar with uh U web assembly like completely I know",
+    "start": "1565880",
+    "end": "1571000"
+  },
+  {
+    "text": "generally it can be used as a Sandbox I think what's great about GV visor is that um first of all it's it's got this",
+    "start": "1571000",
+    "end": "1578320"
+  },
+  {
+    "text": "like or what we aim for is this um full ABI compatibility and um with with",
+    "start": "1578320",
+    "end": "1585520"
+  },
+  {
+    "text": "unmodified binaries right so you don't have to change anything about how you're compiling or um setting up your",
+    "start": "1585520",
+    "end": "1592039"
+  },
+  {
+    "text": "environment you can just take your binary that you're usually running in run C and just run it in run SC which is",
+    "start": "1592039",
+    "end": "1599000"
+  },
+  {
+    "text": "uh how gvisor containers are spawn um yeah hopefully that",
+    "start": "1599000",
+    "end": "1606559"
+  },
+  {
+    "text": "answers",
+    "start": "1606559",
+    "end": "1609559"
+  },
+  {
+    "text": "back yeah um quick answer is no um it's certainly something that's been",
+    "start": "1614679",
+    "end": "1621559"
+  },
+  {
+    "text": "experimented with in the past um again those kind of environments uh have",
+    "start": "1621559",
+    "end": "1628120"
+  },
+  {
+    "text": "like um their their integration with that that platform side remember I I I",
+    "start": "1628120",
+    "end": "1633640"
+  },
+  {
+    "text": "mentioned Cy trp right handling those user faults um and redirecting those CIS calls becomes uh much more complex in",
+    "start": "1633640",
+    "end": "1640919"
+  },
+  {
+    "text": "that uh confidential untrusted environment right mapping that memory um moving that around is complex definitely",
+    "start": "1640919",
+    "end": "1647840"
+  },
+  {
+    "text": "something uh that's been played around with but there nothing on the road map in the future right",
+    "start": "1647840",
+    "end": "1653398"
+  },
+  {
+    "text": "now yeah so I think um we're really looking uh heavily at this uh checkpoint",
+    "start": "1657520",
+    "end": "1664320"
+  },
+  {
+    "text": "restore uh features right so saving the container State and restoring again I think that's that's where we can really",
+    "start": "1664320",
+    "end": "1671320"
+  },
+  {
+    "text": "lean into the uh advantages of gvisor where starting up from uh starting up",
+    "start": "1671320",
+    "end": "1676720"
+  },
+  {
+    "text": "the new gvisor process is super quick compared to other sandboxing Solutions so um it also the checkpoint restore is",
+    "start": "1676720",
+    "end": "1684039"
+  },
+  {
+    "text": "great because it it works really well if any of you are familiar with creu is another uh solution for checkpoint",
+    "start": "1684039",
+    "end": "1691039"
+  },
+  {
+    "text": "restore uh in user space uh that's just with the regular kernel but there's a big feature gaps the great thing about",
+    "start": "1691039",
+    "end": "1696679"
+  },
+  {
+    "text": "gvisor checkpoint restore is we control the whole code base so we can really make sure it works in the important areas that it needs to Works uh for you",
+    "start": "1696679",
+    "end": "1704039"
+  },
+  {
+    "text": "know restoring networking and things like that um yeah so the checkpoint restore and uh",
+    "start": "1704039",
+    "end": "1710120"
+  },
+  {
+    "text": "just building out this Envy proxy to be more and more useful for for whoever wants to use it because again the number",
+    "start": "1710120",
+    "end": "1716159"
+  },
+  {
+    "text": "one demand is just running untrusted uh workloads with this AI you know GPU",
+    "start": "1716159",
+    "end": "1721720"
+  },
+  {
+    "text": "component to",
+    "start": "1721720",
+    "end": "1724278"
+  },
+  {
+    "text": "them what have been some vulnerabilities that you found",
+    "start": "1731519",
+    "end": "1737600"
+  },
+  {
+    "text": "yeah so I I mentioned almost all of the podest escalations were were um",
+    "start": "1742760",
+    "end": "1749000"
+  },
+  {
+    "text": "mitigated by gvisor of course I think so one that we couldn't mitigate against was like uh any sort of speculative",
+    "start": "1749000",
+    "end": "1755640"
+  },
+  {
+    "text": "execution based attacks right that's at the CPU uh layer so that's just like a",
+    "start": "1755640",
+    "end": "1761360"
+  },
+  {
+    "text": "layer below where we provide our defense and there's nothing we can do um really",
+    "start": "1761360",
+    "end": "1766760"
+  },
+  {
+    "text": "there but and there was one other um that was about uh like how we set up",
+    "start": "1766760",
+    "end": "1773320"
+  },
+  {
+    "text": "sort of sim links in the initial uh container and it was a vulnerability in",
+    "start": "1773320",
+    "end": "1778480"
+  },
+  {
+    "text": "runy and then uh we were doing what runy was doing and so we were also found to be vulnerable it wasn't anything to do",
+    "start": "1778480",
+    "end": "1784440"
+  },
+  {
+    "text": "with like our two layers of defen approach it was more about how we were setting up like that initial tro and",
+    "start": "1784440",
+    "end": "1789480"
+  },
+  {
+    "text": "things like that so that was another one we didn't uh protect against yeah those are the two that I know come to mind and",
+    "start": "1789480",
+    "end": "1795679"
+  },
+  {
+    "text": "I'm pretty sure they're the only two in the past uh at least five",
+    "start": "1795679",
+    "end": "1800960"
+  },
+  {
+    "text": "years all right I think uh if no one has any more questions uh thanks for being a great",
+    "start": "1811760",
+    "end": "1818519"
+  },
+  {
+    "text": "audience",
+    "start": "1818519",
+    "end": "1821519"
+  }
+]

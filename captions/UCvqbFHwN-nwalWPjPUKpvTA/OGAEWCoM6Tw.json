@@ -1,0 +1,1607 @@
+[
+  {
+    "text": "good afternoon everyone um thank you all for being here today uh we're going to be talking about cortex um the",
+    "start": "280",
+    "end": "7279"
+  },
+  {
+    "text": "multi-tenant scalable Prometheus um but before we get started I we'd like to quickly introduce",
+    "start": "7279",
+    "end": "13719"
+  },
+  {
+    "text": "ourselves um I'm Charlie I am a cortex maintainer um and my motto is to stay",
+    "start": "13719",
+    "end": "20160"
+  },
+  {
+    "text": "hungry stay foolish hey everybody uh I'm Daniel I'm also CeX maintainer and as",
+    "start": "20160",
+    "end": "26640"
+  },
+  {
+    "text": "Modo I chose it be curious all right so uh we have uh a lot of uh",
+    "start": "26640",
+    "end": "34480"
+  },
+  {
+    "text": "stuff that we want to talk about today so on the agenda we're going to first introduce uh what cortex is um and then",
+    "start": "34480",
+    "end": "42559"
+  },
+  {
+    "text": "uh talk about what's new and what's next and then finally um Daniel's going to be talking",
+    "start": "42559",
+    "end": "48480"
+  },
+  {
+    "text": "about the partition compactor which is like a a pretty cool concept that's coming uh very soon and then finally",
+    "start": "48480",
+    "end": "55800"
+  },
+  {
+    "text": "we'll have a Q&A so keep your questions um in mind uh at the end you can ask",
+    "start": "55800",
+    "end": "62359"
+  },
+  {
+    "text": "us so first um I'd like to first start by talking about Prometheus which is um",
+    "start": "62359",
+    "end": "70000"
+  },
+  {
+    "text": "pretty stable technology I think um it's a graduated project in the cncf and uh I",
+    "start": "70000",
+    "end": "76159"
+  },
+  {
+    "text": "think most folks are comfortable with um what it is nowadays um so essentially",
+    "start": "76159",
+    "end": "81880"
+  },
+  {
+    "text": "you have three components the first is the collection or The Collector piece",
+    "start": "81880",
+    "end": "87640"
+  },
+  {
+    "text": "which is how metrics come into Prometheus so you can either have remote right so um things can write to",
+    "start": "87640",
+    "end": "94720"
+  },
+  {
+    "text": "Prometheus or Prometheus can scrape the services that it is monitoring for",
+    "start": "94720",
+    "end": "100439"
+  },
+  {
+    "text": "metric and that's kind of how metric usually get in gets into Prometheus um and then once they're in",
+    "start": "100439",
+    "end": "107399"
+  },
+  {
+    "text": "they're stored in the time series database um and you know it's it's",
+    "start": "107399",
+    "end": "114680"
+  },
+  {
+    "text": "um it's a Time series database and you can you can use promql to query it um",
+    "start": "114680",
+    "end": "121280"
+  },
+  {
+    "text": "there's a lot of um performance um improvements and optimizations that are",
+    "start": "121280",
+    "end": "126399"
+  },
+  {
+    "text": "happening within the time series database itself and it's actually what",
+    "start": "126399",
+    "end": "131800"
+  },
+  {
+    "text": "um is used in cortex but I'll talk about that in a bit um and then on the right side the third component is the query",
+    "start": "131800",
+    "end": "138920"
+  },
+  {
+    "text": "part so you have all these metrics that are in this time series database but you know you you need to fetch it out so",
+    "start": "138920",
+    "end": "145160"
+  },
+  {
+    "text": "there's this query part so the query engine in Prometheus it's what's used to query those metrics um but as you start",
+    "start": "145160",
+    "end": "153200"
+  },
+  {
+    "text": "to grow and grow you're going to have more and more metrics come in and how do you scalably manage all of that um in",
+    "start": "153200",
+    "end": "160440"
+  },
+  {
+    "text": "Prometheus you would normally just scale your Prometheus instance to have more",
+    "start": "160440",
+    "end": "165760"
+  },
+  {
+    "text": "memory have more CPU have more dis um but there's a limit to how much Prometheus can manage because it's",
+    "start": "165760",
+    "end": "172120"
+  },
+  {
+    "text": "really just built for a single node instance um you can make the the",
+    "start": "172120",
+    "end": "178200"
+  },
+  {
+    "text": "Prometheus instance larger but you know there's a limit so what can you do in cortex the idea is how do you",
+    "start": "178200",
+    "end": "186280"
+  },
+  {
+    "text": "split those components up into different pieces so that you can scale them",
+    "start": "186280",
+    "end": "191560"
+  },
+  {
+    "text": "individually um the idea here is if you wanted to have more rights you can scale",
+    "start": "191560",
+    "end": "196760"
+  },
+  {
+    "text": "up for more rights if you want to have more reads scale up for more reads you want to be able to manage more metrics",
+    "start": "196760",
+    "end": "202599"
+  },
+  {
+    "text": "scale up the middle piece um so that's what these components are the distributor handles the rights the",
+    "start": "202599",
+    "end": "208480"
+  },
+  {
+    "text": "ingestor handles the storage of the the the metrics in memory um and then the",
+    "start": "208480",
+    "end": "214080"
+  },
+  {
+    "text": "queriers handles all the reads from uh you know all of your different dashboards or different clients that are",
+    "start": "214080",
+    "end": "221519"
+  },
+  {
+    "text": "trying to fetch metrics um so in example is if you want",
+    "start": "221519",
+    "end": "226640"
+  },
+  {
+    "text": "to have uh more inors add another ingestor the distributor will know uh",
+    "start": "226640",
+    "end": "232879"
+  },
+  {
+    "text": "where to store those metrics um and then the querier will know where to read the metrics um I'm kind of glance or uh um",
+    "start": "232879",
+    "end": "243720"
+  },
+  {
+    "text": "going through the the the complexity of where or which ingestor should a",
+    "start": "243720",
+    "end": "251799"
+  },
+  {
+    "text": "distributor use to um like pick for a specific metric um and which ingestor",
+    "start": "251799",
+    "end": "260120"
+  },
+  {
+    "text": "should acquire your pick for fetching that metric I'm kind of glossing over those details right now just to keep it",
+    "start": "260120",
+    "end": "265840"
+  },
+  {
+    "text": "simple um but the idea is you don't really have to worry about all all of that cortex does it for you so for",
+    "start": "265840",
+    "end": "272039"
+  },
+  {
+    "text": "example in the Prometheus instance right you scaled up this Prometheus to be super large but then it's not able to",
+    "start": "272039",
+    "end": "279600"
+  },
+  {
+    "text": "manage your metrics anymore so the only thing you could do is maybe you want to scale up another Prometheus and then",
+    "start": "279600",
+    "end": "286600"
+  },
+  {
+    "text": "have that have that Prometheus just manage those metrics um that you don't",
+    "start": "286600",
+    "end": "292680"
+  },
+  {
+    "text": "want to get into the business of like figuring out oh I'm going to use this Prometheus for managing um these sets of",
+    "start": "292680",
+    "end": "299759"
+  },
+  {
+    "text": "metrics and then scale up this Prometheus to manage this set of metrics right you'll have all these different",
+    "start": "299759",
+    "end": "305840"
+  },
+  {
+    "text": "sets of Prometheus and you're not really sure okay should I use this one or that one right it's not really obvious but in",
+    "start": "305840",
+    "end": "313160"
+  },
+  {
+    "text": "cortex it's not a detail right you just say I want more inors boom you're done",
+    "start": "313160",
+    "end": "319560"
+  },
+  {
+    "text": "add more inors you want to have more Distributors add more Distributors and you're done so that's kind of the nice",
+    "start": "319560",
+    "end": "326240"
+  },
+  {
+    "text": "nice thing about cortex here um on the query side you want to have more queriers add another querier",
+    "start": "326240",
+    "end": "333680"
+  },
+  {
+    "text": "guess what for the Distributors you want to add more Distributors add another distributor so um I've talked about um",
+    "start": "333680",
+    "end": "343000"
+  },
+  {
+    "text": "handling metrics sort of on the um a shortterm scale but like what happens",
+    "start": "343000",
+    "end": "350639"
+  },
+  {
+    "text": "when you want to have metrics for longterm you can't store all of your metrics on disk you're going to run out",
+    "start": "350639",
+    "end": "357039"
+  },
+  {
+    "text": "of disc eventually you can't store all of it in in memory you're going to run out of memory eventually so obviously",
+    "start": "357039",
+    "end": "364120"
+  },
+  {
+    "text": "you need to store it somewhere so there's usually an object storage solution that you can use um and that",
+    "start": "364120",
+    "end": "371240"
+  },
+  {
+    "text": "basically gives you infinite storage so just have your metric that you want to query longterm in the object storage and",
+    "start": "371240",
+    "end": "379199"
+  },
+  {
+    "text": "then fetch it when you want to um use it so that process happens with the store",
+    "start": "379199",
+    "end": "386280"
+  },
+  {
+    "text": "Gateway the store Gateway is fulls only its only responsibility is to get",
+    "start": "386280",
+    "end": "392039"
+  },
+  {
+    "text": "metrics that are in your object storage and then return it to you so the querier like I mentioned",
+    "start": "392039",
+    "end": "400440"
+  },
+  {
+    "text": "before is what is used on that read path and when you want to read metrics that",
+    "start": "400440",
+    "end": "405759"
+  },
+  {
+    "text": "are shortterm like you know uh a day or couple of hours you would go to the",
+    "start": "405759",
+    "end": "410840"
+  },
+  {
+    "text": "ingestor and then if you want to get metrics that are in long-term storage",
+    "start": "410840",
+    "end": "416160"
+  },
+  {
+    "text": "you would go to the store Gateway and then the store gate would figure out okay this is uh the object storage and",
+    "start": "416160",
+    "end": "421680"
+  },
+  {
+    "text": "use I'm going to fetch the series in there and then return it to you uh to the querier and then the querier returns",
+    "start": "421680",
+    "end": "428080"
+  },
+  {
+    "text": "it back to you know whatever visualization tool that you have the last piece that I wanted to",
+    "start": "428080",
+    "end": "434360"
+  },
+  {
+    "text": "talk about um was the compactor um the the last component that is um and this",
+    "start": "434360",
+    "end": "441319"
+  },
+  {
+    "text": "is important because you have all of these inors that are uploading these blocks to object storage but um",
+    "start": "441319",
+    "end": "448680"
+  },
+  {
+    "text": "eventually you're going to have all these blocks and they're going to have kind of like the same sets of Series in",
+    "start": "448680",
+    "end": "454160"
+  },
+  {
+    "text": "all of them and when you do the query for all of these blocks it's not going to be efficient because it has to dup",
+    "start": "454160",
+    "end": "460560"
+  },
+  {
+    "text": "all of these metrics when it's serving it to the query um to the client um so",
+    "start": "460560",
+    "end": "465879"
+  },
+  {
+    "text": "the compactor does that for you and it does it periodically um so it compacts these blocks together and then creates a",
+    "start": "465879",
+    "end": "472639"
+  },
+  {
+    "text": "new block with all those metrics in there that's all the duplicated and um",
+    "start": "472639",
+    "end": "477800"
+  },
+  {
+    "text": "we basically reduce the storage juice as well because you don't need to have all these blocks",
+    "start": "477800",
+    "end": "484680"
+  },
+  {
+    "text": "um uh the last thing uh um that I wanted to mention was the member list part of",
+    "start": "484680",
+    "end": "491759"
+  },
+  {
+    "text": "uh of Cortex um you have all these components here they're on different",
+    "start": "491759",
+    "end": "496960"
+  },
+  {
+    "text": "nodes but how do they figure out like what's going on in the cluster um so let's focus on one piece",
+    "start": "496960",
+    "end": "504639"
+  },
+  {
+    "text": "of it the ingestor piece so um let's say the ingestor",
+    "start": "504639",
+    "end": "510319"
+  },
+  {
+    "text": "says uh I have these tokens uh 1 through 512 um and the importance of these",
+    "start": "510319",
+    "end": "518640"
+  },
+  {
+    "text": "tokens is that this is how um the uh system knows where certain metrics",
+    "start": "518640",
+    "end": "526040"
+  },
+  {
+    "text": "should go so each ingestor will have a certain set of tokens they're randomly generated um and then there's this",
+    "start": "526040",
+    "end": "534000"
+  },
+  {
+    "text": "distributor piece which I'm not including in this slide right now but there's the distributor piece that um",
+    "start": "534000",
+    "end": "539920"
+  },
+  {
+    "text": "shards that metric and if that token is in a certain range it'll pick this ingestor to use for uh storing that",
+    "start": "539920",
+    "end": "547560"
+  },
+  {
+    "text": "metric but um the idea is that how do all of these investors know which um or",
+    "start": "547560",
+    "end": "555279"
+  },
+  {
+    "text": "which tokens they have and the way it does this is through a gossip ring",
+    "start": "555279",
+    "end": "560680"
+  },
+  {
+    "text": "protocol um memor list so uh ingestor on node one will say I have these tokens uh",
+    "start": "560680",
+    "end": "567920"
+  },
+  {
+    "text": "1 through 512 it will talk to the other ingestor and say I have these tokens and",
+    "start": "567920",
+    "end": "574920"
+  },
+  {
+    "text": "then that ingestor will propagate that me um that information to the other",
+    "start": "574920",
+    "end": "580040"
+  },
+  {
+    "text": "inors and then eventually all the inors will have the same set of",
+    "start": "580040",
+    "end": "585120"
+  },
+  {
+    "text": "information um and it does this by just gossiping right there's no external",
+    "start": "585120",
+    "end": "590200"
+  },
+  {
+    "text": "dependency that you need for storing this uh this",
+    "start": "590200",
+    "end": "595560"
+  },
+  {
+    "text": "information um the other cool thing is what happens if that node vanishes right",
+    "start": "595760",
+    "end": "601040"
+  },
+  {
+    "text": "like it disappears it's unresponsive it's no longer healthy what happens then",
+    "start": "601040",
+    "end": "606120"
+  },
+  {
+    "text": "how does this gossip ring help with figuring out what's going on well there's this thing called the",
+    "start": "606120",
+    "end": "613120"
+  },
+  {
+    "text": "heartbeat um interval and so it's each ingestor responsibility to update this",
+    "start": "613120",
+    "end": "620320"
+  },
+  {
+    "text": "um this state of when it last heartbe",
+    "start": "620320",
+    "end": "625519"
+  },
+  {
+    "text": "and all of these ingestor will get a copy of that state using the same gossip",
+    "start": "625519",
+    "end": "630680"
+  },
+  {
+    "text": "ring protocol um and so if it doesn't update that state within a certain amount of time it's considered unhealthy",
+    "start": "630680",
+    "end": "638079"
+  },
+  {
+    "text": "by all the other um by all the other ingestor so what happens is now they all",
+    "start": "638079",
+    "end": "644440"
+  },
+  {
+    "text": "know if that ingestor wasn't updating updating its um heartbeat quick enough",
+    "start": "644440",
+    "end": "651480"
+  },
+  {
+    "text": "then the ingestor will say okay this ingestor is no longer healthy don't use it for um any of the operations that",
+    "start": "651480",
+    "end": "658360"
+  },
+  {
+    "text": "require like store scoring or reading uh metrics um that is what I wanted to talk",
+    "start": "658360",
+    "end": "665120"
+  },
+  {
+    "text": "about for the introduction to Cortex um I'm going to hand it off to Daniel to talk about what's",
+    "start": "665120",
+    "end": "670279"
+  },
+  {
+    "text": "new hey everyone um so want to talk a little bit what's new uh what's what we",
+    "start": "670279",
+    "end": "675680"
+  },
+  {
+    "text": "are doing and uh dip deep uh Deep dive in the partition compor so the last talk",
+    "start": "675680",
+    "end": "682480"
+  },
+  {
+    "text": "that we had was around March 20 24 uh since then like we had two new releases",
+    "start": "682480",
+    "end": "688600"
+  },
+  {
+    "text": "the do7 18 uh we also had 22 new contributors to the project and two new",
+    "start": "688600",
+    "end": "694800"
+  },
+  {
+    "text": "maintainers which are actually us and 30 325 PR merg I think they show that the",
+    "start": "694800",
+    "end": "701120"
+  },
+  {
+    "text": "project it's growing it's healthy and the community it's helping a lot us which is very",
+    "start": "701120",
+    "end": "706160"
+  },
+  {
+    "text": "nice talking a little bit more about the uh release that we headed uh the S thing",
+    "start": "706160",
+    "end": "712279"
+  },
+  {
+    "text": "uh just some highlights uh we did had OTP inje we did had also token spread",
+    "start": "712279",
+    "end": "718079"
+  },
+  {
+    "text": "strategy which BAS basically helps balancing these metrics on in gestures and having a better limit uh we also are",
+    "start": "718079",
+    "end": "725800"
+  },
+  {
+    "text": "working a lot on qu optimization so we do have a story here for quer scattering query priority which can give you",
+    "start": "725800",
+    "end": "732000"
+  },
+  {
+    "text": "priority for some queries that are more sensitive for you for alerts for some dashboards um and we also working a lot",
+    "start": "732000",
+    "end": "739639"
+  },
+  {
+    "text": "in the rules ha High availability for our rulers so in the 17 we launched the",
+    "start": "739639",
+    "end": "744720"
+  },
+  {
+    "text": "Le rules API which avoids impact when you have a ruler starting or updating on",
+    "start": "744720",
+    "end": "750320"
+  },
+  {
+    "text": "this kind of stuff for the 18 we kind of continue the same stories uh we do have another story",
+    "start": "750320",
+    "end": "757240"
+  },
+  {
+    "text": "for the rules a which are adding filtering for alerts it was a pinpoint for the users of Cortex uh sometimes",
+    "start": "757240",
+    "end": "763519"
+  },
+  {
+    "text": "when you have a lot of rules it makes harder to read them you don't have pation uh the query rejection and",
+    "start": "763519",
+    "end": "769600"
+  },
+  {
+    "text": "injesture meod data API limits are also related to the query improvements uh the C rejections is basically rejecting bad",
+    "start": "769600",
+    "end": "776639"
+  },
+  {
+    "text": "users the API limit is protecting just a little bit more to not impact the right path and the native f g is a big big",
+    "start": "776639",
+    "end": "784279"
+  },
+  {
+    "text": "microne for us we actually demo this and that's last kuon and we finally launch",
+    "start": "784279",
+    "end": "789639"
+  },
+  {
+    "text": "it in the 18 version in progress is also related to",
+    "start": "789639",
+    "end": "795320"
+  },
+  {
+    "text": "what we already been doing so we have the rul a work which is for the whole service we have remote right 2.0 uh we",
+    "start": "795320",
+    "end": "802240"
+  },
+  {
+    "text": "have M caching multi level chunk cach actually we already have some cash in the index we are working cach in for",
+    "start": "802240",
+    "end": "808440"
+  },
+  {
+    "text": "investors and these all for helping the uh query story that we are working on",
+    "start": "808440",
+    "end": "814079"
+  },
+  {
+    "text": "and another stuff that we another feature that we working on and he's actually talking about this for like one",
+    "start": "814079",
+    "end": "819720"
+  },
+  {
+    "text": "year I guess is partition compactor and I really want to dive deep on how partition compactor was made and how it",
+    "start": "819720",
+    "end": "825639"
+  },
+  {
+    "text": "works uh for you guys to understand it so before talking about partitioning",
+    "start": "825639",
+    "end": "831600"
+  },
+  {
+    "text": "compactor I want to briefly mention how compactor itself Works uh so as Charlie",
+    "start": "831600",
+    "end": "837040"
+  },
+  {
+    "text": "already mentioned compactor basically get box and put it together to improve how query Works to uh decrease the",
+    "start": "837040",
+    "end": "843519"
+  },
+  {
+    "text": "amount of duplicated data so in this scenario here for example we have three gestures they have the blocks they are",
+    "start": "843519",
+    "end": "850000"
+  },
+  {
+    "text": "created from the head compaction the the information that they receive it uh they are putting the long-term storage I kind",
+    "start": "850000",
+    "end": "855800"
+  },
+  {
+    "text": "of briefly show here how this information is on the long-term storage because it's going to help us understanding more about the compact",
+    "start": "855800",
+    "end": "861800"
+  },
+  {
+    "text": "partitioning so each block has an index and a mea file the index is basically the symbol that you have all the L label",
+    "start": "861800",
+    "end": "869199"
+  },
+  {
+    "text": "names this kind of stuff and The Meta files the metadata for that block so",
+    "start": "869199",
+    "end": "874920"
+  },
+  {
+    "text": "looking more on how compactors use that so they can list this for grating gaing the the blocks but how they actually",
+    "start": "874920",
+    "end": "882199"
+  },
+  {
+    "text": "compact them so if you take a look of the compactor itself it can be separated in",
+    "start": "882199",
+    "end": "887839"
+  },
+  {
+    "text": "three stages which are basically the grouper the planner and the compaction which is actually merging the data on",
+    "start": "887839",
+    "end": "895079"
+  },
+  {
+    "text": "the grouper part what is basically looking into that that meta files that we mention it before so in in Thea files",
+    "start": "895079",
+    "end": "901680"
+  },
+  {
+    "text": "we have a mean time and a Max time and that's how we AGR data it's by the time range that the each file it is it's on",
+    "start": "901680",
+    "end": "908639"
+  },
+  {
+    "text": "uh and after deciding which group of blocks they're going to be compacted we",
+    "start": "908639",
+    "end": "914199"
+  },
+  {
+    "text": "actually go to the planer phase and in this planner phase is important to avoid do two compactors or more working the",
+    "start": "914199",
+    "end": "921000"
+  },
+  {
+    "text": "same block so here we want to avoid um double competion or a double data on the",
+    "start": "921000",
+    "end": "928680"
+  },
+  {
+    "text": "on the storage SES so what we do here is we add a visit marker on the Block side on the Block side of things to mention",
+    "start": "928680",
+    "end": "936360"
+  },
+  {
+    "text": "that the compactor X Y and Z is working on the compactor for that block and other compactors cannot work on that",
+    "start": "936360",
+    "end": "942920"
+  },
+  {
+    "text": "simultaneously this going to be helpful for understanding parti compactor later after all of this we actually do the",
+    "start": "942920",
+    "end": "948800"
+  },
+  {
+    "text": "compaction itself uh in a normal compaction we just have one block outcoming so we have block four for",
+    "start": "948800",
+    "end": "954600"
+  },
+  {
+    "text": "example with the index meta and we can see here that the meta is a little bit different we have a level which is",
+    "start": "954600",
+    "end": "960360"
+  },
+  {
+    "text": "increasing because we did we just did a competion and we have a source which is a list of blocks that are related to",
+    "start": "960360",
+    "end": "966440"
+  },
+  {
+    "text": "this information so why are we doing partition compactor so we basically have",
+    "start": "966440",
+    "end": "971839"
+  },
+  {
+    "text": "two problems with Partition with the compaction nowadays one of those is the index size so tsdb just allow us to have",
+    "start": "971839",
+    "end": "979199"
+  },
+  {
+    "text": "a Max index size of 64 GB so for example if you have the three blocks that I",
+    "start": "979199",
+    "end": "984480"
+  },
+  {
+    "text": "mentioned before and each one has a index size around 30 gab it doesn't necessarily mean that we're going to",
+    "start": "984480",
+    "end": "990279"
+  },
+  {
+    "text": "have a sum of it as a new block because it depends on the duplication of data the labels the the name of the same the",
+    "start": "990279",
+    "end": "997319"
+  },
+  {
+    "text": "the the labels that you have but if it's greater than 64 GB for example here 7 GB",
+    "start": "997319",
+    "end": "1003079"
+  },
+  {
+    "text": "it's going to fail so this compa going to fail forever there's nothing we can do what we did it so far to mitigate",
+    "start": "1003079",
+    "end": "1008600"
+  },
+  {
+    "text": "that is adding a no competion marker which we can actually put in the folders",
+    "start": "1008600",
+    "end": "1013959"
+  },
+  {
+    "text": "structure of that block and when a grouper comes in we just skip that block but there's not you can do about that",
+    "start": "1013959",
+    "end": "1019880"
+  },
+  {
+    "text": "and it's going to be forever there another issue that we noticed previously is also about is lower competion so this",
+    "start": "1019880",
+    "end": "1028038"
+  },
+  {
+    "text": "this can happen mostly because of two problems one of them is like if you have a very long list of blocks on your",
+    "start": "1028039",
+    "end": "1035160"
+  },
+  {
+    "text": "storage it can be very slow to list them and to get information of what you need to group and that can be delay in the",
+    "start": "1035160",
+    "end": "1041678"
+  },
+  {
+    "text": "competion and the other one which is more common is kind of the previous scenario where you have like a index",
+    "start": "1041679",
+    "end": "1047438"
+  },
+  {
+    "text": "which is 30 gabes if you try to download a bunch of 30 GB index and you try to upload after the results which is going",
+    "start": "1047439",
+    "end": "1054200"
+  },
+  {
+    "text": "to be I don't know 60 or something like that it's going to take a very long time and that can cause a lot of delay in",
+    "start": "1054200",
+    "end": "1059919"
+  },
+  {
+    "text": "your competion and you can realize that your competion is actually is slowing down instead of speeding",
+    "start": "1059919",
+    "end": "1066440"
+  },
+  {
+    "text": "up so that's basically why we decided to do the partition compactor and that's why impacted us so",
+    "start": "1066440",
+    "end": "1072760"
+  },
+  {
+    "text": "much I'm going to try to explain a little bit here what information we added on the files that they already",
+    "start": "1072760",
+    "end": "1078880"
+  },
+  {
+    "text": "existed and after try to merge all this together and show how the partition compactor works so in the meata file of",
+    "start": "1078880",
+    "end": "1087240"
+  },
+  {
+    "text": "a block we actually added this part which called Partition information so we",
+    "start": "1087240",
+    "end": "1092320"
+  },
+  {
+    "text": "have a partition group ID which is a number but actually generated by the Minx time of the blocks so it's kind of",
+    "start": "1092320",
+    "end": "1099200"
+  },
+  {
+    "text": "the range of the partition group we have a partition count which is actually decided and we're going to see later how",
+    "start": "1099200",
+    "end": "1104480"
+  },
+  {
+    "text": "we decid that with the number of partitions for that partition group and we have a partition IDE which is basically the partition for that exactly",
+    "start": "1104480",
+    "end": "1111640"
+  },
+  {
+    "text": "block that we are looking right now we also need to change how the grou",
+    "start": "1111640",
+    "end": "1116880"
+  },
+  {
+    "text": "and Planet work it of the compactor uh that's the biggest change that we had it in the compactor so the grouper right",
+    "start": "1116880",
+    "end": "1123480"
+  },
+  {
+    "text": "now before was just using the minax time range and now we have to use this partition information that we just",
+    "start": "1123480",
+    "end": "1129440"
+  },
+  {
+    "text": "created so that's the new way of the compactor to merge blocks is it gets the",
+    "start": "1129440",
+    "end": "1134880"
+  },
+  {
+    "text": "minax time range still but it also looks the partition information to see which blocks can go",
+    "start": "1134880",
+    "end": "1140799"
+  },
+  {
+    "text": "together so here for example we have a partition contest two and then we have partition ID Z and one and you can see",
+    "start": "1140799",
+    "end": "1146840"
+  },
+  {
+    "text": "that there's different blocks in some of these partition groups in the partition IDs the planner changed a little bit",
+    "start": "1146840",
+    "end": "1153679"
+  },
+  {
+    "text": "also just because of the visit marker to make this work we cannot have the old",
+    "start": "1153679",
+    "end": "1159360"
+  },
+  {
+    "text": "visit marker that we had because it's blocking the whole block and what we want to do now is having multiple",
+    "start": "1159360",
+    "end": "1165000"
+  },
+  {
+    "text": "compactions in the same block because they can go for different partitions uh so we changeed that ver market and",
+    "start": "1165000",
+    "end": "1171200"
+  },
+  {
+    "text": "remove it from the Block and we put in a new structure for the for the partition group itself so it's also good because",
+    "start": "1171200",
+    "end": "1177640"
+  },
+  {
+    "text": "we can know what's which partition groups are being worked and which partition ID is actually being compacted",
+    "start": "1177640",
+    "end": "1183880"
+  },
+  {
+    "text": "it's very easy now to get information about like how much partitions we how much compaction we still have in the",
+    "start": "1183880",
+    "end": "1191039"
+  },
+  {
+    "text": "queue so how this looks like when you put everything together so one thing",
+    "start": "1191039",
+    "end": "1196840"
+  },
+  {
+    "text": "that we added for making this work is the new configuration which basically tell us what's the size of a partition",
+    "start": "1196840",
+    "end": "1202840"
+  },
+  {
+    "text": "that you want so for example here this scenario we have a 30 million partition",
+    "start": "1202840",
+    "end": "1208039"
+  },
+  {
+    "text": "and the blocks already has some met information mentioning how much time series you have in a block so for",
+    "start": "1208039",
+    "end": "1214120"
+  },
+  {
+    "text": "example in this scenario here which we have three blocks and they all together have a million time series when you put",
+    "start": "1214120",
+    "end": "1220840"
+  },
+  {
+    "text": "in in the configuration the 30 million time series we're going to have four partition count and that's what the",
+    "start": "1220840",
+    "end": "1226159"
+  },
+  {
+    "text": "compa going to create so we can see here that before we had just one block out coming from the",
+    "start": "1226159",
+    "end": "1232600"
+  },
+  {
+    "text": "compaction and now we have four blocks four five six and seven and each one of those has their own index and their own",
+    "start": "1232600",
+    "end": "1239120"
+  },
+  {
+    "text": "meta file we can also notice the difference that we mention it about the partition group information that's in all meta",
+    "start": "1239120",
+    "end": "1246360"
+  },
+  {
+    "text": "files for that file box but the the cck of the problem in",
+    "start": "1246360",
+    "end": "1251400"
+  },
+  {
+    "text": "Partition compactor is how do you know where to put a block or how the blocks go together so I'm I'm going to give",
+    "start": "1251400",
+    "end": "1258320"
+  },
+  {
+    "text": "some scenarios here in the tree one thing to understand very well is the partition count of of a partition group",
+    "start": "1258320",
+    "end": "1265480"
+  },
+  {
+    "text": "can can need to be of power of two that allow us to know where a block came from",
+    "start": "1265480",
+    "end": "1271600"
+  },
+  {
+    "text": "and where a block need to go so for example here if we have a partition count as four and one block is from",
+    "start": "1271600",
+    "end": "1278080"
+  },
+  {
+    "text": "partition ID zero if you want to decrease the number of partitions let's say that you are recomp compacting that",
+    "start": "1278080",
+    "end": "1283640"
+  },
+  {
+    "text": "block for with new time range if you want to decrease the number of par partition uh you know that these",
+    "start": "1283640",
+    "end": "1289720"
+  },
+  {
+    "text": "information come from the partition count to partition in ID zero and if you",
+    "start": "1289720",
+    "end": "1295279"
+  },
+  {
+    "text": "want to increase the number of partitions you know that you need to put this block on the partition ID zero and",
+    "start": "1295279",
+    "end": "1301000"
+  },
+  {
+    "text": "partition ID 4 if you have a partition called 8 so that allows us to actually",
+    "start": "1301000",
+    "end": "1306159"
+  },
+  {
+    "text": "create the partition plans which for the grouper and not lose data or merge data",
+    "start": "1306159",
+    "end": "1311200"
+  },
+  {
+    "text": "that's are are duplicated in different blocks so I'm going to just give an example how this works decreasing",
+    "start": "1311200",
+    "end": "1317360"
+  },
+  {
+    "text": "partition count so for example in this case here the number of Time series uh in a in a metadata of the block can be",
+    "start": "1317360",
+    "end": "1324799"
+  },
+  {
+    "text": "lower or higher after the the the competion because that's just a simulation uh uh it can be the",
+    "start": "1324799",
+    "end": "1331679"
+  },
+  {
+    "text": "duplication data on the blocks so let's say that we did that first partitioning",
+    "start": "1331679",
+    "end": "1336960"
+  },
+  {
+    "text": "that competion we had four partition counts and now that we are doing the second level a new level competion we",
+    "start": "1336960",
+    "end": "1343720"
+  },
+  {
+    "text": "actually want to decrease that because we notice that a much much of a lot of that information is duplicated and now",
+    "start": "1343720",
+    "end": "1349799"
+  },
+  {
+    "text": "we want to go to a partition contest two so what happen with the boxes so when we create a new Partition group for the",
+    "start": "1349799",
+    "end": "1355400"
+  },
+  {
+    "text": "competion the partition count four and partition ID zero if we put in the three that I mentioned before it needs to go",
+    "start": "1355400",
+    "end": "1361880"
+  },
+  {
+    "text": "to the partition ID zero of partition count two so that's how we know how to group the blocks together that's the",
+    "start": "1361880",
+    "end": "1367919"
+  },
+  {
+    "text": "same for the partition count ID 1 and partition count 4 when you put it in the in the tree that I mentioned before it",
+    "start": "1367919",
+    "end": "1374559"
+  },
+  {
+    "text": "needs to go to the partition ID group two and that also works for the increasing so let's say that you are",
+    "start": "1374559",
+    "end": "1381440"
+  },
+  {
+    "text": "trying to compact much more blocks together because of the time range that you're compacting like said they compacting 24 hours so you want now to",
+    "start": "1381440",
+    "end": "1389679"
+  },
+  {
+    "text": "have eight partition counts so you're going to put these blocks in different types of partition these and just using",
+    "start": "1389679",
+    "end": "1396480"
+  },
+  {
+    "text": "that tree you can know where it came it needs to go so basically that's how partition",
+    "start": "1396480",
+    "end": "1403600"
+  },
+  {
+    "text": "compac is made with the partition information the meta file with that idea of always having uh Power of Two for the",
+    "start": "1403600",
+    "end": "1410960"
+  },
+  {
+    "text": "partition count and the changes in the uh in the grouper and in the visit",
+    "start": "1410960",
+    "end": "1418919"
+  },
+  {
+    "text": "marker one thing that was nice about the change that we made it was while we are",
+    "start": "1418919",
+    "end": "1424200"
+  },
+  {
+    "text": "doing this change one of the complaints about the the community and users is it's very hard to debug what's happening",
+    "start": "1424200",
+    "end": "1430440"
+  },
+  {
+    "text": "in cortex we cannot see what's been compacted we cannot see how much we still have left to compact so we try to",
+    "start": "1430440",
+    "end": "1437440"
+  },
+  {
+    "text": "add more met and more visibility on what's going on on the compactor",
+    "start": "1437440",
+    "end": "1442799"
+  },
+  {
+    "text": "side so for example here we can see the first uh two metrics there are kind of a",
+    "start": "1442799",
+    "end": "1449080"
+  },
+  {
+    "text": "snapshot of your uh long St long storage data so it tells you how much blocks you",
+    "start": "1449080",
+    "end": "1454960"
+  },
+  {
+    "text": "have active it tells you how much blocks you have delete market for deletion uh",
+    "start": "1454960",
+    "end": "1460520"
+  },
+  {
+    "text": "below that we have the information about the partition compactor itself which is new it basically as we have a new",
+    "start": "1460520",
+    "end": "1466799"
+  },
+  {
+    "text": "visitor marker now each visitor marker has a status which can be paining uh in progress or completed so it can have",
+    "start": "1466799",
+    "end": "1473080"
+  },
+  {
+    "text": "metrics for how many remaining competions you still have to make how many in progress competion you're are",
+    "start": "1473080",
+    "end": "1478440"
+  },
+  {
+    "text": "doing right now so you can compare that number with the number of PODS that you have to see if match um we also added",
+    "start": "1478440",
+    "end": "1485200"
+  },
+  {
+    "text": "some information about the partitions itself which says basically how much partitions you are in average creating",
+    "start": "1485200",
+    "end": "1492039"
+  },
+  {
+    "text": "for a time frame so for example like in the two hours blocks you are basically normally creating four partitions that",
+    "start": "1492039",
+    "end": "1498480"
+  },
+  {
+    "text": "what you need from the time series that you have and the last one there is pretty cool because it kind of tells you",
+    "start": "1498480",
+    "end": "1505039"
+  },
+  {
+    "text": "how much delay you have in your partition so this is this oldest plan of set is basically you are compacting a",
+    "start": "1505039",
+    "end": "1511640"
+  },
+  {
+    "text": "plane that was created 30 minutes ago so if you're compacting a plan that's was created two hours ago something is wrong",
+    "start": "1511640",
+    "end": "1517440"
+  },
+  {
+    "text": "with compaction because it shouldn't be like that just some more examples of uh gra",
+    "start": "1517440",
+    "end": "1523919"
+  },
+  {
+    "text": "metrics that we added we also added when the competion runs uh we also added information how much compaction was",
+    "start": "1523919",
+    "end": "1529960"
+  },
+  {
+    "text": "completed how much compaction was started the time of the compaction so you actually kind of can know now how",
+    "start": "1529960",
+    "end": "1536000"
+  },
+  {
+    "text": "much time we are using for compacting in each of the time ranges 2 12 4 8 depends",
+    "start": "1536000",
+    "end": "1541279"
+  },
+  {
+    "text": "on what you configure uh and that's basically the change that we did for partition",
+    "start": "1541279",
+    "end": "1546960"
+  },
+  {
+    "text": "compactor so just overall what we talked here today the corection reduction the",
+    "start": "1546960",
+    "end": "1552080"
+  },
+  {
+    "text": "watch new with the two versions The what's next with the partition compactor the remote right the Deep Di the parti",
+    "start": "1552080",
+    "end": "1558919"
+  },
+  {
+    "text": "compactor uh and now we have some time for QA Q&A thank",
+    "start": "1558919",
+    "end": "1564810"
+  },
+  {
+    "text": "[Applause]",
+    "start": "1564810",
+    "end": "1571919"
+  },
+  {
+    "text": "you you can uh come to the mic here for questions um or we can just keep talking about whatever whatever you guys",
+    "start": "1571919",
+    "end": "1579840"
+  },
+  {
+    "text": "want we didn't talk about multi tennessy not more",
+    "start": "1579840",
+    "end": "1585039"
+  },
+  {
+    "text": "okay hey thanks for the presentation um I'm wondering if you can go briefly into some of the best practices for multi",
+    "start": "1585039",
+    "end": "1590960"
+  },
+  {
+    "text": "tendency with regards to the ruler and the alert manager",
+    "start": "1590960",
+    "end": "1596480"
+  },
+  {
+    "text": "yeah so anything sorry anything specific about how to use ruler",
+    "start": "1596480",
+    "end": "1603840"
+  },
+  {
+    "text": "merger like how to uh best like should you use it in like the uh Prometheus",
+    "start": "1603840",
+    "end": "1610039"
+  },
+  {
+    "text": "stack or should you play multiple cortex rulers like how do you give tenants control over their own alerting and",
+    "start": "1610039",
+    "end": "1615360"
+  },
+  {
+    "text": "rules have like centralized rules like those kind of things that you've seen",
+    "start": "1615360",
+    "end": "1620520"
+  },
+  {
+    "text": "work you oh yeah sure um so with the the",
+    "start": "1620520",
+    "end": "1625640"
+  },
+  {
+    "text": "rulers you're talking about like should I use Prometheus for doing alert manager uh or recording rules or should I use",
+    "start": "1625640",
+    "end": "1631960"
+  },
+  {
+    "text": "cortex um yeah so um with cortex you do have that ruler component for handling",
+    "start": "1631960",
+    "end": "1638960"
+  },
+  {
+    "text": "like the recording rules um you can basically U set that up for multi-tenancy as well so that each",
+    "start": "1638960",
+    "end": "1645360"
+  },
+  {
+    "text": "tenant can you know have their own recording rules with Prometheus I'm not really sure how you would be able to do",
+    "start": "1645360",
+    "end": "1651360"
+  },
+  {
+    "text": "the multi-tenancy bit in Prometheus um so just having the ruler alone with multi- tendency is a huge benefit um and",
+    "start": "1651360",
+    "end": "1659520"
+  },
+  {
+    "text": "then the more recording rules that you have like um the more queries it's going",
+    "start": "1659520",
+    "end": "1665720"
+  },
+  {
+    "text": "to have on the the inors or the store gateways depending on like the the the",
+    "start": "1665720",
+    "end": "1672279"
+  },
+  {
+    "text": "time range of those queries um if you are running into issues with like oh",
+    "start": "1672279",
+    "end": "1679080"
+  },
+  {
+    "text": "it's um uh these recording rules are are too expensive to run and it's like",
+    "start": "1679080",
+    "end": "1684320"
+  },
+  {
+    "text": "slowing down the the queriers you can you can have limits on the the rulers themselves or on a tenant level so you",
+    "start": "1684320",
+    "end": "1691159"
+  },
+  {
+    "text": "can say don't allow more than this amount of recording rules um per tenant",
+    "start": "1691159",
+    "end": "1696799"
+  },
+  {
+    "text": "right and that can help with some of the the issues with um too many uh recording",
+    "start": "1696799",
+    "end": "1702279"
+  },
+  {
+    "text": "rules um there's um I think also if you are if you're deploying with kubernetes",
+    "start": "1702279",
+    "end": "1709679"
+  },
+  {
+    "text": "uh we also are kind of suggesting to use stateful sets right now because we are doing rule ha and with that you can",
+    "start": "1709679",
+    "end": "1717240"
+  },
+  {
+    "text": "easier restarting or maintain the points we are also adding the tokens that we talked about the in gestures we also",
+    "start": "1717240",
+    "end": "1723399"
+  },
+  {
+    "text": "adding that to the ruler itself to also maintain the same users for rulers which",
+    "start": "1723399",
+    "end": "1728799"
+  },
+  {
+    "text": "helps a lot for the availability issue that we are having sometimes right nowadays when you are restarting a ruler",
+    "start": "1728799",
+    "end": "1735000"
+  },
+  {
+    "text": "like you can have one user missing some uh uh uh metric uh rulers running this",
+    "start": "1735000",
+    "end": "1741519"
+  },
+  {
+    "text": "kind of stuff yeah are are you are you running into any issues with like trying to scale it up is that the problem or",
+    "start": "1741519",
+    "end": "1747840"
+  },
+  {
+    "text": "are you just looking for Best Practices uh yeah just mov from a m a single cluster deployment to a multicluster",
+    "start": "1747840",
+    "end": "1753919"
+  },
+  {
+    "text": "multiple tenant and you that let people do their own rules and like alert broadcasting into their own page duties",
+    "start": "1753919",
+    "end": "1761000"
+  },
+  {
+    "text": "that kind of thing yeah I think I think the the state foret and trying to look",
+    "start": "1761000",
+    "end": "1766399"
+  },
+  {
+    "text": "at what we are doing about R is going to help you a lot I think also making sure",
+    "start": "1766399",
+    "end": "1771880"
+  },
+  {
+    "text": "that your mood tenant knows that the impact that the roots causes on the inje part or the query part uh it's a heavy",
+    "start": "1771880",
+    "end": "1779080"
+  },
+  {
+    "text": "load because it's always running constantly uh that's was the biggest thing that we already saw on rulers for",
+    "start": "1779080",
+    "end": "1786080"
+  },
+  {
+    "text": "cortex yeah um did that did that answer your",
+    "start": "1786080",
+    "end": "1791760"
+  },
+  {
+    "text": "question cool uh I think we have time for I think",
+    "start": "1791760",
+    "end": "1796919"
+  },
+  {
+    "text": "one more question if anyone has any questions on cortex well we have 5 minutes actually",
+    "start": "1796919",
+    "end": "1804320"
+  },
+  {
+    "text": "so we have a lot of time for questions I can I can talk a bit more about um the multi-tenancy bit if anyone's interested",
+    "start": "1804320",
+    "end": "1811760"
+  },
+  {
+    "text": "I think okay I'm I'm seeing some nods yes that's good good uh okay so let me",
+    "start": "1811760",
+    "end": "1817679"
+  },
+  {
+    "text": "pull back to some of the slides that I had for the ingestion piece and um Talk",
+    "start": "1817679",
+    "end": "1825159"
+  },
+  {
+    "text": "a bit more about multi-tenancy",
+    "start": "1825159",
+    "end": "1828640"
+  },
+  {
+    "text": "okay uh yeah let's go back to the beginning so this is Prometheus it's uh",
+    "start": "1830440",
+    "end": "1836919"
+  },
+  {
+    "text": "historically not multi-tenant and what can you do if you want to add multi-tenancy right you have",
+    "start": "1836919",
+    "end": "1844480"
+  },
+  {
+    "text": "the the main kind of benefit of Cortex is that you get this multi- tendency out of the box it's built for multi-",
+    "start": "1844480",
+    "end": "1850440"
+  },
+  {
+    "text": "tendency it came from the beginning with multi- tendency and the way that it does this is by using um this header it's",
+    "start": "1850440",
+    "end": "1858440"
+  },
+  {
+    "text": "called it's a it's basically an HTTP header and you set it when you're making these uh requests to Cortex and you say",
+    "start": "1858440",
+    "end": "1866039"
+  },
+  {
+    "text": "hey I am this person or this tenant when you send that request and that's how cortex when it sees that request and is",
+    "start": "1866039",
+    "end": "1874200"
+  },
+  {
+    "text": "um you know processing it it will look at that header to figure out okay you are this tenant I'm going to serve you",
+    "start": "1874200",
+    "end": "1881279"
+  },
+  {
+    "text": "for these you know sets of rules that are in place for this tenant um and if you're a different tenant then I'll use",
+    "start": "1881279",
+    "end": "1887600"
+  },
+  {
+    "text": "these sets of rules um and so the nice thing about cortex is that um uh",
+    "start": "1887600",
+    "end": "1895000"
+  },
+  {
+    "text": "depending on which tenant you are you can you can set different limits so let's say you have a tenant that's huge",
+    "start": "1895000",
+    "end": "1901559"
+  },
+  {
+    "text": "right you can say use this limit for this tenant like you are allowed to store this amount of metrics you are",
+    "start": "1901559",
+    "end": "1909080"
+  },
+  {
+    "text": "allowed to query uh for this amount of time you're allowed to query um this at",
+    "start": "1909080",
+    "end": "1915000"
+  },
+  {
+    "text": "this rate um and all of these limits and there's many limits to to configure for",
+    "start": "1915000",
+    "end": "1921679"
+  },
+  {
+    "text": "each tenant but you can set it per tenant and you don't even need to restart your cluster to apply them",
+    "start": "1921679",
+    "end": "1927480"
+  },
+  {
+    "text": "they're just values that could be hot reloaded on the cluster in real time so",
+    "start": "1927480",
+    "end": "1933120"
+  },
+  {
+    "text": "um it makes it really cool and easy to manage for um the various tenants that",
+    "start": "1933120",
+    "end": "1938480"
+  },
+  {
+    "text": "you're managing um and you can have uh as many tenants as you want and um you",
+    "start": "1938480",
+    "end": "1945360"
+  },
+  {
+    "text": "don't need to reconfigure your cluster to handle more tenants really is just you just Bas",
+    "start": "1945360",
+    "end": "1952120"
+  },
+  {
+    "text": "actually so the way that uh cortex works",
+    "start": "1952120",
+    "end": "1957360"
+  },
+  {
+    "text": "is if you want to create a new tenant you don't need to even reconfigure",
+    "start": "1957360",
+    "end": "1962639"
+  },
+  {
+    "text": "cortex you could just start sending requests to Cortex with a new header",
+    "start": "1962639",
+    "end": "1968240"
+  },
+  {
+    "text": "value for that tenant and then it'll just make a new tenant for you which is really nice so let's say you have tenant",
+    "start": "1968240",
+    "end": "1974600"
+  },
+  {
+    "text": "a you use that in the header and then it'll create a tenant for you and then if you want to have tenant B you just",
+    "start": "1974600",
+    "end": "1981480"
+  },
+  {
+    "text": "set the value for that header to be tenant B and then cortex will create it for you on the fly so that's really cool",
+    "start": "1981480",
+    "end": "1987720"
+  },
+  {
+    "text": "the only time you you really need to configure anything is if you want to set limits that are specific to that tenant",
+    "start": "1987720",
+    "end": "1995360"
+  },
+  {
+    "text": "uh otherwise it just manages everything else for you by default um and that's really the the",
+    "start": "1995360",
+    "end": "2001600"
+  },
+  {
+    "text": "awesome benefit here of having um cortex as your multi-tenant solution I think",
+    "start": "2001600",
+    "end": "2006679"
+  },
+  {
+    "text": "sorry I think one differ also is because cortex use this ring that Charlie mentioned before with the tokens and",
+    "start": "2006679",
+    "end": "2013279"
+  },
+  {
+    "text": "it's something that others doesn't use it and that allows you to control a lot",
+    "start": "2013279",
+    "end": "2018639"
+  },
+  {
+    "text": "how The sharding Works between distributor in gestur so you can have a number limit of pods for each one a",
+    "start": "2018639",
+    "end": "2026240"
+  },
+  {
+    "text": "tenant another limit of pods for another tenant if you have a bigger U tenant you can give more injest for the tenant so",
+    "start": "2026240",
+    "end": "2033039"
+  },
+  {
+    "text": "that gives you a lot of flexibility of controlling each tenant differently and also for the limits that Char",
+    "start": "2033039",
+    "end": "2039519"
+  },
+  {
+    "text": "mentioned I think uh yeah yeah I think we're out of time thank you everyone for",
+    "start": "2039519",
+    "end": "2045360"
+  },
+  {
+    "text": "uh coming to our talk and uh thank you",
+    "start": "2045360",
+    "end": "2052398"
+  }
+]

@@ -1,0 +1,1487 @@
+[
+  {
+    "text": "Hello, welcome to the session. We are super excited to tell the story \nhow we set out to make it easier to",
+    "start": "0",
+    "end": "5727"
+  },
+  {
+    "text": "build connectors for Apache sink. If you want to persist data to a \ndestination that is not supported",
+    "start": "5727",
+    "end": "12590"
+  },
+  {
+    "text": "natively by Flink today, \nthis session is for you. We have contributed an abstraction in \nFlink 115 called the Async Sink that",
+    "start": "12590",
+    "end": "22611"
+  },
+  {
+    "text": "makes it easier to build your own sinks. And today we will not only discuss \nwhy and how we built the abstraction,",
+    "start": "22611",
+    "end": "31483"
+  },
+  {
+    "text": "we've also prepared a demo that \nwill show you how you can use the abstraction to build a new sink.",
+    "start": "31483",
+    "end": "37885"
+  },
+  {
+    "text": "Let's get started with how we ended up here. Apache Flink has a rich connector \necosystem, but there will always be",
+    "start": "39089",
+    "end": "47606"
+  },
+  {
+    "text": "use cases that require additional connectors. In particular, if you're looking at \nthe destinations a Flink application ",
+    "start": "47606",
+    "end": "55000"
+  },
+  {
+    "text": "may sync data to, there are just so \nmany different possibilities that it's",
+    "start": "55000",
+    "end": "60186"
+  },
+  {
+    "text": "hard for the community to build \nand maintain connectors for each and every possible destination.",
+    "start": "60186",
+    "end": "66797"
+  },
+  {
+    "text": "And to make things worse, building \nhigh quality connectors is a lot of work.",
+    "start": "68045",
+    "end": "72720"
+  },
+  {
+    "text": "There are 5 key properties to obtain reasonable \nsemantics and performance for a connector.  ",
+    "start": "74160",
+    "end": "80040"
+  },
+  {
+    "text": "And if you look at how sinks are built today, \nmost of them are using batch requests to sync ",
+    "start": "80700",
+    "end": "87479"
+  },
+  {
+    "text": "a set of messages into the destination. And sinks do this to improve the efficiency \nand the throughput they can achieve.",
+    "start": "87480",
+    "end": "96452"
+  },
+  {
+    "text": "But in order to make batch requests, \nthe sink first needs to start buffering",
+    "start": "96878",
+    "end": "102496"
+  },
+  {
+    "text": "messages, and then monitor so called \nbuffering to know when to make a request.",
+    "start": "102496",
+    "end": "108491"
+  },
+  {
+    "text": "And once enough messages have been\nconnected, the sync then makes a",
+    "start": "109080",
+    "end": "114841"
+  },
+  {
+    "text": "batch request, and it then needs to \nmonitors the response for failure. So either the entire recurse can fail, but\nif you're syncing data in Cloud-based",
+    "start": "114841",
+    "end": "125000"
+  },
+  {
+    "text": "systems that follow a provision throughput \nmodel, individual messages of a  single batched request \nmay have been throttled,",
+    "start": "125000",
+    "end": "132360"
+  },
+  {
+    "text": "so you need to have very fine grained \nretry mechanisms built into the sink.  ",
+    "start": "132360",
+    "end": "138840"
+  },
+  {
+    "text": "And this protects you against failure of\nthe endpoint, of throttling of the endpoint,",
+    "start": "139676",
+    "end": "144959"
+  },
+  {
+    "text": "but it does not protect against \nfailure of the Flink application. So if you don't want to lose, or if you \ndon’t want to risk losing messages,",
+    "start": "144960",
+    "end": "154218"
+  },
+  {
+    "text": "the sink also needs to participate in \nCheckpointing to persist or protect the",
+    "start": "154218",
+    "end": "159440"
+  },
+  {
+    "text": "state of the sink and avoid data losses.  And last but not least, the sink should \nbe careful to not overload the endpoint.",
+    "start": "159440",
+    "end": "169118"
+  },
+  {
+    "text": "It needs to apply some kind of Rate \nlimiting so that it doesn't overload",
+    "start": "169383",
+    "end": "175853"
+  },
+  {
+    "text": "the destination and in the \nworst case, make it fall over. So we wanted to be able to support many \nmore destinations with Apache Flink,  ",
+    "start": "175853",
+    "end": "187260"
+  },
+  {
+    "text": "but we're facing these challenges that it's hard \nto build and maintain connectors, in particular  if they are developed independently.",
+    "start": "187260",
+    "end": "194204"
+  },
+  {
+    "text": "So we took a step back and realized, well, most \nconnectors have very common requirements.",
+    "start": "195505",
+    "end": "202813"
+  },
+  {
+    "text": "They all do Buffering, and retries \nand checkpointing and rate limiting. So the idea was to build an abstraction\nthat supports these common aspects",
+    "start": "202813",
+    "end": "213757"
+  },
+  {
+    "text": "of a sink, and when you want to implement a \nnew destination or support a new destination,",
+    "start": "213757",
+    "end": "220860"
+  },
+  {
+    "text": "you only need to specify those things that \nare specific to the endpoint, so specifically,",
+    "start": "220860",
+    "end": "227460"
+  },
+  {
+    "text": "how to make a batch request, and how to \ninspect a response from that request to",
+    "start": "227460",
+    "end": "234180"
+  },
+  {
+    "text": "know which messages or which parts of the \nmessage were not persisted successfully. ",
+    "start": "234180",
+    "end": "239939"
+  },
+  {
+    "text": "And the idea of Async Sink is to have \nsupport for this common functionality,  ",
+    "start": "241020",
+    "end": "246780"
+  },
+  {
+    "text": "so to create a new connector, you basically \nonly create a lightweight shim that specifies  ",
+    "start": "246780",
+    "end": "253200"
+  },
+  {
+    "text": "how to talk to the specific endpoint, and the \nrest is taken care of by the Async sink itself.",
+    "start": "253200",
+    "end": "261299"
+  },
+  {
+    "text": "And this works well for certain classes \nof destinations, so in particular if",
+    "start": "261960",
+    "end": "269100"
+  },
+  {
+    "text": "the destination supports batch requests, \nyou can live with at least one semantics, and you don't really care for ordering \nor you can tolerate slight re-orderings,",
+    "start": "269100",
+    "end": "278520"
+  },
+  {
+    "text": "then the Async Sink works really well to build \nthe connector for this kind of endpoint. ",
+    "start": "278520",
+    "end": "284759"
+  },
+  {
+    "text": "So here is how the Async \nSink works internally. On the left-hand side we have a \nmessage and we want to persist",
+    "start": "286020",
+    "end": "292733"
+  },
+  {
+    "text": "this message reliably into the endpoint. There's a lot going on, so let's \nwalk through this step by step.",
+    "start": "292733",
+    "end": "301421"
+  },
+  {
+    "text": "The first thing that happens is that \nwhen the sink receives a message from",
+    "start": "302032",
+    "end": "308889"
+  },
+  {
+    "text": "an upstream operator, it needs to \nextract those properties from the message that are essential to \nmake the batch request later on.",
+    "start": "308889",
+    "end": "317639"
+  },
+  {
+    "text": "So if you think for instance of a \nstreaming system, when you write a message into a stream, you need \nto specify the data of the payload",
+    "start": "318600",
+    "end": "328027"
+  },
+  {
+    "text": "and often you also need \nto specify a partition key. And this is what the ElementConverter \nextracts from the message and, once",
+    "start": "328027",
+    "end": "338973"
+  },
+  {
+    "text": "applied, it converts that \ninto a so called request entry. So the ElementConverter basically \ntakes a message, extracts all these",
+    "start": "338973",
+    "end": "348646"
+  },
+  {
+    "text": "required properties, and then creates a request \nentry that is buffered in an internal buffer.",
+    "start": "348646",
+    "end": "355247"
+  },
+  {
+    "text": "And this happens individually for \neach message that arrives at the sink.",
+    "start": "356256",
+    "end": "360929"
+  },
+  {
+    "text": "And at some point we have \nbuffered enough request entries",
+    "start": "361301",
+    "end": "366534"
+  },
+  {
+    "text": "that we can make a batch \nrequest into the endpoint. And this is done by the syncSinkWriter, so \nthe AsyncSinkWriter basically recieves a set",
+    "start": "366534",
+    "end": "375841"
+  },
+  {
+    "text": "of request entries, and is then expected to \nmake a batch request against the endpoint,",
+    "start": "375841",
+    "end": "384420"
+  },
+  {
+    "text": "and inspect the response from the \nendpoint and watch out for failures. And all the request entries that \nhave been persisted successfully",
+    "start": "384420",
+    "end": "393552"
+  },
+  {
+    "text": "then need to be requeued \ninto the internal buffer. And this protects against failure of the \nendpoint of throttling of the endpoint.",
+    "start": "393552",
+    "end": "402098"
+  },
+  {
+    "text": "So the AsyncSink makes batch requests, \nonce there have been enough request entries",
+    "start": "402496",
+    "end": "408678"
+  },
+  {
+    "text": "collected, and then inspects the response \nthat comes back to identify which  ",
+    "start": "408678",
+    "end": "414180"
+  },
+  {
+    "text": "request entries need to be requeued \nso that they can be retried later on. But it does not protect against \nfailure of the Flink application.",
+    "start": "414180",
+    "end": "421632"
+  },
+  {
+    "text": "So for checkpointing, we \nneed to add a serializer.",
+    "start": "422760",
+    "end": "426854"
+  },
+  {
+    "text": "So this is how checkpointing works: \nwhen a checkpoint barrier arrives at",
+    "start": "427863",
+    "end": "433264"
+  },
+  {
+    "text": "the sink operator, first of all the AsyncSink \nstops sending new requests and it waits until",
+    "start": "433264",
+    "end": "440821"
+  },
+  {
+    "text": "all inflight batch requests \nhave been completed. Because then all request entries either have \nbeen successfully persisted in the endpoint,  ",
+    "start": "440821",
+    "end": "450960"
+  },
+  {
+    "text": "or they have been \nrequeued in the internal buffer. So if we want to preserve the state, \nall we need to do is basically serialize",
+    "start": "450960",
+    "end": "460136"
+  },
+  {
+    "text": "the internal buffer, and that's \ndone by the state serializer.",
+    "start": "460136",
+    "end": "465060"
+  },
+  {
+    "text": "And then the state is included in the checkpoint, \nand Flink can leverage it for figuring it out.",
+    "start": "465600",
+    "end": "472800"
+  },
+  {
+    "text": "So if you want to implement your own \nsink, there are these three components",
+    "start": "474039",
+    "end": "479940"
+  },
+  {
+    "text": "that you need to implement. The first is the ElementConverter that \nbasically specifies how to extract those",
+    "start": "479940",
+    "end": "486966"
+  },
+  {
+    "text": "properties from a message that are \nrequired to make a batch request later on.",
+    "start": "486966",
+    "end": "491519"
+  },
+  {
+    "text": "The AsyncSinkWriter specifies how \nto make a batch request, and how to inspect a response, and last but not \nleast the state Serializer specifies how",
+    "start": "492366",
+    "end": "502389"
+  },
+  {
+    "text": "to serialize the internal state, the \ninternal buffer of the Async Sink.",
+    "start": "502389",
+    "end": "507200"
+  },
+  {
+    "text": "And that's all, so these are the three\ncomponents you'll need to implement, and the rest is then done by the \nAsync Sink, so all the buffering, retries,",
+    "start": "507731",
+    "end": "517150"
+  },
+  {
+    "text": "rate limiting, and checkpointing, this \nis done by the Async Sink for you.",
+    "start": "517150",
+    "end": "521640"
+  },
+  {
+    "text": "Before we look at how to implement a \nsink yourself, I want to take some time",
+    "start": "523007",
+    "end": "529269"
+  },
+  {
+    "text": "to look at how the Async Sink manages\nthe fifth aspect, the last aspect, mainly",
+    "start": "529269",
+    "end": "535165"
+  },
+  {
+    "text": "mentioning throughput and \nrate limiting the operator. So the challenge we are facing is we have \nan endpoint, and the Async Sink or the Flink",
+    "start": "535165",
+    "end": "544042"
+  },
+  {
+    "text": "application should not overload the endpoint, it \nshould adapt to the throughput of the endpoint.",
+    "start": "544042",
+    "end": "549360"
+  },
+  {
+    "text": "So what we are trying to achieve is \nto adapt the throughput of individual",
+    "start": "550213",
+    "end": "555324"
+  },
+  {
+    "text": "subtasks to the throughput of the endpoint. But there are a couple of challenges.",
+    "start": "555324",
+    "end": "560558"
+  },
+  {
+    "text": "First of all, we don't necessarily always \nknow what the throughput is of the endpoint.",
+    "start": "561196",
+    "end": "566213"
+  },
+  {
+    "text": "If you think for instance of a cluster, \nyou may have a cluster with a certain number of topics, but you don't know \nthe precise throughput for a specific topic.",
+    "start": "567673",
+    "end": "577428"
+  },
+  {
+    "text": "And even in case of CloudServices that\nfollow a provision throughput model, you may be able to discover the throughput \nof the endpoint, but that doesn't help if",
+    "start": "578012",
+    "end": "590000"
+  },
+  {
+    "text": "there are additional producers because\nthen like, you again end up overloading the endpoint unless you know how \nmany other producers there are.",
+    "start": "590000",
+    "end": "598440"
+  },
+  {
+    "text": "Trying to figure out what is the \nthroughput, and then adapting the subtask to the throughput doesn't \nreally work well, and we're looking",
+    "start": "599100",
+    "end": "607092"
+  },
+  {
+    "text": "for something that is more adaptable, \nand doesn't require any knowledge about throughput to the endpoint.",
+    "start": "607092",
+    "end": "612180"
+  },
+  {
+    "text": "And the responses we get when we \nmake requests to the endpoint actually",
+    "start": "612840",
+    "end": "618247"
+  },
+  {
+    "text": "give us a quite good signal on whether\n the endpoint becomes overrun or not.",
+    "start": "618247",
+    "end": "623199"
+  },
+  {
+    "text": "If a batch request, for instance, contains \nelements that were throttled, we know",
+    "start": "623863",
+    "end": "630000"
+  },
+  {
+    "text": "well at least some part of the endpoint \ncame out overloaded, and if the entire request fails, or times out, or gets \nslow, that's also a signal we can use.",
+    "start": "630000",
+    "end": "638579"
+  },
+  {
+    "text": "So we tried a couple of different \nstrategies so that the subtask can leverage that information to adapt the \nthroughput to the endpoint, and things",
+    "start": "639240",
+    "end": "648401"
+  },
+  {
+    "text": "worked okayish until we realized that this is \nactually a problem that has been solved before.",
+    "start": "648401",
+    "end": "654226"
+  },
+  {
+    "text": "So let me rephrase what \nwe're trying to achieve. Instead of subtasks and endpoints, let's \nsay we have a set of devices that want",
+    "start": "654890",
+    "end": "663481"
+  },
+  {
+    "text": "to send packets over a shared network,\nand we don't know the throughputs of",
+    "start": "663481",
+    "end": "668601"
+  },
+  {
+    "text": "this network, and we cannot coordinate\nbetween these different devices. ",
+    "start": "668601",
+    "end": "674045"
+  },
+  {
+    "text": "And if you think that sounds familiar, you're \nright, this is the same problem that TCP has.",
+    "start": "675240",
+    "end": "679860"
+  },
+  {
+    "text": "So what we ended up doing is borrowing the \ncongestion control strategy from TCP which is",
+    "start": "680520",
+    "end": "687334"
+  },
+  {
+    "text": "called Additive Increase/Multiplicative Decrease, \nand applied to our problem, this is what we do. ",
+    "start": "687334",
+    "end": "693660"
+  },
+  {
+    "text": "So first of all, we want to impose a limit \non the number of inflight request entries.",
+    "start": "694740",
+    "end": "700496"
+  },
+  {
+    "text": "Be aware, this is not the number of \ninflight batch requests, this is the number of individual request entries, because \nthat's the unit of work we want to control.",
+    "start": "700948",
+    "end": "711248"
+  },
+  {
+    "text": "And whenever we receive a response \nfrom a batch request, we take a look",
+    "start": "711859",
+    "end": "719049"
+  },
+  {
+    "text": "to see if it was successful. If it was successful, we just increase \nthe limit by a constant factor, by adding",
+    "start": "719049",
+    "end": "727804"
+  },
+  {
+    "text": "a constant factor, and if throttling \nhappened, or the request failed, we",
+    "start": "727804",
+    "end": "733492"
+  },
+  {
+    "text": "simply cut the limit in half. And this is a very simple but very \neffective mechanism, and I'm still",
+    "start": "733492",
+    "end": "742656"
+  },
+  {
+    "text": "excited how well this works in our context. All we need to do is have two counters,\none for the current number of current",
+    "start": "742656",
+    "end": "751399"
+  },
+  {
+    "text": "insight request entries, and a second \none to track the limit, and whenever we",
+    "start": "751400",
+    "end": "756679"
+  },
+  {
+    "text": "receive a response, we either \nadd a constant factor to the limit,",
+    "start": "756679",
+    "end": "761878"
+  },
+  {
+    "text": "or cut the limit in half. And that's it. So to give an example, let's assume \nwe are sending batch requests and we",
+    "start": "761878",
+    "end": "767890"
+  },
+  {
+    "text": "send a batch request and we \nstart with a batch of 10 messages.",
+    "start": "767890",
+    "end": "772897"
+  },
+  {
+    "text": "If the batch request is successful, we \nmay send 20 requests the next time, and then increase up to 30, and 40, \nand maybe 50, and if then a failure",
+    "start": "773693",
+    "end": "782943"
+  },
+  {
+    "text": "happens, we cut that in half back to 25\nand then the cycle starts over again so",
+    "start": "782943",
+    "end": "788919"
+  },
+  {
+    "text": "we go from 25, to 35, and so on. So we are basically oscillating around the \nactual throughput limit for the specific endpoint.",
+    "start": "788919",
+    "end": "799181"
+  },
+  {
+    "text": "Again, this is like a very simple, but \nvery effective mechanism, and there are also fantastic theoretical results.",
+    "start": "799740",
+    "end": "805964"
+  },
+  {
+    "text": "First of all, there's no coordination \nrequired between these subtasks, which means it doesn't make any \ndifference whether we have one",
+    "start": "806682",
+    "end": "814402"
+  },
+  {
+    "text": "application with 3 subtasks, or we have \nthree completely independent applications.",
+    "start": "814402",
+    "end": "820625"
+  },
+  {
+    "text": "So that's great. That solves the problem of \nnot knowing how many producers there are.",
+    "start": "821139",
+    "end": "826415"
+  },
+  {
+    "text": "And if you look at the AMID strategy, there are \nresults that show that if every producer uses",
+    "start": "826839",
+    "end": "835187"
+  },
+  {
+    "text": "AMID, each individual subtask converges to an \nequal throughput usage, so every subtask gets  ",
+    "start": "835187",
+    "end": "843174"
+  },
+  {
+    "text": "a fair share so we are accelerating the \nendpoint, but we are not overloading it, and every producer or every subtask gets \nroughly the same throughput which is great.",
+    "start": "843174",
+    "end": "853740"
+  },
+  {
+    "text": "Now that we have covered how the \nAsync Sink helps you to implement",
+    "start": "855119",
+    "end": "860736"
+  },
+  {
+    "text": "your sinks and cover these 5 aspects\nof sinks, let's take a look at what it actually",
+    "start": "860736",
+    "end": "867032"
+  },
+  {
+    "text": "takes to implement a sink by yourself. We're going to walk through what it \ntakes to actually build a sink based",
+    "start": "867032",
+    "end": "873902"
+  },
+  {
+    "text": "on the Async Sink framework. The code produced in this demo is \nbased on a sample that can be found",
+    "start": "873902",
+    "end": "879431"
+  },
+  {
+    "text": "in the AWS Samples GitHub repository, \nand for additional resources, you could refer to the Amazon Kinesis Data \nFirehose, and Kinesis data streams",
+    "start": "879431",
+    "end": "888569"
+  },
+  {
+    "text": "sink that reside in the Apache \nFlink codebase on GitHub.",
+    "start": "888569",
+    "end": "892241"
+  },
+  {
+    "text": "So we're going to be using IntelliJ \nto walk through this coding sample.  The scenario is going to based around\norders, so consider an ecommerce platform",
+    "start": "895462",
+    "end": "905667"
+  },
+  {
+    "text": "that groups products by categories, for\nexample outdoor, sport, music, and we",
+    "start": "905667",
+    "end": "910683"
+  },
+  {
+    "text": "want to generate metrics and store \nthese in an external system that tell us how many orders have been \nplaced for a given timestamp.",
+    "start": "910683",
+    "end": "919232"
+  },
+  {
+    "text": "So there are two projects in the project\nexplorer, one of them is the Flink application project, and the other \none is the connector project.",
+    "start": "920460",
+    "end": "927805"
+  },
+  {
+    "text": "These have been split in this way to \nshow you the code that needs to be produced by the end user of the sink, \nso the Flink application that is using",
+    "start": "928150",
+    "end": "936865"
+  },
+  {
+    "text": "the sink, and what code is needed to be \nproduced by the maintainers of the sink.",
+    "start": "936865",
+    "end": "941700"
+  },
+  {
+    "text": "So if we open up the Java code, go into\nthe model folder, we can find OrderStats",
+    "start": "944520",
+    "end": "950000"
+  },
+  {
+    "text": "object class, which represents the aggregate \norders that we were just talking about. ",
+    "start": "950000",
+    "end": "954840"
+  },
+  {
+    "text": "So an Order Statistic has a count, \ntimestamp, and category, so the number of orders for a given \ntimestamp, and for a given category.",
+    "start": "956340",
+    "end": "964409"
+  },
+  {
+    "text": "So we're not really too fast for this demo \nwhere this data comes from, but we can assume there's some upstream \nsystem that generates us these metrics.",
+    "start": "964648",
+    "end": "972480"
+  },
+  {
+    "text": "For the purposes of this demo, we’re\ngoing to be using Lombok so it will generate our getters, builders, etc. and\nreduce the boilerplate for this demo. ",
+    "start": "973860",
+    "end": "981960"
+  },
+  {
+    "text": "In the source package we can see \nthere's two data generators, we have a SawTooth and a Sine wave data generator.",
+    "start": "983640",
+    "end": "989912"
+  },
+  {
+    "text": "These will generate a batch two hours \nworth of data, and then one record",
+    "start": "989913",
+    "end": "995428"
+  },
+  {
+    "text": "every second to simulate data for the demo. So let's get coding.",
+    "start": "995428",
+    "end": "1001514"
+  },
+  {
+    "text": "So this is the main method for our Flink \napp, and we're going to start off by   creating some source functions.",
+    "start": "1005420",
+    "end": "1012008"
+  },
+  {
+    "text": "So we're going to create an outdoor \ndata generator, to generate a sine wave for the outdoor category.",
+    "start": "1012645",
+    "end": "1019000"
+  },
+  {
+    "text": "And also we're going to use the Saw Tooth \none to create data for the music category. ",
+    "start": "1027010",
+    "end": "1033725"
+  },
+  {
+    "text": "We will add these to our job \ngraph, and return the stream. ",
+    "start": "1041939",
+    "end": "1046025"
+  },
+  {
+    "text": "So outdoor stream. And for the music one, addSource",
+    "start": "1048140",
+    "end": "1054059"
+  },
+  {
+    "text": "To show you the data, we're going \nto union these two streams together. So union outdoor with music, and \nwe'll simply print this for now",
+    "start": "1059960",
+    "end": "1069500"
+  },
+  {
+    "text": "and we can see the shape of the data. So let's run this.",
+    "start": "1069500",
+    "end": "1075325"
+  },
+  {
+    "text": "There we go! So, as I mentioned, we've \ngenerated a batch of two hours’ worth of data, and then every one \nsecond we get a new record.",
+    "start": "1078560",
+    "end": "1086543"
+  },
+  {
+    "text": "And we can see the count, timestamp, \nand category be that outdoors or music, and over time the count should \nform a sine wave or a sawtooth wave,",
+    "start": "1086914",
+    "end": "1094771"
+  },
+  {
+    "text": "depending on the generator used. Okay so this is our Flink application that's \nprocessing the data, now let's create a sink",
+    "start": "1094771",
+    "end": "1103334"
+  },
+  {
+    "text": "that allows us to persist \nthis data somewhere. For the purposes of this demo, we're going \nto be creating a CloudWatch metrics sink.",
+    "start": "1103334",
+    "end": "1110934"
+  },
+  {
+    "text": "So CloudWatch metrics is an \nAWS service which allows us to persist and visualize metrics.",
+    "start": "1111359",
+    "end": "1117224"
+  },
+  {
+    "text": "Within the console, we can visualize \nmetrics using the graphs and various widgets, so it's quite powerful \nespecially for a demo.",
+    "start": "1117675",
+    "end": "1124591"
+  },
+  {
+    "text": "So I'm going to reopen \nthe explorer over here, and then I'm going to jump \nover to the connector project.",
+    "start": "1125399",
+    "end": "1132425"
+  },
+  {
+    "text": "So there are four main classes in here,   three of them which constitute the building \nblocks that we've previously discussed. ",
+    "start": "1136100",
+    "end": "1142100"
+  },
+  {
+    "text": "So we're going to start with \nthe ElementConverter.  An ElementConverter implements \nElementConverter, and the job of this",
+    "start": "1142498",
+    "end": "1151419"
+  },
+  {
+    "text": "is to convert a record into a type that \ncan be persisted to our end destination.",
+    "start": "1151419",
+    "end": "1157157"
+  },
+  {
+    "text": "So for CloudWatch metrics, and the \nAWS SDK in particular, we are interested in this MetricDatum object type.",
+    "start": "1157422",
+    "end": "1164373"
+  },
+  {
+    "text": "So the MetricDatum has a metricName, \na value, a timeStamp, and dimensions. ",
+    "start": "1165513",
+    "end": "1173612"
+  },
+  {
+    "text": "So there are various other fields, \nbut for this we are just going to be supporting this set of fields.",
+    "start": "1174680",
+    "end": "1179731"
+  },
+  {
+    "text": "So we need to convert the \nrecord into a MetricDatum. So for this demo, the metric name, \nwe're going to have that static.",
+    "start": "1180212",
+    "end": "1189354"
+  },
+  {
+    "text": "So when you create a sink you can \nonly create metrics with one name, but you could change this if you'd like.",
+    "start": "1189354",
+    "end": "1194510"
+  },
+  {
+    "text": "So we'll simply pass the metric name through. And then the final three fields, we \nwill actually extract from the record. ",
+    "start": "1195837",
+    "end": "1204199"
+  },
+  {
+    "text": "To do this we're going to use a \nfunctional interface called Function which accepts type T, and for \nthe value, it will extract a double.",
+    "start": "1204800",
+    "end": "1213772"
+  },
+  {
+    "text": "And we'll call it valueExtractor. This way we can simply \ncall the .apply method on ",
+    "start": "1214223",
+    "end": "1220721"
+  },
+  {
+    "text": "the record which will extract \nthat value from the record. So we'll follow the same \npattern for the timestamp",
+    "start": "1220721",
+    "end": "1228935"
+  },
+  {
+    "text": "and for the list of dimensions.",
+    "start": "1231512",
+    "end": "1234528"
+  },
+  {
+    "text": "And we'll call them dimensionExtractor \nand timestampExtractor.",
+    "start": "1236989",
+    "end": "1242203"
+  },
+  {
+    "text": "And we'll follow the same pattern down here. ",
+    "start": "1243716",
+    "end": "1247053"
+  },
+  {
+    "text": "So this is our element converter complete. And just to reiterate, this will take a \nrecord, and it will generate a MetricDatum. ",
+    "start": "1249260",
+    "end": "1256580"
+  },
+  {
+    "text": "The next class we're going \nto look at is the SinkWriter. ",
+    "start": "1257720",
+    "end": "1260360"
+  },
+  {
+    "text": "So this class is responsible for writing \nthe metrics to the end destination. ",
+    "start": "1264680",
+    "end": "1269480"
+  },
+  {
+    "text": "So I've already coded \nsome of the boilerplate here.  The first thing is we're \npassing in a namespace.",
+    "start": "1270020",
+    "end": "1276248"
+  },
+  {
+    "text": "So within CloudWatch a namespace \nis a logical container for your metrics and we can see this being used with\n AWS Services to separate metrics",
+    "start": "1276568",
+    "end": "1284650"
+  },
+  {
+    "text": "between, for example, Lambda, EC2, etc. As a user of CloudWatch, we can \ncreate our own arbitrary namespaces.",
+    "start": "1284650",
+    "end": "1293092"
+  },
+  {
+    "text": "We also have a HttpClient and a CloudWatch \nclient, which is used to write to CloudWatch.",
+    "start": "1293900",
+    "end": "1300260"
+  },
+  {
+    "text": "There are some configuration options here \nwhich configure the underlying behavior of the AsyncSink, and we'll go through \nthese in a bit more detail later on. ",
+    "start": "1303140",
+    "end": "1311519"
+  },
+  {
+    "text": "And then finally, we're instantiating \nthe clients and setting everything up ready to write to CloudWatch.",
+    "start": "1312440",
+    "end": "1318906"
+  },
+  {
+    "text": "So the actual bits we're going to \nimplement are down below here. So we have submitRequestEntries.",
+    "start": "1319782",
+    "end": "1324801"
+  },
+  {
+    "text": "This method is responsible for writing the metrics \nto CloudWatch and handling any failures.",
+    "start": "1324801",
+    "end": "1330992"
+  },
+  {
+    "text": "So let's get started with this. We need to create a PutMetricDataRequest, \nwhich again has a builder.",
+    "start": "1331760",
+    "end": "1339191"
+  },
+  {
+    "text": "This request accepts two parameters: \nnamespace, which we've previously discussed and passed in, and \na series of metrics to send.",
+    "start": "1340133",
+    "end": "1348379"
+  },
+  {
+    "text": "So the Async Sink framework \nhas passed us a batch of metrics to send and this is the batch we're \ngoing to persist in CloudWatch.",
+    "start": "1349100",
+    "end": "1355880"
+  },
+  {
+    "text": "So we've created our request, now we \nneed to actually pass it to the client.  So AsyncClient, putMetricData, request,\nand this is going to return us a future. ",
+    "start": "1357740",
+    "end": "1371259"
+  },
+  {
+    "text": "Because this is an asynchronous \nclient it returns a future,  and then we're asynchronously \ngoing to handle the result of this.",
+    "start": "1372086",
+    "end": "1378498"
+  },
+  {
+    "text": "So future, whenComplete, we will \nreceive a response and an error.",
+    "start": "1379340",
+    "end": "1384679"
+  },
+  {
+    "text": "So this is where we need to look at the\nresponse and the error and decide did this data get persisted successfully?",
+    "start": "1385580",
+    "end": "1392736"
+  },
+  {
+    "text": "Were there any problems? Do we \nneed to retry any of the elements? So for CloudWatch, it's an all or nothing.",
+    "start": "1392736",
+    "end": "1399639"
+  },
+  {
+    "text": "Either all of the metrics are going \nto be successful, or none of them are going to be successful. So this simplifies this method for us.",
+    "start": "1400000",
+    "end": "1407485"
+  },
+  {
+    "text": "So we're simply going to say if error \nis null, that means there was no problem",
+    "start": "1408680",
+    "end": "1413720"
+  },
+  {
+    "text": "and all of the metrics \nwere persisted successfully. So we will use this failedMetrics \ncallback, which is where we pass",
+    "start": "1413720",
+    "end": "1422086"
+  },
+  {
+    "text": "back to the framework which records \nwe need to retry, and we're going to pass in an empty list because \nthere's nothing to retry.",
+    "start": "1422086",
+    "end": "1428190"
+  },
+  {
+    "text": "So this is the happy path to complete. So else, there was a problem, we're \ngoing to re-enqueue all of the metrics",
+    "start": "1428748",
+    "end": "1437432"
+  },
+  {
+    "text": "to send, and then the Async Sink \nframework will retry that request.",
+    "start": "1437432",
+    "end": "1442018"
+  },
+  {
+    "text": "And it's worth noting at this point you\ncould implement any custom error handling, so you may want to \ninterpret the exceptions and apply",
+    "start": "1443213",
+    "end": "1450139"
+  },
+  {
+    "text": "different behaviors \ndepending on the error code. In this case, we're going to retry.",
+    "start": "1450139",
+    "end": "1454803"
+  },
+  {
+    "text": "If you did want to fail the job, there's a \nmethod you could call, getFatalExceptionsCons",
+    "start": "1455360",
+    "end": "1461754"
+  },
+  {
+    "text": "and then you can pass the exception \nin and it will fail the job for you, and then Flink will behave depending \non your failure of the strategy.",
+    "start": "1461754",
+    "end": "1469416"
+  },
+  {
+    "text": "But for the purposes of this demo, \nwe're simply going to finish with this. But we will add some logs so \nwe can see what's happening.",
+    "start": "1470212",
+    "end": "1477320"
+  },
+  {
+    "text": "So I'm going to say sending batch \nof metrics, and pass in the size. ",
+    "start": "1478533",
+    "end": "1483979"
+  },
+  {
+    "text": "And then when we're \nsuccessful, \"Sent batch\".  And if we fail, we're going to \nsay \"Failed to send batch\". ",
+    "start": "1491060",
+    "end": "1497865"
+  },
+  {
+    "text": "I'm also going to print out the error.  Okay, so that is the sending \npart of our sink complete. ",
+    "start": "1498813",
+    "end": "1505940"
+  },
+  {
+    "text": "The next thing we need to \nimplement here is getSizeInBytes. We'll talk about it later, but there are \nvarious configuration options you can",
+    "start": "1507153",
+    "end": "1513850"
+  },
+  {
+    "text": "set up for the AsyncSink, one of them \nis to set up the maximum batch size, and in order to work out the maximum batch \nsize, we need to know the size of each record.",
+    "start": "1513850",
+    "end": "1523093"
+  },
+  {
+    "text": "So this particular method is a lot easier\nto implement for something like Kinesis or Kafka where we were given a byte array.",
+    "start": "1523491",
+    "end": "1529750"
+  },
+  {
+    "text": "In this case we need to extract the number \nof bytes that are going to be persisted.",
+    "start": "1530148",
+    "end": "1535138"
+  },
+  {
+    "text": "So we have set the metric name which \nis a string, so we can get the length of",
+    "start": "1538880",
+    "end": "1544244"
+  },
+  {
+    "text": "that and times two to get the bytes. Then we also have a timestamp, which \nis a Long, so we'll give it 8 bytes for that.",
+    "start": "1544244",
+    "end": "1554745"
+  },
+  {
+    "text": "And we also have a value, which is \nalso a long, so we'll give it 8 bytes.  And then we also have a list of dimensions.",
+    "start": "1555380",
+    "end": "1563829"
+  },
+  {
+    "text": "We're going to use a stream and \nsum up the length of the value and the name, so mapToLong.",
+    "start": "1564466",
+    "end": "1569711"
+  },
+  {
+    "text": "We're gonna take the dimension, \nname, length, and the dimension value and multiply them both by 2.",
+    "start": "1570667",
+    "end": "1578319"
+  },
+  {
+    "text": "And then sum. So this will give us the number of bytes\n that we have generated in our MetricDatum,",
+    "start": "1579620",
+    "end": "1587136"
+  },
+  {
+    "text": "but depending on the underlying \nimplementation this may vary a bit,",
+    "start": "1587136",
+    "end": "1592496"
+  },
+  {
+    "text": "for example we may be compressing \nthese records, we may not be using the",
+    "start": "1592496",
+    "end": "1597505"
+  },
+  {
+    "text": "full 2 bytes for each character, we may\nbe using ASCII or some other encoding, so we would have to doublecheck \nto make sure this actually lines up",
+    "start": "1597505",
+    "end": "1605436"
+  },
+  {
+    "text": "with our client and the way it sends it. And then finally there is a close method \nhere at the bottom which is used to close",
+    "start": "1605436",
+    "end": "1613147"
+  },
+  {
+    "text": "the clients at the end of when \nthe job is finished or cancelled.",
+    "start": "1613147",
+    "end": "1618080"
+  },
+  {
+    "text": "So just to summarize, this was the \nimplementation of the CloudWatch metric sink writer, which is implementing \nor extending the AsyncSink writer.",
+    "start": "1618740",
+    "end": "1627132"
+  },
+  {
+    "text": "It accepts our generic type T which \nis our record type, and it persists MetricDatums to the end destination.",
+    "start": "1627504",
+    "end": "1635000"
+  },
+  {
+    "text": "So taking a look at our project \nstructure again, the third piece to the puzzle is the state serializer.",
+    "start": "1635960",
+    "end": "1641240"
+  },
+  {
+    "text": "So we're not going to implement \nthis, but I'll briefly show you it.  It simply needs to serialize our \nMetricDatum to a data output stream.",
+    "start": "1644600",
+    "end": "1653539"
+  },
+  {
+    "text": "And another method to deserialize a \ndata input stream to a MetricDatum.",
+    "start": "1654560",
+    "end": "1660346"
+  },
+  {
+    "text": "And this is used to allow the sink \nto participate in checkpointing and",
+    "start": "1660718",
+    "end": "1666236"
+  },
+  {
+    "text": "to serialize a state and \nthen deserialize a state. And then finally we have a class \nhere to wrap everything up together. ",
+    "start": "1666236",
+    "end": "1674058"
+  },
+  {
+    "text": "So this one is already implemented, I just need \nto uncomment some code to make it build. ",
+    "start": "1676526",
+    "end": "1681446"
+  },
+  {
+    "text": "So we're constructing the element \nconverter, we're passing down some default or some dummy configurations for the \nbase sink which I'll discuss in a bit later on.",
+    "start": "1683840",
+    "end": "1693615"
+  },
+  {
+    "text": "And then we have some creator methods \nto actually instantiate our sink writer and",
+    "start": "1693987",
+    "end": "1699867"
+  },
+  {
+    "text": "our state serializer, and then \nsome helper interfaces here.",
+    "start": "1699867",
+    "end": "1704450"
+  },
+  {
+    "text": "But this class is mostly boilerplate.  So now we've completed the sink, we're \nready to wire it into our sample app. ",
+    "start": "1705133",
+    "end": "1714679"
+  },
+  {
+    "text": "So we're going to go back to this app \nwhich we've just created, and we will   build a CloudWatch metric sink.",
+    "start": "1717020",
+    "end": "1724552"
+  },
+  {
+    "text": "So again we have a builder. So we will pass in a namespace, so I'm \ngoing to use the namespace aws-demo. ",
+    "start": "1726632",
+    "end": "1734360"
+  },
+  {
+    "text": "We need a metricName, so we'll \nhave count because the metric is the number of, the count of \norders for a given category.",
+    "start": "1735320",
+    "end": "1742185"
+  },
+  {
+    "text": "The valueExtractor is the callback \nused by the element converter, so the valueExtractor will take \nan OrderStats and it will return the",
+    "start": "1743194",
+    "end": "1752530"
+  },
+  {
+    "text": "value of our metric which is the count \nwhich comes out of the OrderStats. The timestampExtractor looks very \nsimilar, and the dimensionExtractor.",
+    "start": "1752530",
+    "end": "1762072"
+  },
+  {
+    "text": "So we can return an arbitrary number of \ndimensions here, but for the sake of this  demo we're going to add a simple one which is \na single dimension which is the category, ",
+    "start": "1762980",
+    "end": "1772619"
+  },
+  {
+    "text": "So we'll create a new dimension \nwhich has a name of category and  ",
+    "start": "1773540",
+    "end": "1778888"
+  },
+  {
+    "text": "a value of orderStats.getCategory.",
+    "start": "1778888",
+    "end": "1782278"
+  },
+  {
+    "text": "And then finally we will build this.",
+    "start": "1784694",
+    "end": "1787819"
+  },
+  {
+    "text": "So because we're using an AWS client here, we \nalso need to pass in some client properties.",
+    "start": "1794780",
+    "end": "1800765"
+  },
+  {
+    "text": "So within the AWS base connector \npackage there are some standard keys you can use to configure the \nunderlying clients, and this is a",
+    "start": "1801615",
+    "end": "1810431"
+  },
+  {
+    "text": "property map which will be \nused to pass these through. We're simply going to configure \nthe region, so the class is the",
+    "start": "1810431",
+    "end": "1818283"
+  },
+  {
+    "text": "AWSConfigConstants which has \na region, and for this demo we're",
+    "start": "1818283",
+    "end": "1823286"
+  },
+  {
+    "text": "going to be using US_EAST_1. And then we'll pass that into the sink, \nthis is something else that I pre-configured.",
+    "start": "1823286",
+    "end": "1830756"
+  },
+  {
+    "text": "So now the sink is ready to go. Instead of printing, we're going to \nsinkTo the cloudWatchMetricsSink.",
+    "start": "1831712",
+    "end": "1839310"
+  },
+  {
+    "text": "And I'm going to restart the app.",
+    "start": "1850408",
+    "end": "1852361"
+  },
+  {
+    "text": "So the application is now running. We can see we're sending batches of 1000 \nmetrics, sent batches of 1000 metrics.",
+    "start": "1855441",
+    "end": "1862143"
+  },
+  {
+    "text": "If we jump over to CloudWatch in the \nAWS console, we can see our custom namespaces, and we have the aws-demo \nnamespace which is what we just created.",
+    "start": "1864294",
+    "end": "1874442"
+  },
+  {
+    "text": "Under that we have a metric with one dimension, \nwhich is the category which we just created.",
+    "start": "1875345",
+    "end": "1881064"
+  },
+  {
+    "text": "And then underneath that we have \nour two categories music and outdoor, and our metric name of count.",
+    "start": "1883108",
+    "end": "1888499"
+  },
+  {
+    "text": "So let's add these both to the graph.",
+    "start": "1888818",
+    "end": "1890603"
+  },
+  {
+    "text": "We can see here our saw tooth \nand our sine wave patterns. We've generated two hours’ worth of \ndata, and now every one second we're",
+    "start": "1899038",
+    "end": "1907450"
+  },
+  {
+    "text": "going to be pushing new metrics out. So we can see the number of metrics \nstarted off at 1000s because that was",
+    "start": "1907450",
+    "end": "1916162"
+  },
+  {
+    "text": "our maximum batch size, and now \nwe've caught up, we're down to 20 metrics, roughly, at a time.",
+    "start": "1916162",
+    "end": "1922952"
+  },
+  {
+    "text": "So the sink is working as expected. So now I'm going to demonstrate the \nAIMD Rate limiting strategy in action.",
+    "start": "1923828",
+    "end": "1930682"
+  },
+  {
+    "text": "In order to simulate some failures, \nI'm going to increase the maximum batch size above the limit \nallowed by CloudWatch.",
+    "start": "1931850",
+    "end": "1938854"
+  },
+  {
+    "text": "So CloudWatch allows a \nmaximum batch size of 1000, and we're going to increase that to 1800.",
+    "start": "1939544",
+    "end": "1945026"
+  },
+  {
+    "text": "This means we will try to send a \nbatch size that's too big, it will fail, and we'll start seeing \nthe rate limiting kick in.",
+    "start": "1945796",
+    "end": "1951396"
+  },
+  {
+    "text": "Jump back to the sample project. We can see all of this in \naction just by viewing the logs.",
+    "start": "1952378",
+    "end": "1960158"
+  },
+  {
+    "text": "So if I run the application, then we'll \nstart to see some logs coming out.",
+    "start": "1960532",
+    "end": "1964124"
+  },
+  {
+    "text": "So we can see here the Sink \nis sending a batch of 1800. It failed due to the MetricData \nhaving a size greater than 1000.",
+    "start": "1967284",
+    "end": "1975820"
+  },
+  {
+    "text": "So since this failed, the AIMD Rate \nlimiter will kick in, and the next batch we will send is going to be 900.",
+    "start": "1976589",
+    "end": "1983777"
+  },
+  {
+    "text": "This will slowly ramp up, so 910, \n20, 30, 40, until again we see a failure.",
+    "start": "1984334",
+    "end": "1990322"
+  },
+  {
+    "text": "So we go above 1000, it fails to \nsend 1010, which fails and then",
+    "start": "1991092",
+    "end": "1997550"
+  },
+  {
+    "text": "we halve that back down to 505. And then again the same thing \nhappens it will start ramping up.",
+    "start": "1997550",
+    "end": "2004006"
+  },
+  {
+    "text": "So this demonstrates the \nAIMD Rate limiter in action.",
+    "start": "2004457",
+    "end": "2008354"
+  },
+  {
+    "text": "Okay so now the demo is complete, \nwe're going to look through the internals of the AsyncSink, and \nhow the configuration can be used",
+    "start": "2010372",
+    "end": "2017816"
+  },
+  {
+    "text": "to tweak different aspects of \nthe actual underlying framework.",
+    "start": "2017816",
+    "end": "2022266"
+  },
+  {
+    "text": "So we have this internal buffer, and we also have batches. Within a batch we have records and this \nconfiguration option, maxRecordSizeInBytes,",
+    "start": "2023700",
+    "end": "2032885"
+  },
+  {
+    "text": "is used to configure the maximum size or \nthe maximum number of bytes per record.",
+    "start": "2032885",
+    "end": "2037960"
+  },
+  {
+    "text": "If you try to enqueue a record with \na number of bytes greater than this value, it will be rejected and fail the job.",
+    "start": "2038438",
+    "end": "2045955"
+  },
+  {
+    "text": "Then we have two configurations \nwhich are used to configure the size of the batches, maximum batch size \nand maximum batch size in bytes.",
+    "start": "2047097",
+    "end": "2054341"
+  },
+  {
+    "text": "So these are going to be, much like the\nlast configuration option, these will be dependent on the end destination \nand what batches it can handle.",
+    "start": "2054713",
+    "end": "2062708"
+  },
+  {
+    "text": "We have maxInFlightRequests, which \nis essentially how many requests in",
+    "start": "2063451",
+    "end": "2068486"
+  },
+  {
+    "text": "parallel can be made to the destination. We have maxBufferedRequestEntries.",
+    "start": "2068487",
+    "end": "2074306"
+  },
+  {
+    "text": "So this is used to configure\nthe size of the internal buffer, and it's also used to control backpressure.",
+    "start": "2074572",
+    "end": "2080000"
+  },
+  {
+    "text": "So if the maximum number of buffered \nrequest entries is exceeded, then the sink will stop accepting new records and \nit will apply back-pressure to the job graph.",
+    "start": "2080504",
+    "end": "2090118"
+  },
+  {
+    "text": "And then finally maxTimeInBufferMs there \nare three eviction strategies or flush strategies.",
+    "start": "2091446",
+    "end": "2098879"
+  },
+  {
+    "text": "One of them is based off the number \nof bytes, one of them is based off the number of records, and the final \none is the max time in the buffer.",
+    "start": "2099278",
+    "end": "2106968"
+  },
+  {
+    "text": "So if a record sits in a buffer for too \nlong, we can then flush that, which is useful for low throughput situations.",
+    "start": "2107207",
+    "end": "2114735"
+  },
+  {
+    "text": "We've discussed the Async Sink \nframework and the benefits of it, but as always there are some \nlimitations, so let's go through these.",
+    "start": "2116063",
+    "end": "2123192"
+  },
+  {
+    "text": "The first one is the At least once \nsemantics, we don't support out of the box Exactly once semantics, the \nSink doesn't implement the two-phase",
+    "start": "2124068",
+    "end": "2132972"
+  },
+  {
+    "text": "commit interfaces, however you could \nimplement them yourself on top of the Async Sink by implementing \nthe appropriate interfaces.",
+    "start": "2132972",
+    "end": "2140759"
+  },
+  {
+    "text": "Due to the multi-threaded nature of \nthe sync, ordering is not guaranteed because we allow multiple requests to \nbe performed in parallel, and we also",
+    "start": "2141131",
+    "end": "2149532"
+  },
+  {
+    "text": "allow partial failures so for example \nif within a batch of 10 records, the middle 2 failed, we would then re-\nenqueue them and they would arrive",
+    "start": "2149532",
+    "end": "2157115"
+  },
+  {
+    "text": "out of order even within that batch. You could simulate ordering if you \nreduced the maximum inflight requests",
+    "start": "2157115",
+    "end": "2165415"
+  },
+  {
+    "text": "to 1 and you didn't support partial \nfailures, but at that point you're really not leveraging the benefits of the \nAsync Sink and it might not be the",
+    "start": "2165415",
+    "end": "2172386"
+  },
+  {
+    "text": "best framework for your sink. And finally thread pool management, \nyou may have noticed in the demo that",
+    "start": "2172386",
+    "end": "2178281"
+  },
+  {
+    "text": "we were using the AWS SDK \nAsync’s clients which have their own underlying thread pool.",
+    "start": "2178281",
+    "end": "2184709"
+  },
+  {
+    "text": "And we were also closing that down. So the Async Sink does not manage \nany thread pools for you, as a sink",
+    "start": "2184709",
+    "end": "2191122"
+  },
+  {
+    "text": "developer you're in control of that, and \nif your destination does not supply an Async compliant with thread pools, you\nwould have to manage them yourself.",
+    "start": "2191122",
+    "end": "2199173"
+  },
+  {
+    "text": "So what's next? For Flink 116 we have FLIP 242 \nwhich is configurable rate limiting.",
+    "start": "2200925",
+    "end": "2207583"
+  },
+  {
+    "text": "This allows the sink developer \nto control what, how much, and",
+    "start": "2207875",
+    "end": "2212962"
+  },
+  {
+    "text": "when the rate limiting is applied. So before this we would default to \nthe AIMD, and it was not configurable.",
+    "start": "2212962",
+    "end": "2221013"
+  },
+  {
+    "text": "So as of Flink 116, when you build \na sink, you will be able to specify whichever rate limiting strategy \nyou wish that fits your needs.",
+    "start": "2221305",
+    "end": "2229209"
+  },
+  {
+    "text": "We are working on FLIP-252, \nAmazon DynamoDB Sink.",
+    "start": "2229846",
+    "end": "2234420"
+  },
+  {
+    "text": "So we're working on this in a review \nand test capacity, this is actually being contributed by the community, and we're \nhelping out with their review and testing.",
+    "start": "2235429",
+    "end": "2244101"
+  },
+  {
+    "text": "Finally, wider community adoption. There are a range of other sinks \nthat have already started using the",
+    "start": "2245322",
+    "end": "2250941"
+  },
+  {
+    "text": "Async Sink framework, we've seen \nFlips, so for example Redis, we've",
+    "start": "2250941",
+    "end": "2256210"
+  },
+  {
+    "text": "seen Jiras for Cassandra, \nand other destinations. So it's exciting to see the framework \nbeing leveraged, and also just discussing",
+    "start": "2256210",
+    "end": "2265912"
+  },
+  {
+    "text": "with people at Flink forward it's already\n being used internally, so that's great to see.",
+    "start": "2265912",
+    "end": "2270000"
+  },
+  {
+    "text": "So we set out to make it easier to build sinks\n and we've arrived here with the Async Sink.",
+    "start": "2271035",
+    "end": "2276291"
+  },
+  {
+    "text": "We've really enjoyed working with the \nOpen source community and it's great to see people using the framework \nand great to hear everyone's feedback.",
+    "start": "2276716",
+    "end": "2283614"
+  },
+  {
+    "text": "Thank you.",
+    "start": "2284464",
+    "end": "2285628"
+  }
+]

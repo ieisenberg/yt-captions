@@ -1,0 +1,1976 @@
+[
+  {
+    "start": "0",
+    "end": "95000"
+  },
+  {
+    "text": "I'm gonna give a talk called kubernetes at Comcast really just sharing our experiences getting kubernetes deployed",
+    "start": "0",
+    "end": "7760"
+  },
+  {
+    "text": "into production what it took to get that done and and kind of how we how we",
+    "start": "7760",
+    "end": "13920"
+  },
+  {
+    "text": "managed to to do it I'm gonna try to breeze through this because there's a lot of detail in here and not a lot of",
+    "start": "13920",
+    "end": "19500"
+  },
+  {
+    "text": "time and I'd like to leave some time for questions at the end so I'll start with with a quick introduction to to myself",
+    "start": "19500",
+    "end": "26150"
+  },
+  {
+    "text": "I'm a software engineer my role is really to empower other teams to launch their products and services on time I've",
+    "start": "26150",
+    "end": "32850"
+  },
+  {
+    "text": "been doing that with Comcast for about four years as a part of the VIPRE group and what VIPRE does this IP video",
+    "start": "32850",
+    "end": "39770"
+  },
+  {
+    "text": "infrastructure basically taking the the",
+    "start": "39770",
+    "end": "45170"
+  },
+  {
+    "text": "applications and like the the core products that make up Comcast's service offerings linear video video on-demand",
+    "start": "45170",
+    "end": "52980"
+  },
+  {
+    "text": "and cloud DVR and implementing those in software and serving them as IP video services and an IP video is is",
+    "start": "52980",
+    "end": "60120"
+  },
+  {
+    "text": "fundamentally different from the way that cable is traditionally delivered in the sense that it's a unicast",
+    "start": "60120",
+    "end": "66720"
+  },
+  {
+    "text": "transmission where we only deliver the video that a subscriber is watching as",
+    "start": "66720",
+    "end": "72750"
+  },
+  {
+    "text": "opposed to delivering every channel to every subscriber all the time so there's there's a lot of buy-in for this project and there's there's kind of a lot of",
+    "start": "72750",
+    "end": "80159"
+  },
+  {
+    "text": "opportunity in the event that that we succeed so I'm really gonna be telling the story about how we used kubernetes",
+    "start": "80159",
+    "end": "86750"
+  },
+  {
+    "text": "to develop and deploy a cloud DVR",
+    "start": "86750",
+    "end": "92299"
+  },
+  {
+    "text": "project so cloud DVR some of you guys",
+    "start": "92299",
+    "end": "98250"
+  },
+  {
+    "start": "95000",
+    "end": "154000"
+  },
+  {
+    "text": "might have a DVR cloud DVR is DVR in the cloud we have a legal requirement to",
+    "start": "98250",
+    "end": "105720"
+  },
+  {
+    "text": "store a unique copy for every user so when when one user hits record another hits record we have to we have to store",
+    "start": "105720",
+    "end": "112409"
+  },
+  {
+    "text": "two copies of that video and that actually gives us some really interesting technical requirements we",
+    "start": "112409",
+    "end": "117689"
+  },
+  {
+    "text": "have to commit seven terabits a second of data to disk and when we're playing stuff back we have to play each",
+    "start": "117689",
+    "end": "123450"
+  },
+  {
+    "text": "subscribers copy back unique copies so we don't get to leverage any of the",
+    "start": "123450",
+    "end": "128670"
+  },
+  {
+    "text": "caching strategies like a CDN to deliver content to our subscribers for this because",
+    "start": "128670",
+    "end": "133770"
+  },
+  {
+    "text": "each subscriber has to get a unique set or slice of a bit so we we egress 300 gigabits a second our database that",
+    "start": "133770",
+    "end": "141900"
+  },
+  {
+    "text": "backs this service needs to support a million writes a second and two and to make this especially crazy",
+    "start": "141900",
+    "end": "148230"
+  },
+  {
+    "text": "we had to deploy this to you know where we're deploying this to ten plus data centers so we created an architecture",
+    "start": "148230",
+    "end": "156750"
+  },
+  {
+    "start": "154000",
+    "end": "195000"
+  },
+  {
+    "text": "that we thought would work and when we sold it this architecture is the most",
+    "start": "156750",
+    "end": "162720"
+  },
+  {
+    "text": "complex architecture that VIPRE had deployed at the time or designed at the time we have six components in here that",
+    "start": "162720",
+    "end": "168960"
+  },
+  {
+    "text": "would be deployed into kubernetes plus some back-office components and five external dependencies things that",
+    "start": "168960",
+    "end": "174810"
+  },
+  {
+    "text": "interact with the system in order to to store content store metadata and and and",
+    "start": "174810",
+    "end": "181850"
+  },
+  {
+    "text": "provide provide content to the cloud give you our system this being our most",
+    "start": "181850",
+    "end": "189270"
+  },
+  {
+    "text": "complex architecture we knew we were going to have a hard time with it and",
+    "start": "189270",
+    "end": "194900"
+  },
+  {
+    "text": "the reason for that is that our existing deployment processes once so great we had a virtualization layer we had we had",
+    "start": "194900",
+    "end": "203880"
+  },
+  {
+    "start": "195000",
+    "end": "293000"
+  },
+  {
+    "text": "vmware in production that under cloud vmware in all of these different data",
+    "start": "203880",
+    "end": "210180"
+  },
+  {
+    "text": "centers was what data centers was experiencing configuration drift so everywhere that we had deployed it we were running a different version as",
+    "start": "210180",
+    "end": "216240"
+  },
+  {
+    "text": "our cloud team would would roll a new point release of vmware out by the time they made it through the entire",
+    "start": "216240",
+    "end": "222270"
+  },
+  {
+    "text": "infrastructure we were already several releases behind existing projects",
+    "start": "222270",
+    "end": "227580"
+  },
+  {
+    "text": "required a full time release management because our our applications have this",
+    "start": "227580",
+    "end": "233670"
+  },
+  {
+    "text": "matrix of compatibility all of these different services what's running in one one market versus another and and how do",
+    "start": "233670",
+    "end": "240000"
+  },
+  {
+    "text": "we manage that in adding more components and creating a more complex architecture means that that you know we would have",
+    "start": "240000",
+    "end": "246840"
+  },
+  {
+    "text": "to double down on that existing people process and and and really like invest in in and something that we didn't want",
+    "start": "246840",
+    "end": "254489"
+  },
+  {
+    "text": "to invest in provisioning new VMS getting new capacity was a ticket based system and we didn't have a way to",
+    "start": "254489",
+    "end": "261570"
+  },
+  {
+    "text": "transition from the lab to production developers would would provision a VM in the lab and they",
+    "start": "261570",
+    "end": "267840"
+  },
+  {
+    "text": "would just run new versions of their application on it and and when it came",
+    "start": "267840",
+    "end": "273210"
+  },
+  {
+    "text": "time to go to production we just throw the app over the wall here you go figure it out we got the documentation",
+    "start": "273210",
+    "end": "279540"
+  },
+  {
+    "text": "on the wiki good luck so so all of this kind of left us with a with low confidence you know the existing",
+    "start": "279540",
+    "end": "286200"
+  },
+  {
+    "text": "infrastructure the existing deployment model wasn't successful so so we had to study to find a new a new model these",
+    "start": "286200",
+    "end": "294330"
+  },
+  {
+    "start": "293000",
+    "end": "349000"
+  },
+  {
+    "text": "are our high-level requirements and and these are you know pretty simple I think manageable deployments lab production",
+    "start": "294330",
+    "end": "301440"
+  },
+  {
+    "text": "parity managed risk you know these are real products with real customers when we roll this stuff out it's not like",
+    "start": "301440",
+    "end": "308100"
+  },
+  {
+    "text": "we're we're a scrappy startup who is slowly ramping up the customers and can solve these problems at over time like",
+    "start": "308100",
+    "end": "315990"
+  },
+  {
+    "text": "we have to we roll these things out to a large existing customer base and and because of that it has to work and it",
+    "start": "315990",
+    "end": "322080"
+  },
+  {
+    "text": "has to work right away and ultimately one one faster release cycles so we kind",
+    "start": "322080",
+    "end": "327360"
+  },
+  {
+    "text": "of had two options here we could scale up our existing people processes or we could find something new and and there",
+    "start": "327360",
+    "end": "334919"
+  },
+  {
+    "text": "were a lot of new options at the time this was about a year ago year and a half ago you know we had meso stalker swarm some",
+    "start": "334919",
+    "end": "341040"
+  },
+  {
+    "text": "sort of Frankenstein's monster of different hasha Cort utilities hum all like tied together into something that",
+    "start": "341040",
+    "end": "347940"
+  },
+  {
+    "text": "works and then there was kubernetes which had just hit one dot o and kubernetes gives us containers and",
+    "start": "347940",
+    "end": "355320"
+  },
+  {
+    "start": "349000",
+    "end": "417000"
+  },
+  {
+    "text": "encapsulation and kubernetes provides containers at scale really like",
+    "start": "355320",
+    "end": "361710"
+  },
+  {
+    "text": "declarative deployments i can define my deployment I can run it on on kuba local or mini cube something that actually",
+    "start": "361710",
+    "end": "367919"
+  },
+  {
+    "text": "didn't exist when we started this and then I can use that same deployment when I go to production or into the lab",
+    "start": "367919",
+    "end": "374340"
+  },
+  {
+    "text": "things like service discovery are a big deal for us because running multiple sets of load balancers means that any",
+    "start": "374340",
+    "end": "380700"
+  },
+  {
+    "text": "troubleshooting exercise you know requires an investigation into is that the load balancer or the component or",
+    "start": "380700",
+    "end": "386520"
+  },
+  {
+    "text": "the next load balancer in the chain and then you look looking towards the future kubernetes is very promising with",
+    "start": "386520",
+    "end": "393419"
+  },
+  {
+    "text": "respect to providing multi-tenancy and if we used it correctly it wouldn't",
+    "start": "393419",
+    "end": "398760"
+  },
+  {
+    "text": "necessarily lock sin and that was a big selling point as we didn't have to architect and design or applications in containers with",
+    "start": "398760",
+    "end": "404870"
+  },
+  {
+    "text": "kubernetes specifically in mind we could design a 12 factor app dump it in a",
+    "start": "404870",
+    "end": "409909"
+  },
+  {
+    "text": "container run it in kubernetes and if it worked that's great and if it didn't we",
+    "start": "409909",
+    "end": "415400"
+  },
+  {
+    "text": "could we could scramble we could go back to the drawing board and figure something out so we had to do a lot of",
+    "start": "415400",
+    "end": "427340"
+  },
+  {
+    "text": "things and and and these are them there",
+    "start": "427340",
+    "end": "433129"
+  },
+  {
+    "text": "because we knew that we were deploying 2 to 10 or more facilities you know there's shortcuts that that we",
+    "start": "433129",
+    "end": "439550"
+  },
+  {
+    "text": "couldn't permit ourselves to take we had to get that provisioning tier for our under cloud for kubernetes and all of",
+    "start": "439550",
+    "end": "445819"
+  },
+  {
+    "text": "its associated services right we had to answer the question of load balancing very very early on and we had to solve",
+    "start": "445819",
+    "end": "452750"
+  },
+  {
+    "text": "monitoring and log R again these things needed to be centralized because you know as we deploy to all of these",
+    "start": "452750",
+    "end": "458330"
+  },
+  {
+    "text": "different facilities we don't want to have to hire a team to operate every single deployment we wanted to be able",
+    "start": "458330",
+    "end": "464569"
+  },
+  {
+    "text": "to to have one team that understood the applications use one single pane of",
+    "start": "464569",
+    "end": "470029"
+  },
+  {
+    "text": "glass to actually manage and operate these things things like docker needed",
+    "start": "470029",
+    "end": "476360"
+  },
+  {
+    "text": "to work it's actually been a challenge for us and I'll talk about that a little",
+    "start": "476360",
+    "end": "481430"
+  },
+  {
+    "text": "bit later and one of the toughest things that we've had to do is is just educate users about best practices and really",
+    "start": "481430",
+    "end": "487219"
+  },
+  {
+    "text": "establish like a dialogue with the teams that want to use kubernetes and want to use all of these brand new and advanced",
+    "start": "487219",
+    "end": "492830"
+  },
+  {
+    "text": "features about what works in our infrastructure and and what doesn't and",
+    "start": "492830",
+    "end": "497900"
+  },
+  {
+    "text": "and why and then we'll be changing our minds about that so with respect to our",
+    "start": "497900",
+    "end": "502969"
+  },
+  {
+    "start": "500000",
+    "end": "565000"
+  },
+  {
+    "text": "deployment automation and getting kubernetes out there you know kubernetes is great because it solves configuration",
+    "start": "502969",
+    "end": "508639"
+  },
+  {
+    "text": "drift for applications I declare what I'm gonna have and and it just runs in kubernetes and I can reuse that",
+    "start": "508639",
+    "end": "514789"
+  },
+  {
+    "text": "declaration in in different kubernetes clusters but we had to solve that for kubernetes itself and getting that",
+    "start": "514789",
+    "end": "520990"
+  },
+  {
+    "text": "deployed and and we kind of had some principles with respect to that we wanted it to be a repeatable process and",
+    "start": "520990",
+    "end": "527420"
+  },
+  {
+    "text": "error free and instrumented and it needs to be something that's distributed because we're deploying it to many many",
+    "start": "527420",
+    "end": "533520"
+  },
+  {
+    "text": "locations and when I say instrumented I'm gonna roll back and touch on that",
+    "start": "533520",
+    "end": "539040"
+  },
+  {
+    "text": "what I really mean is that as we're as we're rolling out changes to our infrastructure we need to be able to to",
+    "start": "539040",
+    "end": "544890"
+  },
+  {
+    "text": "stop and check along the way and ensure that as a result of rolling out these changes we're not not introducing new",
+    "start": "544890",
+    "end": "552930"
+  },
+  {
+    "text": "problems we're not inadvertently taking down our cluster which is actually something that we've seen with with",
+    "start": "552930",
+    "end": "558270"
+  },
+  {
+    "text": "config management like puppet where you where you you roll out a change and it kind of happens all at once and now",
+    "start": "558270",
+    "end": "563760"
+  },
+  {
+    "text": "you're in a lot of trouble so you know",
+    "start": "563760",
+    "end": "569190"
+  },
+  {
+    "start": "565000",
+    "end": "713000"
+  },
+  {
+    "text": "we had some goals what you wanted to get to be our source of truth and and we",
+    "start": "569190",
+    "end": "574560"
+  },
+  {
+    "text": "wanted we really wanted for our deployments and our upgrades to follow the same process so so know like you",
+    "start": "574560",
+    "end": "582570"
+  },
+  {
+    "text": "know yum install or yum update type of thing happening we wanted to use the exact same process for deploying a net",
+    "start": "582570",
+    "end": "590190"
+  },
+  {
+    "text": "new server as we were using for upgrading an existing server keeping in mind that we were deploying this on two",
+    "start": "590190",
+    "end": "596220"
+  },
+  {
+    "text": "on two bare metal machines and our own data centers now we also needed to support other applications things that",
+    "start": "596220",
+    "end": "601950"
+  },
+  {
+    "text": "exist outside of the context of kubernetes entirely because we're deploying a much larger application that",
+    "start": "601950",
+    "end": "608130"
+  },
+  {
+    "text": "entails storage object storage databases things like that and we kind of wanted",
+    "start": "608130",
+    "end": "613650"
+  },
+  {
+    "text": "to think about well how do we how do we manage this change over time as well you",
+    "start": "613650",
+    "end": "619050"
+  },
+  {
+    "text": "know we have we have a lot of facilities when these applications that we deploy are going to exist for a long time you",
+    "start": "619050",
+    "end": "626430"
+  },
+  {
+    "text": "know it's it's pretty easy to get a demo running and say yeah this is good enough let's roll out to production but but",
+    "start": "626430",
+    "end": "633330"
+  },
+  {
+    "text": "figuring out how to how to manage that long term and ensure that a year and a half from now we're not three point",
+    "start": "633330",
+    "end": "639270"
+  },
+  {
+    "text": "releases behind the the main line of kubernetes is important to us so you",
+    "start": "639270",
+    "end": "647730"
+  },
+  {
+    "text": "know we we had this goal let's get an immutable immutable infrastructure let's let's declare what we have let's use",
+    "start": "647730",
+    "end": "654600"
+  },
+  {
+    "text": "these technologies like DHCP and I pixie that let us just reboot a server to",
+    "start": "654600",
+    "end": "659790"
+  },
+  {
+    "text": "rebuild a site and then we can roll a set of reboots across our kubernetes cluster",
+    "start": "659790",
+    "end": "666110"
+  },
+  {
+    "text": "this the system and then on top of that we have fleet that's in the mix and fleet runs all of the kubernetes",
+    "start": "666830",
+    "end": "675300"
+  },
+  {
+    "text": "services on top of that we designed this system specifically with respect to",
+    "start": "675300",
+    "end": "680550"
+  },
+  {
+    "text": "fleet and DHCP and I pixie pieces to restrict possible variations of software",
+    "start": "680550",
+    "end": "686420"
+  },
+  {
+    "text": "rather than then enable any sort of arbitrary individual application",
+    "start": "686420",
+    "end": "692490"
+  },
+  {
+    "text": "component like kubernetes or our log aggregator or a monitoring system to be updated independently and deployed to a",
+    "start": "692490",
+    "end": "698250"
+  },
+  {
+    "text": "site you know we treated the entire set of configurations for our under cloud as a as a deployable entity and we roll",
+    "start": "698250",
+    "end": "706260"
+  },
+  {
+    "text": "that out to the lab and then our other labs and then into production and this is something that reduces errors so",
+    "start": "706260",
+    "end": "714350"
+  },
+  {
+    "start": "713000",
+    "end": "790000"
+  },
+  {
+    "text": "outcomes for what we did here the systems that we that we built have successfully deployed a thousand",
+    "start": "714350",
+    "end": "720720"
+  },
+  {
+    "text": "physical servers in production today capacity augmentation for kubernetes is",
+    "start": "720720",
+    "end": "726120"
+  },
+  {
+    "text": "fully automated in fact when we were first trialing the system our deployment",
+    "start": "726120",
+    "end": "731370"
+  },
+  {
+    "text": "engineering teams racked and stacked fifteen additional servers and they",
+    "start": "731370",
+    "end": "736560"
+  },
+  {
+    "text": "didn't tell us about it and we found them in the kubernetes api when we were wondering why why we had additional",
+    "start": "736560",
+    "end": "742830"
+  },
+  {
+    "text": "capacity which was a good gap the issues",
+    "start": "742830",
+    "end": "748770"
+  },
+  {
+    "text": "with this model its its fleet is is not a great way to deploy software it's an",
+    "start": "748770",
+    "end": "755100"
+  },
+  {
+    "text": "all-or-nothing approach we can't just roll a change through that cluster and or through through a cluster we have to",
+    "start": "755100",
+    "end": "760980"
+  },
+  {
+    "text": "turn a service off and turn a new one back on and vendor products are challenging to integrate when you buy a",
+    "start": "760980",
+    "end": "766800"
+  },
+  {
+    "text": "service or a system from a vendor it's tough to to provide them there's a",
+    "start": "766800",
+    "end": "773310"
+  },
+  {
+    "text": "requirement that all we have to you need to allow us to instrument an update of your software through through a variety",
+    "start": "773310",
+    "end": "780120"
+  },
+  {
+    "text": "of through a series of reboots vendors don't really like that and we're working",
+    "start": "780120",
+    "end": "786540"
+  },
+  {
+    "text": "on a version two of this that we intend to open-source so another challenge that",
+    "start": "786540",
+    "end": "792060"
+  },
+  {
+    "start": "790000",
+    "end": "830000"
+  },
+  {
+    "text": "we had to overcome was load balancing I just came from a pretty good talk on ingress ingress didn't exists",
+    "start": "792060",
+    "end": "799339"
+  },
+  {
+    "text": "and we had some pretty egregious bandwidth requirements we couldn't just",
+    "start": "799339",
+    "end": "804740"
+  },
+  {
+    "text": "deploy a couple of VMs with a che proxy and be done with it we needed something that would scale across the entire",
+    "start": "804740",
+    "end": "809839"
+  },
+  {
+    "text": "cluster and let us omit a lot of data our requirements are really scale",
+    "start": "809839",
+    "end": "817100"
+  },
+  {
+    "text": "reliability no VMs and having some sort of failure semantics in the event that",
+    "start": "817100",
+    "end": "822589"
+  },
+  {
+    "text": "that a master fails over if you guys haven't heard of IP vs or you used it it's a really great really great tool to",
+    "start": "822589",
+    "end": "829220"
+  },
+  {
+    "text": "have in your in your toolbox briefly how it works you have a high PBS master this",
+    "start": "829220",
+    "end": "836180"
+  },
+  {
+    "start": "830000",
+    "end": "863000"
+  },
+  {
+    "text": "is a component that that publishes a VIP on its on its public interface to the",
+    "start": "836180",
+    "end": "842389"
+  },
+  {
+    "text": "router all of your inbound traffic comes to this master it routes traffic to the back end which has an anycast address",
+    "start": "842389",
+    "end": "848240"
+  },
+  {
+    "text": "and that anycast address and that back-end replies directly to the client so you end up with a ingress bandwidth",
+    "start": "848240",
+    "end": "855019"
+  },
+  {
+    "text": "equal to whatever the throughput is on that master node and egress equal to whatever the sum is of all of the",
+    "start": "855019",
+    "end": "861019"
+  },
+  {
+    "text": "throughput on all of your back ends to make this work in kubernetes we couldn't",
+    "start": "861019",
+    "end": "866689"
+  },
+  {
+    "start": "863000",
+    "end": "946000"
+  },
+  {
+    "text": "just deploy a PBS we wanted to make it really easy for developers to add a new",
+    "start": "866689",
+    "end": "872959"
+  },
+  {
+    "text": "load balancer and to do that quickly and to know what we had configured in ipbs so we created a tool that uses the",
+    "start": "872959",
+    "end": "880750"
+  },
+  {
+    "text": "config maps to store a representation of of what VIPs were assigned to what what",
+    "start": "880750",
+    "end": "888589"
+  },
+  {
+    "text": "IP vs services so our master would get the config map it would get the nodes and it would configure IP vs ATM with",
+    "start": "888589",
+    "end": "896449"
+  },
+  {
+    "text": "all of the rules that were necessary in order to load balanced traffic to all of those different backends and then on the",
+    "start": "896449",
+    "end": "901879"
+  },
+  {
+    "text": "backend side we would get the config map which would have a VIP and a port and a service in the namespace and it would",
+    "start": "901879",
+    "end": "907670"
+  },
+  {
+    "text": "take that data and it would use it to write IP tables rules in the in the NAT",
+    "start": "907670",
+    "end": "912769"
+  },
+  {
+    "text": "table that would route packets that were inbound on a VIP to a specific kubernetes service so a very high",
+    "start": "912769",
+    "end": "919399"
+  },
+  {
+    "text": "performance low-level load balancer that that actually works and and it works",
+    "start": "919399",
+    "end": "927050"
+  },
+  {
+    "text": "pretty well changes are applied within five seconds if we make a change to this config map and we built",
+    "start": "927050",
+    "end": "932510"
+  },
+  {
+    "text": "you eye that lets developers just provision any of it that they want or any load balancer that they want just at",
+    "start": "932510",
+    "end": "938900"
+  },
+  {
+    "text": "the click of a mouse which is a real serious change from from where it used",
+    "start": "938900",
+    "end": "944540"
+  },
+  {
+    "text": "to be the the drawbacks of this are are",
+    "start": "944540",
+    "end": "950120"
+  },
+  {
+    "start": "946000",
+    "end": "988000"
+  },
+  {
+    "text": "that it is limited to a single broadcast domain that that model of replying",
+    "start": "950120",
+    "end": "956560"
+  },
+  {
+    "text": "directly to a client requires that all of the nodes are layer 2 adjacent so so",
+    "start": "956560",
+    "end": "963500"
+  },
+  {
+    "text": "currently we're limited to like 255 nodes but we have we have plans to just",
+    "start": "963500",
+    "end": "969020"
+  },
+  {
+    "text": "scale that out even further potentially by using bgp or by using some of the the networking technologies that are",
+    "start": "969020",
+    "end": "975260"
+  },
+  {
+    "text": "featured out in the in the hallway so",
+    "start": "975260",
+    "end": "980320"
+  },
+  {
+    "text": "like the last thing that we really needed to do to make kubernetes useful for our developers was logs and",
+    "start": "980320",
+    "end": "988430"
+  },
+  {
+    "start": "988000",
+    "end": "1040000"
+  },
+  {
+    "text": "monitoring and and this kind of ties into into like bringing a DevOps model",
+    "start": "988430",
+    "end": "994910"
+  },
+  {
+    "text": "into an enterprise team to the dev team that was developing this cloud DVR application I didn't have operational",
+    "start": "994910",
+    "end": "1001720"
+  },
+  {
+    "text": "experience you know we've deployed some applications but we throw those apps over the wall and that was it and this",
+    "start": "1001720",
+    "end": "1007690"
+  },
+  {
+    "text": "development team was very new within Comcast VIPRE no team had ever instrumented an app with any sort of",
+    "start": "1007690",
+    "end": "1015220"
+  },
+  {
+    "text": "metrics no stats Dino Prometheus no nothing yeah we did emit logs and then",
+    "start": "1015220",
+    "end": "1021370"
+  },
+  {
+    "text": "the ops team would use those logs to to perform aggregations and guess at what",
+    "start": "1021370",
+    "end": "1027130"
+  },
+  {
+    "text": "the at what the applications were actually doing and log aggregation was was very foreign to developers and and",
+    "start": "1027130",
+    "end": "1034720"
+  },
+  {
+    "text": "we kind of had this this principle when we when we came into this which is that",
+    "start": "1034720",
+    "end": "1040890"
+  },
+  {
+    "start": "1040000",
+    "end": "1085000"
+  },
+  {
+    "text": "when it comes to designing something that developers are gonna consume that you want people to use you need to",
+    "start": "1041040",
+    "end": "1048250"
+  },
+  {
+    "text": "provide immediate value you need to demand a minimum amount of instrumentation all of the the weird",
+    "start": "1048250",
+    "end": "1055030"
+  },
+  {
+    "text": "monitoring and logging efforts that have that have that I've seen kind of come through over the years have have failed",
+    "start": "1055030",
+    "end": "1062320"
+  },
+  {
+    "text": "because they they impose these onerous restrictions on develop so any any system that we introduce in",
+    "start": "1062320",
+    "end": "1070510"
+  },
+  {
+    "text": "order to get developers to use kubernetes and use these systems you know we really had to deliver immediate",
+    "start": "1070510",
+    "end": "1075820"
+  },
+  {
+    "text": "value because new tooling requires a cultural shift and a lot of indoctrination which you might not have",
+    "start": "1075820",
+    "end": "1082030"
+  },
+  {
+    "text": "time to do if you're just struggling to get kubernetes running so some other",
+    "start": "1082030",
+    "end": "1087490"
+  },
+  {
+    "start": "1085000",
+    "end": "1105000"
+  },
+  {
+    "text": "high-level goals you know we wanted to reuse existing implementations and we",
+    "start": "1087490",
+    "end": "1093310"
+  },
+  {
+    "text": "needed we needed to to support you know deployment to multiple data centers and",
+    "start": "1093310",
+    "end": "1098320"
+  },
+  {
+    "text": "to get that single pane of glass like if we have 20 places that we need to look for monitoring data we need 20 people to",
+    "start": "1098320",
+    "end": "1104350"
+  },
+  {
+    "text": "operate that product so so two approaches for logs we reused existing",
+    "start": "1104350",
+    "end": "1111420"
+  },
+  {
+    "start": "1105000",
+    "end": "1170000"
+  },
+  {
+    "text": "services so our our containers running in docker on a kubernetes node that's",
+    "start": "1111420",
+    "end": "1117250"
+  },
+  {
+    "text": "what this big box is they write their logs to standard out using Dockers JSON",
+    "start": "1117250",
+    "end": "1122950"
+  },
+  {
+    "text": "log driver we initially tried turning that off we wanted to use journal control or one of like the direct",
+    "start": "1122950",
+    "end": "1129340"
+  },
+  {
+    "text": "logging drivers but when we did that we broke curb controls ability to get logs from the kubernetes api which developers",
+    "start": "1129340",
+    "end": "1137290"
+  },
+  {
+    "text": "were relying on and and breaking that functionality was was less important or",
+    "start": "1137290",
+    "end": "1144310"
+  },
+  {
+    "text": "rather more important than having like a sane deployment model for your for your",
+    "start": "1144310",
+    "end": "1149410"
+  },
+  {
+    "text": "logging so so we write our JSON logs to disk and then we have a log shipper which was hecka and that was something",
+    "start": "1149410",
+    "end": "1155380"
+  },
+  {
+    "text": "else and that thing reads all the logs off a disk reads our journal control",
+    "start": "1155380",
+    "end": "1160750"
+  },
+  {
+    "text": "logs reads all of this stuff and ships it off to a very expensive logging service that some of you may have used",
+    "start": "1160750",
+    "end": "1168990"
+  },
+  {
+    "start": "1170000",
+    "end": "1188000"
+  },
+  {
+    "text": "right and and like one of the keys to this is that we're not asking developers to to ship their logs to a TCP port it's",
+    "start": "1170940",
+    "end": "1178510"
+  },
+  {
+    "text": "write your logs to standard out write your container 12 factor and we'll figure the rest out for you and I think",
+    "start": "1178510",
+    "end": "1184660"
+  },
+  {
+    "text": "that works that model works really well at getting people to adopt something new like kubernetes now monitoring is a",
+    "start": "1184660",
+    "end": "1191260"
+  },
+  {
+    "start": "1188000",
+    "end": "1232000"
+  },
+  {
+    "text": "little bit different for monitoring we replaced the existing solution because there's the existing solution doesn't",
+    "start": "1191260",
+    "end": "1196780"
+  },
+  {
+    "text": "have anything in place like what we're using to monitor now Comcast doesn't have a good mechanism",
+    "start": "1196780",
+    "end": "1202480"
+  },
+  {
+    "text": "for monitoring containers you can do buddy containers which which I strongly",
+    "start": "1202480",
+    "end": "1207490"
+  },
+  {
+    "text": "disagree with you can run multiple processes in a container but but you",
+    "start": "1207490",
+    "end": "1212980"
+  },
+  {
+    "text": "know ideally we want a system that doesn't require instrumentation so we found this monitoring tool that just",
+    "start": "1212980",
+    "end": "1220630"
+  },
+  {
+    "text": "like does some clever stuff with system calls and ships them off to a single",
+    "start": "1220630",
+    "end": "1226240"
+  },
+  {
+    "text": "pane of glass and that that actually worked really great for us worth",
+    "start": "1226240",
+    "end": "1233710"
+  },
+  {
+    "start": "1232000",
+    "end": "1281000"
+  },
+  {
+    "text": "mentioning too that when we started the project prometheus I don't think existed in a in a usable form and I'm still a",
+    "start": "1233710",
+    "end": "1239680"
+  },
+  {
+    "text": "little bit skeptical about that so you know was was this a success kind of our",
+    "start": "1239680",
+    "end": "1245770"
+  },
+  {
+    "text": "teams were meeting hundreds of gigabytes of logs per day per site like we we gave them log aggregation we gave it to them",
+    "start": "1245770",
+    "end": "1252310"
+  },
+  {
+    "text": "in the labs and then they're like oh this stuff's free let's ship all of our logs let's let's emit twice as many logs",
+    "start": "1252310",
+    "end": "1259180"
+  },
+  {
+    "text": "as we need and they did it but largely a success you know one one kind of lesson",
+    "start": "1259180",
+    "end": "1266260"
+  },
+  {
+    "text": "that we've learned here as we've gone into production with this app is that there isn't really a replacement for instrumenting an app to emit that",
+    "start": "1266260",
+    "end": "1274030"
+  },
+  {
+    "text": "internally measured telemetry what is my application doing as measured by my application and emitting that directly",
+    "start": "1274030",
+    "end": "1281580"
+  },
+  {
+    "start": "1281000",
+    "end": "1404000"
+  },
+  {
+    "text": "so let's talk about some problems that we ran into we ran into problems with everything kubernetes kubernetes is",
+    "start": "1281580",
+    "end": "1288550"
+  },
+  {
+    "text": "great but we did run into into three kind of serious issues very early on we",
+    "start": "1288550",
+    "end": "1295600"
+  },
+  {
+    "text": "had the user space load balancer in in place and that was the default service",
+    "start": "1295600",
+    "end": "1301450"
+  },
+  {
+    "text": "load balance of recruitment at ease our very first load test knocked that over it was a it was a single process load",
+    "start": "1301450",
+    "end": "1307750"
+  },
+  {
+    "text": "balancer and you couldn't send more than five gigabits a second of traffic into a single service fortunately the iptables",
+    "start": "1307750",
+    "end": "1314440"
+  },
+  {
+    "text": "load balancer is exceptionally performant so that was that was a freebie pod density limitations one of",
+    "start": "1314440",
+    "end": "1323080"
+  },
+  {
+    "text": "the the kind of gotchas and this is more of a documentation gotcha which the opening keynote touched on is that",
+    "start": "1323080",
+    "end": "1329140"
+  },
+  {
+    "text": "kubernetes supports only 110 pods which is actually quite low when you",
+    "start": "1329140",
+    "end": "1335940"
+  },
+  {
+    "text": "when you when you consider how you might want to use containers like well why not just run one container per per like",
+    "start": "1335940",
+    "end": "1343409"
+  },
+  {
+    "text": "logical unit like one pertain er one container per channel which is like a great model to to to use to deploy an",
+    "start": "1343409",
+    "end": "1351059"
+  },
+  {
+    "text": "application that deals with video and deals with channels where you might have 1500 channels in a market but that means that we have to scale our clusters out",
+    "start": "1351059",
+    "end": "1356849"
+  },
+  {
+    "text": "and that that extra 15 nodes that I that I talked about earlier like we bought",
+    "start": "1356849",
+    "end": "1362639"
+  },
+  {
+    "text": "those because of pod density limitations the last thing that we that we run into",
+    "start": "1362639",
+    "end": "1368070"
+  },
+  {
+    "text": "or we ran into but had to do with nap hairpin mode so a pod if it sends a",
+    "start": "1368070",
+    "end": "1375269"
+  },
+  {
+    "text": "request to its own its own host on a node port to another pod another",
+    "start": "1375269",
+    "end": "1380309"
+  },
+  {
+    "text": "container that's running on that node the packet would just get lost it would hang and there's actually a",
+    "start": "1380309",
+    "end": "1385349"
+  },
+  {
+    "text": "configuration parameter in the coop proxy that needs to be set in order to support that sort of traffic he said",
+    "start": "1385349",
+    "end": "1391769"
+  },
+  {
+    "text": "well why would you do that I don't know I don't have a node on that but but it's",
+    "start": "1391769",
+    "end": "1397559"
+  },
+  {
+    "text": "one of the things that that you you might do if you're sending sending requests into a into a load balancer",
+    "start": "1397559",
+    "end": "1404329"
+  },
+  {
+    "start": "1404000",
+    "end": "1608000"
+  },
+  {
+    "text": "other problems we ran into pertaining to docker most of the issues that we've run",
+    "start": "1404329",
+    "end": "1410249"
+  },
+  {
+    "text": "into our are issues of a docker and it's something that we see these are all I think all three of these or race",
+    "start": "1410249",
+    "end": "1416249"
+  },
+  {
+    "text": "conditions yeah we see race conditions all the time when you start using containers at scale when you're when",
+    "start": "1416249",
+    "end": "1425429"
+  },
+  {
+    "text": "you're you're churning pods very quickly on every single node in your cluster you're gonna get some strange errors so",
+    "start": "1425429",
+    "end": "1431879"
+  },
+  {
+    "text": "this first one this this container doesn't exist there's a race condition we're calling docker stop at the same",
+    "start": "1431879",
+    "end": "1437940"
+  },
+  {
+    "text": "time as your container process dies triggers triggers this this weird error",
+    "start": "1437940",
+    "end": "1443219"
+  },
+  {
+    "text": "where docker doesn't think the container exists but it actually does and the only way to fix this oh and kubernetes thinks",
+    "start": "1443219",
+    "end": "1449309"
+  },
+  {
+    "text": "that the pot is just terminating so your pod gets stuck in a terminating state the only way to fix this is to restart",
+    "start": "1449309",
+    "end": "1454379"
+  },
+  {
+    "text": "the docker daemon on the node then this happens when whenever we do a deployment because kubernetes being something that",
+    "start": "1454379",
+    "end": "1462239"
+  },
+  {
+    "text": "will restart our containers if they go down that's a really that's a really powerful like semantics for designing a system",
+    "start": "1462239",
+    "end": "1469680"
+  },
+  {
+    "text": "because if something goes wrong and my container like my pod can just commit suicide and kubernetes will recreate it which our developers did but then every",
+    "start": "1469680",
+    "end": "1477630"
+  },
+  {
+    "text": "time they did a deployment they would hose a kubernetes cluster and we would have to go in and restart docker across",
+    "start": "1477630",
+    "end": "1484110"
+  },
+  {
+    "text": "the board the second issue docker attached hanging containers this was an issue triggered",
+    "start": "1484110",
+    "end": "1492180"
+  },
+  {
+    "text": "by our use of hecka so hecka use docker attached to read the log data coming off a standard out and if hecka couldn't",
+    "start": "1492180",
+    "end": "1498720"
+  },
+  {
+    "text": "keep up or if that process stopped the standard up pipe would fill and the",
+    "start": "1498720",
+    "end": "1504180"
+  },
+  {
+    "text": "program that's running in your container it would hard luck it would basically be",
+    "start": "1504180",
+    "end": "1509490"
+  },
+  {
+    "text": "stuck on a on a system call to write to the standard app file descriptor and you would have no way of determining what",
+    "start": "1509490",
+    "end": "1516540"
+  },
+  {
+    "text": "was happening short of going on to the node and fussing around with p prof so",
+    "start": "1516540",
+    "end": "1523800"
+  },
+  {
+    "text": "that that's an issue that we ended up resolving by removing hacker from the critical path we didn't have time to",
+    "start": "1523800",
+    "end": "1529830"
+  },
+  {
+    "text": "like evaluate and deploy fluent D so we wrote a little 500 line a program that",
+    "start": "1529830",
+    "end": "1536550"
+  },
+  {
+    "text": "that basically gets a list of all of the containers from the docker API and then reads the files directly off a disk and",
+    "start": "1536550",
+    "end": "1543780"
+  },
+  {
+    "text": "that works for now the third piece here is a race condition with the docker bridge essentially this was a bad",
+    "start": "1543780",
+    "end": "1550080"
+  },
+  {
+    "text": "interaction between core OSS network D and docker in that ticket docker says oh",
+    "start": "1550080",
+    "end": "1555540"
+  },
+  {
+    "text": "this is a core OS issue not a bug and there's no defensive programming to",
+    "start": "1555540",
+    "end": "1560730"
+  },
+  {
+    "text": "check to see if the you know is that is that device up this network device up",
+    "start": "1560730",
+    "end": "1567450"
+  },
+  {
+    "text": "before we add it essentially what would happen is you would network te would be creating this V device and then docker",
+    "start": "1567450",
+    "end": "1574080"
+  },
+  {
+    "text": "would add it to the dock or zero bridge but if that V device wasn't created in time that add to the bridge would fail",
+    "start": "1574080",
+    "end": "1580830"
+  },
+  {
+    "text": "and he'd be done so essentially your containers would exist but there'd be no network bridge there'd be no networking",
+    "start": "1580830",
+    "end": "1586020"
+  },
+  {
+    "text": "and kubernetes would think that the containers were healthy so you know you had to had to figure it out yourself",
+    "start": "1586020",
+    "end": "1593640"
+  },
+  {
+    "text": "we we may need that with code written in-house similar to the logging thing it reads a list of contain",
+    "start": "1593640",
+    "end": "1598740"
+  },
+  {
+    "text": "from the docker API and then checks to see you know is this is this containers beef device in the bridge",
+    "start": "1598740",
+    "end": "1605490"
+  },
+  {
+    "text": "so three fun problems there the the other thing and I think this is the last",
+    "start": "1605490",
+    "end": "1611390"
+  },
+  {
+    "start": "1608000",
+    "end": "1625000"
+  },
+  {
+    "text": "the last sort of issue that we ran into was actually a kernel bug so this is a flame graph of where our our CPU time is",
+    "start": "1611390",
+    "end": "1620700"
+  },
+  {
+    "text": "going we had a bug that that essentially locked 40 cores on a node at a hundred",
+    "start": "1620700",
+    "end": "1627929"
+  },
+  {
+    "start": "1625000",
+    "end": "1676000"
+  },
+  {
+    "text": "percent in case soft.i rqd so it's an interrupt request as consuming one other percent of 40 cores on a system whenever",
+    "start": "1627929",
+    "end": "1634770"
+  },
+  {
+    "text": "more than 20 connections were moving traffic this locked our our our network",
+    "start": "1634770",
+    "end": "1641490"
+  },
+  {
+    "text": "throughput to one gigabit a second it turns out that this was related to interrupts being processed on all cores",
+    "start": "1641490",
+    "end": "1647280"
+  },
+  {
+    "text": "instead of on the core that was that was responsible for the packet and we and we got a good workaround for this",
+    "start": "1647280",
+    "end": "1652790"
+  },
+  {
+    "text": "essentially reducing the number of received hues from 40 down to two you",
+    "start": "1652790",
+    "end": "1660270"
+  },
+  {
+    "text": "know whatever I'm ever many physical cores there are on a single socket but that was that was a pretty serious",
+    "start": "1660270",
+    "end": "1665640"
+  },
+  {
+    "text": "crisis and if we hadn't resolved that we we probably would have had to abandon",
+    "start": "1665640",
+    "end": "1671900"
+  },
+  {
+    "text": "kubernetes or maybe just deploy it on to Santo s6 so so did we succeed mostly so",
+    "start": "1671900",
+    "end": "1683270"
+  },
+  {
+    "start": "1681000",
+    "end": "1712000"
+  },
+  {
+    "text": "this architecture which is the the current architecture - a bunch of back office systems is running in 4",
+    "start": "1683270",
+    "end": "1690030"
+  },
+  {
+    "text": "production environments on kubernetes those environments are deployed automatically to bare-metal servers and",
+    "start": "1690030",
+    "end": "1695790"
+  },
+  {
+    "text": "the development team for this cloud recorder is deploying on a weekly",
+    "start": "1695790",
+    "end": "1701400"
+  },
+  {
+    "text": "cadence and that's in contrast to the monthly cadence or the quarterly cadence",
+    "start": "1701400",
+    "end": "1707130"
+  },
+  {
+    "text": "that a lot of the other products that we deploy currently have so how did we",
+    "start": "1707130",
+    "end": "1713400"
+  },
+  {
+    "start": "1712000",
+    "end": "1777000"
+  },
+  {
+    "text": "succeed at this it really came down to you know several things first first I",
+    "start": "1713400",
+    "end": "1719429"
+  },
+  {
+    "text": "think it's the team we we assembled a cross-functional team we co-located that team with the developers so the team",
+    "start": "1719429",
+    "end": "1726450"
+  },
+  {
+    "text": "that was responsible for the kubernetes infrastructure was sitting in the same room as the developers who are writing the",
+    "start": "1726450",
+    "end": "1731690"
+  },
+  {
+    "text": "location that was gonna run on this infrastructure and when the developers ran into problems they could talk to us and and and we could push back if we",
+    "start": "1731690",
+    "end": "1739639"
+  },
+  {
+    "text": "needed to but but really it came down to the team it was it was the right",
+    "start": "1739639",
+    "end": "1744710"
+  },
+  {
+    "text": "combination of of software engineers systems engineers network engineers",
+    "start": "1744710",
+    "end": "1749840"
+  },
+  {
+    "text": "people who understood every single layer of abstraction in the stack so when we did run into these show-stopping issues",
+    "start": "1749840",
+    "end": "1756230"
+  },
+  {
+    "text": "we could as a group investigate troubleshoot them successfully and",
+    "start": "1756230",
+    "end": "1761779"
+  },
+  {
+    "text": "though the solutions that we did develop you know having having all of those various viewpoints really ensured that",
+    "start": "1761779",
+    "end": "1767389"
+  },
+  {
+    "text": "that our solutions were suitable for for a broader audience you know when I when",
+    "start": "1767389",
+    "end": "1773809"
+  },
+  {
+    "text": "I say careful technology choices up here you know we we made a deliberate choice",
+    "start": "1773809",
+    "end": "1779179"
+  },
+  {
+    "start": "1777000",
+    "end": "1864000"
+  },
+  {
+    "text": "we're going to use kubernetes we're going to use docker and we're gonna commit to it so all of those docker bugs",
+    "start": "1779179",
+    "end": "1784850"
+  },
+  {
+    "text": "we could have said you know what let's go off and try a rocket or something else and and see see if they fix our",
+    "start": "1784850",
+    "end": "1790789"
+  },
+  {
+    "text": "problems but but I I really think that committing to a technical decision",
+    "start": "1790789",
+    "end": "1796059"
+  },
+  {
+    "text": "understanding the stack communicating that to to your development teams and",
+    "start": "1796059",
+    "end": "1801470"
+  },
+  {
+    "text": "everybody else that's involved was crucial to for something like this to be",
+    "start": "1801470",
+    "end": "1807169"
+  },
+  {
+    "text": "a success because it's really easy just to to bounce around different technologies that are available and there's so many of them but it's hard to",
+    "start": "1807169",
+    "end": "1814820"
+  },
+  {
+    "text": "make those work for you and make the mortgage scale we also took a very conservative approach to using features",
+    "start": "1814820",
+    "end": "1820279"
+  },
+  {
+    "text": "within the stack even if ingress had exist when we started as a beta feature we wouldn't use it and that's just",
+    "start": "1820279",
+    "end": "1826549"
+  },
+  {
+    "text": "because you know we we we want to be sure that the features that we use every",
+    "start": "1826549",
+    "end": "1832190"
+  },
+  {
+    "text": "additional feature that we use has a cost we have to understand how to use it we have to support it and if there are",
+    "start": "1832190",
+    "end": "1838220"
+  },
+  {
+    "text": "problems in it we have to understand why those problems are occurring and attempt to fix them so the fewer the fewer",
+    "start": "1838220",
+    "end": "1844399"
+  },
+  {
+    "text": "features that we use the better things like Sky DNS and cube to sky we don't use them and the reason for that is that",
+    "start": "1844399",
+    "end": "1851000"
+  },
+  {
+    "text": "that adds an additional layer of abstraction that makes it difficult to understand what our applications are doing and I think that's it for success",
+    "start": "1851000",
+    "end": "1859820"
+  },
+  {
+    "text": "factors we attempted to DevOps and we're still doing that so stumbling blocks problems that we had",
+    "start": "1859820",
+    "end": "1867229"
+  },
+  {
+    "start": "1864000",
+    "end": "1918000"
+  },
+  {
+    "text": "along the way they're mostly technological there they're you know issues with all of the technology and we",
+    "start": "1867229",
+    "end": "1873710"
+  },
+  {
+    "text": "kind of talked about them but they're they're problems that we can solve if we",
+    "start": "1873710",
+    "end": "1878839"
+  },
+  {
+    "text": "if we put our minds to it and really understand what's going on one of the big unsolved problems I think and this",
+    "start": "1878839",
+    "end": "1885440"
+  },
+  {
+    "text": "is something that I see is as more teams within VIPRE attempt to use or want to use the stack is that state management",
+    "start": "1885440",
+    "end": "1892190"
+  },
+  {
+    "text": "is is an issue where do we store data where do we store the volumes that your database is running on do we need to run",
+    "start": "1892190",
+    "end": "1899299"
+  },
+  {
+    "text": "something that's attached or can we run a distributed file system I don't think there are great solutions to that right",
+    "start": "1899299",
+    "end": "1904429"
+  },
+  {
+    "text": "now and especially when you're running on on-premise you know you can't just",
+    "start": "1904429",
+    "end": "1909710"
+  },
+  {
+    "text": "use s3 you need to deploy an object storage system alongside your kubernetes",
+    "start": "1909710",
+    "end": "1915409"
+  },
+  {
+    "text": "and and that's pretty hard so things that we need to do better DevOps is hard",
+    "start": "1915409",
+    "end": "1921259"
+  },
+  {
+    "start": "1918000",
+    "end": "2040000"
+  },
+  {
+    "text": "and it's it's really hard in a in an",
+    "start": "1921259",
+    "end": "1926389"
+  },
+  {
+    "text": "organization like as big as Comcast where you have a lot of these kind of entrenched teams and business processes",
+    "start": "1926389",
+    "end": "1932450"
+  },
+  {
+    "text": "like Conway's laws is this idea right that our or application architectures",
+    "start": "1932450",
+    "end": "1938239"
+  },
+  {
+    "text": "mirror the structure of organization and that's something that actually happens that's something that I've witnessed and",
+    "start": "1938239",
+    "end": "1943700"
+  },
+  {
+    "text": "and the DevOps model and declarative infrastructure and having developers do",
+    "start": "1943700",
+    "end": "1949969"
+  },
+  {
+    "text": "deployments like that kind of flies in the face of that so it's it's really hard to get people to think in those",
+    "start": "1949969",
+    "end": "1955489"
+  },
+  {
+    "text": "mindsets and to and to take on these problems and this responsibility especially when it's things that that",
+    "start": "1955489",
+    "end": "1962749"
+  },
+  {
+    "text": "other teams have historically been responsible for responsibility for infrastructure that I think that's one",
+    "start": "1962749",
+    "end": "1968269"
+  },
+  {
+    "text": "of the toughest things because the the I think the compulsion is when when",
+    "start": "1968269",
+    "end": "1974119"
+  },
+  {
+    "text": "something is going wrong with your application do you look at the layer of abstraction below you and you blame that and at some point the buck has to stop",
+    "start": "1974119",
+    "end": "1980659"
+  },
+  {
+    "text": "and if your team owns the infrastructure that's where the buck stops because you don't have anything else to blame",
+    "start": "1980659",
+    "end": "1985849"
+  },
+  {
+    "text": "cosmic rays no like it's the infrastructures responsibility to to",
+    "start": "1985849",
+    "end": "1991009"
+  },
+  {
+    "text": "clear its name and and push responsibility back up the chain",
+    "start": "1991009",
+    "end": "1996210"
+  },
+  {
+    "text": "when things go wrong I think the last piece on here saying no is is really",
+    "start": "1996210",
+    "end": "2001999"
+  },
+  {
+    "text": "tough you know when when development teams come to me and say hey I need DNS and I need it yesterday",
+    "start": "2001999",
+    "end": "2008029"
+  },
+  {
+    "text": "or else my projects gonna fail a plague of locusts it's gonna come over the land",
+    "start": "2008029",
+    "end": "2013249"
+  },
+  {
+    "text": "and and everything is just going to crash and burn and blah get fired like I have to say no to that because we made",
+    "start": "2013249",
+    "end": "2021979"
+  },
+  {
+    "text": "that decision and and if we if we were an egg on that and and adopt these",
+    "start": "2021979",
+    "end": "2027440"
+  },
+  {
+    "text": "additional features there's a cost to that that cost us supporting it and and if things go wrong you know it cost to",
+    "start": "2027440",
+    "end": "2034580"
+  },
+  {
+    "text": "the whole organization so we're very careful about that and that it's not easy to to do that day in and day out so",
+    "start": "2034580",
+    "end": "2041539"
+  },
+  {
+    "start": "2040000",
+    "end": "2077000"
+  },
+  {
+    "text": "where we're going you know six products within Viper in addition to the one that",
+    "start": "2041539",
+    "end": "2046879"
+  },
+  {
+    "text": "I showed you our our I've either been developed for kubernetes or migrated to it the immutable deployment model is",
+    "start": "2046879",
+    "end": "2053690"
+  },
+  {
+    "text": "something that we're rolling out we're looking to the future towards dealing with multi-tenancy kind of building a",
+    "start": "2053690",
+    "end": "2060319"
+  },
+  {
+    "text": "crappy version of AWS within Comcast doing stuff with ipv6 and hybrid six to",
+    "start": "2060319",
+    "end": "2067250"
+  },
+  {
+    "text": "four clusters and then scaling out beyond 200 nodes that's that's really",
+    "start": "2067250",
+    "end": "2072589"
+  },
+  {
+    "text": "where we're headed with that and and I'm very excited for for our future that's it",
+    "start": "2072589",
+    "end": "2079480"
+  },
+  {
+    "start": "2077000",
+    "end": "2405000"
+  },
+  {
+    "text": "all right any questions",
+    "start": "2083950",
+    "end": "2087609"
+  },
+  {
+    "text": "right so the question was how did he deal with state in the cloud since you",
+    "start": "2099070",
+    "end": "2104200"
+  },
+  {
+    "text": "were running on bare metal so for this pilot application being in cloud DVR and having these these excessive throughput",
+    "start": "2104200",
+    "end": "2111700"
+  },
+  {
+    "text": "requirements you know we managed State externally we're running in in-memory distributed database specific to this",
+    "start": "2111700",
+    "end": "2116740"
+  },
+  {
+    "text": "application and we're running an object storage that gets deployed alongside at most of the 1,000 servers that we've",
+    "start": "2116740",
+    "end": "2123220"
+  },
+  {
+    "text": "deployed are actually pertaining to that",
+    "start": "2123220",
+    "end": "2127920"
+  },
+  {
+    "text": "are we handling PKI for nodes I don't know what PKI is oh we're not so the",
+    "start": "2131430",
+    "end": "2147760"
+  },
+  {
+    "text": "question was what's driving ipv6 as we show a lot of things there's a big push",
+    "start": "2147760",
+    "end": "2153940"
+  },
+  {
+    "text": "within the company to to move towards ipv6 and I think that long term",
+    "start": "2153940",
+    "end": "2159190"
+  },
+  {
+    "text": "communication with external clients set-top boxes and things like that within the Comcast network are intended",
+    "start": "2159190",
+    "end": "2165970"
+  },
+  {
+    "text": "to be ipv6 only there also some pretty cool ypb six technologies like segment",
+    "start": "2165970",
+    "end": "2171010"
+  },
+  {
+    "text": "routing and any cast IPs I don't think I'm getting the name right that that our architecture astronauts",
+    "start": "2171010",
+    "end": "2177790"
+  },
+  {
+    "text": "are and have in mind",
+    "start": "2177790",
+    "end": "2180870"
+  },
+  {
+    "text": "so the question was what's the interface for our developers so our developers are",
+    "start": "2187570",
+    "end": "2193000"
+  },
+  {
+    "text": "using an in-house developed CIC de pipeline that leverages Concours and a",
+    "start": "2193000",
+    "end": "2199900"
+  },
+  {
+    "text": "tool that that we wrote that takes a couple of state files and converts them into all of the kubernetes artifacts",
+    "start": "2199900",
+    "end": "2206500"
+  },
+  {
+    "text": "that we need to deploy them 30 gigabytes",
+    "start": "2206500",
+    "end": "2213550"
+  },
+  {
+    "text": "a second so the question was when we say we can write okay so the question was",
+    "start": "2213550",
+    "end": "2219760"
+  },
+  {
+    "text": "how much traffic can we handle per container per server so so we use Network teaming on the individual nodes so per node it's 20 cubits a second and",
+    "start": "2219760",
+    "end": "2228100"
+  },
+  {
+    "text": "and the bandwidth across the cluster is the width of all of the nodes that we have so if we have 10 nodes at 20",
+    "start": "2228100",
+    "end": "2236470"
+  },
+  {
+    "text": "gigabits a second per node that would be 200 Giga bits a second keeping in mind that that that's assuming many connected",
+    "start": "2236470",
+    "end": "2243490"
+  },
+  {
+    "text": "clients the most that one connected client could pull would be 10 gigabits a second in that model",
+    "start": "2243490",
+    "end": "2251130"
+  },
+  {
+    "text": "the question was what was the churn rate of this environment you know I don't",
+    "start": "2253410",
+    "end": "2258820"
+  },
+  {
+    "text": "know I think it's application dependent we do deployments once a week which turns every single pot in the node or",
+    "start": "2258820",
+    "end": "2265450"
+  },
+  {
+    "text": "every single pot on the cluster but I believe that we also turn on the order",
+    "start": "2265450",
+    "end": "2271060"
+  },
+  {
+    "text": "of 50 to 100 pods per hour just generally the question was what",
+    "start": "2271060",
+    "end": "2280960"
+  },
+  {
+    "text": "specifically in kubernetes made this successful that's that's kind of tough",
+    "start": "2280960",
+    "end": "2286300"
+  },
+  {
+    "text": "to answer but I but I really think it came down to the to the fact that your kubernetes the artifacts the things that",
+    "start": "2286300",
+    "end": "2293890"
+  },
+  {
+    "text": "you push into the API or declarative and stateful so it made it really easy to take a configuration that we tested in",
+    "start": "2293890",
+    "end": "2299710"
+  },
+  {
+    "text": "the lab and deploy that into a production environment things like the",
+    "start": "2299710",
+    "end": "2305020"
+  },
+  {
+    "text": "the service load balancers and the extensibility of the API the accessibility of data from the API where",
+    "start": "2305020",
+    "end": "2310570"
+  },
+  {
+    "text": "we're also pretty crucial",
+    "start": "2310570",
+    "end": "2314010"
+  },
+  {
+    "text": "so I believe the question was it sounds like a successful project have you been successful at influencing the the",
+    "start": "2324090",
+    "end": "2329970"
+  },
+  {
+    "text": "culture in Comcast outside of Viper I think that you know that's that",
+    "start": "2329970",
+    "end": "2335910"
+  },
+  {
+    "text": "remains to be determined but I think that that's the direction that we're heading I've seen a lot of interest from other teams throughout Comcast and in",
+    "start": "2335910",
+    "end": "2341970"
+  },
+  {
+    "text": "what we've been doing and people looking to mirror the success all right I think",
+    "start": "2341970",
+    "end": "2349470"
+  },
+  {
+    "text": "that's it oh one more all right so the question",
+    "start": "2349470",
+    "end": "2354720"
+  },
+  {
+    "text": "was how important is network security between micro-services right now not",
+    "start": "2354720",
+    "end": "2361830"
+  },
+  {
+    "text": "important but I think that as we we look at using kubernetes and a more multi",
+    "start": "2361830",
+    "end": "2367260"
+  },
+  {
+    "text": "tenant model having many applications from any developers running in in these clusters that it becomes much more",
+    "start": "2367260",
+    "end": "2372660"
+  },
+  {
+    "text": "important all right thank you oh one more",
+    "start": "2372660",
+    "end": "2379490"
+  },
+  {
+    "text": "so the question was are we doing resource management to prevent one micro-service taking away resources from another not presently but the resource",
+    "start": "2386420",
+    "end": "2394940"
+  },
+  {
+    "text": "quotas in that you attach to namespace we're gonna factor in heavily in the",
+    "start": "2394940",
+    "end": "2400190"
+  },
+  {
+    "text": "near future all right thank you",
+    "start": "2400190",
+    "end": "2404500"
+  }
+]

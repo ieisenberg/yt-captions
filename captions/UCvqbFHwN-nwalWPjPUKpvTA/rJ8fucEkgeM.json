@@ -1,0 +1,2764 @@
+[
+  {
+    "start": "0",
+    "end": "82000"
+  },
+  {
+    "text": "okay hi everyone today nick and i will be presenting about how we scaled the monitoring system at databricks from prometheus m3",
+    "start": "3840",
+    "end": "11759"
+  },
+  {
+    "text": "so some quick introductions my name is yui i'm a software engineer on the durability team at databricks",
+    "start": "11759",
+    "end": "18640"
+  },
+  {
+    "text": "um yeah so for those of you who haven't heard of databricks we were founded in 2013 by the original",
+    "start": "24240",
+    "end": "30000"
+  },
+  {
+    "text": "creators of apache spark we're a data and ai unified analytics platform as a service",
+    "start": "30000",
+    "end": "35040"
+  },
+  {
+    "text": "and we serve over 5000 customers we're still a startup but we've grown pretty big we have more than 1 500 employees with",
+    "start": "35040",
+    "end": "42160"
+  },
+  {
+    "text": "more than 400 engineers and with our an arr of 400 million dollars",
+    "start": "42160",
+    "end": "48320"
+  },
+  {
+    "text": "or more um we run across three cloud providers in more than 50 regions and we launch",
+    "start": "48320",
+    "end": "54160"
+  },
+  {
+    "text": "millions of vms per day to run data engineering and machine learning workloads processing exabytes of data per day",
+    "start": "54160",
+    "end": "61840"
+  },
+  {
+    "text": "so in this talk we'll cover how we monitor our data bricks before m3 and then i'll talk about how we deploy",
+    "start": "62559",
+    "end": "67920"
+  },
+  {
+    "text": "m3 at databricks including architecture and migration and then nick will cover some of the lessons we learned in this process",
+    "start": "67920",
+    "end": "74320"
+  },
+  {
+    "text": "including operational advice um important things to monitor in an m3 cluster and how we do updates and",
+    "start": "74320",
+    "end": "80000"
+  },
+  {
+    "text": "upgrades so what was monitoring a database like",
+    "start": "80000",
+    "end": "85040"
+  },
+  {
+    "start": "82000",
+    "end": "633000"
+  },
+  {
+    "text": "before m3 first i'm going to provide some context",
+    "start": "85040",
+    "end": "90240"
+  },
+  {
+    "text": "about the role that monitoring plays for databricks engineers we have two main metric sources the first is our internal services that run",
+    "start": "90240",
+    "end": "97040"
+  },
+  {
+    "text": "on kubernetes clusters that we manage in-house and then we have external services running co-located with the vms for",
+    "start": "97040",
+    "end": "103040"
+  },
+  {
+    "text": "customer spark workloads and these run in customer environments we've been running a prometheus-based",
+    "start": "103040",
+    "end": "109040"
+  },
+  {
+    "text": "monitoring system to monitor these targets since 2016 and all service teams rely heavily on the system um service owners write and",
+    "start": "109040",
+    "end": "116320"
+  },
+  {
+    "text": "omit their own metrics from their own services and they use these metrics for dashboarding we use grafana for dashboarding",
+    "start": "116320",
+    "end": "122079"
+  },
+  {
+    "text": "and they write their own queries and most engineers are prom kill literate and engineers maintain their own alerting rules",
+    "start": "122079",
+    "end": "128879"
+  },
+  {
+    "text": "some of the use cases we have are real-time alerting debugging slo reporting and alerting and automated",
+    "start": "128879",
+    "end": "135120"
+  },
+  {
+    "text": "event response so yeah to sum it up monitoring is a pretty critical workflow for engineers",
+    "start": "135120",
+    "end": "140160"
+  },
+  {
+    "text": "at databricks for their services to run smoothly and its core to our engineering culture",
+    "start": "140160",
+    "end": "146319"
+  },
+  {
+    "text": "so this is what our original prometheus monitoring system looked like in one region",
+    "start": "147040",
+    "end": "152100"
+  },
+  {
+    "text": "[Music] so for those of you who are not too familiar with prometheus it's a single node monitoring solution that is used",
+    "start": "152100",
+    "end": "158000"
+  },
+  {
+    "text": "for event metrics and alerting it uses like a pool based model and it will scrape metrics from other services",
+    "start": "158000",
+    "end": "163680"
+  },
+  {
+    "text": "and it stores these metrics as time series data and then it can service queries and alerts using this data",
+    "start": "163680",
+    "end": "171120"
+  },
+  {
+    "text": "so in each region we have two different problems for the two types of monitoring targets that we have the first problem is prometheus normal",
+    "start": "171120",
+    "end": "177760"
+  },
+  {
+    "text": "this is the instance that scrapes all the kubernetes pods local to the cluster and then we have a prometheus proxied",
+    "start": "177760",
+    "end": "183440"
+  },
+  {
+    "text": "instance for proxy metrics from services that live outside of our kubernetes cluster",
+    "start": "183440",
+    "end": "188800"
+  },
+  {
+    "text": "in particular we use like a push-based path through kafka or kinesis to get these metrics into our metrics proxy",
+    "start": "188800",
+    "end": "194480"
+  },
+  {
+    "text": "service which runs in our kubernetes cluster and then this is then scraped by the prometheus proxied instance",
+    "start": "194480",
+    "end": "201120"
+  },
+  {
+    "text": "for this prometheus instance we maintain a whitelist to only ingest some metrics so that we can reduce metrics volume",
+    "start": "201120",
+    "end": "206560"
+  },
+  {
+    "text": "since the metrics from our customer environments are the higher cardinality workloads",
+    "start": "206560",
+    "end": "211760"
+  },
+  {
+    "text": "and the reason we have two separate prometheus servers instead of just one server per region is because of scaling limitations",
+    "start": "211760",
+    "end": "217840"
+  },
+  {
+    "text": "and we found that metrics from both of these sources would not fit on a single prometheus server so though it's not ideal to have",
+    "start": "217840",
+    "end": "224000"
+  },
+  {
+    "text": "separate servers in one region there's kind of a logical separation between these two metric sources so engineers can still",
+    "start": "224000",
+    "end": "230159"
+  },
+  {
+    "text": "function pretty well with having a sharded view of metrics per region",
+    "start": "230159",
+    "end": "235040"
+  },
+  {
+    "text": "each of these prometheus servers are set up in the high availability blue green deployment so that we can in place update one of",
+    "start": "235360",
+    "end": "240959"
+  },
+  {
+    "text": "the prometheus servers while the other is still running and serving alerts and inquiries",
+    "start": "240959",
+    "end": "246319"
+  },
+  {
+    "text": "we also have a disk attached to each prometheus server to store metrics we have a global prometheus server which",
+    "start": "246319",
+    "end": "252879"
+  },
+  {
+    "text": "contains a subset of metrics federated from the regional prometheus servers across all regions",
+    "start": "252879",
+    "end": "258560"
+  },
+  {
+    "text": "for this we're just using the out-of-box federation feature from prometheus and we also maintain a white list here",
+    "start": "258560",
+    "end": "264160"
+  },
+  {
+    "text": "so we only federate some metrics that users need to have if they want like an aggregate view of their services across regions",
+    "start": "264160",
+    "end": "272479"
+  },
+  {
+    "text": "so users interact with this monitoring system in two main ways the first is alerting so each of these",
+    "start": "272800",
+    "end": "277919"
+  },
+  {
+    "text": "prometheus servers will evaluate alert rules and issue alerts to alert manager and then alert manager will forward",
+    "start": "277919",
+    "end": "283680"
+  },
+  {
+    "text": "the alerts to the bench response channels like pagerduty or slack and the second workflow is querying or",
+    "start": "283680",
+    "end": "289360"
+  },
+  {
+    "text": "dashboarding so users can query the regional prometheus servers to view the metrics from their services",
+    "start": "289360",
+    "end": "295440"
+  },
+  {
+    "text": "or any metrics like underlying alerting incidents and typically users will mostly interact with just a regional",
+    "start": "295440",
+    "end": "301120"
+  },
+  {
+    "text": "prometheus but when they need like a global view of services across regions then they use",
+    "start": "301120",
+    "end": "306479"
+  },
+  {
+    "text": "the global prometheus server so here are some numbers to give you a",
+    "start": "306479",
+    "end": "312320"
+  },
+  {
+    "text": "picture of the scale that we were running this prometheus modeling system at we ran in more than 50 regions and",
+    "start": "312320",
+    "end": "318560"
+  },
+  {
+    "text": "different cloud providers and we monitored like 100 plus microservices with an infrastructure footprint",
+    "start": "318560",
+    "end": "324080"
+  },
+  {
+    "text": "of 4 million plus vms of databrick services and customer apache spark workers",
+    "start": "324080",
+    "end": "330479"
+  },
+  {
+    "text": "and because of our architecture where we had a single prometheus server handling all the metrics from the customer environments",
+    "start": "330479",
+    "end": "336639"
+  },
+  {
+    "text": "that server was pretty huge like at its peak it was handling close to a million samples per second",
+    "start": "336639",
+    "end": "341919"
+  },
+  {
+    "text": "had a pretty high metric turn rate with a lot of metrics from short-lived spark drops persisting for like less than 100 minutes",
+    "start": "341919",
+    "end": "348800"
+  },
+  {
+    "text": "and the disk usage was pretty high at 4 terabytes for only 15 days of retention and we also were running on",
+    "start": "348800",
+    "end": "355199"
+  },
+  {
+    "text": "a really big machine with 64 cores of cpu and 2 terabytes of ram",
+    "start": "355199",
+    "end": "361280"
+  },
+  {
+    "text": "at this scale we found our prometa system extremely difficult to operate and we found that it also impacted on",
+    "start": "362960",
+    "end": "368800"
+  },
+  {
+    "text": "the user experience so for us as the operators we had to handle a lot of capacity issues like",
+    "start": "368800",
+    "end": "374240"
+  },
+  {
+    "text": "frequent ooms and a lot of high disk usage situations where we had to resize a disk and also we had to deal with multi-hour",
+    "start": "374240",
+    "end": "381039"
+  },
+  {
+    "text": "prompt updates because of the long right-ahead log recovery process during restarts",
+    "start": "381039",
+    "end": "386479"
+  },
+  {
+    "text": "in terms of the user experience users had to deal with like a shorted view of metrics they had to be like aware of",
+    "start": "386479",
+    "end": "392160"
+  },
+  {
+    "text": "which metric stores they wanted to query whether it was from normal or from proxied um users also had to deal with slowness",
+    "start": "392160",
+    "end": "399280"
+  },
+  {
+    "text": "of querying bigqueries would take like a long time sometimes they would never even like complete",
+    "start": "399280",
+    "end": "404400"
+  },
+  {
+    "text": "and sometimes they would even cause the prometheus server to we also had to build a custom querying",
+    "start": "404400",
+    "end": "409919"
+  },
+  {
+    "text": "ui since out of box prometheus ui was too slow to handle high volume",
+    "start": "409919",
+    "end": "415120"
+  },
+  {
+    "text": "users also had to deal with shorter retention period and they could only see metrics in like the last 15 days instead of",
+    "start": "415120",
+    "end": "420160"
+  },
+  {
+    "text": "the last 90 days which was ideal and they couldn't really see metrics spanning across different release cycles since our release cycle is only two",
+    "start": "420160",
+    "end": "426639"
+  },
+  {
+    "text": "weeks um and also users had to deal with a metric white list",
+    "start": "426639",
+    "end": "432479"
+  },
+  {
+    "text": "they could only include a small subset of metrics in the whitelist and occasionally for us as the operators when we're dealing with like capacity",
+    "start": "432479",
+    "end": "438960"
+  },
+  {
+    "text": "issues we would even have to actively remove metrics from the white list um and then just to keep our permissive",
+    "start": "438960",
+    "end": "444880"
+  },
+  {
+    "text": "server running so with these scaling bottlenecks and",
+    "start": "444880",
+    "end": "450400"
+  },
+  {
+    "text": "pain points we really needed to find a more scalable monitoring solution some of our requirements were this",
+    "start": "450400",
+    "end": "457199"
+  },
+  {
+    "text": "system needs to be able to handle high metric volume cardinality and return rate since databricks was growing rapidly and",
+    "start": "457199",
+    "end": "462319"
+  },
+  {
+    "text": "we needed a system that could keep up we also wanted there to be a 90-day retention so that engineers can monitor",
+    "start": "462319",
+    "end": "468800"
+  },
+  {
+    "text": "their service release over release um also importantly we needed it to be prom q compatible",
+    "start": "468800",
+    "end": "474639"
+  },
+  {
+    "text": "since everything is already built on top of prometheus so we didn't want to migrate these are workflows like alerting rules",
+    "start": "474639",
+    "end": "480479"
+  },
+  {
+    "text": "querying or dashboards to another system and teach users to use a different language also we needed the system to",
+    "start": "480479",
+    "end": "488000"
+  },
+  {
+    "text": "have a global view of metrics so that engineers could have the ability to have an aggregate view of important",
+    "start": "488000",
+    "end": "493199"
+  },
+  {
+    "text": "service metrics across all regions and finally the system needed to be highly available",
+    "start": "493199",
+    "end": "500160"
+  },
+  {
+    "text": "some features we considered like nice to haves were first ideally would have a good update and maintenance story without some of the",
+    "start": "500160",
+    "end": "506960"
+  },
+  {
+    "text": "pain points that we experienced with our prometheus setup so like no metric gaps during updates and less manual",
+    "start": "506960",
+    "end": "512240"
+  },
+  {
+    "text": "operations for updates it would also be nice if the system had been battle tested in a large scale",
+    "start": "512240",
+    "end": "517680"
+  },
+  {
+    "text": "production environment and also good if the system was open source so that we have more freedom to",
+    "start": "517680",
+    "end": "523518"
+  },
+  {
+    "text": "manage it on our own um to make it more suitable to our metric workload and also we felt that",
+    "start": "523519",
+    "end": "529120"
+  },
+  {
+    "text": "there was more transparency into the cost of running an open source monitoring system",
+    "start": "529120",
+    "end": "534959"
+  },
+  {
+    "text": "some of the alternatives we considered in mid-2019 um firstly we considered starting",
+    "start": "534959",
+    "end": "540240"
+  },
+  {
+    "text": "prometheus even more but we were a bit hesitant about this because it was more of like a do-it-yourself situation and not",
+    "start": "540240",
+    "end": "546080"
+  },
+  {
+    "text": "an out-of-box scaling solution we considered some open source solutions like cortex and thanos",
+    "start": "546080",
+    "end": "552560"
+  },
+  {
+    "text": "we prototyped down as in late 2018 at that time it wasn't that mature back then and we weren't really comfortable",
+    "start": "552560",
+    "end": "557920"
+  },
+  {
+    "text": "using it at our scale in production and we also prototyped cortex and we found that it wasn't really",
+    "start": "557920",
+    "end": "563120"
+  },
+  {
+    "text": "suited for metric workloads which were pretty which had a pretty high churn rate we",
+    "start": "563120",
+    "end": "568320"
+  },
+  {
+    "text": "also considered some hosted solutions like data dog and signalfx but they were too expensive",
+    "start": "568320",
+    "end": "576320"
+  },
+  {
+    "text": "so given our requirements and the alternatives we considered why did we pick m3",
+    "start": "576320",
+    "end": "582480"
+  },
+  {
+    "text": "m3 fulfilled all our hard requirements it was designed for large-scale workloads and it's horizontally scalable and it exposes a",
+    "start": "582560",
+    "end": "589519"
+  },
+  {
+    "text": "prometheus api query endpoint as well it's set up to be highly available with a multi-replica setup and it's designed",
+    "start": "589519",
+    "end": "596640"
+  },
+  {
+    "text": "for multi-region and cloud setup which is perfect for our use case and has a built-in global querying feature",
+    "start": "596640",
+    "end": "603600"
+  },
+  {
+    "text": "an important point also was that it had been battle tested at high scale at uber in a production environment where it had",
+    "start": "603600",
+    "end": "608800"
+  },
+  {
+    "text": "been running for a couple years and also an added bonus was that m3 has",
+    "start": "608800",
+    "end": "613839"
+  },
+  {
+    "text": "a kubernetes operator for automated cluster operations like scaling the cluster or updating the",
+    "start": "613839",
+    "end": "618880"
+  },
+  {
+    "text": "cluster and also we thought there were like some pretty cool features that we would be interested to use in the future",
+    "start": "618880",
+    "end": "624720"
+  },
+  {
+    "text": "like aggregation of metrics on ingest and down sampling of metrics which could potentially allow us to have a longer",
+    "start": "624720",
+    "end": "630480"
+  },
+  {
+    "text": "retention period so now i'm going to cover how we deploy",
+    "start": "630480",
+    "end": "636640"
+  },
+  {
+    "start": "633000",
+    "end": "868000"
+  },
+  {
+    "text": "m3 at databricks um like specifically the different decisions we made along the way and how we arrived at our final",
+    "start": "636640",
+    "end": "644720"
+  },
+  {
+    "text": "architecture so our initial plan was for m3db to be a drop-in replacement for prometheus local",
+    "start": "644839",
+    "end": "651680"
+  },
+  {
+    "text": "disk storage so instead of prometheus servers storing metrics in an attached disk it would remote write the metrics into m3db for",
+    "start": "651680",
+    "end": "658240"
+  },
+  {
+    "text": "storage prometheus servers would still be evaluating alert rules and they would remote read metrics from m3db to",
+    "start": "658240",
+    "end": "664480"
+  },
+  {
+    "text": "evaluate these rules and then forward the alerts to alert manager so this setup would result in some",
+    "start": "664480",
+    "end": "670640"
+  },
+  {
+    "text": "improvements first since all metrics would be remote written into the m3db storage database in the region",
+    "start": "670640",
+    "end": "676480"
+  },
+  {
+    "text": "we would get rid of the started view of metrics in one region so users could have a consolidated view",
+    "start": "676480",
+    "end": "681600"
+  },
+  {
+    "text": "of both from normal and prone proxied in one region rather than having the query both",
+    "start": "681600",
+    "end": "686839"
+  },
+  {
+    "text": "separately we would also not have to maintain a global prometheus server anymore since",
+    "start": "686839",
+    "end": "692240"
+  },
+  {
+    "text": "m3db has a global occurring feature and it can connect with other m3 clusters in other regions to provide the global vf",
+    "start": "692240",
+    "end": "698000"
+  },
+  {
+    "text": "metrics across all regions so though this architecture was really",
+    "start": "698000",
+    "end": "703839"
+  },
+  {
+    "text": "simple and it would have been the least amount of work to incorporate m3d into our system we did find",
+    "start": "703839",
+    "end": "709600"
+  },
+  {
+    "text": "like some trouble with remote writing from prometheus servers like specifically we couldn't remote",
+    "start": "709600",
+    "end": "714720"
+  },
+  {
+    "text": "right at the scale that we needed especially for this prometheus proxied instance which was handling all the higher cardinality metrics from our",
+    "start": "714720",
+    "end": "720880"
+  },
+  {
+    "text": "customer environments so now our question was how do we scale",
+    "start": "720880",
+    "end": "726880"
+  },
+  {
+    "text": "up the right path successfully to make it work we needed to move away from having two giant prometheus servers",
+    "start": "726880",
+    "end": "732880"
+  },
+  {
+    "text": "and instead make the metric remote writing path a lot more lightweight handled by many",
+    "start": "732880",
+    "end": "737920"
+  },
+  {
+    "text": "small components rather than a fewer larger components we found a solution to this in the",
+    "start": "737920",
+    "end": "743600"
+  },
+  {
+    "text": "grafana agent which is open source by grafana this is a lightweight component that is prometheus",
+    "start": "743600",
+    "end": "749200"
+  },
+  {
+    "text": "api friendly and solely functions to scrape and remote right metrics there are many instances of this running",
+    "start": "749200",
+    "end": "755200"
+  },
+  {
+    "text": "in our cluster and we shard the grape targets and assign them across the grafana agent instances so this makes it",
+    "start": "755200",
+    "end": "761279"
+  },
+  {
+    "text": "really easy for us to scale the metric scraping and remote writing path since to do that we just need to increase a number of these",
+    "start": "761279",
+    "end": "767360"
+  },
+  {
+    "text": "agent replicas and then reassign the scrape targets accordingly",
+    "start": "767360",
+    "end": "772720"
+  },
+  {
+    "text": "also for metrics coming from outside our kubernetes cluster from our customer environments that were",
+    "start": "772720",
+    "end": "777920"
+  },
+  {
+    "text": "proxy through our metrics proxy service we added a remote write protocol into the metrics proxy service so that it",
+    "start": "777920",
+    "end": "784079"
+  },
+  {
+    "text": "would directly remote write metrics into m3db so this saved us from needing to have another set of grafana agents scraping",
+    "start": "784079",
+    "end": "791120"
+  },
+  {
+    "text": "the service to handle metrics coming through this path and it just overall reduced the number of hops and the end-to-end latency of the metrics being",
+    "start": "791120",
+    "end": "797680"
+  },
+  {
+    "text": "proxied from outside our kubernetes cluster so now we kind of solve the challenge to",
+    "start": "797680",
+    "end": "804079"
+  },
+  {
+    "text": "make the right path scalable but we needed to find a way to evaluate alerting rules since we weren't using prometheus servers anymore",
+    "start": "804079",
+    "end": "812000"
+  },
+  {
+    "text": "so unfortunately m3 doesn't have an out of box full evaluation engine um it mainly just serves as like the metric storage database for",
+    "start": "813040",
+    "end": "819680"
+  },
+  {
+    "text": "writing to and querying from so this led us to building our own role engine",
+    "start": "819680",
+    "end": "824720"
+  },
+  {
+    "text": "um this was more like in the spirit of designing an architecture with more lightweight and scalable components each serving a more narrow",
+    "start": "824720",
+    "end": "831760"
+  },
+  {
+    "text": "purpose so for this we ripped out the rule management code from open source prometheus and deployed that",
+    "start": "831760",
+    "end": "837199"
+  },
+  {
+    "text": "as our prometheus api friendly role engine so we pass our original prometheus",
+    "start": "837199",
+    "end": "844240"
+  },
+  {
+    "text": "modern systems alerting rule configurations into it it issues alertable queries to m3db um",
+    "start": "844240",
+    "end": "850320"
+  },
+  {
+    "text": "m3 handles the role evaluation and evaluates the query and then it returns the query result back to the rule engine",
+    "start": "850320",
+    "end": "856480"
+  },
+  {
+    "text": "the rule engine does some extra like processing for checking for example the four duration of the alert it adds like any extra external",
+    "start": "856480",
+    "end": "862959"
+  },
+  {
+    "text": "labels to the alerts and then it'll issue the alert back to the user",
+    "start": "862959",
+    "end": "870880"
+  },
+  {
+    "start": "868000",
+    "end": "1233000"
+  },
+  {
+    "text": "so so far we've covered the components we set up to interact with m3 like the scrape agents um the metric proxy service with the",
+    "start": "870880",
+    "end": "877360"
+  },
+  {
+    "text": "remote writing and the rule engine now i'm going to focus more on what our m3 setup looks like",
+    "start": "877360",
+    "end": "884800"
+  },
+  {
+    "text": "so basic setup of m3 will typically have like two main components it has the storage cluster and the m3",
+    "start": "884800",
+    "end": "890720"
+  },
+  {
+    "text": "coordinators the storage cluster consists of multiple replicas in our case we use three",
+    "start": "890720",
+    "end": "896320"
+  },
+  {
+    "text": "and each replica has multiple pods and each pod has a disc attached to store metrics",
+    "start": "896320",
+    "end": "902480"
+  },
+  {
+    "text": "to scale up the cluster we just increase the number of pods in each replica",
+    "start": "902480",
+    "end": "907600"
+  },
+  {
+    "text": "and then we have the m3 coordinators these allow us to interact with the storage cluster to read and write metrics um the",
+    "start": "907600",
+    "end": "914079"
+  },
+  {
+    "text": "coordinators have empty query embedded in them so for write requests it receives the",
+    "start": "914079",
+    "end": "919199"
+  },
+  {
+    "text": "requests unpacks them and then writes them into all replicas of the storage cluster and then for read requests it will",
+    "start": "919199",
+    "end": "925440"
+  },
+  {
+    "text": "receive the request fetch metrics from the storage cluster evaluate the query and then return the query results back to the client",
+    "start": "925440",
+    "end": "933600"
+  },
+  {
+    "text": "we also run the m3db operator this is like optional to have an m3 system but it was like",
+    "start": "934560",
+    "end": "940959"
+  },
+  {
+    "text": "we use it because it's really useful for a kubernetes setup um since it automates scaling up and",
+    "start": "940959",
+    "end": "946160"
+  },
+  {
+    "text": "down the cluster and also automates like deleting and creating the storage cluster so we don't have to manually",
+    "start": "946160",
+    "end": "951600"
+  },
+  {
+    "text": "manage the three different replicas one issue we did have initially with",
+    "start": "951600",
+    "end": "958079"
+  },
+  {
+    "text": "this basic setup was that the m3 coordinators were having a lot of like noisy neighbor issues for example if a user submits a heavy",
+    "start": "958079",
+    "end": "964720"
+  },
+  {
+    "text": "query it might like take up all the cpu and memory on the coordinator and which might impact the right path",
+    "start": "964720",
+    "end": "969920"
+  },
+  {
+    "text": "and cause data loss or impact the rule evaluation workload from the real engine and affect the availability of alerts",
+    "start": "969920",
+    "end": "978800"
+  },
+  {
+    "text": "so to make our m3 deployment more stable and have more isolation between writing querying and alert evaluation",
+    "start": "979759",
+    "end": "985680"
+  },
+  {
+    "text": "workloads we decided to create separate deployments of the coordinators for different purposes",
+    "start": "985680",
+    "end": "992079"
+  },
+  {
+    "text": "so in m3 read and write workloads are quite different for the coordinator writing is more cpu intensive since",
+    "start": "992079",
+    "end": "997920"
+  },
+  {
+    "text": "coordinators need to handle and unpack many incoming write requests and reading is more memory intensive since",
+    "start": "997920",
+    "end": "1003759"
+  },
+  {
+    "text": "they need to fetch and store cached data in order to evaluate and serve queries",
+    "start": "1003759",
+    "end": "1008959"
+  },
+  {
+    "text": "so we created four different groups of coordinators we have a group that handles writing",
+    "start": "1008959",
+    "end": "1014000"
+  },
+  {
+    "text": "these consists of many small replicas of right coordinators to handle any incoming requests from our scrape agents and the",
+    "start": "1014000",
+    "end": "1020160"
+  },
+  {
+    "text": "metrics proxy service and then we have a group designated to the rule engine",
+    "start": "1020160",
+    "end": "1025760"
+  },
+  {
+    "text": "this just handles like a regular and more predictable workload of querying for rule evaluation since the rule",
+    "start": "1025760",
+    "end": "1032000"
+  },
+  {
+    "text": "engine will just submit the same set of alert rules at regular intervals to m3",
+    "start": "1032000",
+    "end": "1037760"
+  },
+  {
+    "text": "and then we have two groups here to handle ad-hoc querying the first is the regional group um this",
+    "start": "1037760",
+    "end": "1043438"
+  },
+  {
+    "text": "just returns query results based on the metrics in the regional cluster and then we have the global querying",
+    "start": "1043439",
+    "end": "1049120"
+  },
+  {
+    "text": "group which reads from m3db clusters across regions and provides a global view to our users",
+    "start": "1049120",
+    "end": "1055919"
+  },
+  {
+    "text": "we wanted to separate the regional and the global coordinator groups since the global coordinator group the",
+    "start": "1056400",
+    "end": "1061840"
+  },
+  {
+    "text": "configuration is really different it requires setting up listening across clusters and has different security",
+    "start": "1061840",
+    "end": "1066880"
+  },
+  {
+    "text": "configurations um but more importantly our users mostly only use the regional view of metrics in most cases",
+    "start": "1066880",
+    "end": "1073360"
+  },
+  {
+    "text": "and so since we knew if we just exposed the global view it was unlikely that users would be like making the extra",
+    "start": "1073360",
+    "end": "1079679"
+  },
+  {
+    "text": "effort to always add a region label filter to each query we wanted to provide a default region-only query endpoint to avoid",
+    "start": "1079679",
+    "end": "1086400"
+  },
+  {
+    "text": "creating the extra cross-region traffic and cost for no reason",
+    "start": "1086400",
+    "end": "1091600"
+  },
+  {
+    "text": "so now that we separated the coordinator groups our two most important stable workloads um the right path which where stability",
+    "start": "1092000",
+    "end": "1098640"
+  },
+  {
+    "text": "is important to prevent data loss and the rule evaluation path which is highly critical for us to always have",
+    "start": "1098640",
+    "end": "1104320"
+  },
+  {
+    "text": "alerts these workloads were isolated from the more spiky and unpredictable workload",
+    "start": "1104320",
+    "end": "1109360"
+  },
+  {
+    "text": "of ad-hoc queries where it's subject to bad behavior from users",
+    "start": "1109360",
+    "end": "1115200"
+  },
+  {
+    "text": "so the final challenge was how can we monitor all of these m3 components since there are so many of them",
+    "start": "1116880",
+    "end": "1122160"
+  },
+  {
+    "text": "and still avoid like a circular dependency where we're using the same system to monitor the system",
+    "start": "1122160",
+    "end": "1128480"
+  },
+  {
+    "text": "so for this we decided to set up a vanilla lightweight prometheus server this prometheus server only scrapes m3",
+    "start": "1128480",
+    "end": "1135280"
+  },
+  {
+    "text": "related components it has no disk attached and its retention is only a couple of hours",
+    "start": "1135280",
+    "end": "1140480"
+  },
+  {
+    "text": "so it's very easy to maintain since we consider it to be stateless and restarts happen really quickly",
+    "start": "1140480",
+    "end": "1146400"
+  },
+  {
+    "text": "the metric retention period is short but it's sufficient for us since we mainly use this",
+    "start": "1146400",
+    "end": "1151440"
+  },
+  {
+    "text": "prometheus to alert us if any entry components are down um and it doesn't really require us to",
+    "start": "1151440",
+    "end": "1156559"
+  },
+  {
+    "text": "look back on metrics over the past couple days for this permission server to issue alerts",
+    "start": "1156559",
+    "end": "1161679"
+  },
+  {
+    "text": "and it issue alerts straight to alert manager and doesn't have like it's completely independent from the m3",
+    "start": "1161679",
+    "end": "1166960"
+  },
+  {
+    "text": "system we also have a global m3 monitoring prompt for a longer term view of our m3",
+    "start": "1166960",
+    "end": "1173280"
+  },
+  {
+    "text": "related metrics for example to track this usage or memory usage or like the number of reads per second um and we",
+    "start": "1173280",
+    "end": "1180559"
+  },
+  {
+    "text": "use the prom federation feature here to federate all metrics from the regional m3 monitoring prompts",
+    "start": "1180559",
+    "end": "1186240"
+  },
+  {
+    "text": "um to be persistently stored in this global prom so this global prompt has a disk attached and also we run it with the",
+    "start": "1186240",
+    "end": "1192720"
+  },
+  {
+    "text": "blue green high availability setup and the main reason we use prometheus",
+    "start": "1192720",
+    "end": "1197760"
+  },
+  {
+    "text": "here instead of just running a separate m3 cluster to monitor m3 is because prometheus is a really good",
+    "start": "1197760",
+    "end": "1203280"
+  },
+  {
+    "text": "all-in-one kind of out-of-box solution for monitoring especially at a small scale",
+    "start": "1203280",
+    "end": "1208720"
+  },
+  {
+    "text": "and we felt it would be overkill to set up a separate entry cluster with all of its like small components",
+    "start": "1208720",
+    "end": "1213760"
+  },
+  {
+    "text": "just for this use case also we're more familiar with prometheus since we've been using it for a couple years now",
+    "start": "1213760",
+    "end": "1219039"
+  },
+  {
+    "text": "and also promise has been around for longer in the community and we felt that we wanted to be comfortable",
+    "start": "1219039",
+    "end": "1225520"
+  },
+  {
+    "text": "with something if we were monitoring m3 which is a relatively newer system",
+    "start": "1225520",
+    "end": "1231200"
+  },
+  {
+    "text": "so now i've covered how we deploy m3 and our architecture and i'm going to share more about how we did",
+    "start": "1232640",
+    "end": "1237760"
+  },
+  {
+    "start": "1233000",
+    "end": "1503000"
+  },
+  {
+    "text": "the migration from our prometheus system to the m3 system",
+    "start": "1237760",
+    "end": "1242960"
+  },
+  {
+    "text": "so there are more four main steps in our migration the first step is bringing up the whole",
+    "start": "1243919",
+    "end": "1249200"
+  },
+  {
+    "text": "entry system as a shadow deployment we were dual writing metrics to both prom and m3 storage",
+    "start": "1249200",
+    "end": "1255440"
+  },
+  {
+    "text": "and we were evaluating alerts in both the old prometheus system and the new m3 system so we just sent all our alerts from the",
+    "start": "1255440",
+    "end": "1261600"
+  },
+  {
+    "text": "new m3 system to a black hole receiver that didn't fire alerts to any real receivers",
+    "start": "1261600",
+    "end": "1266960"
+  },
+  {
+    "text": "and we also opened up a querying endpoint but only to internally to the durability team and not really to the rest of",
+    "start": "1266960",
+    "end": "1272799"
+  },
+  {
+    "text": "engineering or the end org so that we could do some behavior validation",
+    "start": "1272799",
+    "end": "1278080"
+  },
+  {
+    "text": "um yeah so the second step of behavior validation is we compared alerts across the two systems",
+    "start": "1278080",
+    "end": "1283200"
+  },
+  {
+    "text": "by using scripts and we also did some querying speed and correctness checks by comparing our more like",
+    "start": "1283200",
+    "end": "1289039"
+  },
+  {
+    "text": "well-used complex dashboards side-by-side the third step was an incremental",
+    "start": "1289039",
+    "end": "1294480"
+  },
+  {
+    "text": "rollout of querying traffic and alerts for ad-hoc querying traffic we staged it across environments and we did a",
+    "start": "1294480",
+    "end": "1300640"
+  },
+  {
+    "text": "percentage based rollout of traffic from prometheus over to m3 and then for alerts we did a per service",
+    "start": "1300640",
+    "end": "1306640"
+  },
+  {
+    "text": "migration we replaced alerts emitted by prom with alerts emitted by m3 for less critical services first",
+    "start": "1306640",
+    "end": "1313039"
+  },
+  {
+    "text": "and then we moved on to more critical services in the later stages of the rollout",
+    "start": "1313039",
+    "end": "1318720"
+  },
+  {
+    "text": "and the final outcome of this rollout is that all ad-hoc querying traffic and alerts are served from the m3 system",
+    "start": "1318720",
+    "end": "1324320"
+  },
+  {
+    "text": "and then we can safely deprecate prometheus",
+    "start": "1324320",
+    "end": "1328559"
+  },
+  {
+    "text": "now here's a diagram to illustrate like how we did the rollout of the ad-hoc querying traffic it's a pretty simple setup we just put",
+    "start": "1329760",
+    "end": "1336320"
+  },
+  {
+    "text": "an m3 uh an engine x in front of the coring endpoints of permeates and m3 and we split the current traffic across both",
+    "start": "1336320",
+    "end": "1343520"
+  },
+  {
+    "text": "and over time we just slowly increase the percentage of traffic directed to m3 this strategy was pretty good for",
+    "start": "1343520",
+    "end": "1350000"
+  },
+  {
+    "text": "us to give an idea to like give us an idea of how ad-hoc occurring traffic affects the utilization in the entry system",
+    "start": "1350000",
+    "end": "1357039"
+  },
+  {
+    "text": "and we did end up doing like some tuning of correlating limits and extra provision of resources up front as",
+    "start": "1357039",
+    "end": "1363919"
+  },
+  {
+    "text": "we did this rollout to make sure that the rest of the rollout would be smooth",
+    "start": "1363919",
+    "end": "1369200"
+  },
+  {
+    "text": "and this is a picture to highlight how we did the per service migration of alerts so all our alerts at databricks are",
+    "start": "1370640",
+    "end": "1377120"
+  },
+  {
+    "text": "emitted with a service label which denotes the service and the owning team they belong to",
+    "start": "1377120",
+    "end": "1382799"
+  },
+  {
+    "text": "in addition to this label we added a source label to indicate whether the alert was submitted by the old prometa",
+    "start": "1382799",
+    "end": "1388000"
+  },
+  {
+    "text": "system or the new m3 system and then we made some routing configuration changes in alert manager",
+    "start": "1388000",
+    "end": "1394159"
+  },
+  {
+    "text": "so that if we want to roll out empty alerts for less critical service first um the m3 alert from that service would",
+    "start": "1394159",
+    "end": "1400400"
+  },
+  {
+    "text": "go to the receiver but the equivalent prometheus alert for that service would go to the black hole receiver that doesn't alert anyone",
+    "start": "1400400",
+    "end": "1408000"
+  },
+  {
+    "text": "we found this rolex strategy to be like really nifty because it was all controlled in alert manager at the routing level so",
+    "start": "1408000",
+    "end": "1414880"
+  },
+  {
+    "text": "an alert manager can hot reload any new config quickly without any restart so it was very easy to advance and roll out board",
+    "start": "1414880",
+    "end": "1421600"
+  },
+  {
+    "text": "but more importantly it was like easy to roll back if we found any issues and this was good to do since alerting",
+    "start": "1421600",
+    "end": "1428559"
+  },
+  {
+    "text": "is a highly critical service so rollback shouldn't be able to happen quickly",
+    "start": "1428559",
+    "end": "1434640"
+  },
+  {
+    "text": "yeah the outcome of this one-year migration is that m3 now runs as a sole metrics provider in all environments",
+    "start": "1435360",
+    "end": "1441039"
+  },
+  {
+    "text": "across clouds um the global querying endpoint is available via m3 for all metrics",
+    "start": "1441039",
+    "end": "1446880"
+  },
+  {
+    "text": "um this is a slim beta so we're still like testing this and rolling it out um and the user experience is largely",
+    "start": "1446880",
+    "end": "1452799"
+  },
+  {
+    "text": "unchanged our users still use promql for learning rules and dashboards and we still use alert manager",
+    "start": "1452799",
+    "end": "1458080"
+  },
+  {
+    "text": "for all our alerts retention is widely 90 days across all regions and this is unlike before where",
+    "start": "1458080",
+    "end": "1464559"
+  },
+  {
+    "text": "we had our large prometheus server which had like two weeks of retention and overall we think that migration went",
+    "start": "1464559",
+    "end": "1471279"
+  },
+  {
+    "text": "pretty smoothly we avoided any major outages since we had a good rollback strategy",
+    "start": "1471279",
+    "end": "1477440"
+  },
+  {
+    "text": "so now we have much higher confidence that we can continue to scale this system into the upcoming years since databricks",
+    "start": "1477440",
+    "end": "1483200"
+  },
+  {
+    "text": "is like continue to grow continuing to grow rapidly as a company and it'll keep processing larger and larger workloads",
+    "start": "1483200",
+    "end": "1489679"
+  },
+  {
+    "text": "and most importantly the observability team doesn't have to deal with like a giant prometheus driver anymore that runs on two terabytes of ram and takes",
+    "start": "1489679",
+    "end": "1496480"
+  },
+  {
+    "text": "like multiple hours to restart okay um on to nick for lessons learned",
+    "start": "1496480",
+    "end": "1506158"
+  },
+  {
+    "start": "1503000",
+    "end": "1643000"
+  },
+  {
+    "text": "yeah thanks my way um i was having some sound issues earlier hopefully it sounds okay now",
+    "start": "1506240",
+    "end": "1511520"
+  },
+  {
+    "text": "let me awesome thanks everybody um cool so um i'm going to go",
+    "start": "1511520",
+    "end": "1518400"
+  },
+  {
+    "text": "cover some of our lessons learned in um operating m3 um over the past year or so um so i'm",
+    "start": "1518400",
+    "end": "1524960"
+  },
+  {
+    "text": "going to some of the things i want to talk about are some of the system metrics that you should be looking at if you're monitoring m3",
+    "start": "1524960",
+    "end": "1531039"
+  },
+  {
+    "text": "give some general operational advice um talk about some things that we found it really helpful to alert on",
+    "start": "1531039",
+    "end": "1537760"
+  },
+  {
+    "text": "and also talk a little bit about how we do upgrades and updates um i just want to give a brief",
+    "start": "1537760",
+    "end": "1544159"
+  },
+  {
+    "text": "overview because when you're talking about sort of like from the trenches i think the uh the perspective can sometimes sound negative",
+    "start": "1544159",
+    "end": "1550159"
+  },
+  {
+    "text": "um because i will be talking about issues that we've we've run into but i want to like emphasize at the start that",
+    "start": "1550159",
+    "end": "1555840"
+  },
+  {
+    "text": "overall m3 has been amazingly stable for us why i sort of talked about how much trouble we had operating prometheus",
+    "start": "1555840",
+    "end": "1561840"
+  },
+  {
+    "text": "it was a constant source of alerts and trouble for us and we operate you know more than 50",
+    "start": "1561840",
+    "end": "1567120"
+  },
+  {
+    "text": "different deployments of m3 and it's it's just really stable um we have a few places where we've run into issues",
+    "start": "1567120",
+    "end": "1572720"
+  },
+  {
+    "text": "and i'll be talking about those and those are obviously the ones that have sort of the highest scale where you're really pushing against the limits",
+    "start": "1572720",
+    "end": "1578640"
+  },
+  {
+    "text": "of what we can do um but overall uh it's been an extremely stable thing for",
+    "start": "1578640",
+    "end": "1584000"
+  },
+  {
+    "text": "us and honestly the biggest problem we have is just that we keep running out of disk space in places because our metric",
+    "start": "1584000",
+    "end": "1589200"
+  },
+  {
+    "text": "load keeps going up um and that's not obviously m3 fault that's our fault for needing to be better about how we",
+    "start": "1589200",
+    "end": "1594720"
+  },
+  {
+    "text": "deal with incoming metrics um so even though that's so that's the positive side we have had some",
+    "start": "1594720",
+    "end": "1601120"
+  },
+  {
+    "text": "problematic things so i'm going to dive into that because you know dealing with problems is obviously an interesting thing to hear about um",
+    "start": "1601120",
+    "end": "1607520"
+  },
+  {
+    "text": "before i do that just a little bit more about how how it runs you know we like i said we have a large number of",
+    "start": "1607520",
+    "end": "1612799"
+  },
+  {
+    "text": "clusters so we have to automate things um we use a combination of spinnaker and jenkins to",
+    "start": "1612799",
+    "end": "1618080"
+  },
+  {
+    "text": "to do temp like template applies um to update things um so that's where",
+    "start": "1618080",
+    "end": "1623919"
+  },
+  {
+    "text": "having the operator is really nice because it makes it pretty easy to kind of do those updates um in our bigger clusters we process you",
+    "start": "1623919",
+    "end": "1631360"
+  },
+  {
+    "text": "know close to a million samples per second and about 200 000 reads so we are more",
+    "start": "1631360",
+    "end": "1636559"
+  },
+  {
+    "text": "right heavy um you know i that that's definitely the workload that we we have at databricks um",
+    "start": "1636559",
+    "end": "1644320"
+  },
+  {
+    "start": "1643000",
+    "end": "2023000"
+  },
+  {
+    "text": "cool so i wanted to jump into sort of at the top level the things that we found most important to keep an eye on um",
+    "start": "1644320",
+    "end": "1651679"
+  },
+  {
+    "text": "while you're operating so we look at how much memory is being used these are in the m3 db",
+    "start": "1651679",
+    "end": "1659039"
+  },
+  {
+    "text": "pods we have seen that if you are steadily over 60 of memory usage um that can be bad um",
+    "start": "1659520",
+    "end": "1667840"
+  },
+  {
+    "text": "mostly because there are certain things that happen that can cause memory spikes and then if you're",
+    "start": "1667840",
+    "end": "1672960"
+  },
+  {
+    "text": "consistently over 60 percent those can can get you all the way up to over 100 and then",
+    "start": "1672960",
+    "end": "1678000"
+  },
+  {
+    "text": "you boom um uh you know it's nice that because it's distributed um and",
+    "start": "1678000",
+    "end": "1683840"
+  },
+  {
+    "text": "highly available if only one pod ooms it's not a big deal it recovers nobody even notices we don't",
+    "start": "1683840",
+    "end": "1689440"
+  },
+  {
+    "text": "even get alerted uh when that happens for a single one but if you're all of your pods are consistently over 60 you have a good",
+    "start": "1689440",
+    "end": "1695039"
+  },
+  {
+    "text": "chance of multiple ones zooming and then things can be bad um so how you can you resolve that if you're steadily over 60",
+    "start": "1695039",
+    "end": "1701679"
+  },
+  {
+    "text": "um you can scale up your cluster uh or you can reduce incoming metric load those are the two primary ones we've",
+    "start": "1701679",
+    "end": "1707200"
+  },
+  {
+    "text": "found obviously if you're in a more read heavy workload you may need to do something like reduce the amount of reads that are",
+    "start": "1707200",
+    "end": "1712320"
+  },
+  {
+    "text": "happening um one thing i'll mention here with the new version of m3 having all these",
+    "start": "1712320",
+    "end": "1718000"
+  },
+  {
+    "text": "nice limits for reading and writing it's really a great other way to sort of put limits on",
+    "start": "1718000",
+    "end": "1724000"
+  },
+  {
+    "text": "the memory used so um you know we don't we've already done that so that's not a way we resolve these but uh if you",
+    "start": "1724000",
+    "end": "1729520"
+  },
+  {
+    "text": "haven't set the limits that would be another way to try to reduce the amount of memory um and i've included here i you know you",
+    "start": "1729520",
+    "end": "1735919"
+  },
+  {
+    "text": "obviously don't need to like memorize the the queries that i've put in here but i've just kind of put them in here as a reference for like the way that we",
+    "start": "1735919",
+    "end": "1741440"
+  },
+  {
+    "text": "look at these so we look at this particular metric filtered for our pods um we also need to alert on disk space",
+    "start": "1741440",
+    "end": "1748559"
+  },
+  {
+    "text": "like i mentioned this is a problem for us just because as things grow uh the cluster can get bigger and bigger and",
+    "start": "1748559",
+    "end": "1754000"
+  },
+  {
+    "text": "your disks can fill up we use predict linear to look at how big the disks are the disk space usage is actually",
+    "start": "1754000",
+    "end": "1760799"
+  },
+  {
+    "text": "very easy to predict over so it's pretty accurate um and so we do it very early mostly just",
+    "start": "1760799",
+    "end": "1767440"
+  },
+  {
+    "text": "to give ourselves lots of time to react um this you know uh there's other things",
+    "start": "1767440",
+    "end": "1772640"
+  },
+  {
+    "text": "going on sometimes it takes a little bit of time to get to it um and also you know we've found that scaling up can take a significant amount",
+    "start": "1772640",
+    "end": "1779360"
+  },
+  {
+    "text": "of time in in the really big regions um and so it's nice to give ourselves enough time to to deal with this uh and again ways you",
+    "start": "1779360",
+    "end": "1786080"
+  },
+  {
+    "text": "can fix this uh if you are running out of disk space are scaling up the cluster like i said reducing retention obviously will",
+    "start": "1786080",
+    "end": "1792840"
+  },
+  {
+    "text": "uh free up some disk space or reducing the incoming metric load and again here's the query um like i",
+    "start": "1792840",
+    "end": "1799840"
+  },
+  {
+    "text": "mentioned cluster scale up can be slow there has been a good amount of work in improving this bootstrapping time",
+    "start": "1799840",
+    "end": "1805679"
+  },
+  {
+    "text": "um in the newer versions of m3 we are a little bit behind on the update schedule so uh we're hoping to see some",
+    "start": "1805679",
+    "end": "1811360"
+  },
+  {
+    "text": "improvements in our cluster scale up time uh as we upgrade to the newer versions of m3 uh but i would encourage you if",
+    "start": "1811360",
+    "end": "1817600"
+  },
+  {
+    "text": "you're operating m3 to try to do some testing around how long um",
+    "start": "1817600",
+    "end": "1823600"
+  },
+  {
+    "text": "uh how long it takes to do this cluster scale up um so that you can set the sort of",
+    "start": "1823600",
+    "end": "1828720"
+  },
+  {
+    "text": "limits and uh like how long in the future you need to alert for these kinds of things so that you know",
+    "start": "1828720",
+    "end": "1833840"
+  },
+  {
+    "text": "um how to react to them um cool so that was some of the like those are probably the most important things that we need",
+    "start": "1833840",
+    "end": "1839679"
+  },
+  {
+    "text": "to alert on i'll get on to some of the other like uh smaller things in a little bit but i also wanted to give a little bit of",
+    "start": "1839679",
+    "end": "1844880"
+  },
+  {
+    "text": "general advice um that we've kind of um accrued over the time over operating uh m3 one",
+    "start": "1844880",
+    "end": "1852559"
+  },
+  {
+    "text": "thing is um you know try to not add a lot of custom annotations labels uh configs on top of the",
+    "start": "1852559",
+    "end": "1860159"
+  },
+  {
+    "text": "deployments um the operator does have certain expectations about the stuff it's going to deploy and we've we've shot ourselves in the",
+    "start": "1860159",
+    "end": "1866320"
+  },
+  {
+    "text": "foot a few times by trying to do weird custom things and then the operator can get confused or we can get confused and",
+    "start": "1866320",
+    "end": "1871760"
+  },
+  {
+    "text": "anyway uh if possible avoid doing lots of custom things let the operator just do its thing um",
+    "start": "1871760",
+    "end": "1878480"
+  },
+  {
+    "text": "like i mentioned do observe your query rates and set limits so look at uh how your cluster's being",
+    "start": "1878480",
+    "end": "1883840"
+  },
+  {
+    "text": "used uh in a good state and try to set limits so that you can prevent",
+    "start": "1883840",
+    "end": "1888880"
+  },
+  {
+    "text": "a bad state from occurring if a giant queries come in or you know things like that um one thing",
+    "start": "1888880",
+    "end": "1894559"
+  },
+  {
+    "text": "that i think we waited much too long to do at databricks was to have a really good testing environment",
+    "start": "1894559",
+    "end": "1901120"
+  },
+  {
+    "text": "um meaning uh we we rolled this out in all of our clusters and it was working pretty well",
+    "start": "1901120",
+    "end": "1907600"
+  },
+  {
+    "text": "but um you know a monitoring system is something that everybody relies on all the time",
+    "start": "1907600",
+    "end": "1912720"
+  },
+  {
+    "text": "which means that your dev clusters are development for other engineers but for us our dev clusters are actually",
+    "start": "1912720",
+    "end": "1919039"
+  },
+  {
+    "text": "quite important um to have good monitoring because people care about observing how their you know test clusters are running um",
+    "start": "1919039",
+    "end": "1925919"
+  },
+  {
+    "text": "and so we needed sort of a dev dev i guess or you know m3 dev cluster which we now have but",
+    "start": "1925919",
+    "end": "1931600"
+  },
+  {
+    "text": "it took us too long but it was really important i think it's important to have a place where you can quickly iterate",
+    "start": "1931600",
+    "end": "1936880"
+  },
+  {
+    "text": "um on rolling out new versions testing load uh important to be able to just throw",
+    "start": "1936880",
+    "end": "1942000"
+  },
+  {
+    "text": "away the data there so that you know if you're testing some stuff out and it doesn't work you don't you're not scared",
+    "start": "1942000",
+    "end": "1947200"
+  },
+  {
+    "text": "of ruining your data um and i think it's also important to try to have that at scale and and this is non-trivial",
+    "start": "1947200",
+    "end": "1952880"
+  },
+  {
+    "text": "um you know having load generation and stuff because if it's truly dev dev you're not going to have a lot of stuff running there",
+    "start": "1952880",
+    "end": "1957919"
+  },
+  {
+    "text": "naturally so there is some work to doing that but i think it's very valuable to have this",
+    "start": "1957919",
+    "end": "1963120"
+  },
+  {
+    "text": "so that you can kind of be aware of how your production clusters are going to behave",
+    "start": "1963120",
+    "end": "1968640"
+  },
+  {
+    "text": "but not be testing it in production because if you're only testing high load in production it's not it's not a recipe for great",
+    "start": "1968640",
+    "end": "1974720"
+  },
+  {
+    "text": "success um i also would encourage you to have a look at some of the m3 dashboards",
+    "start": "1974720",
+    "end": "1980960"
+  },
+  {
+    "text": "that are out there and kind of learn what these metrics mean it can be really helpful uh you know as rob mentioned m3 has a",
+    "start": "1980960",
+    "end": "1987039"
+  },
+  {
+    "text": "ton of features and it also as a metric system has a lot of its own internal metrics um",
+    "start": "1987039",
+    "end": "1993200"
+  },
+  {
+    "text": "the dashboard i've linked here is kind of the the one that that the m3 uh web page mentions",
+    "start": "1993200",
+    "end": "1998880"
+  },
+  {
+    "text": "i would say that the this one that's linked here the grafana.com is is somewhat developer",
+    "start": "1998880",
+    "end": "2004720"
+  },
+  {
+    "text": "focused i think it's built to help people who are working on m3 uh understand what's happening and",
+    "start": "2004720",
+    "end": "2010240"
+  },
+  {
+    "text": "debug issues um and that's useful for that um but i would maybe suggest",
+    "start": "2010240",
+    "end": "2015279"
+  },
+  {
+    "text": "kind of looking through that and understanding what some of the more useful metrics are from an operator operational perspective um and and",
+    "start": "2015279",
+    "end": "2022240"
+  },
+  {
+    "text": "making a dashboard with your own key metrics uh i'm not going to cover that this is like you know for future reference this is",
+    "start": "2022240",
+    "end": "2028720"
+  },
+  {
+    "start": "2023000",
+    "end": "2069000"
+  },
+  {
+    "text": "what our one of our internal dashboards looks like so we kind of look at some a lot of the more high-level things",
+    "start": "2028720",
+    "end": "2035039"
+  },
+  {
+    "text": "that kind of show you know how cpu doing how's memory doing um and you can kind of see in that memory one how it's a little bit it goes",
+    "start": "2035039",
+    "end": "2041760"
+  },
+  {
+    "text": "up and down but we try to keep it you know at about the 50 to 60 level uh of what's available",
+    "start": "2041760",
+    "end": "2049358"
+  },
+  {
+    "text": "um you know and i'm not going to cover all the other stuff that's on here but basically these are some of the things that we have found",
+    "start": "2049359",
+    "end": "2055679"
+  },
+  {
+    "text": "really useful uh to monitor in terms of understanding what's happening from a more sort of operational perspective",
+    "start": "2055679",
+    "end": "2061679"
+  },
+  {
+    "text": "than than this would like really internal perspective of a developer working on m3 um",
+    "start": "2061679",
+    "end": "2069760"
+  },
+  {
+    "text": "cool so a few other things that we alert on um just uh the things that are",
+    "start": "2069760",
+    "end": "2076158"
+  },
+  {
+    "text": "worth uh worth looking at um so if we have high latency ingesting samples so this",
+    "start": "2076159",
+    "end": "2081440"
+  },
+  {
+    "text": "is the coordinator and just latency bucket metric that can mean that you're just getting backed up and in writing samples or that there's some",
+    "start": "2081440",
+    "end": "2088320"
+  },
+  {
+    "text": "other problem with the incoming metrics we do try to filter on the incoming metrics and and prevent them",
+    "start": "2088320",
+    "end": "2094320"
+  },
+  {
+    "text": "from uh coming in late but i will say that although the grafana agent has been pretty good",
+    "start": "2094320",
+    "end": "2099359"
+  },
+  {
+    "text": "for us one problem it does have is a tendency to sometimes try to write old data and it's hard to get it to not do that",
+    "start": "2099359",
+    "end": "2105680"
+  },
+  {
+    "text": "so you can sometimes see spikes in this from that and then you need to go kind of kick the agent to have it not do that",
+    "start": "2105680",
+    "end": "2110960"
+  },
+  {
+    "text": "um we look at the rates of both right errors and fetch errors um",
+    "start": "2110960",
+    "end": "2116000"
+  },
+  {
+    "text": "these are good ones to be watching mostly because they kind of represent the user perspective they say like how",
+    "start": "2116000",
+    "end": "2123280"
+  },
+  {
+    "text": "is it as a user of m3 trying to do something like write a metric in or trying to do something like issue a query",
+    "start": "2123280",
+    "end": "2128960"
+  },
+  {
+    "text": "am i seeing errors right there can be all kinds of other errors happening under the covers but if these two metrics are steady",
+    "start": "2128960",
+    "end": "2134480"
+  },
+  {
+    "text": "uh from a user perspective you're you're kind of okay you're meeting your slo um so uh we",
+    "start": "2134480",
+    "end": "2140960"
+  },
+  {
+    "text": "we monitor those and those ones kind of issue some high priority alerts if you're getting right errors something's bad you're not able to write",
+    "start": "2140960",
+    "end": "2147200"
+  },
+  {
+    "text": "error right metrics into the cluster if you're getting fetch errors something's bad you're not able to query the cluster uh and your users will be seeing issues",
+    "start": "2147200",
+    "end": "2153680"
+  },
+  {
+    "text": "um another one that we monitor um and i i wanted to mention this one because it can cause",
+    "start": "2153680",
+    "end": "2158880"
+  },
+  {
+    "text": "for us it can be a really big issue um but uh it may not be depending on the",
+    "start": "2158880",
+    "end": "2164960"
+  },
+  {
+    "text": "the your deployment but we do look at um how many out of order samples are being are being",
+    "start": "2164960",
+    "end": "2170800"
+  },
+  {
+    "text": "uh written and the the reason that we do this is because uh if you are double scraping um pods",
+    "start": "2170800",
+    "end": "2178880"
+  },
+  {
+    "text": "or services that can cause all kinds of craziness in your metrics because they can kind of bounce around and the",
+    "start": "2178880",
+    "end": "2185200"
+  },
+  {
+    "text": "counter semantics of prometheus make it think that crazy stuff is happening um and and because we operate in a largely",
+    "start": "2185200",
+    "end": "2191280"
+  },
+  {
+    "text": "pool-based architecture um this can cause a lot of false alerts for our customers",
+    "start": "2191280",
+    "end": "2196400"
+  },
+  {
+    "text": "um it is a little bit of a tricky want to monitor because some amount of out of order emerging is",
+    "start": "2196400",
+    "end": "2201599"
+  },
+  {
+    "text": "is expected and doesn't mean that there's a problem so i put an x here um because you'll probably need to look",
+    "start": "2201599",
+    "end": "2206880"
+  },
+  {
+    "text": "at how it looks in your cluster and another thing to be aware of is that during node startup",
+    "start": "2206880",
+    "end": "2212640"
+  },
+  {
+    "text": "there can be a little bit more out of order merging just because there may be some data that's sort of built up and things are not coming in directly in",
+    "start": "2212640",
+    "end": "2218320"
+  },
+  {
+    "text": "order um so you'll want to inhibit this during node startup but if in sort of a normal operation you can you should be",
+    "start": "2218320",
+    "end": "2224400"
+  },
+  {
+    "text": "able to get a good sort of baseline for what your out of order write rate is and then if that spikes it can be indicative that you've somehow",
+    "start": "2224400",
+    "end": "2229920"
+  },
+  {
+    "text": "messed up the configuration of your scraping um yeah so that's another one that has bitten this",
+    "start": "2229920",
+    "end": "2235280"
+  },
+  {
+    "start": "2235000",
+    "end": "2516000"
+  },
+  {
+    "text": "um great so talking a little bit about uh upgrades and updates um they have",
+    "start": "2235280",
+    "end": "2242160"
+  },
+  {
+    "text": "been i think rob mentioned that uh they do really focus on or m3 really focuses on having good",
+    "start": "2242160",
+    "end": "2248800"
+  },
+  {
+    "text": "forward and backward capacity compatibility and we have seen that we have experienced that um we are not scared of",
+    "start": "2248800",
+    "end": "2254640"
+  },
+  {
+    "text": "doing updates to new versions we have not seen really any issues uh i only mentioned this because it's",
+    "start": "2254640",
+    "end": "2259920"
+  },
+  {
+    "text": "literally the only issue we've run into is just there was a tiny query evaluation regression um where i think",
+    "start": "2259920",
+    "end": "2265359"
+  },
+  {
+    "text": "they changed something in the query engine and it was also relatively it was not",
+    "start": "2265359",
+    "end": "2270720"
+  },
+  {
+    "text": "a big deal and and was fixed relatively quickly but uh we've done you know we've been running m3 for a while through a lot of",
+    "start": "2270720",
+    "end": "2277280"
+  },
+  {
+    "text": "the early pre 1.0 things um and so there were relatively a",
+    "start": "2277280",
+    "end": "2282320"
+  },
+  {
+    "text": "relatively large number of updates there that we've gone through and it's been it's been very smooth for us so that's been great",
+    "start": "2282320",
+    "end": "2288240"
+  },
+  {
+    "text": "um we are now just moving into 1.0 slowly throughout our clusters",
+    "start": "2288240",
+    "end": "2293520"
+  },
+  {
+    "text": "that has also been very smooth um you know rob rob kind of mentioned that there were some config changes and made it",
+    "start": "2293520",
+    "end": "2299359"
+  },
+  {
+    "text": "sound like it's a big deal but honestly there weren't that many config changes we have a pretty complex um",
+    "start": "2299359",
+    "end": "2305359"
+  },
+  {
+    "text": "kind of programming system for generating our configs and so it was pretty easy for us i suppose if you have manual configs it might be more work but",
+    "start": "2305359",
+    "end": "2312240"
+  },
+  {
+    "text": "for us it really wasn't a big deal to update to 1.0 um one thing to be aware of there were some sort of api changes so",
+    "start": "2312240",
+    "end": "2318560"
+  },
+  {
+    "text": "uh this is probably only relevant if you have a built up sort of institutional knowledge around m3 already but a lot of",
+    "start": "2318560",
+    "end": "2324000"
+  },
+  {
+    "text": "our run books have to go we have to go through and change some of the api paths that we say to hit for things like changing retention or",
+    "start": "2324000",
+    "end": "2330960"
+  },
+  {
+    "text": "updating placements um that's sort of like advanced usage so as a normal user of m3 you probably",
+    "start": "2330960",
+    "end": "2336240"
+  },
+  {
+    "text": "won't run into any of that um i mentioned um that we manage all of our upgrades and updates via spinnaker and",
+    "start": "2336240",
+    "end": "2342480"
+  },
+  {
+    "text": "jenkins um the one sort of minor issue here that we have is",
+    "start": "2342480",
+    "end": "2347680"
+  },
+  {
+    "text": "up until now there has been a lack of fully self-driving updates um we kind of count you know we're very",
+    "start": "2347680",
+    "end": "2353200"
+  },
+  {
+    "text": "bought into kubernetes shop and we kind of count on uh our pipelines being able to do updates by",
+    "start": "2353200",
+    "end": "2359200"
+  },
+  {
+    "text": "just calling coop control apply uh on a new template um this was not fully working until",
+    "start": "2359200",
+    "end": "2365839"
+  },
+  {
+    "text": "recently but as rob mentioned with the o13 version of the operator this should",
+    "start": "2365839",
+    "end": "2371520"
+  },
+  {
+    "text": "now be available um that's a relatively recent release we have not had time to go fully test this but we do believe we'll be able to to",
+    "start": "2371520",
+    "end": "2378960"
+  },
+  {
+    "text": "move to this in the near future um one thing that i will want to would you",
+    "start": "2378960",
+    "end": "2384000"
+  },
+  {
+    "text": "want to mention uh if you are doing these kinds of fully self-driving updates um or sorry if you're not doing full",
+    "start": "2384000",
+    "end": "2391200"
+  },
+  {
+    "text": "self-driving updates where you are just applying and then having to do some kind of manual intervention to get the",
+    "start": "2391200",
+    "end": "2396400"
+  },
+  {
+    "text": "operator to do the update um we have to be vigilant that the configs which can be updated by just calling",
+    "start": "2396400",
+    "end": "2403200"
+  },
+  {
+    "text": "control apply um stay in sync with the m3db version we've had some issues where you know our pipeline goes and deploys",
+    "start": "2403200",
+    "end": "2410079"
+  },
+  {
+    "text": "new version specification and new config but the old version is left running and then we restart it and it's like i don't",
+    "start": "2410079",
+    "end": "2415440"
+  },
+  {
+    "text": "understand this new config so that's one thing to be careful of um",
+    "start": "2415440",
+    "end": "2420800"
+  },
+  {
+    "text": "and then one suggestion i will have uh this is probably generally good but it's one that we found really important",
+    "start": "2420800",
+    "end": "2426560"
+  },
+  {
+    "text": "during the upgrade process is to have a readiness check for your coordinators so try to make",
+    "start": "2426560",
+    "end": "2432800"
+  },
+  {
+    "text": "sure that your coordinators as they come up are able to talk to m3db and then you",
+    "start": "2432800",
+    "end": "2437839"
+  },
+  {
+    "text": "know i'm not going to cover sort of update strategies for for kubernetes but if you're familiar with kubernetes you know",
+    "start": "2437839",
+    "end": "2443200"
+  },
+  {
+    "text": "have like a rolling update strategy that doesn't restart too many coordinators at once what we found is that if you know you",
+    "start": "2443200",
+    "end": "2449119"
+  },
+  {
+    "text": "run a lot of coordinators these coordinators are super lightweight which is great and we run a whole bunch of them but that means if they all",
+    "start": "2449119",
+    "end": "2456400"
+  },
+  {
+    "text": "restart quickly which is what happens if you don't have a readiness check um it's so many services",
+    "start": "2456400",
+    "end": "2462400"
+  },
+  {
+    "text": "restarting that kubernetes can can deal has a little bit of trouble dealing with the churn",
+    "start": "2462400",
+    "end": "2468000"
+  },
+  {
+    "text": "um and can leave a number of the coordinators unable to connect to m3db um just because it hasn't had time",
+    "start": "2468000",
+    "end": "2476160"
+  },
+  {
+    "text": "to sort of update all the endpoints and the various service updates that it needs to make to do that and then you have",
+    "start": "2476160",
+    "end": "2482079"
+  },
+  {
+    "text": "a little bit of downtime and because uh the kubernetes uh control loop is not",
+    "start": "2482079",
+    "end": "2488000"
+  },
+  {
+    "text": "super fast uh it can actually just take a while before it sort of churns through and updates everything so having this uh",
+    "start": "2488000",
+    "end": "2494319"
+  },
+  {
+    "text": "readiness check uh if you have a connect consistency on the coordinator um then that will sort of enforce that",
+    "start": "2494319",
+    "end": "2502240"
+  },
+  {
+    "text": "the coordinators restart slowly and re-establish their connection before the next one goes down and you can have sort",
+    "start": "2502240",
+    "end": "2507440"
+  },
+  {
+    "text": "of zero downtime downtime updates um cool so that's what i wanted to mention about",
+    "start": "2507440",
+    "end": "2512640"
+  },
+  {
+    "text": "upgrades and updates um and then just a little color about you",
+    "start": "2512640",
+    "end": "2519520"
+  },
+  {
+    "start": "2516000",
+    "end": "2602000"
+  },
+  {
+    "text": "know metric spikes in any high volume system that you operate you're gonna have to have a way to deal with spikes",
+    "start": "2519520",
+    "end": "2525359"
+  },
+  {
+    "text": "uh you know an example of something we sometimes have is you know some somebody goes and adds a",
+    "start": "2525359",
+    "end": "2530960"
+  },
+  {
+    "text": "new label to a metric and it has an absurdly hide cardinality um so suddenly your your number of time",
+    "start": "2530960",
+    "end": "2537200"
+  },
+  {
+    "text": "series is just going up uh by a huge amount um this is this this happens you don't control all the",
+    "start": "2537200",
+    "end": "2543920"
+  },
+  {
+    "text": "services that get deployed they can do crazy things um and so uh a great way to deal with",
+    "start": "2543920",
+    "end": "2549520"
+  },
+  {
+    "text": "this is you know you need to be able to identify where it's coming from so you know have some metrics that you can",
+    "start": "2549520",
+    "end": "2555280"
+  },
+  {
+    "text": "look at that that cover you know the graphon agents can can expose this we have our own",
+    "start": "2555280",
+    "end": "2561359"
+  },
+  {
+    "text": "metrics inside our other systems that sort of push directly into m3 so always have some metric that",
+    "start": "2561359",
+    "end": "2566560"
+  },
+  {
+    "text": "you can use to see you know who who is producing all of these metrics and then also be able to cut that source",
+    "start": "2566560",
+    "end": "2572640"
+  },
+  {
+    "text": "off easily so we have good ways of sort of quickly blacklisting things um because this is",
+    "start": "2572640",
+    "end": "2578640"
+  },
+  {
+    "text": "extremely preferable to ooming your cluster i'm much happier to be able to go to a customer and",
+    "start": "2578640",
+    "end": "2583920"
+  },
+  {
+    "text": "you know internal customer and say hey your service is not currently not having any metrics because you did something silly",
+    "start": "2583920",
+    "end": "2589920"
+  },
+  {
+    "text": "rather than having to send an email out to the entire company and say hey our our metricking system is down in",
+    "start": "2589920",
+    "end": "2595359"
+  },
+  {
+    "text": "production right now um it's never a nice message to send um so yeah that's something i would recommend um",
+    "start": "2595359",
+    "end": "2603040"
+  },
+  {
+    "start": "2602000",
+    "end": "2664000"
+  },
+  {
+    "text": "so just a little bit about how we do capacity uh obviously i think you know it's gonna depend a little bit",
+    "start": "2603040",
+    "end": "2608480"
+  },
+  {
+    "text": "um on your workload so uh you know we found that about one m3db replica for about 50 000 incoming",
+    "start": "2608480",
+    "end": "2615599"
+  },
+  {
+    "text": "time series works pretty well for us but we are very right heavy so that may be different depending on how how your cluster looks i saw that there",
+    "start": "2615599",
+    "end": "2622400"
+  },
+  {
+    "text": "was a question about uh how many nodes we use on that big cluster we're currently running about uh 18",
+    "start": "2622400",
+    "end": "2629760"
+  },
+  {
+    "text": "nodes per replica so yeah you can do the math for how many we have all together um",
+    "start": "2629760",
+    "end": "2636240"
+  },
+  {
+    "text": "and we run about 50 right coordinators and two different deployments about 100 and like i said we just are happy to run lots and lots",
+    "start": "2636240",
+    "end": "2642560"
+  },
+  {
+    "text": "of these for stability we probably could get away with fewer but this just you know gives us sort of the buffer that we need and it's",
+    "start": "2642560",
+    "end": "2648400"
+  },
+  {
+    "text": "it's okay um and these are just sort of numbers that we've come to sort of organically um so",
+    "start": "2648400",
+    "end": "2654800"
+  },
+  {
+    "text": "i don't have a it would be nice if i had sort of a formula like this many in do this many things but i think",
+    "start": "2654800",
+    "end": "2659920"
+  },
+  {
+    "text": "partially also just testing and because it will depend on your workload um",
+    "start": "2659920",
+    "end": "2665200"
+  },
+  {
+    "start": "2664000",
+    "end": "2891000"
+  },
+  {
+    "text": "cool uh i did want to talk a little bit about some of the things we want to do in the future so i would say at this point",
+    "start": "2665200",
+    "end": "2672560"
+  },
+  {
+    "text": "we have completed the fully completed our migration away from prometheus we are removing",
+    "start": "2672560",
+    "end": "2678160"
+  },
+  {
+    "text": "prometheus everywhere um so we don't need it anymore aside from these sort of like lightweight monitoring ones that",
+    "start": "2678160",
+    "end": "2684000"
+  },
+  {
+    "text": "that why we mentioned um and we're now getting to the point where we can sort of look towards the future and what",
+    "start": "2684000",
+    "end": "2691200"
+  },
+  {
+    "text": "nice new things that we can do so we were sort of previously we were in this bad state that prometheus kept crashing and",
+    "start": "2691200",
+    "end": "2697440"
+  },
+  {
+    "text": "everything was unhappy and and it wasn't good and we've you know had a very successful but somewhat long",
+    "start": "2697440",
+    "end": "2703760"
+  },
+  {
+    "text": "migration also to now have a sort of stable set of monitoring",
+    "start": "2703760",
+    "end": "2708800"
+  },
+  {
+    "text": "uh clusters running and so now we can start to look forward and say hey now that we have this nifty new m3 thing",
+    "start": "2708800",
+    "end": "2714720"
+  },
+  {
+    "text": "what can we do um and so some of the things we're looking to do in the future are uh to start getting down sampling for",
+    "start": "2714720",
+    "end": "2720480"
+  },
+  {
+    "text": "our older metrics um so this is something that we expect to see significant savings in disk space",
+    "start": "2720480",
+    "end": "2726319"
+  },
+  {
+    "text": "probably also in you know query performance over older data um you know we we run with a 30 second",
+    "start": "2726319",
+    "end": "2732480"
+  },
+  {
+    "text": "scrape interval and it's a little bit unreasonable to expect that um when you query data that's 60 days old",
+    "start": "2732480",
+    "end": "2739280"
+  },
+  {
+    "text": "that you'll get it at 30 second resolution um we will be looking at using different",
+    "start": "2739280",
+    "end": "2745520"
+  },
+  {
+    "text": "name spaces for metrics with uh that have different sort of retention requirements so like i mentioned we run a lot of test things in",
+    "start": "2745520",
+    "end": "2752400"
+  },
+  {
+    "text": "our dev clusters it's a bit unreasonable also to expect that these test clusters will have really long retention on their metrics",
+    "start": "2752400",
+    "end": "2758560"
+  },
+  {
+    "text": "so a really nice feature that m3 has is that you could kind of put those metrics in a different name space",
+    "start": "2758560",
+    "end": "2764079"
+  },
+  {
+    "text": "and then have a shorter retention on that namespace so your test clusters get you know five days or whatever of retention and um that's great and",
+    "start": "2764079",
+    "end": "2771599"
+  },
+  {
+    "text": "then for things that matter more you can have longer retention again this is to deal with less",
+    "start": "2771599",
+    "end": "2776960"
+  },
+  {
+    "text": "needing less disk space and lower lower load on the system um and then another one that i think",
+    "start": "2776960",
+    "end": "2783200"
+  },
+  {
+    "text": "that we are excited about that m3 has enabled because m3 supports sort of pushing metrics in",
+    "start": "2783200",
+    "end": "2790880"
+  },
+  {
+    "text": "it it allows us to do uh to enable work uh use cases where you're",
+    "start": "2790880",
+    "end": "2798319"
+  },
+  {
+    "text": "in a in a mode that's actually very hard to be scraped so there's things like databricks jobs that we that a lot of",
+    "start": "2798319",
+    "end": "2803920"
+  },
+  {
+    "text": "that we leverage where you know spark clusters are running and processing lots of data um our data science teams really want to",
+    "start": "2803920",
+    "end": "2811200"
+  },
+  {
+    "text": "track those jobs and historically it's been very difficult because those jobs are running sort of somewhere else in an isolated cluster and how would",
+    "start": "2811200",
+    "end": "2819280"
+  },
+  {
+    "text": "prometheus reach over there and scrape the metrics out of it um and so being able to sort of build a",
+    "start": "2819280",
+    "end": "2826000"
+  },
+  {
+    "text": "little proxy so that they can push metrics directly through into m3 is is really great another one that",
+    "start": "2826000",
+    "end": "2831760"
+  },
+  {
+    "text": "our dev tools team is looking at is they want to sort of monitor things from developer laptops to know",
+    "start": "2831760",
+    "end": "2837839"
+  },
+  {
+    "text": "hey how long is it taking to do certain developer operations so they can improve the developer experience at databricks",
+    "start": "2837839",
+    "end": "2843200"
+  },
+  {
+    "text": "and they want to also be able to put metrics in because obviously uh your scraping system is not going to be",
+    "start": "2843200",
+    "end": "2848319"
+  },
+  {
+    "text": "able to to reach out and scrape metrics from your lap from your developers laptops",
+    "start": "2848319",
+    "end": "2853599"
+  },
+  {
+    "text": "so that's another these are another feature that m3 has that's kind of like a new thing that we can do um there",
+    "start": "2853599",
+    "end": "2859440"
+  },
+  {
+    "text": "obviously are ways to push metrics into a proxy for for prometheus but we found them we we",
+    "start": "2859440",
+    "end": "2864640"
+  },
+  {
+    "text": "do operate we did operate some of those and we found them to be less than reliable just because of the nature of",
+    "start": "2864640",
+    "end": "2870480"
+  },
+  {
+    "text": "kind of needing to cache the data um and then re-scrape it it's much less reliable to",
+    "start": "2870480",
+    "end": "2876559"
+  },
+  {
+    "text": "do that than to be able to just directly push the metric in because it lets you caching is just a",
+    "start": "2876559",
+    "end": "2883280"
+  },
+  {
+    "text": "difficult problem with metrics so i'll leave it at that it's a lot of time trying to fix various caching metric",
+    "start": "2883280",
+    "end": "2888480"
+  },
+  {
+    "text": "caching issues um anyway uh so i want to leave a little bit of time for",
+    "start": "2888480",
+    "end": "2894240"
+  },
+  {
+    "start": "2891000",
+    "end": "3315000"
+  },
+  {
+    "text": "questions so i'll i'll just conclude and then we'll leave about 10 10 minutes um so i would say",
+    "start": "2894240",
+    "end": "2901280"
+  },
+  {
+    "text": "in conclusion this has been a very successful migration for us um it was you know we were very happy uh",
+    "start": "2901280",
+    "end": "2908000"
+  },
+  {
+    "text": "with where we've landed overall um the community has been extremely helpful um you know we've worked a lot with the",
+    "start": "2908000",
+    "end": "2914880"
+  },
+  {
+    "text": "people at chronosphere who have been extremely helpful uh we've worked sort of just with the",
+    "start": "2914880",
+    "end": "2920400"
+  },
+  {
+    "text": "open community as well and and people it's a it's been a great experience there",
+    "start": "2920400",
+    "end": "2926319"
+  },
+  {
+    "text": "um and there's a lot of great new things sort of on the horizon for us and we're really excited to be sure shifting gears",
+    "start": "2926319",
+    "end": "2931359"
+  },
+  {
+    "text": "into um making the overall metrics experience at databricks better",
+    "start": "2931359",
+    "end": "2936640"
+  },
+  {
+    "text": "um from a sort of feature perspective uh not just from uh you know stability",
+    "start": "2936640",
+    "end": "2942480"
+  },
+  {
+    "text": "perspective so cool i thought that's what i wanted to say um and i think we can maybe shift to questions",
+    "start": "2942480",
+    "end": "2951599"
+  },
+  {
+    "text": "um so i saw i see a lot of them have been marked as answered but um okay so",
+    "start": "2951599",
+    "end": "2958640"
+  },
+  {
+    "text": "let's see i see why cortex didn't suit the high churn rate um we know we didn't we didn't dive very",
+    "start": "2958640",
+    "end": "2965920"
+  },
+  {
+    "text": "deeply into this other than that we did actually talk to um the name is escaping me right now but",
+    "start": "2965920",
+    "end": "2972079"
+  },
+  {
+    "text": "the main guy who started cortex at grafana um and and he did kind of identify this",
+    "start": "2972079",
+    "end": "2977760"
+  },
+  {
+    "text": "this problem that uh cortex has with ingesting a lot of",
+    "start": "2977760",
+    "end": "2982960"
+  },
+  {
+    "text": "sort of short-lived metrics um and so uh and i see that why i would",
+    "start": "2982960",
+    "end": "2989040"
+  },
+  {
+    "text": "like to answer this question live but um oh i just clicked it for you oh okay",
+    "start": "2989040",
+    "end": "2994240"
+  },
+  {
+    "text": "thanks um so that that is uh something that that we kind of ran into um",
+    "start": "2994240",
+    "end": "3001280"
+  },
+  {
+    "text": "uh and we we we actually did try quite hard to to deal with that um and then um how many production",
+    "start": "3001280",
+    "end": "3008720"
+  },
+  {
+    "text": "issues are we facing daily on over 50 clusters um if i exclude disk space issues uh",
+    "start": "3008720",
+    "end": "3016480"
+  },
+  {
+    "text": "i would say we average maybe one or two a week of actual production issues on over 50",
+    "start": "3016480",
+    "end": "3022559"
+  },
+  {
+    "text": "clusters so like i said it's really very stable at this point um something we are i would say probably",
+    "start": "3022559",
+    "end": "3028240"
+  },
+  {
+    "text": "the main thing we are focusing on right now is kind of getting a handle on the the increasing load you know uh",
+    "start": "3028240",
+    "end": "3033760"
+  },
+  {
+    "text": "databricks is scaling very quickly uh in terms of how many people use the platform and so our metric loads just",
+    "start": "3033760",
+    "end": "3040480"
+  },
+  {
+    "text": "continue to go up um and so uh we we get a lot of alerts that um",
+    "start": "3040480",
+    "end": "3046000"
+  },
+  {
+    "text": "sort of say hey you're going to be running out of disk space and then we have to kind of decide are we going to reduce retention here are we going to",
+    "start": "3046000",
+    "end": "3051599"
+  },
+  {
+    "text": "try to scale up the cluster are we going to go try to figure out like which are the worst defenders and and make them",
+    "start": "3051599",
+    "end": "3056800"
+  },
+  {
+    "text": "reduce their their things um so those are sort of a separate set of issues mostly because they're not really i wouldn't blame",
+    "start": "3056800",
+    "end": "3062880"
+  },
+  {
+    "text": "those on m3 that would be an issue no matter what system we were using um so in terms of sort of like uh m3",
+    "start": "3062880",
+    "end": "3068800"
+  },
+  {
+    "text": "issues uh i would say you know on the order of one or two a week where and it's usually something like",
+    "start": "3068800",
+    "end": "3074000"
+  },
+  {
+    "text": "high memory usage or uh something like that we we also end up",
+    "start": "3074000",
+    "end": "3079440"
+  },
+  {
+    "text": "you know with 50 clusters there's inherently going to be some underlying infrastructure issues so a lot of times it'll be",
+    "start": "3079440",
+    "end": "3085200"
+  },
+  {
+    "text": "you know you have some cluster where your node just can't schedule because there's some underlying issue with cloud platform or something like that",
+    "start": "3085200",
+    "end": "3091520"
+  },
+  {
+    "text": "but like i said not a ton of issues overall um so hopefully that answers that one um",
+    "start": "3091520",
+    "end": "3097920"
+  },
+  {
+    "text": "how do you communicate with the community through the slack channel yes uh we have not taken the chronosphere office hours",
+    "start": "3097920",
+    "end": "3104079"
+  },
+  {
+    "text": "we may start doing that um but yes currently our communication with the community has been through the slack channel but through flying",
+    "start": "3104079",
+    "end": "3109680"
+  },
+  {
+    "text": "filing github issues you know i mentioned the operator self-driving thing um that's an issue",
+    "start": "3109680",
+    "end": "3115200"
+  },
+  {
+    "text": "that we reported that it wasn't that there were some bugs in there and they've now fixed those so that's been good so i would say our primary",
+    "start": "3115200",
+    "end": "3121520"
+  },
+  {
+    "text": "things of communicating are through the slack channel where people are pretty responsive and also just through github for sort of",
+    "start": "3121520",
+    "end": "3127839"
+  },
+  {
+    "text": "code issues um node size using for the large cluster",
+    "start": "3127839",
+    "end": "3133119"
+  },
+  {
+    "text": "i actually don't know off the top of my head why why do you know like around 100",
+    "start": "3133119",
+    "end": "3138240"
+  },
+  {
+    "text": "gigs of ram and 16 cpu maybe something like that cool oh and",
+    "start": "3138240",
+    "end": "3144880"
+  },
+  {
+    "text": "someone noticed that i'm listening to mad lib so yeah that is a really good new album if you want to check it out that's pretty awesome um",
+    "start": "3144880",
+    "end": "3152160"
+  },
+  {
+    "text": "cool um and did we let's see um i saw that",
+    "start": "3152160",
+    "end": "3159440"
+  },
+  {
+    "text": "somebody else asked if we were wanting to um",
+    "start": "3159440",
+    "end": "3164800"
+  },
+  {
+    "text": "to open source our rule manager engine um and the answer is yes we do want to um",
+    "start": "3164800",
+    "end": "3170319"
+  },
+  {
+    "text": "at some point in the future uh we we do not have a like roadmap for",
+    "start": "3170319",
+    "end": "3175359"
+  },
+  {
+    "text": "doing that right at the moment um but as soon as we sort of are able to",
+    "start": "3175359",
+    "end": "3180400"
+  },
+  {
+    "text": "to prioritize that uh i think that is something that we would definitely like to to prioritize and get get open source we",
+    "start": "3180400",
+    "end": "3187680"
+  },
+  {
+    "text": "are a company that likes to open source things if possible so um",
+    "start": "3187680",
+    "end": "3192960"
+  },
+  {
+    "text": "yeah um let's see uh i don't know if i should go through i",
+    "start": "3192960",
+    "end": "3198400"
+  },
+  {
+    "text": "see why has answered a lot of these questions um sort of uh by typing so thanks y um",
+    "start": "3198400",
+    "end": "3206400"
+  },
+  {
+    "text": "let's see if there are any other questions are we using stateful set disks yes so we use a stateful set uh we use ssds",
+    "start": "3206400",
+    "end": "3213680"
+  },
+  {
+    "text": "under the covers um you know we're like i said we are we run across multiple clouds",
+    "start": "3213680",
+    "end": "3218880"
+  },
+  {
+    "text": "um one of the nice things about uh about that is that kubernetes can kind",
+    "start": "3218880",
+    "end": "3224880"
+  },
+  {
+    "text": "of hide some of those details for us so we just have a persistent volume claims that",
+    "start": "3224880",
+    "end": "3229920"
+  },
+  {
+    "text": "that let us get disks um for the clusters and then you know they magically have discs and",
+    "start": "3229920",
+    "end": "3236800"
+  },
+  {
+    "text": "doesn't matter which which cloud you're running in um cool",
+    "start": "3236800",
+    "end": "3241920"
+  },
+  {
+    "text": "well uh i don't know if there are any other questions uh otherwise um i think",
+    "start": "3241920",
+    "end": "3251839"
+  },
+  {
+    "text": "um great i don't know what a kill all bobber does but that uh",
+    "start": "3259040",
+    "end": "3264720"
+  },
+  {
+    "text": "sounds fun yeah that was me trying to be able to stop sharing my screen but now i still can't",
+    "start": "3264720",
+    "end": "3271200"
+  },
+  {
+    "text": "thank you both um i've now had it back to gibbs but yeah that was uh i hope that was like i mean yeah",
+    "start": "3272079",
+    "end": "3278640"
+  },
+  {
+    "text": "extreme deep dives um and uh really valuable i think for everyone to hear about so um thanks",
+    "start": "3278640",
+    "end": "3285599"
+  },
+  {
+    "text": "for putting so much work um into it it's it's you know really great uh to see",
+    "start": "3285599",
+    "end": "3291839"
+  },
+  {
+    "text": "under the covers um uh for the for other folks out there running entry obviously",
+    "start": "3291839",
+    "end": "3297119"
+  },
+  {
+    "text": "um so yeah i just wanted to to say uh yeah give a great thank you for",
+    "start": "3297119",
+    "end": "3303920"
+  },
+  {
+    "text": "for all the detailed materials here",
+    "start": "3303920",
+    "end": "3307838"
+  },
+  {
+    "text": "awesome gibbs yeah no agreed that was really great thanks both yy and nick",
+    "start": "3310160",
+    "end": "3317520"
+  }
+]

@@ -1,0 +1,1682 @@
+[
+  {
+    "text": "all right thanks for tuning in i'm sebastian i'm a software engineer at isovalent we",
+    "start": "80",
+    "end": "5920"
+  },
+  {
+    "text": "are a security and networking company who is building hubble which i'm going to talk about",
+    "start": "5920",
+    "end": "11360"
+  },
+  {
+    "text": "today and cilium and so the talk today is about hubble an ebpf-based observability tool",
+    "start": "11360",
+    "end": "17440"
+  },
+  {
+    "text": "for kubernetes so what does observability in kubernetes",
+    "start": "17440",
+    "end": "22480"
+  },
+  {
+    "text": "mean what are the kind of questions that hubble tries to answer kubernetes is kind of a complex piece",
+    "start": "22480",
+    "end": "28640"
+  },
+  {
+    "text": "so from different perspectives there can be different questions that we might want to ask",
+    "start": "28640",
+    "end": "33840"
+  },
+  {
+    "text": "so if i'm an application developer i would for example like to know what kind of services my application is depending on i would",
+    "start": "33840",
+    "end": "41200"
+  },
+  {
+    "text": "like to know which http endpoints or which grpc or kafka",
+    "start": "41200",
+    "end": "46559"
+  },
+  {
+    "text": "calls are being made from my application and of course i also want to know the performance characteristics of of these calls",
+    "start": "46559",
+    "end": "54640"
+  },
+  {
+    "text": "if i'm operations persons i might have a different set of questions i want to ask the my tool so i i if i'm an operations",
+    "start": "54640",
+    "end": "62239"
+  },
+  {
+    "text": "person i might be more interested in the network communication i want to know if the network communication is failing",
+    "start": "62239",
+    "end": "67600"
+  },
+  {
+    "text": "and if it is failing i want to know the reason why is it a problem with the application is it a problem with the network",
+    "start": "67600",
+    "end": "73200"
+  },
+  {
+    "text": "if it is a problem with the network i would like to know why and on which layer this problems",
+    "start": "73200",
+    "end": "78880"
+  },
+  {
+    "text": "occurred and if i'm a security person i might have a different set",
+    "start": "78880",
+    "end": "84320"
+  },
+  {
+    "text": "again that i would like to have entered so for example if i have a kubernetes",
+    "start": "84320",
+    "end": "91759"
+  },
+  {
+    "text": "cluster which has network network policies enabled i would like to see if these network policies are being enforced and what",
+    "start": "91759",
+    "end": "97759"
+  },
+  {
+    "text": "connections are being dropped if there's services that are being accessed by outside",
+    "start": "97759",
+    "end": "104000"
+  },
+  {
+    "text": "entities or that are connecting to outside entities i would also like to know uh what services are being accessed and",
+    "start": "104000",
+    "end": "110240"
+  },
+  {
+    "text": "what outside entities are being accessed so these are the kind of questions that hubble tries to answer",
+    "start": "110240",
+    "end": "116560"
+  },
+  {
+    "text": "and the tool it it has chosen to to implement",
+    "start": "116560",
+    "end": "122159"
+  },
+  {
+    "text": "uh to implement its functionality is ebpf so i briefly want to talk about",
+    "start": "122159",
+    "end": "128879"
+  },
+  {
+    "text": "ebpf what it is and how we use it so ebpf stands for extended perk pack-up",
+    "start": "128879",
+    "end": "136080"
+  },
+  {
+    "text": "filter it's a linux kernel feature that allows you to attach small programs to the linux kernel in a",
+    "start": "136080",
+    "end": "142239"
+  },
+  {
+    "text": "secure and efficient manner i will again briefly explain what this means in more detail in a second",
+    "start": "142239",
+    "end": "148480"
+  },
+  {
+    "text": "so ebpf allows us to attach programs to the kernel on various attachment points so on the",
+    "start": "148480",
+    "end": "154080"
+  },
+  {
+    "text": "slide here i have an example program",
+    "start": "154080",
+    "end": "158480"
+  },
+  {
+    "text": "that is invoked whenever there's a outgoing packet on a certain interface",
+    "start": "159200",
+    "end": "164560"
+  },
+  {
+    "text": "so i can attach this this program for example on the socket layer and whenever there is a new packet going",
+    "start": "164560",
+    "end": "170959"
+  },
+  {
+    "text": "out on that interface this eppf program will be invoked so it's an event-driven mechanism and this sample program here",
+    "start": "170959",
+    "end": "177519"
+  },
+  {
+    "text": "is written in c but it will be compiled to bytecode this example program will extract the ethernet and ip header",
+    "start": "177519",
+    "end": "185360"
+  },
+  {
+    "text": "and then display us the source and destination ip address of",
+    "start": "185360",
+    "end": "191280"
+  },
+  {
+    "text": "this packet as well as the protocol of the payload that is being",
+    "start": "191280",
+    "end": "196840"
+  },
+  {
+    "text": "transported and while ppf originates in the in the networking space uh it has",
+    "start": "196840",
+    "end": "204400"
+  },
+  {
+    "text": "been extended to support uh quite a few other attachment points so we can for example also",
+    "start": "204400",
+    "end": "209519"
+  },
+  {
+    "text": "attach ppf programs to system calls this is a common use mechanism for example to implement sandboxing where we can",
+    "start": "209519",
+    "end": "216159"
+  },
+  {
+    "text": "inspect system calls and maybe block or even rewrite them if needed and the kernel also has some additional",
+    "start": "216159",
+    "end": "223280"
+  },
+  {
+    "text": "capabilities as well to inspect user space processes but there's also layers",
+    "start": "223280",
+    "end": "228799"
+  },
+  {
+    "text": "deeper down in the network stack where we can access bpf probes and these days you can even",
+    "start": "228799",
+    "end": "235280"
+  },
+  {
+    "text": "push down bpf programs to the network card and the network card will invoke your bpf program whenever it sees a new",
+    "start": "235280",
+    "end": "240640"
+  },
+  {
+    "text": "packet so why do we want to use this technology in hubble why do we want to use this",
+    "start": "240640",
+    "end": "245920"
+  },
+  {
+    "text": "technology for observability and the biggest reason is that it is completely transparent to the application",
+    "start": "245920",
+    "end": "251599"
+  },
+  {
+    "text": "the application doesn't know that ebpf is being used at all so this means we don't have to modify",
+    "start": "251599",
+    "end": "256880"
+  },
+  {
+    "text": "the application which is important especially when we are troubleshooting issues that we have never seen before",
+    "start": "256880",
+    "end": "262240"
+  },
+  {
+    "text": "where we could not modify the application ahead of time to make sure we cover that use case ebpf is also because it's dynamic it has",
+    "start": "262240",
+    "end": "269840"
+  },
+  {
+    "text": "a minimal overhead so we can we can attach probes only when we need them and we can enable and disable them whenever we want to get",
+    "start": "269840",
+    "end": "276400"
+  },
+  {
+    "text": "deeper visibility eppf is already widely available so there's a few large-scale users i have a",
+    "start": "276400",
+    "end": "282800"
+  },
+  {
+    "text": "few names there on the slides that are already using it in in production in quite large clusters",
+    "start": "282800",
+    "end": "288880"
+  },
+  {
+    "text": "and it's also widely available on most cloud providers so hubble for example only requires linux 4.9 to",
+    "start": "288880",
+    "end": "296000"
+  },
+  {
+    "text": "run if you are interested in more interest more in ebpf",
+    "start": "296000",
+    "end": "302720"
+  },
+  {
+    "text": "and its history and how i came along i highly recommend you check out uh the kubecon talk by my cover cro daniel",
+    "start": "302720",
+    "end": "308720"
+  },
+  {
+    "text": "he's also one of the epf subsystem maintainers in the linux kernel as well",
+    "start": "308720",
+    "end": "315520"
+  },
+  {
+    "text": "so how how would you use an eppf program i have a small example here on this",
+    "start": "315520",
+    "end": "321520"
+  },
+  {
+    "text": "slide so ebpf programs are typically loaded by a user space agent this is a user",
+    "start": "321520",
+    "end": "327919"
+  },
+  {
+    "text": "space program that is taking the c program so we have the z program there in the middle that we want to attach in this case to",
+    "start": "327919",
+    "end": "334880"
+  },
+  {
+    "text": "the socket layer of the linux kernel so what the agent does is it will take this c",
+    "start": "334880",
+    "end": "340080"
+  },
+  {
+    "text": "program and compile it to bytecode and then load the bytecode so ebpf is always bytecode similar to for",
+    "start": "340080",
+    "end": "345840"
+  },
+  {
+    "text": "example how javascript works so this bytecode is then loaded into the kernel and the first thing the kernel",
+    "start": "345840",
+    "end": "351440"
+  },
+  {
+    "text": "does is verify that this byte code does not do anything dangerous by that i mean that it terminates so it kind of",
+    "start": "351440",
+    "end": "357840"
+  },
+  {
+    "text": "blocked the kernel and that it doesn't crash the kernel or access any data structures that it is not supposed to access",
+    "start": "357840",
+    "end": "364240"
+  },
+  {
+    "text": "once we know that this program is safe and kind of crash the kernel we will then optimize it using a just in",
+    "start": "364240",
+    "end": "370880"
+  },
+  {
+    "text": "time compiler which will take the byte code and emit machine code which is basically as",
+    "start": "370880",
+    "end": "376720"
+  },
+  {
+    "text": "optimized as a kernel module and so once we have the machine code we can attach this machine code to",
+    "start": "376720",
+    "end": "382080"
+  },
+  {
+    "text": "our attachment point in this example the socket layer of the kernel and once we have",
+    "start": "382080",
+    "end": "387919"
+  },
+  {
+    "text": "attached the ppf program it will get invoked for each in this case outgoing packet that for",
+    "start": "387919",
+    "end": "394240"
+  },
+  {
+    "text": "example a process will emit by using the send system call so whenever there is a there's a sound",
+    "start": "394240",
+    "end": "399600"
+  },
+  {
+    "text": "system call the packet will be processed by the linux kernel and we will be informed about each",
+    "start": "399600",
+    "end": "405520"
+  },
+  {
+    "text": "outgoing packet and this andy can then either decide to for example log it for",
+    "start": "405520",
+    "end": "410560"
+  },
+  {
+    "text": "severability purposes but we can also implement things like firewalls or other policies a nice",
+    "start": "410560",
+    "end": "417440"
+  },
+  {
+    "text": "feature about ppf is that these programs that we attach to the kernel they can have state and the state is managed by what we call bpf maps",
+    "start": "417440",
+    "end": "424639"
+  },
+  {
+    "text": "there's different kind of maps available uh the kind of most common one is a basic",
+    "start": "424639",
+    "end": "430479"
+  },
+  {
+    "text": "hash table but there's other one like ring buffers that you can use to stream events and so this",
+    "start": "430479",
+    "end": "436000"
+  },
+  {
+    "text": "is used to communicate with our user space agent that loaded us into the into the kernel and the bpf map",
+    "start": "436000",
+    "end": "442319"
+  },
+  {
+    "text": "can be used for transferring of state it can be used for configuration so for example we can add filter lists",
+    "start": "442319",
+    "end": "448479"
+  },
+  {
+    "text": "to the program using ebpf maps but it's also used to send down events",
+    "start": "448479",
+    "end": "454240"
+  },
+  {
+    "text": "from the bpf program to the agent and ancient can see what what the ppf program is currently seeing",
+    "start": "454240",
+    "end": "459680"
+  },
+  {
+    "text": "and doing so two technologies that use ebpf quite",
+    "start": "459680",
+    "end": "464879"
+  },
+  {
+    "text": "heavily to implement networking on kubernetes are psyllium and hubble",
+    "start": "464879",
+    "end": "470240"
+  },
+  {
+    "text": "and the two are the two come together so psyllium is uh is in its core a cni a container",
+    "start": "470240",
+    "end": "476560"
+  },
+  {
+    "text": "networking interface which means that it implements the part-to-part network connectivity on your kubernetes",
+    "start": "476560",
+    "end": "483280"
+  },
+  {
+    "text": "cluster it is the piece of software that is that is responsible for forwarding your pow-to-pod traffic but",
+    "start": "483280",
+    "end": "490319"
+  },
+  {
+    "text": "psyllium has a few additional um features on top of that",
+    "start": "490319",
+    "end": "495680"
+  },
+  {
+    "text": "such as for example service based load balancing so it comes with a cube proxy replacement which completely",
+    "start": "495680",
+    "end": "502319"
+  },
+  {
+    "text": "replaces the cube proxy no port and load balancing implementation",
+    "start": "502319",
+    "end": "507919"
+  },
+  {
+    "text": "but tilum also has additional features like uh it supports kubernetes network policies which means",
+    "start": "507919",
+    "end": "513200"
+  },
+  {
+    "text": "that we can enforce network traffic rules we can you can um block certain parts from communicating",
+    "start": "513200",
+    "end": "519518"
+  },
+  {
+    "text": "with each other and psyllium also provides note to node encryption hubble so while zillion kind of manages",
+    "start": "519519",
+    "end": "525680"
+  },
+  {
+    "text": "the network connectivity in our cloud cluster hubble allows us to observe it and more",
+    "start": "525680",
+    "end": "531040"
+  },
+  {
+    "text": "so it's the it's the network observer observability part of psyllium and it can produce",
+    "start": "531040",
+    "end": "536800"
+  },
+  {
+    "text": "things like service dependency maps it has a troubleshooting api that we can use to dive deep into what's currently",
+    "start": "536800",
+    "end": "543120"
+  },
+  {
+    "text": "going on and it also provides us with mechanisms for to obtain metrics and to do monitoring so hubble and",
+    "start": "543120",
+    "end": "551279"
+  },
+  {
+    "text": "psyllium are quite intertwined we released a preview of hubble late",
+    "start": "551279",
+    "end": "559040"
+  },
+  {
+    "text": "2019 where we released the basic functionality of metrics and the command line tool as well as",
+    "start": "559040",
+    "end": "566320"
+  },
+  {
+    "text": "a preview of our graphical user interface this was built for celium one six so in",
+    "start": "566320",
+    "end": "572080"
+  },
+  {
+    "text": "cilium one seven uh we open source the ui and psyllium 17 is the first release of psyllium to also",
+    "start": "572080",
+    "end": "578080"
+  },
+  {
+    "text": "contain additional features specifically designed with hubble in mind so it supports visibility annotation and it",
+    "start": "578080",
+    "end": "583920"
+  },
+  {
+    "text": "also gives hubble more metadata about the trace events event study limits in march",
+    "start": "583920",
+    "end": "591600"
+  },
+  {
+    "text": "we had our first kind of proper release where we also provide some apa stability and psyllium",
+    "start": "591600",
+    "end": "599200"
+  },
+  {
+    "text": "0.5 is also the last release that we support for syllabus 17 which is kind of",
+    "start": "599200",
+    "end": "604320"
+  },
+  {
+    "text": "where hubble and psyllium are kind of separate entities because in psyllium 1.8 which was rela",
+    "start": "604320",
+    "end": "609760"
+  },
+  {
+    "text": "which was released in june uh 2020 we integrated hubble and psyllium even",
+    "start": "609760",
+    "end": "615519"
+  },
+  {
+    "text": "closer together so the hubble api is now directly integrated into the cilium agent",
+    "start": "615519",
+    "end": "620880"
+  },
+  {
+    "text": "which allows us much much better performance and the release itself also had a bit more stability improvements in terms of the",
+    "start": "620880",
+    "end": "627279"
+  },
+  {
+    "text": "ui and stability improvements in terms of the ui and hubble 0.6 also comes with",
+    "start": "627279",
+    "end": "634399"
+  },
+  {
+    "text": "initial support for hubble relay which allows you to do cluster wide troubleshooting as well",
+    "start": "634399",
+    "end": "642480"
+  },
+  {
+    "text": "so how does hubble use evpf as i've mentioned before in sydium 1.8 hubble and xilium are both",
+    "start": "643200",
+    "end": "650000"
+  },
+  {
+    "text": "part of the same user space process the xilium agent which is responsible for submitting ebpf",
+    "start": "650000",
+    "end": "656720"
+  },
+  {
+    "text": "programs to the kernel to implement all the features that i've mentioned so psyllium attaches",
+    "start": "656720",
+    "end": "664800"
+  },
+  {
+    "text": "ppf programs to all kubernetes pots that are in the system or on the local node",
+    "start": "664800",
+    "end": "670640"
+  },
+  {
+    "text": "and it subscribes to the kubernetes api to be informed about kubernetes resources such as existing",
+    "start": "670640",
+    "end": "676240"
+  },
+  {
+    "text": "pods existing services nodes that have been added to the clusters and of course network policies",
+    "start": "676240",
+    "end": "681360"
+  },
+  {
+    "text": "that cilium needs to enforce so it takes this data obtained from the kubernetes api and writes them into ppf maps which are",
+    "start": "681360",
+    "end": "689279"
+  },
+  {
+    "text": "then accessed by the epf ebpf data path so if a part wants to connect to either",
+    "start": "689279",
+    "end": "696399"
+  },
+  {
+    "text": "a part on the same node or to entities on a remote node it will have",
+    "start": "696399",
+    "end": "703440"
+  },
+  {
+    "text": "to go through the ebpf data path and so the ebpf datapath will take the incoming connection",
+    "start": "703440",
+    "end": "709120"
+  },
+  {
+    "text": "we'll inspect the packages see if it has to do some load balancing so it will access the service map to find service",
+    "start": "709120",
+    "end": "716240"
+  },
+  {
+    "text": "backends and frontends and maybe rewrite the packet even it will annotate identities so it will",
+    "start": "716240",
+    "end": "722000"
+  },
+  {
+    "text": "check the source and destination ip and see if these are known identities which is important for policy enforcement so policy enforcement",
+    "start": "722000",
+    "end": "729200"
+  },
+  {
+    "text": "in the policy map we will see whether this first identity is allowed to access this destination identity",
+    "start": "729200",
+    "end": "736079"
+  },
+  {
+    "text": "and while the data path is working it will emit trace and drop and policy events",
+    "start": "736079",
+    "end": "743120"
+  },
+  {
+    "text": "at certain points in the code and these events are also pushed into a ppf map the event ppf map",
+    "start": "743120",
+    "end": "748800"
+  },
+  {
+    "text": "which is a ring buffer which is read by a hubble instance running inside the",
+    "start": "748800",
+    "end": "755519"
+  },
+  {
+    "text": "psyllium agent so this hubble instance will collect these networking events um store them in",
+    "start": "755519",
+    "end": "761839"
+  },
+  {
+    "text": "a historic buffer and expose it via grpc and metrics and these can then be accessed by other",
+    "start": "761839",
+    "end": "768480"
+  },
+  {
+    "text": "hubble components such as the clients that we have like the graphical user interface and also prometheus",
+    "start": "768480",
+    "end": "775760"
+  },
+  {
+    "text": "so to see a bit more details of this uh we have the hubble ui which is the",
+    "start": "775839",
+    "end": "781120"
+  },
+  {
+    "text": "graphical user interface which will give you service dependency maps i will have a demo later with the ui to see how it",
+    "start": "781120",
+    "end": "786959"
+  },
+  {
+    "text": "actually looks like in in practice the ui also allows you to display flows",
+    "start": "786959",
+    "end": "792880"
+  },
+  {
+    "text": "filter flows so you can you can only see a subset of flows if you're interested and it also is able to display your",
+    "start": "792880",
+    "end": "799279"
+  },
+  {
+    "text": "cellular network policies the common line interface is a bit more for a bit more",
+    "start": "799279",
+    "end": "805519"
+  },
+  {
+    "text": "advanced troubleshooting so it gives you all the details the details that are available in the",
+    "start": "805519",
+    "end": "810800"
+  },
+  {
+    "text": "flow you can filter the output quite extensively we have quite a few filters that are implemented",
+    "start": "810800",
+    "end": "817120"
+  },
+  {
+    "text": "and the command line utility also has a json output that you can use to um that you can use for scripting and so",
+    "start": "817120",
+    "end": "825040"
+  },
+  {
+    "text": "these are the kind of two the two troubleshooting tools that we have but we also provide metrics",
+    "start": "825040",
+    "end": "830160"
+  },
+  {
+    "text": "so hubble has built-in metrics for both operations and application monitoring purposes i will later show a",
+    "start": "830160",
+    "end": "837199"
+  },
+  {
+    "text": "bit more how they work and and what they provide but basically they can be used in your",
+    "start": "837199",
+    "end": "844720"
+  },
+  {
+    "text": "typical grafana and prometheus stack to to monitor things going on in your cluster",
+    "start": "844720",
+    "end": "852240"
+  },
+  {
+    "text": "so the hubble api how does it how what does it provide the hubble api provides access to recent flows that occurred in",
+    "start": "852880",
+    "end": "859519"
+  },
+  {
+    "text": "the cluster um typically it's uh 4k events that are stored in each node but",
+    "start": "859519",
+    "end": "865760"
+  },
+  {
+    "text": "this is configurable you can also stream currently ongoing flows as well you can submit filters and only see the flows",
+    "start": "865760",
+    "end": "872399"
+  },
+  {
+    "text": "which match a filter or you can exclude flows based on the filter and in xilium 1.8 we also added a new",
+    "start": "872399",
+    "end": "879440"
+  },
+  {
+    "text": "feature for a cluster-wide visibility so the hubble api is re-implemented by this component called hubble relay",
+    "start": "879440",
+    "end": "886240"
+  },
+  {
+    "text": "which you can talk to and it will push down the filters to all the different nodes to make sure that you can you can find",
+    "start": "886240",
+    "end": "894000"
+  },
+  {
+    "text": "all the flows occurring in your cluster and as i've mentioned the api is accessed by both the cli and the ui",
+    "start": "894000",
+    "end": "902000"
+  },
+  {
+    "text": "so what what does the what does the api provide in details it has a few information that are",
+    "start": "902240",
+    "end": "909120"
+  },
+  {
+    "text": "obtained directly from the ebpf data path so flow metadata such as ethernet ip headers tcp flags but also",
+    "start": "909120",
+    "end": "915279"
+  },
+  {
+    "text": "things like http and tns traffic as i will show that in a second it annotates kubernetes information such",
+    "start": "915279",
+    "end": "922720"
+  },
+  {
+    "text": "as pod names labels service names uh node names and if if available it",
+    "start": "922720",
+    "end": "927920"
+  },
+  {
+    "text": "will also match um the domain names and will show you",
+    "start": "927920",
+    "end": "933600"
+  },
+  {
+    "text": "the domain names of of either the source or destination of a certain flow event and we also",
+    "start": "933600",
+    "end": "939440"
+  },
+  {
+    "text": "attach a few psyllium based information such as security identities um drop reasons and policy verdict",
+    "start": "939440",
+    "end": "946800"
+  },
+  {
+    "text": "decisions so in the in the screenshot there you see how the cli looks like so we we have a",
+    "start": "946800",
+    "end": "953440"
+  },
+  {
+    "text": "small four part example this is stolen from the psyllium getting started guide and we",
+    "start": "953440",
+    "end": "959600"
+  },
+  {
+    "text": "see that we can use hubble observe the cli to filter uh by label so in this case i'm doing a class equals x-wing label",
+    "start": "959600",
+    "end": "966160"
+  },
+  {
+    "text": "filter to only see events from parts emitted matching this filter and we invoke it in follow mode",
+    "start": "966160",
+    "end": "974000"
+  },
+  {
+    "text": "which means we'll see all the live flows and in this example we see that the x-wing part is accessing coordinates to",
+    "start": "974000",
+    "end": "979600"
+  },
+  {
+    "text": "do a to do a dns lookup you see this on port 53 which is udp traffic and this is then followed by",
+    "start": "979600",
+    "end": "986160"
+  },
+  {
+    "text": "some https request to an outside entity in this case it's uh apparently accessing disney.com so we",
+    "start": "986160",
+    "end": "993680"
+  },
+  {
+    "text": "see the full tcp connection including the shutdown as well and at the bottom there we see",
+    "start": "993680",
+    "end": "999519"
+  },
+  {
+    "text": "how it looks like if the part if a part is accessing something which it is not supposed to so in this",
+    "start": "999519",
+    "end": "1005040"
+  },
+  {
+    "text": "case the x-wing part managed by the rebels is trying to access the death star which is managed by the empire",
+    "start": "1005040",
+    "end": "1011920"
+  },
+  {
+    "text": "and the empire has installed a policy that doesn't allow this flow to go through so huble informs us about this drop as",
+    "start": "1011920",
+    "end": "1017920"
+  },
+  {
+    "text": "well all the information that i've showed you in the previous slide is",
+    "start": "1017920",
+    "end": "1024558"
+  },
+  {
+    "text": "information obtained directly from the ebpf data path but hubble can go deeper if we opt into l7 visibility",
+    "start": "1024559",
+    "end": "1032319"
+  },
+  {
+    "text": "we can also see more details so what this will do is",
+    "start": "1032319",
+    "end": "1037678"
+  },
+  {
+    "text": "that psyllium if we if we annotate a part so in this example we annotate the tie fighter part",
+    "start": "1037679",
+    "end": "1042959"
+  },
+  {
+    "text": "with a visibility annotation which says that we are interested in outgoing traffic uh outgoing http traffic on port 80. so",
+    "start": "1042959",
+    "end": "1050720"
+  },
+  {
+    "text": "as soon as we do this psyllium will transparently insert a proxy between the part and all outgoing",
+    "start": "1050720",
+    "end": "1057280"
+  },
+  {
+    "text": "endpoints and this then allows hubble to observe",
+    "start": "1057280",
+    "end": "1066559"
+  },
+  {
+    "text": "the metadata emitted by the by the android proxy in this case so we have support for http dns tls kafka",
+    "start": "1066559",
+    "end": "1073280"
+  },
+  {
+    "text": "but the android proxy can also be extended with uh different protocols and",
+    "start": "1073280",
+    "end": "1079520"
+  },
+  {
+    "text": "we can then access this data from from hubble as we can see in the screenshot there we",
+    "start": "1079520",
+    "end": "1084559"
+  },
+  {
+    "text": "are using the cli to filter based on uh the so we're filtering from",
+    "start": "1084559",
+    "end": "1091200"
+  },
+  {
+    "text": "the tie fighter part which we just annotated and we tell it to only display us http request",
+    "start": "1091200",
+    "end": "1096799"
+  },
+  {
+    "text": "http responses which have status code 200 and we output this as json so using jq we can actually then parse",
+    "start": "1096799",
+    "end": "1103760"
+  },
+  {
+    "text": "this json and in this case i'm just extracting the l7 information and we see all the metadata that hubble",
+    "start": "1103760",
+    "end": "1108880"
+  },
+  {
+    "text": "has access to which is things like the latency but also details like which url was accessed and the http headers so",
+    "start": "1108880",
+    "end": "1116559"
+  },
+  {
+    "text": "in this case we see that the request was apparently made by curl so this is what the api can do",
+    "start": "1116559",
+    "end": "1122640"
+  },
+  {
+    "text": "but as i mentioned hubble also provides metrics so these are based on the openmetrics format hubble",
+    "start": "1122640",
+    "end": "1129280"
+  },
+  {
+    "text": "exposes a matrix endpoint on each node which then can be scraped by prometheus there is",
+    "start": "1129280",
+    "end": "1134720"
+  },
+  {
+    "text": "a ton of built-in metrics that i'm not be not able to show all of them today but you have metrics for http details so",
+    "start": "1134720",
+    "end": "1142400"
+  },
+  {
+    "text": "the l7 visibility details can also be integrated to metrics",
+    "start": "1142400",
+    "end": "1147440"
+  },
+  {
+    "text": "we have metrics for dns requests and responses we have metrics for tcp flags we have metrics for icmp and many",
+    "start": "1147440",
+    "end": "1154799"
+  },
+  {
+    "text": "many more we also provide uh dashboards for graphana so you can just use our example",
+    "start": "1154799",
+    "end": "1160400"
+  },
+  {
+    "text": "dashboards to to try this out and the metrics can be enabled and disabled on a metric biometric basis",
+    "start": "1160400",
+    "end": "1167760"
+  },
+  {
+    "text": "and it's also quite easy to write new metrics as well if you want to",
+    "start": "1167760",
+    "end": "1173760"
+  },
+  {
+    "text": "so this is kind of the overall overview of hubble so let's let's see",
+    "start": "1174080",
+    "end": "1179840"
+  },
+  {
+    "text": "how it looks like in action so what i have here is a kubernetes",
+    "start": "1179840",
+    "end": "1186000"
+  },
+  {
+    "text": "cluster running uh psyllium and hubble so we have a 3-0 cluster running psyllium",
+    "start": "1186000",
+    "end": "1192960"
+  },
+  {
+    "text": "and as well as hubble and hubble relay and ui and if we check the status",
+    "start": "1192960",
+    "end": "1199039"
+  },
+  {
+    "text": "output of psyllium we will see that we can access or the table is enabled",
+    "start": "1199039",
+    "end": "1205679"
+  },
+  {
+    "text": "and that we can also access metrics as well so in this cluster i will now access",
+    "start": "1205679",
+    "end": "1211120"
+  },
+  {
+    "text": "hubble ui i've done a port for roading already ahead of time so we now we see the hubble ui this is",
+    "start": "1211120",
+    "end": "1216640"
+  },
+  {
+    "text": "how it looks like it displaces a service map for this this is an example application and",
+    "start": "1216640",
+    "end": "1222640"
+  },
+  {
+    "text": "it generates the service map only by the flow events emitted by hubble so in this",
+    "start": "1222640",
+    "end": "1228240"
+  },
+  {
+    "text": "case we see an application which is kind of a job portal where we have recruiters which are",
+    "start": "1228240",
+    "end": "1234640"
+  },
+  {
+    "text": "posting applicants and we have a job posting part which is creating new jobs and listing them and",
+    "start": "1234640",
+    "end": "1241600"
+  },
+  {
+    "text": "people applying to jobs both via an api which on the backend then access elasticsearch",
+    "start": "1241600",
+    "end": "1248000"
+  },
+  {
+    "text": "we have a crawler which is crawling twitter to find cvs and kind of information and loads them into a kafka topic which",
+    "start": "1248000",
+    "end": "1255919"
+  },
+  {
+    "text": "kafka as we know also needs zookeepers so we kind of see the service dependencies here quiet quite easily",
+    "start": "1255919",
+    "end": "1260960"
+  },
+  {
+    "text": "and we also see which endpoints are being accessed thanks to alzheimer's visibility we have the policy view so we can see",
+    "start": "1260960",
+    "end": "1267280"
+  },
+  {
+    "text": "that there's two policies one on the elasticsearch and one of the crawler part and so for the crawler we seem to",
+    "start": "1267280",
+    "end": "1272880"
+  },
+  {
+    "text": "have a policy for egress or for outgoing traffic and we see that the",
+    "start": "1272880",
+    "end": "1278799"
+  },
+  {
+    "text": "crawler pod is only allowed to access twitter and the loader pod that it that it needs to access and the",
+    "start": "1278799",
+    "end": "1284320"
+  },
+  {
+    "text": "dns for cube dns as well so this make sure that the crawler pod only accesses the",
+    "start": "1284320",
+    "end": "1290080"
+  },
+  {
+    "text": "network connections that it is supposed to and we see indeed in the service map that we only have",
+    "start": "1290080",
+    "end": "1295440"
+  },
+  {
+    "text": "flows going to twitter and the loader so now let's try to see what happens",
+    "start": "1295440",
+    "end": "1301280"
+  },
+  {
+    "text": "if you actually try to access an an entity which is not part of the of the policy which would be backed",
+    "start": "1301280",
+    "end": "1308400"
+  },
+  {
+    "text": "by the policy so in this example i'm now cube cuddling into",
+    "start": "1308400",
+    "end": "1313919"
+  },
+  {
+    "text": "the trial report and i'm accessing a current request to the psyllium.io domain and we will see",
+    "start": "1313919",
+    "end": "1319200"
+  },
+  {
+    "text": "that after three seconds this will timeout because the policy doesn't allow it and indeed we can",
+    "start": "1319200",
+    "end": "1325120"
+  },
+  {
+    "text": "double check this by using the hubble cli so i will ask for drug flows for for the crawler part and we will see",
+    "start": "1325120",
+    "end": "1331600"
+  },
+  {
+    "text": "that we have policy denied events coming in we can also see this in",
+    "start": "1331600",
+    "end": "1337840"
+  },
+  {
+    "text": "the ui so in the ui we have the flow view as well and if you refresh refresh the page here you will see that",
+    "start": "1337840",
+    "end": "1344880"
+  },
+  {
+    "text": "the drop flow will also occur if you filter by crawler pod we can see the drop flow there",
+    "start": "1344880",
+    "end": "1350880"
+  },
+  {
+    "text": "as well so this is kind of the ui and the service map and the information it",
+    "start": "1350880",
+    "end": "1356000"
+  },
+  {
+    "text": "provides another thing that hubble provides are metrics so on the second tab there i have",
+    "start": "1356000",
+    "end": "1363039"
+  },
+  {
+    "text": "grafana already open these are the metrics that hubble provides so we can for example",
+    "start": "1363039",
+    "end": "1368559"
+  },
+  {
+    "text": "see the general metrics that hubble produces we see the amount of flows per second per node we see what kind of",
+    "start": "1368559",
+    "end": "1375280"
+  },
+  {
+    "text": "flow types that we have we see also things like drop reasons",
+    "start": "1375280",
+    "end": "1380880"
+  },
+  {
+    "text": "and so forth so these are all generic metrics that you can enable and disable",
+    "start": "1380880",
+    "end": "1386640"
+  },
+  {
+    "text": "based on your preferences so we have yeah we have drop forward flows",
+    "start": "1386640",
+    "end": "1391919"
+  },
+  {
+    "text": "we can also see there where trace events are being omitted and here for example you have the uh the drop reason and if",
+    "start": "1391919",
+    "end": "1397280"
+  },
+  {
+    "text": "you look really closely we can see that there has been a slight increase in policies policy denied drop reason which is exactly the flow",
+    "start": "1397280",
+    "end": "1403600"
+  },
+  {
+    "text": "that we just tried to emit on the pod we also see other information",
+    "start": "1403600",
+    "end": "1409440"
+  },
+  {
+    "text": "like tcp icmp udp information so there's a ton of metrics that you can collect",
+    "start": "1409440",
+    "end": "1415120"
+  },
+  {
+    "text": "i'm not going into details here right now but uh there should be something for both application operations and security",
+    "start": "1415120",
+    "end": "1421520"
+  },
+  {
+    "text": "persons here so let's take a look at an l7 metric so these are http metrics being collected",
+    "start": "1421520",
+    "end": "1429840"
+  },
+  {
+    "text": "in the whole cluster so this is all http metrics for all the http traffic in the cluster that we have visibility into",
+    "start": "1429840",
+    "end": "1435840"
+  },
+  {
+    "text": "so we see things like methods we see that most requests seem to be successful so almost",
+    "start": "1435840",
+    "end": "1441440"
+  },
+  {
+    "text": "no 500s and we also have latency information so we see the medium latency which seems to",
+    "start": "1441440",
+    "end": "1446480"
+  },
+  {
+    "text": "be below 10 milliseconds and you have to tell it and say which in this case",
+    "start": "1446480",
+    "end": "1452400"
+  },
+  {
+    "text": "starts to look a bit weird right so in the tail latency we seem to have these bikes and if we if we look closely we see that",
+    "start": "1452400",
+    "end": "1458720"
+  },
+  {
+    "text": "there's uh so this is bucket based so we see that the um up to 200 millisecond bucket",
+    "start": "1458720",
+    "end": "1465360"
+  },
+  {
+    "text": "seems to have quite a few spikes that are occurring maybe every 30 seconds or so so there seems to be a",
+    "start": "1465360",
+    "end": "1471440"
+  },
+  {
+    "text": "performance problem with our application something is a bit fishy in in this application or something especially in our cluster",
+    "start": "1471440",
+    "end": "1477120"
+  },
+  {
+    "text": "and we want to now use hubble to figure out what exactly we want to do so",
+    "start": "1477120",
+    "end": "1483840"
+  },
+  {
+    "text": "let's start to investigate the the way i will investigate this is",
+    "start": "1483840",
+    "end": "1489200"
+  },
+  {
+    "text": "using the hubble cli using the json output so this is a jquery which will",
+    "start": "1489200",
+    "end": "1495760"
+  },
+  {
+    "text": "sort the all http and requests by latency and we only showing",
+    "start": "1495760",
+    "end": "1502320"
+  },
+  {
+    "text": "the the maximum latency for each url and so we see here that",
+    "start": "1502320",
+    "end": "1507919"
+  },
+  {
+    "text": "indeed that there's two uh endpoints job endpoints and core api which seems to have quite a high latency while the rest",
+    "start": "1507919",
+    "end": "1514159"
+  },
+  {
+    "text": "here seems fine there's only two endpoints that have this really weird highly high maximum latency so since",
+    "start": "1514159",
+    "end": "1521360"
+  },
+  {
+    "text": "this is on the core api let's start to investigate this so we can filter by recent traffic say",
+    "start": "1521360",
+    "end": "1527200"
+  },
+  {
+    "text": "for the last three minutes you want to see all traffic for the core api part i'm using a label",
+    "start": "1527200",
+    "end": "1532880"
+  },
+  {
+    "text": "filter here and i'm just using less to kind of be able to grab the output so this is the hubble output again we see all the",
+    "start": "1532880",
+    "end": "1538880"
+  },
+  {
+    "text": "all the events emitted by the core api pod and i grab for the end point so here's the request that seems to have",
+    "start": "1538880",
+    "end": "1544400"
+  },
+  {
+    "text": "only two milliseconds late see that's fine and if i go to the next one i now see there's uh",
+    "start": "1544400",
+    "end": "1550159"
+  },
+  {
+    "text": "yeah there's now a request which has 106 milliseconds latency so this is one of the",
+    "start": "1550159",
+    "end": "1555440"
+  },
+  {
+    "text": "degraded requests so we have the request coming in up there and then 100 milliseconds later",
+    "start": "1555440",
+    "end": "1562720"
+  },
+  {
+    "text": "we see the response going out at the bottom right there",
+    "start": "1562720",
+    "end": "1568000"
+  },
+  {
+    "text": "so let's see what happens in between so we seem to have a bit of uh a bit of",
+    "start": "1568000",
+    "end": "1576240"
+  },
+  {
+    "text": "uh unrelated traffic for fro from the front of the proxy um this is fine the tcp flags look fine",
+    "start": "1576240",
+    "end": "1583039"
+  },
+  {
+    "text": "nothing nothing too conspicuous here uh so this is just just a request coming in from the proxy",
+    "start": "1583039",
+    "end": "1590080"
+  },
+  {
+    "text": "and being being sent to the core api but then we see uh we see on this line here we see the",
+    "start": "1590080",
+    "end": "1596720"
+  },
+  {
+    "text": "core api trying to access memcache d so it seems to seems to be using caching and we see that the tcp flags indeed for",
+    "start": "1596720",
+    "end": "1604240"
+  },
+  {
+    "text": "the response are reset so this connection is being dropped so it seems like the core api is unable to access",
+    "start": "1604240",
+    "end": "1610159"
+  },
+  {
+    "text": "the cache for some reason and we see then the elasticsearch um requests going out to the back end to",
+    "start": "1610159",
+    "end": "1618000"
+  },
+  {
+    "text": "fetch the information from from the backend instead of the cache so let's see kind of what connections we have to this",
+    "start": "1618000",
+    "end": "1623760"
+  },
+  {
+    "text": "memcache d um instances so i've copy-pasted the",
+    "start": "1623760",
+    "end": "1629039"
+  },
+  {
+    "text": "the domain for the memcached service so i can again write with the click and",
+    "start": "1629039",
+    "end": "1635520"
+  },
+  {
+    "text": "write a filter where i say show me all the traffic to this domain and this will show me all the traffic to the domain",
+    "start": "1635520",
+    "end": "1643200"
+  },
+  {
+    "text": "and we see that there's a few different connections but all from the core api now i'm doing a second request as well",
+    "start": "1646159",
+    "end": "1653120"
+  },
+  {
+    "text": "which will get rid of the of the name resolution and just show us the raw ips",
+    "start": "1653120",
+    "end": "1658480"
+  },
+  {
+    "text": "and so um here we don't have the annotations anymore this is just the raw data but if you look at this we see we see",
+    "start": "1658480",
+    "end": "1665120"
+  },
+  {
+    "text": "the requests at the resets being emitted there and so",
+    "start": "1665120",
+    "end": "1670320"
+  },
+  {
+    "text": "if you look more closely we can actually see that the reset only seems to occur on ip23",
+    "start": "1670320",
+    "end": "1677440"
+  },
+  {
+    "text": "the other the other um the other destinations like point 25 and point 24",
+    "start": "1677440",
+    "end": "1683440"
+  },
+  {
+    "text": "seem to be fine so um let's quickly double check what kind of um",
+    "start": "1683440",
+    "end": "1689760"
+  },
+  {
+    "text": "ips are associated with this domain so we can filter by dns request and indeed we see that",
+    "start": "1689760",
+    "end": "1696399"
+  },
+  {
+    "text": "we have three ips associated with the memcache and one of these ip is the top 23 which",
+    "start": "1696399",
+    "end": "1702320"
+  },
+  {
+    "text": "seems to be behaving really really strangely so let's um let's let's see if we can",
+    "start": "1702320",
+    "end": "1710159"
+  },
+  {
+    "text": "reproduce this let's see if if there's really a problem so now i'm keep cuddling into the core api part",
+    "start": "1710159",
+    "end": "1716080"
+  },
+  {
+    "text": "and i'm just accessing the ip directly on the memcached port and if we act if we execute this command",
+    "start": "1716080",
+    "end": "1721760"
+  },
+  {
+    "text": "we should see whether or not we can access memcached",
+    "start": "1721760",
+    "end": "1728159"
+  },
+  {
+    "text": "and indeed it seems to fail for this particular instance so let's try a different one the other one served so we have",
+    "start": "1728159",
+    "end": "1734240"
+  },
+  {
+    "text": "established the root cause now um that indeed point 23 seems to be unaccessible",
+    "start": "1734240",
+    "end": "1740240"
+  },
+  {
+    "text": "so we have let's check again we have three back ends for the memcache d and so we've we've established that",
+    "start": "1740240",
+    "end": "1747520"
+  },
+  {
+    "text": "there seems to be a problem with one of these one of these nodes and we can we can",
+    "start": "1747520",
+    "end": "1753360"
+  },
+  {
+    "text": "check that and in this case of course i i know what the reason is because this is a demo that i've prepared",
+    "start": "1753360",
+    "end": "1759200"
+  },
+  {
+    "text": "so uh let's ssh into the ins into this instance and see what's going on so i will ssh into this faulty memcached",
+    "start": "1759200",
+    "end": "1767200"
+  },
+  {
+    "text": "part and show me the list of containers that are currently running or have been stopped so if i use docker",
+    "start": "1767200",
+    "end": "1773440"
+  },
+  {
+    "text": "ps on that instance i see that there's indeed a memcached that has been",
+    "start": "1773440",
+    "end": "1778640"
+  },
+  {
+    "text": "turned off an hour ago almost so that would explain why we see dropped connections so i can now",
+    "start": "1778640",
+    "end": "1786559"
+  },
+  {
+    "text": "start this start this container again by just starting the docker container",
+    "start": "1786559",
+    "end": "1792240"
+  },
+  {
+    "text": "and once the container is up again we can now verify whether the connection works so again i'm using",
+    "start": "1792240",
+    "end": "1797840"
+  },
+  {
+    "text": "cubecode directly access the part and now the instance is up so a few minutes later we can now check",
+    "start": "1797840",
+    "end": "1803919"
+  },
+  {
+    "text": "again how things are so we still have access to the memcache that seems to work fine and if we now",
+    "start": "1803919",
+    "end": "1809200"
+  },
+  {
+    "text": "check the metrics and refresh we will see that now that we have fixed the memcached",
+    "start": "1809200",
+    "end": "1814720"
+  },
+  {
+    "text": "backend traffic is healthy and performant as expected",
+    "start": "1814720",
+    "end": "1823200"
+  },
+  {
+    "text": "so this has been a showcase of hubble uh i hope you have understood",
+    "start": "1823200",
+    "end": "1830320"
+  },
+  {
+    "text": "uh what hubble can provide for you and what you can do uh if you want to try it out yourself",
+    "start": "1830320",
+    "end": "1835440"
+  },
+  {
+    "text": "please do so on the url on the slides here we have a getting started guide which will guide you through a few examples as well",
+    "start": "1835440",
+    "end": "1842000"
+  },
+  {
+    "text": "and hubble of course is open source so please feel free to check out the source",
+    "start": "1842000",
+    "end": "1847279"
+  },
+  {
+    "text": "to open uh prs and issues so yeah um thanks a lot for your attention and",
+    "start": "1847279",
+    "end": "1854159"
+  },
+  {
+    "text": "goodbye all right so thanks a lot for watching",
+    "start": "1854159",
+    "end": "1862559"
+  },
+  {
+    "text": "uh we do have a few minutes for a more additional q a i already tried to answer some during",
+    "start": "1862559",
+    "end": "1869279"
+  },
+  {
+    "text": "the talk in the chat but i will now also answer kind of the the most common ones",
+    "start": "1869279",
+    "end": "1874399"
+  },
+  {
+    "text": "here in the uh in the in the q a session if you have",
+    "start": "1874399",
+    "end": "1879600"
+  },
+  {
+    "text": "more questions afterwards uh please feel free to drop me a message either on the kubecon slack or also make",
+    "start": "1879600",
+    "end": "1885440"
+  },
+  {
+    "text": "sure to join the psyllium slack this is psyllium delay slack for especially for more details technical",
+    "start": "1885440",
+    "end": "1891679"
+  },
+  {
+    "text": "questions um so yeah an answer that that came up",
+    "start": "1891679",
+    "end": "1897440"
+  },
+  {
+    "text": "or a question that came up quite quite often is the question better",
+    "start": "1897440",
+    "end": "1904240"
+  },
+  {
+    "text": "it is mandatory to have psyllium as a cni in order to use hubble and what this means for things like",
+    "start": "1904240",
+    "end": "1911840"
+  },
+  {
+    "text": "running hubble on cloud providers like gke or aws",
+    "start": "1911840",
+    "end": "1919440"
+  },
+  {
+    "text": "and so the the the answer is is is that yes you will need to deploy",
+    "start": "1919440",
+    "end": "1925120"
+  },
+  {
+    "text": "psyllium as a cni to use hubble that the two are really tightly coupled however cilium as a zni is able to chain",
+    "start": "1925120",
+    "end": "1933679"
+  },
+  {
+    "text": "uh with other cni's as well so you can actually use psyllium on top of the cheek on top of",
+    "start": "1933679",
+    "end": "1939200"
+  },
+  {
+    "text": "gke or on top of the aws cni without problems and psyllium will integrate quite nicely",
+    "start": "1939200",
+    "end": "1945360"
+  },
+  {
+    "text": "with the existing cni so psyllium will do things like the observability for hubble but the actual part the pod traffic is",
+    "start": "1945360",
+    "end": "1951600"
+  },
+  {
+    "text": "then handled by the aws cni for example so yes it is tied to psyllium but yes",
+    "start": "1951600",
+    "end": "1957760"
+  },
+  {
+    "text": "you can also run psyllium with other cni's as well",
+    "start": "1957760",
+    "end": "1963840"
+  },
+  {
+    "text": "another question that came up is uh",
+    "start": "1968640",
+    "end": "1976000"
+  },
+  {
+    "text": "whether we can also use deploy hubble for vms and parameter",
+    "start": "1976000",
+    "end": "1983519"
+  },
+  {
+    "text": "workloads and the question here is kind of or not yet so psyllium has recently gained in the",
+    "start": "1983519",
+    "end": "1990960"
+  },
+  {
+    "text": "latest tiller release we have gained the ability to uh use uh host firewall rules so you can",
+    "start": "1990960",
+    "end": "1998159"
+  },
+  {
+    "text": "now protect hosts using serium as well and this also means that psyllium will get traffic can observe the traffic on a",
+    "start": "1998159",
+    "end": "2005039"
+  },
+  {
+    "text": "vm so this is something we're actively working on intellium and hubble will gain the we'll gain the uh the workloads",
+    "start": "2005039",
+    "end": "2013760"
+  },
+  {
+    "text": "as well um our hubble will will be able to to see this is we'll be able",
+    "start": "2013760",
+    "end": "2020159"
+  },
+  {
+    "text": "to see the the uh data produced by vms and parameter workloads as well but this is something",
+    "start": "2020159",
+    "end": "2025840"
+  },
+  {
+    "text": "that's currently um being worked on in in uh enthelium",
+    "start": "2025840",
+    "end": "2034080"
+  },
+  {
+    "text": "so yeah i think the other questions i've already answered in texts",
+    "start": "2034080",
+    "end": "2040960"
+  },
+  {
+    "text": "um there has been a question about security so i didn't really talk that",
+    "start": "2040960",
+    "end": "2046240"
+  },
+  {
+    "text": "much about security uh it's of course you can use hubble and",
+    "start": "2046240",
+    "end": "2052000"
+  },
+  {
+    "text": "and uh stomp the dump the uh events in your seam or or another kind of um security focus",
+    "start": "2052000",
+    "end": "2060320"
+  },
+  {
+    "text": "tool as well if you have more questions in this regard please reach out to us uh on the slack",
+    "start": "2060320",
+    "end": "2065358"
+  },
+  {
+    "text": "um i think this is kind of a more detailed question where uh that the use case might might be a",
+    "start": "2065359",
+    "end": "2071520"
+  },
+  {
+    "text": "bit more um where we have to discuss the use case first whether it's something but that is",
+    "start": "2071520",
+    "end": "2077040"
+  },
+  {
+    "text": "in scope for hubble or not but generally speaking we absolutely also use hubble for security um observability uh especially like the",
+    "start": "2077040",
+    "end": "2085520"
+  },
+  {
+    "text": "network security policy monitoring that we have in psyllium is this one is one use case that i've",
+    "start": "2085520",
+    "end": "2092158"
+  },
+  {
+    "text": "demonstrated in the talk",
+    "start": "2092159",
+    "end": "2102000"
+  },
+  {
+    "text": "all right i think this answers",
+    "start": "2102000",
+    "end": "2109599"
+  },
+  {
+    "text": "almost all questions that we have i will follow up with the rest uh here in the in the platform and again",
+    "start": "2109599",
+    "end": "2116240"
+  },
+  {
+    "text": "please feel free to reach out to me on slack this is either the cncf slack or also the psyllium slack i will be available",
+    "start": "2116240",
+    "end": "2122640"
+  },
+  {
+    "text": "in both uh the the uh the channel on the cncf slack is the kubecon observability",
+    "start": "2122640",
+    "end": "2129040"
+  },
+  {
+    "text": "channel and yeah thanks a lot for attending",
+    "start": "2129040",
+    "end": "2134400"
+  },
+  {
+    "text": "and enjoy the rest of qcon thank you",
+    "start": "2134400",
+    "end": "2140480"
+  }
+]

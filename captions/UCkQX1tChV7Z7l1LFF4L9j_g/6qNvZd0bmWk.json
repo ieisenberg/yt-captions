@@ -1,0 +1,2267 @@
+[
+  {
+    "text": "[Music]",
+    "start": "3320",
+    "end": "8769"
+  },
+  {
+    "text": "yeah thank you thank you so much Sid um so my name as Sid said is Lily Mara I'm",
+    "start": "12320",
+    "end": "18199"
+  },
+  {
+    "text": "an engineering manager at a software company here in the Bay Area called uh one signal we are a customer messaging",
+    "start": "18199",
+    "end": "25279"
+  },
+  {
+    "text": "company we help millions of application developers and marketers connect with billi ions of users and we send around",
+    "start": "25279",
+    "end": "33320"
+  },
+  {
+    "text": "uh 13 billion push notifications emails inapp messages and SMS every single day",
+    "start": "33320",
+    "end": "39200"
+  },
+  {
+    "text": "a little bit about my history uh I started uh using rust uh professionally",
+    "start": "39200",
+    "end": "45079"
+  },
+  {
+    "text": "in 2016 and I started using it as my main daily programming language",
+    "start": "45079",
+    "end": "50360"
+  },
+  {
+    "text": "professionally at 2019 in 2019 when I started at one signal I'm the author of the book uh refactoring to rust that is",
+    "start": "50360",
+    "end": "57320"
+  },
+  {
+    "text": "available now in Early Access at Ming and hopefully we'll be going into",
+    "start": "57320",
+    "end": "62359"
+  },
+  {
+    "text": "production uh relatively soon so what are we going to be talking",
+    "start": "62359",
+    "end": "68960"
+  },
+  {
+    "text": "about today we're going to be talking about how we built this scalable High throughput timer system at one signal",
+    "start": "68960",
+    "end": "74600"
+  },
+  {
+    "text": "we're going to be talking about the motivation behind building it in the first place uh the architecture of the system itself how the system performed",
+    "start": "74600",
+    "end": "82280"
+  },
+  {
+    "text": "uh how we scaled it up and some future work that we are maybe thinking about doing in the",
+    "start": "82280",
+    "end": "87560"
+  },
+  {
+    "text": "system so let's jump back in time a little bit it's 2019 uh I've just",
+    "start": "87560",
+    "end": "93640"
+  },
+  {
+    "text": "started at one signal I've just moved to sunny California from horrible not Sunny",
+    "start": "93640",
+    "end": "98759"
+  },
+  {
+    "text": "Ohio and everybody in uh one signal everybody in the kind of customer",
+    "start": "98759",
+    "end": "104240"
+  },
+  {
+    "text": "messaging sphere is talking about the concept of Journey Builders and if you're not a Content marketer you might",
+    "start": "104240",
+    "end": "110360"
+  },
+  {
+    "text": "not know what a journey Builder is so just a quick crash course um this is a",
+    "start": "110360",
+    "end": "116039"
+  },
+  {
+    "text": "no Code system that allows marketers to build out uh custom messaging flows so",
+    "start": "116039",
+    "end": "121479"
+  },
+  {
+    "text": "this is a flowchart that's going to be applied at a per user level this is very similar to like what a marketer might",
+    "start": "121479",
+    "end": "127159"
+  },
+  {
+    "text": "put together themselves so over here on the left we're going to we're going to start every user is going to start over",
+    "start": "127159",
+    "end": "132760"
+  },
+  {
+    "text": "here and there's immediately going to be dumped into a decision node so we allow our customers to store arbitrary key",
+    "start": "132760",
+    "end": "139959"
+  },
+  {
+    "text": "value pairs at the user level and you know in this case a customer might be storing you know what's your favorite",
+    "start": "139959",
+    "end": "146640"
+  },
+  {
+    "text": "color as as one of those key value pairs so we'll make it decision based on that let's say for the sake of argument that",
+    "start": "146640",
+    "end": "153239"
+  },
+  {
+    "text": "this customer this user's favorite color was blue we're going to send that user a push notification that says hey there's",
+    "start": "153239",
+    "end": "159680"
+  },
+  {
+    "text": "a you know 20% off sale on blue shirts we know how much you love blue aren't you so excited about the the blue shirt",
+    "start": "159680",
+    "end": "165080"
+  },
+  {
+    "text": "sale and then the next thing that's going to happen is we are going to wait 24 hours we're going to do nothing for a",
+    "start": "165080",
+    "end": "170480"
+  },
+  {
+    "text": "day this is this was the missing piece you know we we kind of uh thought we",
+    "start": "170480",
+    "end": "175760"
+  },
+  {
+    "text": "understood how to build the event system we understood how to build the uh the",
+    "start": "175760",
+    "end": "181959"
+  },
+  {
+    "text": "the node walking tree but we didn't have a primitive in place in our Network for",
+    "start": "181959",
+    "end": "187360"
+  },
+  {
+    "text": "scheduling for storing a bunch of timers and expiring them performant so this is",
+    "start": "187360",
+    "end": "192879"
+  },
+  {
+    "text": "what we're going to be building today so after we after we do that 24-hour wait we are going to have another decision",
+    "start": "192879",
+    "end": "199080"
+  },
+  {
+    "text": "node we're going to say did that particular user click on that particular push notification we sent them uh if",
+    "start": "199080",
+    "end": "204640"
+  },
+  {
+    "text": "they did we will say you know mission accomplished good job Journey you know you you did the engagement",
+    "start": "204640",
+    "end": "210439"
+  },
+  {
+    "text": "and if they didn't we'll send them an SMS that has you know more or less the same message and you might want to do this because uh sending an SMS has a",
+    "start": "210439",
+    "end": "218120"
+  },
+  {
+    "text": "monetary cost associated with it you know carriers will bill you for sending sms twilio will bill you for sending sms",
+    "start": "218120",
+    "end": "224840"
+  },
+  {
+    "text": "but push notifications have basically zero marginal cost um so if you if you",
+    "start": "224840",
+    "end": "232159"
+  },
+  {
+    "text": "want to use SMS you might want to use it as kind of a second order messaging system to get in contact with your",
+    "start": "232159",
+    "end": "237480"
+  },
+  {
+    "text": "customers so that's a journey Builder that's what we're going to try to enable the construction of today so what are",
+    "start": "237480",
+    "end": "244079"
+  },
+  {
+    "text": "the constru what are the uh requirements on this timer system that we're going to build we want to be able to store billions of concurrent timers because we",
+    "start": "244079",
+    "end": "250439"
+  },
+  {
+    "text": "want to be able to support the billions of user records that we already have we want to be able to expire those timers",
+    "start": "250439",
+    "end": "257280"
+  },
+  {
+    "text": "performant we want to minimize data loss because of course we don't want to be dropping timers on the floor we don't",
+    "start": "257280",
+    "end": "262960"
+  },
+  {
+    "text": "want people to get stuck in particular nodes of their Journeys and we want to",
+    "start": "262960",
+    "end": "268120"
+  },
+  {
+    "text": "integrate well with the rest of the data systems that we have at one signal you know we're a relatively small company we",
+    "start": "268120",
+    "end": "275160"
+  },
+  {
+    "text": "don't have the resources to have you know a team for every particular data",
+    "start": "275160",
+    "end": "280560"
+  },
+  {
+    "text": "system that's out there we don't we don't want to adopt you know 50",
+    "start": "280560",
+    "end": "285680"
+  },
+  {
+    "text": "completely different you know uh open source Data Systems so let's get in the heads space",
+    "start": "285680",
+    "end": "293000"
+  },
+  {
+    "text": "a little bit we realized very crucially that if we wanted to build a timer we had to think like a timer and so we took",
+    "start": "293000",
+    "end": "299120"
+  },
+  {
+    "text": "the project and we set it down for a year and we didn't think about it that hard and we prioritized other",
+    "start": "299120",
+    "end": "306160"
+  },
+  {
+    "text": "initiatives jumping forward once again uh we're in the beginning of 2021 and we have the resources to start",
+    "start": "306160",
+    "end": "313680"
+  },
+  {
+    "text": "investigating this project so we have to make a decision you know are we going to build something completely from scratch",
+    "start": "313680",
+    "end": "319199"
+  },
+  {
+    "text": "ourselves or are we going to buy a kind of off-the-shelf system is there an open source timer and open source scheduling",
+    "start": "319199",
+    "end": "325000"
+  },
+  {
+    "text": "system that we can just use right the first place we looked were uh generic",
+    "start": "325000",
+    "end": "331160"
+  },
+  {
+    "text": "open source queuing systems like sidekick and rabbit mq uh we already operate sidekick uh very heavily that",
+    "start": "331160",
+    "end": "338680"
+  },
+  {
+    "text": "one signal is the core of our delivery API and a lot of our kind of lower throughput scheduling jobs um but but",
+    "start": "338680",
+    "end": "346600"
+  },
+  {
+    "text": "these these general purpose queuing systems they had a lot of features that we didn't really need we didn't want to pay to have to operate and they were",
+    "start": "346600",
+    "end": "353759"
+  },
+  {
+    "text": "lacking in the area that was the most important to us and that was uh performance we didn't think that these",
+    "start": "353759",
+    "end": "359199"
+  },
+  {
+    "text": "systems were were going to scale up to the kind of throughput that we were expecting this timer system to have",
+    "start": "359199",
+    "end": "364479"
+  },
+  {
+    "text": "right and the schedule the uh published performance numbers for things like",
+    "start": "364479",
+    "end": "369960"
+  },
+  {
+    "text": "rapid mq just seem to orders a magnitude off from what we wanted out of this system you know we knew from experience",
+    "start": "369960",
+    "end": "376199"
+  },
+  {
+    "text": "what sidekick was like to scale and we didn't think that was going to be good enough and based on the published",
+    "start": "376199",
+    "end": "381919"
+  },
+  {
+    "text": "numbers we thought that that other things weren't going to be good enough so we opted to build something",
+    "start": "381919",
+    "end": "387639"
+  },
+  {
+    "text": "for ourselves you know we're going we're going all the way uh once again let's look at these",
+    "start": "387639",
+    "end": "393280"
+  },
+  {
+    "text": "requirements right we want to be able to store tons of timers expire them performant minimize data loss and uh",
+    "start": "393280",
+    "end": "399800"
+  },
+  {
+    "text": "interoperate with the rest of our system so let's talk about the rest of the systems what is the prior art for system",
+    "start": "399800",
+    "end": "406160"
+  },
+  {
+    "text": "design at one signal we have a lot of things uh written in Rust we actually",
+    "start": "406160",
+    "end": "412120"
+  },
+  {
+    "text": "currently but not at the time had a policy around uh only using rust for for",
+    "start": "412120",
+    "end": "417160"
+  },
+  {
+    "text": "new systems but at the time we were also spinning up uh new services in go we use",
+    "start": "417160",
+    "end": "423720"
+  },
+  {
+    "text": "Apache Kafka very heavily for our async messaging applications and we also use grpc for",
+    "start": "423720",
+    "end": "430160"
+  },
+  {
+    "text": "all of our internal uh synchronous uh rpcs also as a part of the larger",
+    "start": "430160",
+    "end": "435919"
+  },
+  {
+    "text": "Journeys initiative we were going to be using Sila which is a C++ rewrite of",
+    "start": "435919",
+    "end": "441599"
+  },
+  {
+    "text": "Apache Cassandra so let's talk about the Big",
+    "start": "441599",
+    "end": "446840"
+  },
+  {
+    "text": "Blocks how the data are flowing in and out of the system right right probably you know sensibly the input to this",
+    "start": "446840",
+    "end": "453599"
+  },
+  {
+    "text": "system is a timer right and a timer is an expiry time a time to end that and a",
+    "start": "453599",
+    "end": "459879"
+  },
+  {
+    "text": "thing to do once it has ended an action so what are what are the actions you",
+    "start": "459879",
+    "end": "464919"
+  },
+  {
+    "text": "know initially we came up with a pretty short list that is sending a message like a notification email SMS Ina",
+    "start": "464919",
+    "end": "470639"
+  },
+  {
+    "text": "message or it's you know adding a tag to a particular user but we realized that",
+    "start": "470639",
+    "end": "476319"
+  },
+  {
+    "text": "you know we might come up with more actions in the future so we didn't necessarily want to constrain ourselves to uh a fixed list and we also realized",
+    "start": "476319",
+    "end": "484400"
+  },
+  {
+    "text": "that we might come up with actions that had absolutely nothing to do with uh Journeys absolutely nothing to do with",
+    "start": "484400",
+    "end": "490440"
+  },
+  {
+    "text": "messaging that you know this timer system this Schuler system has a broad range of applicability and we wanted to",
+    "start": "490440",
+    "end": "497440"
+  },
+  {
+    "text": "leave the door open for us to uh take advantage of that so we imposed a new requirement on",
+    "start": "497440",
+    "end": "503319"
+  },
+  {
+    "text": "ourselves we said we wanted this system to be generic so uh given that the system is",
+    "start": "503319",
+    "end": "510120"
+  },
+  {
+    "text": "going to be generic what is an action what does it look like how does how does it work in addition to being generic we",
+    "start": "510120",
+    "end": "516360"
+  },
+  {
+    "text": "wanted it to be simple so that meant uh constraining what an action what an action is even though even though it's",
+    "start": "516360",
+    "end": "522839"
+  },
+  {
+    "text": "flexible we didn't want to give people a whole templating engine or scripting library or something like that you know",
+    "start": "522839",
+    "end": "528120"
+  },
+  {
+    "text": "we wanted it to be pretty straightforward you know you give us these bits and we will ship them off when the time comes so are we going to",
+    "start": "528120",
+    "end": "535120"
+  },
+  {
+    "text": "let people send HTTP requests with Json payloads um well all of our internal",
+    "start": "535120",
+    "end": "540640"
+  },
+  {
+    "text": "services use grpc so probably not that maybe there'll be grpc requests then but",
+    "start": "540640",
+    "end": "546320"
+  },
+  {
+    "text": "both of these systems suffer from the same uh in our mind critical flaw and that these are both uh you know",
+    "start": "546320",
+    "end": "552079"
+  },
+  {
+    "text": "synchronous systems and we thought it was really important that the outputs of the timer system be themselves",
+    "start": "552079",
+    "end": "558360"
+  },
+  {
+    "text": "asynchronous right and why is that uh as",
+    "start": "558360",
+    "end": "563399"
+  },
+  {
+    "text": "timers start to expire if there's multiple systems that are being interfaced with you know say",
+    "start": "563399",
+    "end": "568720"
+  },
+  {
+    "text": "notification delivery and adding key value pairs if one of those systems is",
+    "start": "568720",
+    "end": "574560"
+  },
+  {
+    "text": "down or is timing out requests we don't want I we don't want a to have to design",
+    "start": "574560",
+    "end": "581440"
+  },
+  {
+    "text": "our own queuing independence layer in the timer system or B you know have our request cues get filled up with you know",
+    "start": "581440",
+    "end": "589560"
+  },
+  {
+    "text": "with requests for that one failing system and to to the detriment of the other well- behaving systems right so we",
+    "start": "589560",
+    "end": "596079"
+  },
+  {
+    "text": "wanted the output of this to be asynchronous so we opted to use Apache Kafka which as",
+    "start": "596079",
+    "end": "602440"
+  },
+  {
+    "text": "I mentioned is already used very heavily at one signal we already have a lot of In-House knowledge and expertise on how",
+    "start": "602440",
+    "end": "607880"
+  },
+  {
+    "text": "to operate and scale kafa workloads uh it gave us a general purpose queuing system that was high performance and a",
+    "start": "607880",
+    "end": "614839"
+  },
+  {
+    "text": "really key benefit is it meant that the timer system was isolated from the performance of the end Action System",
+    "start": "614839",
+    "end": "623519"
+  },
+  {
+    "text": "right now what about these inputs what about the the timers themselves um",
+    "start": "623519",
+    "end": "628920"
+  },
+  {
+    "text": "because all the timers are being written into the same place by us we can own the latency of those rights so this can be a",
+    "start": "628920",
+    "end": "636200"
+  },
+  {
+    "text": "synchronous grpc call so the interface broadly speaking",
+    "start": "636200",
+    "end": "641880"
+  },
+  {
+    "text": "looks like this uh you know external customers make a grpc request to the timer system they're going to give us an",
+    "start": "641880",
+    "end": "648440"
+  },
+  {
+    "text": "expiry time and they're going to give us an action which is a Kafka topic Kafka partition and some bites to write onto",
+    "start": "648440",
+    "end": "654839"
+  },
+  {
+    "text": "the cofa stream uh and then later on when that timer expires we're going to write that",
+    "start": "654839",
+    "end": "660040"
+  },
+  {
+    "text": "Kafka message to the place that the customer has specified and we'll delve into the you",
+    "start": "660040",
+    "end": "666279"
+  },
+  {
+    "text": "know magic box of the timer system as we go through this and hopefully later on presumably at some point uh the team",
+    "start": "666279",
+    "end": "673519"
+  },
+  {
+    "text": "that inced the timer will have a consumer a Copa consumer that picks up the message and acts on it but the",
+    "start": "673519",
+    "end": "679399"
+  },
+  {
+    "text": "really important thing here is the consumer picking up the message and acting on it is you know totally",
+    "start": "679399",
+    "end": "685360"
+  },
+  {
+    "text": "isolated from the timer system you know deqing the message and shipping it across the wire so if a c consumer is",
+    "start": "685360",
+    "end": "692760"
+  },
+  {
+    "text": "down or not performant that really has nothing to do with the timer system it's it's not impacting us at",
+    "start": "692760",
+    "end": "699800"
+  },
+  {
+    "text": "all so let's let's delve into the internals of this a little bit how are we going to store timers after they come",
+    "start": "699800",
+    "end": "705839"
+  },
+  {
+    "text": "across the grpc interface how are we going to expire timers to Kafka after they've been stored what are the key",
+    "start": "705839",
+    "end": "711480"
+  },
+  {
+    "text": "Health metrics to the system yeah let's let's get into it I'd first like to talk about the timer expiry process",
+    "start": "711480",
+    "end": "719399"
+  },
+  {
+    "text": "we know we're going to be writing timers to Kafka um we know there's a grpc service on the other side that has some",
+    "start": "719399",
+    "end": "725399"
+  },
+  {
+    "text": "kind of storage medium attached to it for these timers and we want to try to build something that's relatively simple",
+    "start": "725399",
+    "end": "731440"
+  },
+  {
+    "text": "relatively straightforward for uh pulling these things out of storage and expiring them to Kafka so how are we",
+    "start": "731440",
+    "end": "737199"
+  },
+  {
+    "text": "going to do this we came up with this architecture as as kind of our first pass um you know",
+    "start": "737199",
+    "end": "743639"
+  },
+  {
+    "text": "we're still abstracting the storage away we're going to delve into that in a minute but we have our grpc service we've added a couple new endpoints to it",
+    "start": "743639",
+    "end": "750800"
+  },
+  {
+    "text": "there's a get timers endpoint that takes in a time stamp and it's going to serve us back all the timers that expire",
+    "start": "750800",
+    "end": "757560"
+  },
+  {
+    "text": "before this time stamp so every minute this newer box over here that's a uh",
+    "start": "757560",
+    "end": "763680"
+  },
+  {
+    "text": "scheduling service written in Rust it's going to send a grpc request up to our service and it's going to say give me",
+    "start": "763680",
+    "end": "769720"
+  },
+  {
+    "text": "all the timers that expire before 10 minutes into the future so if it's currently 4:48 we are going to say give",
+    "start": "769720",
+    "end": "777120"
+  },
+  {
+    "text": "me all the timers that expire before 458 it's going to take all those timers",
+    "start": "777120",
+    "end": "783199"
+  },
+  {
+    "text": "write them into a pending area in memory um have some you know inmemory timers",
+    "start": "783199",
+    "end": "789320"
+  },
+  {
+    "text": "and then it's going to expire those out to Apache kfka as those timers expire once they are expired and shift off to",
+    "start": "789320",
+    "end": "796199"
+  },
+  {
+    "text": "kfka we are going to send a delete request up to the grpc service to remove",
+    "start": "796199",
+    "end": "801360"
+  },
+  {
+    "text": "that particular timer from Storage so that it's not served back down to",
+    "start": "801360",
+    "end": "806600"
+  },
+  {
+    "text": "theer so we we view this as a relatively simple solution to the problem because",
+    "start": "806639",
+    "end": "811920"
+  },
+  {
+    "text": "you know we we kind of thought that this timer system was going to be pretty tricky to implement in the first place so we were a bit incredulous when we",
+    "start": "811920",
+    "end": "817639"
+  },
+  {
+    "text": "came up with with this kind of uh solution we weren't sure how we were going to represent the timers in memory we weren't sure how we were going to",
+    "start": "817639",
+    "end": "823360"
+  },
+  {
+    "text": "avoid doubling queuing um but once we kind of just coated up a first pass we",
+    "start": "823360",
+    "end": "829519"
+  },
+  {
+    "text": "realized that it was actually so much simpler and so much more performant than than we thought it was going to be so we",
+    "start": "829519",
+    "end": "835680"
+  },
+  {
+    "text": "basically created an arena for these pending timer s in memory we had an",
+    "start": "835680",
+    "end": "841600"
+  },
+  {
+    "text": "infinite loop with a 1 second period we pulled all the timers from the grpc interface uh looped over them and",
+    "start": "841600",
+    "end": "848079"
+  },
+  {
+    "text": "checked to see if they were known or not if they were not known to the instance",
+    "start": "848079",
+    "end": "853600"
+  },
+  {
+    "text": "we would uh spawn an asynchronous task using Tokyo use their built-in uh timer",
+    "start": "853600",
+    "end": "861040"
+  },
+  {
+    "text": "mechanism when that timer expires we would produce the kofka event delete the timer from the grpc interface and then",
+    "start": "861040",
+    "end": "867759"
+  },
+  {
+    "text": "there was a bit of additional synch ization code that was required to communicate this back to the main task",
+    "start": "867759",
+    "end": "873639"
+  },
+  {
+    "text": "so that we could remove that particular timer ID from the hash set um that was kind of the only complicated piece here",
+    "start": "873639",
+    "end": "880199"
+  },
+  {
+    "text": "but the real service implementation is really not a whole lot more complicated than this we were we were",
+    "start": "880199",
+    "end": "886800"
+  },
+  {
+    "text": "pretty impressed that that it was that it was quite so simple uh but how does",
+    "start": "886800",
+    "end": "892240"
+  },
+  {
+    "text": "this thing actually perform what what do the numbers look like using the like kind of built-in default Tokyo uh async",
+    "start": "892240",
+    "end": "899440"
+  },
+  {
+    "text": "future spawning and sleep until until functions we tried to spawn a million",
+    "start": "899440",
+    "end": "904480"
+  },
+  {
+    "text": "timers and measure both the latency and the memory utilization we found that it took about 350 milliseconds to spawn a",
+    "start": "904480",
+    "end": "910759"
+  },
+  {
+    "text": "million timers and that ate about 600 megabytes of memory which is a",
+    "start": "910759",
+    "end": "916440"
+  },
+  {
+    "text": "relatively high amount of memory for uh a million timers that's about like 96 bytes per timer which seems a bit heavy",
+    "start": "916440",
+    "end": "924480"
+  },
+  {
+    "text": "but um we decided that this was good enough performance metrics to uh to go",
+    "start": "924480",
+    "end": "929639"
+  },
+  {
+    "text": "out with so we were not going to invest too heavily at this point in Ultra optimizing from",
+    "start": "929639",
+    "end": "937199"
+  },
+  {
+    "text": "here so what key performance metrics did we identify once we once we were ready",
+    "start": "937199",
+    "end": "942519"
+  },
+  {
+    "text": "to ship this thing the first one was the number of pending timers in that hashset the number of things that we are watching right now this was really",
+    "start": "942519",
+    "end": "949000"
+  },
+  {
+    "text": "important for us when we started getting aut of memory kills on this timer instance because we had not put any back",
+    "start": "949000",
+    "end": "955600"
+  },
+  {
+    "text": "pressure into the system so you know if there were too many timers expiring at say 4:00 um 4:00 rolls around you try to",
+    "start": "955600",
+    "end": "963240"
+  },
+  {
+    "text": "load those all into the Schuler Schuler falls down Schuler starts back up it tries to load the timers again and it",
+    "start": "963240",
+    "end": "969319"
+  },
+  {
+    "text": "keeps falling over um so we use this metric to identify what's falling over at a million let's tell it to not load",
+    "start": "969319",
+    "end": "976680"
+  },
+  {
+    "text": "any more than you know 600,000 into memory and the other one was a little",
+    "start": "976680",
+    "end": "981959"
+  },
+  {
+    "text": "bit less intuitive it was the time stamp of the last timer that we expired to Kafka and we Ed this to measure the",
+    "start": "981959",
+    "end": "987639"
+  },
+  {
+    "text": "drift between the timer system system and reality so if it's currently 4:00 and you just expired a timer for 3:00",
+    "start": "987639",
+    "end": "994279"
+  },
+  {
+    "text": "that means your system is probably operating about an hour behind reality and you know you're going to have some customers who are maybe asking questions",
+    "start": "994279",
+    "end": "1000440"
+  },
+  {
+    "text": "about why their messages are an hour late this was kind of the the most important performance uh metric for the",
+    "start": "1000440",
+    "end": "1006519"
+  },
+  {
+    "text": "system you know this is the one that we have alerting around if things start to fall too be if things start to fall too far behind reality you know we'll page",
+    "start": "1006519",
+    "end": "1013160"
+  },
+  {
+    "text": "an engineer and have them you know look into that um next I'd like to talk about the the storage layer for the",
+    "start": "1013160",
+    "end": "1020759"
+  },
+  {
+    "text": "system uh thinking about the the requirements of this we wanted to support uh a high right through put the",
+    "start": "1020759",
+    "end": "1027880"
+  },
+  {
+    "text": "goal that we had in mind was about 10,000 rights per second and from our experience operating postest we knew",
+    "start": "1027880",
+    "end": "1035160"
+  },
+  {
+    "text": "that this was definitely possible to do with postest but it was kind of a big pain in the butt if you didn't have a",
+    "start": "1035160",
+    "end": "1041079"
+  },
+  {
+    "text": "lot of you know dedicated postest staff and a lot of infrastructure dedicated to",
+    "start": "1041079",
+    "end": "1046199"
+  },
+  {
+    "text": "uh you know clustering postc crust so we we didn't really want to use postest for this we wanted something that was going",
+    "start": "1046199",
+    "end": "1052480"
+  },
+  {
+    "text": "to be simple to scale so that when we needed additional capacity we could just kind of throw it at the wall and and have it stick we wanted something that",
+    "start": "1052480",
+    "end": "1059200"
+  },
+  {
+    "text": "would be simple to maintain so zero downtime upgrades were going to be really important to us and we knew that",
+    "start": "1059200",
+    "end": "1065960"
+  },
+  {
+    "text": "we were going to be making relatively simple queries that that might serve back a bunch of results so you know what",
+    "start": "1065960",
+    "end": "1072760"
+  },
+  {
+    "text": "what do what is simple query what what is the kind of queries uh that we're going to be making theuer remember is",
+    "start": "1072760",
+    "end": "1079520"
+  },
+  {
+    "text": "going to be doing queries that look like give me all of the timers that are expiring in the next 10 minutes you know",
+    "start": "1079520",
+    "end": "1085360"
+  },
+  {
+    "text": "that is not a very complicated query it's not give me all the timers that are expiring in the next 10 minutes for this",
+    "start": "1085360",
+    "end": "1091200"
+  },
+  {
+    "text": "particular customer that are targeting these 10,000 users in these time zones",
+    "start": "1091200",
+    "end": "1096480"
+  },
+  {
+    "text": "you know relatively straightforward queries so we didn't necessarily need all the all the querying filtering power",
+    "start": "1096480",
+    "end": "1102679"
+  },
+  {
+    "text": "of something like post grass or another relational database so in the end we picked uh Sila as I mentioned this was",
+    "start": "1102679",
+    "end": "1108880"
+  },
+  {
+    "text": "already something that we were spinning up as a part of the larger Journeys project so even though we didn't have",
+    "start": "1108880",
+    "end": "1114000"
+  },
+  {
+    "text": "existing in-house experience operating Sila we knew that we were going to be developing it as you know another",
+    "start": "1114000",
+    "end": "1120520"
+  },
+  {
+    "text": "business line item one thing that we had to think about with adopting Sila was that uh the",
+    "start": "1120520",
+    "end": "1127520"
+  },
+  {
+    "text": "data modeling approach for cill for Sila and Cassandra are very different from something like uh postgress so we need",
+    "start": "1127520",
+    "end": "1134159"
+  },
+  {
+    "text": "to think pretty hard about how we're going to be writing these data to the tables and how we're going to be quering it afterwards",
+    "start": "1134159",
+    "end": "1140720"
+  },
+  {
+    "text": "so when you're doing data modeling in in a relational database it's a lot easier to just think about you know what are",
+    "start": "1141120",
+    "end": "1147280"
+  },
+  {
+    "text": "the data and how do they relate to each other you know you can generally speaking add any number of joins to a",
+    "start": "1147280",
+    "end": "1154480"
+  },
+  {
+    "text": "postest query and then add any number of indices on the other side to make up for",
+    "start": "1154480",
+    "end": "1160600"
+  },
+  {
+    "text": "your poor data modeling you don't really have this this luxury with Sila or",
+    "start": "1160600",
+    "end": "1165880"
+  },
+  {
+    "text": "Cassandra um they use SS tables they don't provide the ability to do joins um",
+    "start": "1165880",
+    "end": "1171960"
+  },
+  {
+    "text": "and they really aren't much in the way of indices other than the tables themselves so ahead of time as we",
+    "start": "1171960",
+    "end": "1179240"
+  },
+  {
+    "text": "writing the data to the database we need to be thinking about how we're going to be querying it um on the other side and",
+    "start": "1179240",
+    "end": "1185000"
+  },
+  {
+    "text": "remember the query we're going to be doing is fetch Alzheimer's about to expire so what does about to expire mean",
+    "start": "1185000",
+    "end": "1193200"
+  },
+  {
+    "text": "um in in this sense right uh if we about the basic elements that",
+    "start": "1193200",
+    "end": "1200159"
+  },
+  {
+    "text": "we just said were a part of a timer it's got an expiry time stamp it has a binary data blob and it has a CCO topic and",
+    "start": "1200159",
+    "end": "1208000"
+  },
+  {
+    "text": "partition that the message are going to be written",
+    "start": "1208000",
+    "end": "1211480"
+  },
+  {
+    "text": "to um quick quick note here most of the architecture work here was done by the",
+    "start": "1213559",
+    "end": "1220240"
+  },
+  {
+    "text": "Apache Cassandra team and uh my exposure to this ecosystem has all been through",
+    "start": "1220240",
+    "end": "1226360"
+  },
+  {
+    "text": "Sila so I'm going to attribute things to that were certainly done by people on the Apache Cassandra team and if that",
+    "start": "1226360",
+    "end": "1233000"
+  },
+  {
+    "text": "was you I apologize I'm very sorry um in Sila we have data that's distributed",
+    "start": "1233000",
+    "end": "1239320"
+  },
+  {
+    "text": "amongst a cluster of nodes um and as the",
+    "start": "1239320",
+    "end": "1244440"
+  },
+  {
+    "text": "as you query the data in the nodes generally speaking each query we want it to hit a single node we don't want to be",
+    "start": "1244440",
+    "end": "1250679"
+  },
+  {
+    "text": "merging data together we don't want to be searching across all the nodes for particular pieces of data generally",
+    "start": "1250679",
+    "end": "1257559"
+  },
+  {
+    "text": "speaking we want to know ahead of time where a particular row are going to land in the data structure in the",
+    "start": "1257559",
+    "end": "1264280"
+  },
+  {
+    "text": "cluster so how do we do that how do we distinguish where a row is going to go",
+    "start": "1264280",
+    "end": "1269840"
+  },
+  {
+    "text": "there's a couple different layers of keys that exist on each row in Sila and we're going to use those the primary key",
+    "start": "1269840",
+    "end": "1277559"
+  },
+  {
+    "text": "has two parts so just like a relational database we have a primary key on each row the first part is the partitioning",
+    "start": "1277559",
+    "end": "1284679"
+  },
+  {
+    "text": "key that's going to determine you know which node in the cluster is going to land on and where on that node it's",
+    "start": "1284679",
+    "end": "1291640"
+  },
+  {
+    "text": "going to go it's going to group the data into partitions that are shipped around as kind of one unit and this is composed",
+    "start": "1291640",
+    "end": "1299440"
+  },
+  {
+    "text": "of one or more fields and there's also a clustering key that determines where in",
+    "start": "1299440",
+    "end": "1304919"
+  },
+  {
+    "text": "the partition each row is going to go so that's used for things like sort ordering and this is that's optional but",
+    "start": "1304919",
+    "end": "1311600"
+  },
+  {
+    "text": "it it also can have a variable number of fields in it generally speaking the kinds of",
+    "start": "1311600",
+    "end": "1317159"
+  },
+  {
+    "text": "queries the kind of high performance queries that we want to be doing you need to include the partition key an exact partition key in each uh read",
+    "start": "1317159",
+    "end": "1324400"
+  },
+  {
+    "text": "query that you're doing so you're not having like a range of partition Keys",
+    "start": "1324400",
+    "end": "1329480"
+  },
+  {
+    "text": "you're not saying uh give me everything you need to provide you know give me this partition",
+    "start": "1329480",
+    "end": "1335600"
+  },
+  {
+    "text": "key and remember again query we're performing is get all the timers about to expire so what does about to expire",
+    "start": "1335600",
+    "end": "1344240"
+  },
+  {
+    "text": "mean it means we need to pre- buuck the data we need to group our time Tim into",
+    "start": "1344240",
+    "end": "1349799"
+  },
+  {
+    "text": "buckets of you know timers that expire around the same time so that we can query all those timers",
+    "start": "1349799",
+    "end": "1356480"
+  },
+  {
+    "text": "together we're going to be bucketing on 5 minute intervals so for example a timer expiring at 4 uh 48 p.m. and 30",
+    "start": "1356480",
+    "end": "1365559"
+  },
+  {
+    "text": "seconds we're going to bucket that down to 445 and everything between uh 445 and",
+    "start": "1365559",
+    "end": "1372240"
+  },
+  {
+    "text": "450 those are going to land in the same bucket we are still going to store the expiry time but we're also going to have",
+    "start": "1372240",
+    "end": "1378720"
+  },
+  {
+    "text": "this bucket that's specifically going to be used for storage locality but we can't have the bucket",
+    "start": "1378720",
+    "end": "1384400"
+  },
+  {
+    "text": "alone be the primary key because you know just like every other database that's out there primary Keys need to be",
+    "start": "1384400",
+    "end": "1390279"
+  },
+  {
+    "text": "unique in tables so if the 5 minute bucket was the sole primary key you can",
+    "start": "1390279",
+    "end": "1396080"
+  },
+  {
+    "text": "only have one timer that existed per 5minute bucket and that's not a very good data system so we're going to",
+    "start": "1396080",
+    "end": "1401600"
+  },
+  {
+    "text": "introduce a ID field a uu ID field that's going to be on each row and that's going to take the place of the",
+    "start": "1401600",
+    "end": "1407159"
+  },
+  {
+    "text": "clustering key so that's going to determine again where in the partition each row is is going to",
+    "start": "1407159",
+    "end": "1412840"
+  },
+  {
+    "text": "land so our final table design looked like this we had those same four fields that we talked about initially but we",
+    "start": "1412840",
+    "end": "1419240"
+  },
+  {
+    "text": "also introduced two new Fields this row uid field and the bucket field which is",
+    "start": "1419240",
+    "end": "1425200"
+  },
+  {
+    "text": "again the expiry time stamp rounded down to the nearest 5 minutes and you can see that uh on the part on the primary key",
+    "start": "1425200",
+    "end": "1432080"
+  },
+  {
+    "text": "line down there we have uh first the bucket field that's the partitioning key",
+    "start": "1432080",
+    "end": "1438240"
+  },
+  {
+    "text": "and and second we have the clustering key field which is the uid",
+    "start": "1438240",
+    "end": "1444799"
+  },
+  {
+    "text": "field so what do the queries look like that we're going to be doing on this table we're going to be getting all the",
+    "start": "1444799",
+    "end": "1449960"
+  },
+  {
+    "text": "fields off of each timer row inside of each bucket inside of you know this 5",
+    "start": "1449960",
+    "end": "1457240"
+  },
+  {
+    "text": "minute bucket that's at 4 starts at 4:45 but the the uh eagley among you",
+    "start": "1457240",
+    "end": "1463640"
+  },
+  {
+    "text": "might already be noticing a problem with this if it's current",
+    "start": "1463640",
+    "end": "1469520"
+  },
+  {
+    "text": "448 and we get the timers that are in the bucket starting at 4:45 how are we going to how are we",
+    "start": "1469520",
+    "end": "1476480"
+  },
+  {
+    "text": "going to do this 10-minute look ahead interval thing how are we going to fetch the timers that start at 450 and 455",
+    "start": "1476480",
+    "end": "1484039"
+  },
+  {
+    "text": "because you know a 10-minute interval is necessarily going to span more than one 5minute data",
+    "start": "1484039",
+    "end": "1490240"
+  },
+  {
+    "text": "bucket and further complicating things you know this system is not necessarily",
+    "start": "1490240",
+    "end": "1495600"
+  },
+  {
+    "text": "always real time right it might be the case that this system is so far behind",
+    "start": "1495600",
+    "end": "1502520"
+  },
+  {
+    "text": "reality which you know in some cases that might only be a couple seconds but it might be the case that there are",
+    "start": "1502520",
+    "end": "1508080"
+  },
+  {
+    "text": "still some existing timers that are falling into buckets that already you",
+    "start": "1508080",
+    "end": "1513320"
+  },
+  {
+    "text": "know ended right if it's 4:45 and 10 seconds and you still have",
+    "start": "1513320",
+    "end": "1518720"
+  },
+  {
+    "text": "an existing timer that was supposed to expire at 4:44 and 59 seconds you still",
+    "start": "1518720",
+    "end": "1525520"
+  },
+  {
+    "text": "have to be able to fetch that out of Sila because because you know maybe theer is going to restart and it's not",
+    "start": "1525520",
+    "end": "1530679"
+  },
+  {
+    "text": "going to be able to use the one that's floating around in memory so how how are we going to pull",
+    "start": "1530679",
+    "end": "1536720"
+  },
+  {
+    "text": "all the buckets and and get the data we can't just query the currently active",
+    "start": "1536720",
+    "end": "1542120"
+  },
+  {
+    "text": "bucket we need to find out what buckets exist uh which buckets that exist fall within our look ahead window and we need",
+    "start": "1542120",
+    "end": "1548559"
+  },
+  {
+    "text": "to query all of those for their timers so we introduced another table a",
+    "start": "1548559",
+    "end": "1554640"
+  },
+  {
+    "text": "metadata table that was just going to hold every single bucket that we knew about so this is going to be partitioned",
+    "start": "1554640",
+    "end": "1562720"
+  },
+  {
+    "text": "just by its single field the bucket timestamp and this was just going to",
+    "start": "1562720",
+    "end": "1568840"
+  },
+  {
+    "text": "give us access to query what buckets currently exist so every time we insert",
+    "start": "1568840",
+    "end": "1575120"
+  },
+  {
+    "text": "data into our tables we are going to do two different rights we're going to",
+    "start": "1575120",
+    "end": "1580360"
+  },
+  {
+    "text": "store the timer itself and we're also going to do an insertion on this bucket table every insert in Sila is actually",
+    "start": "1580360",
+    "end": "1587320"
+  },
+  {
+    "text": "an upsert so no matter how many millions of times we run this exact same query",
+    "start": "1587320",
+    "end": "1592440"
+  },
+  {
+    "text": "it's just going to have you know one entry for uh each particular bucket because they all have the same uh",
+    "start": "1592440",
+    "end": "1598720"
+  },
+  {
+    "text": "primary key so what do our queries look like we're first going to have to query every",
+    "start": "1598720",
+    "end": "1605919"
+  },
+  {
+    "text": "single bucket that exist in the database literally every single one and that's going to come back into the memory of",
+    "start": "1605919",
+    "end": "1612600"
+  },
+  {
+    "text": "our grpc service and we're going to say of those buckets that exist which ones fall into our look the head window",
+    "start": "1612600",
+    "end": "1619840"
+  },
+  {
+    "text": "that's going to be the four buckets from 440 to 445 and we're going to query all the",
+    "start": "1619840",
+    "end": "1626120"
+  },
+  {
+    "text": "timers off of those and we're going to merge them in the memory of the grpc service and then ship them down to",
+    "start": "1626120",
+    "end": "1632360"
+  },
+  {
+    "text": "theer so if we put this Al together into one kind of cohesive system view uh on",
+    "start": "1632360",
+    "end": "1638880"
+  },
+  {
+    "text": "the external team side we have a thing that creates timers that's going to send a grpc request across the wire to our",
+    "start": "1638880",
+    "end": "1645279"
+  },
+  {
+    "text": "service that's going to store a timer in our Sila database alongside a",
+    "start": "1645279",
+    "end": "1651000"
+  },
+  {
+    "text": "corresponding bucket then every minute our scheduler is going to call the get timers uh grpc",
+    "start": "1651000",
+    "end": "1657559"
+  },
+  {
+    "text": "method with a look ahead window it's going to add the timers that fall into that window to its pending area and",
+    "start": "1657559",
+    "end": "1663799"
+  },
+  {
+    "text": "memory and when those inmemory timers expire it's going to write them out to an Apache Kafka topic and eventually",
+    "start": "1663799",
+    "end": "1671039"
+  },
+  {
+    "text": "maybe there will be a Kafka consumer that picks that message up so this system as I've described it existed for",
+    "start": "1671039",
+    "end": "1679519"
+  },
+  {
+    "text": "about a year maybe a year and a half without any major issues modulus that out of memory problem and we didn't have",
+    "start": "1679519",
+    "end": "1686200"
+  },
+  {
+    "text": "to do any major scaling operations um it didn't have any really big problems we mostly just didn't think about it after",
+    "start": "1686200",
+    "end": "1692600"
+  },
+  {
+    "text": "it was out there and running we're pretty happy with it um but eventually we started to think about adding more",
+    "start": "1692600",
+    "end": "1699039"
+  },
+  {
+    "text": "users to our Journey's product we started to think about you know using timer using this timer system to support",
+    "start": "1699039",
+    "end": "1705799"
+  },
+  {
+    "text": "more use cases than just Journeys and we realized that we would have to do some scaling work in this because what I've",
+    "start": "1705799",
+    "end": "1711480"
+  },
+  {
+    "text": "described has some kind of poor uh scaling Tendencies so to describe that",
+    "start": "1711480",
+    "end": "1716880"
+  },
+  {
+    "text": "work I'd like to invite Hunter up to the stage to uh finish out great thank you",
+    "start": "1716880",
+    "end": "1723080"
+  },
+  {
+    "text": "Lily all right hi my name is Hunter Lane I've been an engineer on Lily's team at one signal for about two and a half",
+    "start": "1723080",
+    "end": "1729279"
+  },
+  {
+    "text": "years um and in a past life I was a marketing operations manager in Prague so we're going to take another leap",
+    "start": "1729279",
+    "end": "1735720"
+  },
+  {
+    "text": "forward in time to q1 of this year we have this effective timer service up",
+    "start": "1735720",
+    "end": "1741760"
+  },
+  {
+    "text": "and running pretty smoothly it's capable of storing billions of concurrent timers and expiring them in a performant manner",
+    "start": "1741760",
+    "end": "1748919"
+  },
+  {
+    "text": "while minimizing data loss and easily integrating with the rest of our systems it's essentially a set timeout function",
+    "start": "1748919",
+    "end": "1755799"
+  },
+  {
+    "text": "that's available across our entire infrastructure without any use case specific limitations sounds pretty good",
+    "start": "1755799",
+    "end": "1762320"
+  },
+  {
+    "text": "right we thought so too so we decided it was time to actually start doing that integrating with the of our systems as",
+    "start": "1762320",
+    "end": "1769960"
+  },
+  {
+    "text": "liily mentioned we send about 13 billion notifications a day so we wanted to use the timer service to ease a significant",
+    "start": "1769960",
+    "end": "1776840"
+  },
+  {
+    "text": "amount of load on our task cues this could be useful for a myriad of things from retrying requests on failures",
+    "start": "1776840",
+    "end": "1783519"
+  },
+  {
+    "text": "across multiple services to scheduling future notifications and many other areas we were already excited about but",
+    "start": "1783519",
+    "end": "1790840"
+  },
+  {
+    "text": "if we were going to use the timer service in these many critically important areas we needed to ensure that",
+    "start": "1790840",
+    "end": "1797120"
+  },
+  {
+    "text": "it could handle a a lot more timers reliably than it currently could we needed to scale",
+    "start": "1797120",
+    "end": "1802919"
+  },
+  {
+    "text": "up so as we mentioned before the original motivation for and use of the timer service was to enable these",
+    "start": "1802919",
+    "end": "1809559"
+  },
+  {
+    "text": "Journey Builders no code marketing no code systems generally used as a marketing tool now these systems",
+    "start": "1809559",
+    "end": "1817039"
+  },
+  {
+    "text": "constitute a significant number of timers that we were storing and retrieving however when compared to the",
+    "start": "1817039",
+    "end": "1822799"
+  },
+  {
+    "text": "task of integrating with our Delivery Systems it represented a relatively small scale of use",
+    "start": "1822799",
+    "end": "1828760"
+  },
+  {
+    "text": "and at this scale of use we had opted for this slightly again slightly more",
+    "start": "1828760",
+    "end": "1835000"
+  },
+  {
+    "text": "simplified architecture to avoid dealing with the more complex coordination required to make the timer service fully",
+    "start": "1835000",
+    "end": "1841720"
+  },
+  {
+    "text": "scalable and specifically when we talk about scaling issues we will be focusing more on the scheduler",
+    "start": "1841720",
+    "end": "1848000"
+  },
+  {
+    "text": "portion now scaling the timer service vertically was no problem at all we could and did add resources to both the",
+    "start": "1848000",
+    "end": "1855440"
+  },
+  {
+    "text": "grpc service portion and the schedu as needed and yeah now scaling the grpc",
+    "start": "1855440",
+    "end": "1864360"
+  },
+  {
+    "text": "service portion horizontally was also no trouble we could easily add a pod or four to handle an increase and create",
+    "start": "1864360",
+    "end": "1870240"
+  },
+  {
+    "text": "get and delete requests from multiple clients the slight hitch that we were now facing was that the scheduler was",
+    "start": "1870240",
+    "end": "1876720"
+  },
+  {
+    "text": "not quite so simple to scale horizontally we'd not yet done the work to allow for multiple schedulers to run",
+    "start": "1876720",
+    "end": "1882720"
+  },
+  {
+    "text": "at the same time see each Schuler needs to ask the grp PC service for timers at some set",
+    "start": "1882720",
+    "end": "1890039"
+  },
+  {
+    "text": "interval but it does no one any good if each individual scheduler is asking for",
+    "start": "1890039",
+    "end": "1895279"
+  },
+  {
+    "text": "timers and getting all the same ones back then we're just duplicating all the",
+    "start": "1895279",
+    "end": "1901760"
+  },
+  {
+    "text": "work and each one is instead of sharing the load plus it certainly doesn't seem",
+    "start": "1901760",
+    "end": "1907279"
+  },
+  {
+    "text": "like a desirable feature to inue each message to Kafka multiple times as we see here we needed to do a bit of a",
+    "start": "1907279",
+    "end": "1914200"
+  },
+  {
+    "text": "redesign to allow for multiple schedulers to share the task of scheduling and firing timers with each",
+    "start": "1914200",
+    "end": "1920960"
+  },
+  {
+    "text": "in charge of only a particular subset of the overall timers so how do we do that if we wanted",
+    "start": "1920960",
+    "end": "1928679"
+  },
+  {
+    "text": "multiple schedulers to run in conjunction we needed to find a way to group timers by more than just time so",
+    "start": "1928679",
+    "end": "1935000"
+  },
+  {
+    "text": "that those schedulers could be responsible each one for requesting and retrieving only a particular group of",
+    "start": "1935000",
+    "end": "1942519"
+  },
+  {
+    "text": "timers so first we needed to make some adjustments to how our data was stored so the timer weren't stored just by the",
+    "start": "1942519",
+    "end": "1949360"
+  },
+  {
+    "text": "time that they were to be sent out those 5 minute bucket intervals but by some other grouping the different schedulers",
+    "start": "1949360",
+    "end": "1955279"
+  },
+  {
+    "text": "could retrieve from so we made some adjustments to our Sila table schemas so that when a new timer is created it is",
+    "start": "1955279",
+    "end": "1962519"
+  },
+  {
+    "text": "inserted into a bucket by both that time interval and now A",
+    "start": "1962519",
+    "end": "1968519"
+  },
+  {
+    "text": "Shard while we were adjusting these schemas we also actually decided to shrink that bucket interval from the 5",
+    "start": "1968519",
+    "end": "1974000"
+  },
+  {
+    "text": "minutes we'd been using to one minute bucket intervals and this was because we were already noticing that our Sila",
+    "start": "1974000",
+    "end": "1979919"
+  },
+  {
+    "text": "partitions were getting larger than we would like we would like to keep our Sil partitions in general relatively small",
+    "start": "1979919",
+    "end": "1986120"
+  },
+  {
+    "text": "as this leads to more efficient and less resource intensive compaction we determined which Shard a",
+    "start": "1986120",
+    "end": "1992559"
+  },
+  {
+    "text": "timer belonged to by encoding its unique uuid to an integer within the range of the number of shards we have we actually",
+    "start": "1992559",
+    "end": "1999519"
+  },
+  {
+    "text": "have our Shard set to 1,24 with timers pretty evenly distributed among them",
+    "start": "1999519",
+    "end": "2004960"
+  },
+  {
+    "text": "each Schuler instance is then responsible for an L distributed portion of those shards now we went to this sort",
+    "start": "2004960",
+    "end": "2011559"
+  },
+  {
+    "text": "of granularity and this many shards also in an effort to keep those Sila partitions relatively",
+    "start": "2011559",
+    "end": "2018679"
+  },
+  {
+    "text": "small now this means we have a more efficient way to parse a far greater number of timers this update also makes",
+    "start": "2019159",
+    "end": "2026120"
+  },
+  {
+    "text": "the bookkeeping of the buckets table much more efficient and means that when querying for timers we look much more",
+    "start": "2026120",
+    "end": "2032559"
+  },
+  {
+    "text": "particularly at a particular Shard and time to retrieve from",
+    "start": "2032559",
+    "end": "2038639"
+  },
+  {
+    "text": "we then just needed to adjust our get timers requests so that when we do request that those timers we do it not",
+    "start": "2038639",
+    "end": "2044240"
+  },
+  {
+    "text": "just by time as we were before but in addition buy that Shard so that we can get a particular subset of the overall",
+    "start": "2044240",
+    "end": "2052000"
+  },
+  {
+    "text": "timers great so we now have a system whereby timers are stored by both time and Shard and a way by which to retrieve",
+    "start": "2052000",
+    "end": "2059118"
+  },
+  {
+    "text": "those timers by both time and Shard we're there right just one big",
+    "start": "2059119",
+    "end": "2065440"
+  },
+  {
+    "text": "problem eacher instance needs to have state so that it can reliably ask for",
+    "start": "2065440",
+    "end": "2071200"
+  },
+  {
+    "text": "the same subset of timers every time it asks but how does each Schuler know who",
+    "start": "2071200",
+    "end": "2076280"
+  },
+  {
+    "text": "it is this was important because if a schedular instance were to restart for",
+    "start": "2076280",
+    "end": "2083000"
+  },
+  {
+    "text": "any reason it needed to start back up as the same scheduler so it could pull the same timers if we have multiple",
+    "start": "2083000",
+    "end": "2089599"
+  },
+  {
+    "text": "instances pulling the same subset of timers we're kind of back at square one if scheduler 2 were to restart for any",
+    "start": "2089599",
+    "end": "2096520"
+  },
+  {
+    "text": "reason now thinking that it's schuer one when we already have a schuer one up and",
+    "start": "2096520",
+    "end": "2101880"
+  },
+  {
+    "text": "running and pulling timers for schuer one we're again duplicating work and erroneously firing timers multiple times",
+    "start": "2101880",
+    "end": "2109320"
+  },
+  {
+    "text": "plus even worse here no one is looking after the shards assigned to scheduler",
+    "start": "2109320",
+    "end": "2114480"
+  },
+  {
+    "text": "2 so in order to solve this we deployed a new version of the scheduler as a stateful set in kubernetes which among",
+    "start": "2114480",
+    "end": "2121200"
+  },
+  {
+    "text": "other things gave us a stable unique name for each instance of theuer every time it started up with each name ending",
+    "start": "2121200",
+    "end": "2128320"
+  },
+  {
+    "text": "in a zero index value up to the number of replicas each Schuler could then take",
+    "start": "2128320",
+    "end": "2133359"
+  },
+  {
+    "text": "that value and calculate a range of shards that it's responsible for retrieving timers from importantly this",
+    "start": "2133359",
+    "end": "2140160"
+  },
+  {
+    "text": "means that each shart of timers and therefore each individual timer will only ever be retrieved by one scheduler",
+    "start": "2140160",
+    "end": "2148079"
+  },
+  {
+    "text": "instance so we now have this system where we store timers by both time and",
+    "start": "2148079",
+    "end": "2153640"
+  },
+  {
+    "text": "Shard where we have a retrieval request that can get a subset of timers by both time and Shard and now schedulers that",
+    "start": "2153640",
+    "end": "2161319"
+  },
+  {
+    "text": "have state and can therefore reliably request the same subset of timers every time they ask we have achieved full",
+    "start": "2161319",
+    "end": "2170078"
+  },
+  {
+    "text": "scalability so with these changes made to the architecture of the timer service adding new nodes to the scheduler is as",
+    "start": "2171200",
+    "end": "2177760"
+  },
+  {
+    "text": "simple as increasing the replica count in the config file which makes scaling the timer service both vertically and",
+    "start": "2177760",
+    "end": "2183960"
+  },
+  {
+    "text": "horizontally possible and simple to do as we Contin to use it in more and more parts of our",
+    "start": "2183960",
+    "end": "2190400"
+  },
+  {
+    "text": "system because we now have multiple instances of both the grpc service portion and the scheduler we've made the",
+    "start": "2190400",
+    "end": "2197400"
+  },
+  {
+    "text": "timer service much less susceptible to Serious outage if a note were to go down previously we only had one",
+    "start": "2197400",
+    "end": "2204560"
+  },
+  {
+    "text": "scheduler so if it went down it was kind of it there were no timers being",
+    "start": "2204560",
+    "end": "2209880"
+  },
+  {
+    "text": "retrieved or processed or fired and no messages being inced to Kafka by the",
+    "start": "2209880",
+    "end": "2214960"
+  },
+  {
+    "text": "timer service until that node were to restart now because we have multiple instances",
+    "start": "2214960",
+    "end": "2220960"
+  },
+  {
+    "text": "each in charge of only a particular subset of the overall timers if a node goes down it has much less impact on the",
+    "start": "2220960",
+    "end": "2227280"
+  },
+  {
+    "text": "overall functioning of the system on single cord performance each",
+    "start": "2227280",
+    "end": "2233119"
+  },
+  {
+    "text": "scheduler note is capable of handling about 10,000 timers per second and frankly that's without even pushing it",
+    "start": "2233119",
+    "end": "2238920"
+  },
+  {
+    "text": "which makes horizontally scaling incredibly powerful each grpc instance handles",
+    "start": "2238920",
+    "end": "2244319"
+  },
+  {
+    "text": "about 177,000 requests per second really without trouble",
+    "start": "2244319",
+    "end": "2249520"
+  },
+  {
+    "text": "there are a few things to note about our timer Service as it exists today first the timer service has an at least once",
+    "start": "2249599",
+    "end": "2256599"
+  },
+  {
+    "text": "guarantee and this is because there's a space between the scheduler in queuing its message to Kafka and then turning",
+    "start": "2256599",
+    "end": "2263119"
+  },
+  {
+    "text": "around and requesting that that timer be deleted if the scheduler were to restart for any reason between those two actions",
+    "start": "2263119",
+    "end": "2270240"
+  },
+  {
+    "text": "or if the grpc service has some sort of communication error between the scheduler or between filla when",
+    "start": "2270240",
+    "end": "2275839"
+  },
+  {
+    "text": "processing that delete the timer will fail to be deleted and will again be retrieved and fired because of this the",
+    "start": "2275839",
+    "end": "2282520"
+  },
+  {
+    "text": "timer service does expect that all Downstream consumers manage their own item potency",
+    "start": "2282520",
+    "end": "2288560"
+  },
+  {
+    "text": "guarantees another call out about the timer service is that timers will fire close to but not exactly at the time",
+    "start": "2288560",
+    "end": "2294920"
+  },
+  {
+    "text": "they're scheduled and this is because schedulers still need to pull in timers at that periodic interval via that get",
+    "start": "2294920",
+    "end": "2301040"
+  },
+  {
+    "text": "timers request think as Lily mentioned we currently have each scheduler set to pull in the next 10 minutes of timers",
+    "start": "2301040",
+    "end": "2307880"
+  },
+  {
+    "text": "every 1 minute possibly the biggest call out about the timer Service as it exists",
+    "start": "2307880",
+    "end": "2313800"
+  },
+  {
+    "text": "today is that once a timer has been retrieved by the scheduler there's no method by which to cancel it this is",
+    "start": "2313800",
+    "end": "2319440"
+  },
+  {
+    "text": "because the only way to delete or cancel a timer in this system the way we have it currently is via that delete timer",
+    "start": "2319440",
+    "end": "2325680"
+  },
+  {
+    "text": "request on the grpc service which deletes from the database therein if the timer's already been retrieved from the",
+    "start": "2325680",
+    "end": "2331720"
+  },
+  {
+    "text": "database and is now in theuer there's no way to currently stop it from firing",
+    "start": "2331720",
+    "end": "2337920"
+  },
+  {
+    "text": "the timer service has proven to be incredibly powerful within our own internal systems and as such we really",
+    "start": "2337920",
+    "end": "2343079"
+  },
+  {
+    "text": "believe it could be useful to other organizations and individuals so there's definite potential that we will move to",
+    "start": "2343079",
+    "end": "2348240"
+  },
+  {
+    "text": "open source it in the near future as we continue to grow as an organization we intend to use the timer",
+    "start": "2348240",
+    "end": "2355480"
+  },
+  {
+    "text": "Service as we create new services but want to dedicate resources to integrating it more broadly across our",
+    "start": "2355480",
+    "end": "2361880"
+  },
+  {
+    "text": "infrastructuring existing infrastructure in order to streamline we also would like to add and",
+    "start": "2361880",
+    "end": "2367920"
+  },
+  {
+    "text": "fine-tune features such as perhaps the ability to cancel a timer at any point in the life",
+    "start": "2367920",
+    "end": "2374800"
+  },
+  {
+    "text": "cycle we're about four years on now from that original conception of a timer",
+    "start": "2374960",
+    "end": "2380000"
+  },
+  {
+    "text": "service to enable those Journey Builders we now have an incredibly robust system",
+    "start": "2380000",
+    "end": "2385160"
+  },
+  {
+    "text": "that's capable of storing billions of concurrent timers and expiring them in a performant manner while minimizing data",
+    "start": "2385160",
+    "end": "2392480"
+  },
+  {
+    "text": "loss easily integrating with the rest of our systems and importantly",
+    "start": "2392480",
+    "end": "2398359"
+  },
+  {
+    "text": "scaling simply both vertically and horizontally to accommodate our future",
+    "start": "2398359",
+    "end": "2403800"
+  },
+  {
+    "text": "use thank you so much for joining us today um if you'd like to get in touch with me my LinkedIn is here if you'd",
+    "start": "2403800",
+    "end": "2409480"
+  },
+  {
+    "text": "like to get in touch with Lily on any of her socials or bu her book her information's here um and we would love",
+    "start": "2409480",
+    "end": "2414839"
+  },
+  {
+    "text": "any feedback on the app so I think we have a few minutes for questions yeah I",
+    "start": "2414839",
+    "end": "2420319"
+  },
+  {
+    "text": "think we ended perfectly on time [Applause] great how did you handle when you added",
+    "start": "2420319",
+    "end": "2427079"
+  },
+  {
+    "text": "new noes to the scheduler so you have four run in each get 250 charge right",
+    "start": "2427079",
+    "end": "2433880"
+  },
+  {
+    "text": "you add a fifth one how you only get 200 how did you keep them from stepping on",
+    "start": "2433880",
+    "end": "2438920"
+  },
+  {
+    "text": "each other's TOs and increase that number yeah so uh we would we would take",
+    "start": "2438920",
+    "end": "2444720"
+  },
+  {
+    "text": "all of the nodes down at the time that a restart occurred and you know start them back up so there would maybe be you know",
+    "start": "2444720",
+    "end": "2451680"
+  },
+  {
+    "text": "30 seconds of potential timer latency we weren't super concerned about you know millisecond accuracy of the schedulers",
+    "start": "2451680",
+    "end": "2458160"
+  },
+  {
+    "text": "in this",
+    "start": "2458160",
+    "end": "2460480"
+  },
+  {
+    "text": "case um one interesting",
+    "start": "2470760",
+    "end": "2475000"
+  },
+  {
+    "text": "places a Delta insteading pockets of of",
+    "start": "2480720",
+    "end": "2486599"
+  },
+  {
+    "text": "actually store um the offset so every time you have a clock you just have to off first any",
+    "start": "2486599",
+    "end": "2494079"
+  },
+  {
+    "text": "number of times to did you explore that idea whena different solutions or and",
+    "start": "2494079",
+    "end": "2502880"
+  },
+  {
+    "text": "yeah come figure out Sol yeah so um so I was the manager",
+    "start": "2502880",
+    "end": "2512079"
+  },
+  {
+    "text": "on on the team that we were at the time we were initially building out this this project and the engineer that was in",
+    "start": "2512079",
+    "end": "2518040"
+  },
+  {
+    "text": "charge of the implementation um he was you know running all these complicated data structures past me and I suggested you",
+    "start": "2518040",
+    "end": "2525680"
+  },
+  {
+    "text": "know did you try the most naive possible approach did you try you know spawn a future and you know wait on a task and",
+    "start": "2525680",
+    "end": "2532200"
+  },
+  {
+    "text": "he was like well that can't possibly perform well enough you know for for our needs I said well why don't you try it",
+    "start": "2532200",
+    "end": "2538520"
+  },
+  {
+    "text": "and and you know we'll see if it performs well enough and it did so we actually you know didn't really continue",
+    "start": "2538520",
+    "end": "2545119"
+  },
+  {
+    "text": "to evaluate more complicated data structures cuz the easiest one worked for",
+    "start": "2545119",
+    "end": "2551280"
+  },
+  {
+    "text": "us I think one the most things to with anything Rel did you Sid or hand",
+    "start": "2556559",
+    "end": "2565160"
+  },
+  {
+    "text": "yeah so that was totally sidestepped these these timers were all in UTC these were all um you know serers side events",
+    "start": "2565160",
+    "end": "2572240"
+  },
+  {
+    "text": "everything that is happening here is something like every timer that's in this system is a timer that was",
+    "start": "2572240",
+    "end": "2578119"
+  },
+  {
+    "text": "scheduled you know by another team at one signal so if somebody cared about something being you know time zone",
+    "start": "2578119",
+    "end": "2584480"
+  },
+  {
+    "text": "sensitive they cared about you know you you send a notification at 8: a.m. in",
+    "start": "2584480",
+    "end": "2589839"
+  },
+  {
+    "text": "the user's time zone you know they would have to figure out when 8: a.m. in the user's time zone was on a UTC",
+    "start": "2589839",
+    "end": "2596520"
+  },
+  {
+    "text": "clock good",
+    "start": "2596520",
+    "end": "2599760"
+  },
+  {
+    "text": "question you that you have a second store all",
+    "start": "2605839",
+    "end": "2612640"
+  },
+  {
+    "text": "theet all the system [Music]",
+    "start": "2612640",
+    "end": "2618369"
+  },
+  {
+    "text": "yes yes that is basically a full table scan the thing that's kind of saving us",
+    "start": "2620960",
+    "end": "2626200"
+  },
+  {
+    "text": "from you know really having a bad time on that is the fact that the number of",
+    "start": "2626200",
+    "end": "2632160"
+  },
+  {
+    "text": "entries on that table is you know much more constrained than say the number of entries on the timers table right",
+    "start": "2632160",
+    "end": "2638599"
+  },
+  {
+    "text": "there's going to be a maximum of one entry on that table for every 5 minute interval and I",
+    "start": "2638599",
+    "end": "2645680"
+  },
+  {
+    "text": "believe I don't think the timer system actually has a a limit on how far out you can schedule schedule timers but I",
+    "start": "2645680",
+    "end": "2653520"
+  },
+  {
+    "text": "believe the the systems that in Q timers currently and maybe we should revisit this but the systems that currently in Q",
+    "start": "2653520",
+    "end": "2659559"
+  },
+  {
+    "text": "timers I believe do have limits on how how long they will allow you to schedule",
+    "start": "2659559",
+    "end": "2665160"
+  },
+  {
+    "text": "out of timer so like Journeys will not allow you to say you know send a notification then wait for 30",
+    "start": "2665160",
+    "end": "2671280"
+  },
+  {
+    "text": "days so that that just you know puts a constraint on the number of things that are allowed to live in in the data",
+    "start": "2671280",
+    "end": "2678599"
+  },
+  {
+    "text": "set but yes it's potentially very",
+    "start": "2678599",
+    "end": "2684680"
+  },
+  {
+    "text": "expensive nice so I questioning your",
+    "start": "2685000",
+    "end": "2690480"
+  },
+  {
+    "text": "structure so on is called candra yes",
+    "start": "2690480",
+    "end": "2696240"
+  },
+  {
+    "text": "right it must be more performant than cently so at the back end how many notes",
+    "start": "2696240",
+    "end": "2703079"
+  },
+  {
+    "text": "do you have and what the application factor is and we have with the same image",
+    "start": "2703079",
+    "end": "2711078"
+  },
+  {
+    "text": "of replication yeah so we have uh just a single data center I believe for timers",
+    "start": "2711200",
+    "end": "2719720"
+  },
+  {
+    "text": "we have I think it's six I think six nodes yeah with um yeah do you know what",
+    "start": "2719720",
+    "end": "2725640"
+  },
+  {
+    "text": "the replication factor is don't off the top of my head gosh I don't know what it is off the top of my head either um I",
+    "start": "2725640",
+    "end": "2731440"
+  },
+  {
+    "text": "I'm not sure if we did any of our own benchmarking of of Sila versus Cassandra I think at the time our CTO had quite a",
+    "start": "2731440",
+    "end": "2739280"
+  },
+  {
+    "text": "strong aversion to Java um so I believe we actually run zero Java code in production and adopting Sila versus",
+    "start": "2739280",
+    "end": "2746319"
+  },
+  {
+    "text": "Cassandra was partially motivated by by that",
+    "start": "2746319",
+    "end": "2751079"
+  },
+  {
+    "text": "desire we have been quite happy with Sila uh since we've adopted it",
+    "start": "2751640",
+    "end": "2758559"
+  },
+  {
+    "text": "so many so many questions lots of good questions you",
+    "start": "2761800",
+    "end": "2768200"
+  },
+  {
+    "text": "you and then the next minutes yes processing",
+    "start": "2768200",
+    "end": "2773839"
+  },
+  {
+    "text": "right so was it like recr again after it",
+    "start": "2773839",
+    "end": "2779000"
+  },
+  {
+    "text": "processed mon until the",
+    "start": "2779000",
+    "end": "2783720"
+  },
+  {
+    "text": "uh yes so that's a good question so uh a timer would be returned by the grpc",
+    "start": "2787599",
+    "end": "2793640"
+  },
+  {
+    "text": "service multiple times until it was expired until that delete timer uh",
+    "start": "2793640",
+    "end": "2799400"
+  },
+  {
+    "text": "method was called for that particular timer so that I suppose is another effic inefficiency of the system right there's",
+    "start": "2799400",
+    "end": "2805480"
+  },
+  {
+    "text": "a bunch of data retransmission um and again this was done in the name of kind of the the Simplicity of the system and",
+    "start": "2805480",
+    "end": "2812920"
+  },
+  {
+    "text": "that is something that you know probably could be removed in the future if we wanted to",
+    "start": "2812920",
+    "end": "2819200"
+  },
+  {
+    "text": "uh optimize optimize that a bit more okay this last",
+    "start": "2819200",
+    "end": "2829000"
+  },
+  {
+    "text": "question appreciate the talk that there is a possibility here",
+    "start": "2832160",
+    "end": "2837760"
+  },
+  {
+    "text": "there's some crashing bug in a particular timer your one of your noes",
+    "start": "2837760",
+    "end": "2843200"
+  },
+  {
+    "text": "can get St Do you have a me for Recovery that",
+    "start": "2843200",
+    "end": "2848559"
+  },
+  {
+    "text": "that not been a problem um that hasn't been a problem for us I think because the API of a timer is so small you know",
+    "start": "2848559",
+    "end": "2856920"
+  },
+  {
+    "text": "the things you are allowed to have are you know the variance in each timer is",
+    "start": "2856920",
+    "end": "2862280"
+  },
+  {
+    "text": "you know time and data and Kafka settings basically and we actually we",
+    "start": "2862280",
+    "end": "2868240"
+  },
+  {
+    "text": "don't give you more Kafka settings than topic and partition so the the attack",
+    "start": "2868240",
+    "end": "2874440"
+  },
+  {
+    "text": "surface is is really small we have haven't had any instances of a malformed",
+    "start": "2874440",
+    "end": "2879760"
+  },
+  {
+    "text": "timer that was causing issues for the service but yes if if a particular node",
+    "start": "2879760",
+    "end": "2887640"
+  },
+  {
+    "text": "of the timer system was just crash looping um we would you know basically just have to page an engineer and have",
+    "start": "2887640",
+    "end": "2893280"
+  },
+  {
+    "text": "them look into it there's not kind of Auto healing built into",
+    "start": "2893280",
+    "end": "2898280"
+  },
+  {
+    "text": "it everyone thanks for coming",
+    "start": "2899040",
+    "end": "2907079"
+  },
+  {
+    "text": "good job great job [Music]",
+    "start": "2907079",
+    "end": "2917810"
+  }
+]

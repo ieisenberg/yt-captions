@@ -1,0 +1,1517 @@
+[
+  {
+    "text": "hi everyone thank you for joining me today and I'm excited to talk about",
+    "start": "1500",
+    "end": "7259"
+  },
+  {
+    "text": "TLS tracing encrypted microservices with evpf",
+    "start": "7259",
+    "end": "12780"
+  },
+  {
+    "text": "so before we get started I wanted to give a brief background about myself my name's Dom I'm an SRE at Twitter",
+    "start": "12780",
+    "end": "19800"
+  },
+  {
+    "text": "working in observability across metrics and logging prior to Twitter I was a production",
+    "start": "19800",
+    "end": "26880"
+  },
+  {
+    "text": "engineer at Yelp where our team was responsible for keeping the website and",
+    "start": "26880",
+    "end": "31920"
+  },
+  {
+    "text": "mobile apps working and that's where I got a deep appreciation for observability tooling",
+    "start": "31920",
+    "end": "39019"
+  },
+  {
+    "text": "let's go over our agenda for today we'll start off with a background and motivation for why Twitter was",
+    "start": "39300",
+    "end": "46140"
+  },
+  {
+    "text": "interested in this work from there we'll do an overview of protocol tracing techniques",
+    "start": "46140",
+    "end": "53760"
+  },
+  {
+    "text": "then we'll do a deep dive into the Twitter TLS tracing work we implemented",
+    "start": "53760",
+    "end": "60059"
+  },
+  {
+    "text": "we'll see a live demo that and then we will generalize the criteria",
+    "start": "60059",
+    "end": "65580"
+  },
+  {
+    "text": "for how to support new TLS use cases",
+    "start": "65580",
+    "end": "70820"
+  },
+  {
+    "text": "moving on to the background so at Twitter scale we rely heavily on right time aggregated metrics",
+    "start": "71880",
+    "end": "79080"
+  },
+  {
+    "text": "this is great for monitoring service health but it really limits your ability to slice and dice your data and so when",
+    "start": "79080",
+    "end": "86100"
+  },
+  {
+    "text": "you're investigating outliers or doing other real-time debugging it becomes a real challenge",
+    "start": "86100",
+    "end": "93320"
+  },
+  {
+    "text": "another thing is that our collection and ingestion for our observability data has",
+    "start": "94200",
+    "end": "100259"
+  },
+  {
+    "text": "largely remained the same we saw that ebpf had promise with auto instrumentation and we saw the Hubble",
+    "start": "100259",
+    "end": "108240"
+  },
+  {
+    "text": "and pixie projects doing exciting things and so we wanted to explore this further and see if the protocol tracing could",
+    "start": "108240",
+    "end": "115320"
+  },
+  {
+    "text": "help aid this real-time debugging use case",
+    "start": "115320",
+    "end": "119780"
+  },
+  {
+    "text": "another important detail is that services at Twitter use mtls by default",
+    "start": "120360",
+    "end": "125880"
+  },
+  {
+    "text": "this is fantastic for security but renders many observability tools useless",
+    "start": "125880",
+    "end": "131039"
+  },
+  {
+    "text": "so whatever ebpf instrumentation we would use supporting encrypted connections is a",
+    "start": "131039",
+    "end": "137160"
+  },
+  {
+    "text": "necessity otherwise it wouldn't provide any insight and lastly the tracing needs to be",
+    "start": "137160",
+    "end": "145440"
+  },
+  {
+    "text": "extendable for the protocols used at Twitter the majority of our microservices are",
+    "start": "145440",
+    "end": "151680"
+  },
+  {
+    "text": "built on top of this project that we open source called finagle which is an RPC framework for communicating between",
+    "start": "151680",
+    "end": "157800"
+  },
+  {
+    "text": "services and while it supports protocols like MySQL",
+    "start": "157800",
+    "end": "163019"
+  },
+  {
+    "text": "postgres Thrift mux is the most widely used protocol which that's Apache Thrift",
+    "start": "163019",
+    "end": "169620"
+  },
+  {
+    "text": "over a mux session layer protocol with that background out of the way",
+    "start": "169620",
+    "end": "175980"
+  },
+  {
+    "text": "let's dive into how protocol tracing can be done we'll first discuss how it works for the",
+    "start": "175980",
+    "end": "182160"
+  },
+  {
+    "text": "plain text use case and then dig into encrypted use cases after that",
+    "start": "182160",
+    "end": "187980"
+  },
+  {
+    "text": "so for tracing plain text traffic we can attach a BPF program to the read and",
+    "start": "187980",
+    "end": "193739"
+  },
+  {
+    "text": "write sys calls through a k-probe this curl command that you see here is",
+    "start": "193739",
+    "end": "198840"
+  },
+  {
+    "text": "dumping out the networking sys calls when we are curling google.com",
+    "start": "198840",
+    "end": "204480"
+  },
+  {
+    "text": "and the arguments that we see to the syscall would be equivalent to the data",
+    "start": "204480",
+    "end": "210540"
+  },
+  {
+    "text": "that we would be able to access through the k-probe so you can see in the send to syscall",
+    "start": "210540",
+    "end": "217040"
+  },
+  {
+    "text": "five is the file descriptor and the second argument is the raw protocol data",
+    "start": "217040",
+    "end": "224459"
+  },
+  {
+    "text": "so from here what a tool like pixiq does is it sets these probes on those",
+    "start": "224459",
+    "end": "230400"
+  },
+  {
+    "text": "syscalls it pulls out the socket file descriptor and the raw protocol data it",
+    "start": "230400",
+    "end": "236099"
+  },
+  {
+    "text": "sends it to the pem which is their user space Daemon for doing more processing",
+    "start": "236099",
+    "end": "241440"
+  },
+  {
+    "text": "and from there it stitches together the requests and response Pairs and adds more metadata so that you get rich",
+    "start": "241440",
+    "end": "248040"
+  },
+  {
+    "text": "information about your traffic let's move on to the encrypted case",
+    "start": "248040",
+    "end": "255780"
+  },
+  {
+    "text": "so we are unable to hook into things at the same layer for encrypted traffic Because by the time it gets the syscall",
+    "start": "255780",
+    "end": "263040"
+  },
+  {
+    "text": "it's already encrypted so we need to access it just before it's decrypted or after it",
+    "start": "263040",
+    "end": "269820"
+  },
+  {
+    "text": "has been decrypted and where this occurs is in the TLs Library",
+    "start": "269820",
+    "end": "274860"
+  },
+  {
+    "text": "in this example here we can see the SSL right and SSL read functions exist",
+    "start": "274860",
+    "end": "280380"
+  },
+  {
+    "text": "within the open SSL Library so this is a common point of",
+    "start": "280380",
+    "end": "285720"
+  },
+  {
+    "text": "instrumentation it's worth mentioning that while openssl is popular the there are many other TLS",
+    "start": "285720",
+    "end": "294180"
+  },
+  {
+    "text": "libraries and so for instance golang has its own crypto implementation so while",
+    "start": "294180",
+    "end": "300360"
+  },
+  {
+    "text": "it it has a similar layer these SSL write and SL read functions aren't necessarily",
+    "start": "300360",
+    "end": "307199"
+  },
+  {
+    "text": "it don't necessarily exist in that case it's worth mentioning that the popular",
+    "start": "307199",
+    "end": "313860"
+  },
+  {
+    "text": "BCC tools project has a tool that implements tracing in this way called",
+    "start": "313860",
+    "end": "319199"
+  },
+  {
+    "text": "SSL sniff so it sets you probes on these two functions and it's able to dump out the",
+    "start": "319199",
+    "end": "326960"
+  },
+  {
+    "text": "unencrypted traffic pixie also takes a similar approach",
+    "start": "326960",
+    "end": "333240"
+  },
+  {
+    "text": "and so it puts the probes on those two functions and from that point forward it sends the",
+    "start": "333240",
+    "end": "339900"
+  },
+  {
+    "text": "data to the user space process and the request and response request and response pairing occurs just as it did",
+    "start": "339900",
+    "end": "347520"
+  },
+  {
+    "text": "in the plain text case",
+    "start": "347520",
+    "end": "351020"
+  },
+  {
+    "text": "however there's some additional challenges here in this diagram you see that there are",
+    "start": "352740",
+    "end": "358440"
+  },
+  {
+    "text": "three requests going on service B is making a HTTP call to service a while service C is making two",
+    "start": "358440",
+    "end": "365699"
+  },
+  {
+    "text": "HTTP calls to service a we need to be able to understand",
+    "start": "365699",
+    "end": "371300"
+  },
+  {
+    "text": "what data is associated with which connection and so while we can access",
+    "start": "371300",
+    "end": "376860"
+  },
+  {
+    "text": "the protocol data from those functions that's just part of the story",
+    "start": "376860",
+    "end": "382440"
+  },
+  {
+    "text": "we need to have some type of connection identity which as I mentioned in the plain text use case is done through the",
+    "start": "382440",
+    "end": "388620"
+  },
+  {
+    "text": "socket file descriptor unfortunately with the SSL right and SSL",
+    "start": "388620",
+    "end": "394259"
+  },
+  {
+    "text": "read functions the socket file descriptor isn't passed in as its own argument and so we need to work out how",
+    "start": "394259",
+    "end": "401160"
+  },
+  {
+    "text": "to determine that so you can see the Prototype of the SSL",
+    "start": "401160",
+    "end": "407460"
+  },
+  {
+    "text": "rate function the second argument is the plain Text data that we can use just as in the",
+    "start": "407460",
+    "end": "414180"
+  },
+  {
+    "text": "plain text case the first argument of interest is the SSL struct",
+    "start": "414180",
+    "end": "420300"
+  },
+  {
+    "text": "and so what you will see from the other struck definitions here is that the SSL",
+    "start": "420300",
+    "end": "426479"
+  },
+  {
+    "text": "struct has been embedded rbio member which is of type bio which is open ssl's",
+    "start": "426479",
+    "end": "434840"
+  },
+  {
+    "text": "basic input output abstraction within that struct there is a num member",
+    "start": "434840",
+    "end": "442199"
+  },
+  {
+    "text": "and that is where the socket file descriptor is actually stored so in order to get this connection",
+    "start": "442199",
+    "end": "448860"
+  },
+  {
+    "text": "identity working we need our BPF program to walk this structure and pull out that num field",
+    "start": "448860",
+    "end": "456960"
+  },
+  {
+    "text": "so let's see how that works on the right hand side you'll see a",
+    "start": "456960",
+    "end": "462720"
+  },
+  {
+    "text": "diagram of how this exists in memory the function will be given that SSL pointer which will go to the beginning",
+    "start": "462720",
+    "end": "469620"
+  },
+  {
+    "text": "of the SSL struct from there we need to determine two offsets",
+    "start": "469620",
+    "end": "474840"
+  },
+  {
+    "text": "we need the offset between the beginning of the SSL struct and the rbio member",
+    "start": "474840",
+    "end": "481560"
+  },
+  {
+    "text": "we can then follow that pointer and then we need the additional offset",
+    "start": "481560",
+    "end": "486620"
+  },
+  {
+    "text": "of the bio struct to the num member which contains the socket file",
+    "start": "486620",
+    "end": "492780"
+  },
+  {
+    "text": "descriptor one thing to mention here and",
+    "start": "492780",
+    "end": "498539"
+  },
+  {
+    "text": "this was discussed earlier in the grpc talk is that these offsets aren't",
+    "start": "498539",
+    "end": "504599"
+  },
+  {
+    "text": "guaranteed to be the same across open SSL versions and so what we assume is that for a",
+    "start": "504599",
+    "end": "511139"
+  },
+  {
+    "text": "given open SSL version those offsets will be stable the way pixie's user space process",
+    "start": "511139",
+    "end": "518279"
+  },
+  {
+    "text": "determines this is through DL opening the openssl library and calling the open",
+    "start": "518279",
+    "end": "524700"
+  },
+  {
+    "text": "SSL Version num function before it attaches the u-probe so that those so",
+    "start": "524700",
+    "end": "531180"
+  },
+  {
+    "text": "that the offset calculation can be done when the function is triggered",
+    "start": "531180",
+    "end": "538399"
+  },
+  {
+    "text": "now that we've understood the background and some tactics for doing this protocol tracing let's move on to Twitter's use",
+    "start": "539100",
+    "end": "545880"
+  },
+  {
+    "text": "case so we built out our TLS tracing on top of the pixie project",
+    "start": "545880",
+    "end": "552540"
+  },
+  {
+    "text": "the reason why we were interested in Pixi is because it provides granular observability data and it's at the edge",
+    "start": "552540",
+    "end": "559740"
+  },
+  {
+    "text": "model scales for real-time debugging",
+    "start": "559740",
+    "end": "564019"
+  },
+  {
+    "text": "I mentioned I work on the observability team and many of the tools that we",
+    "start": "564899",
+    "end": "570899"
+  },
+  {
+    "text": "provide are for service owners to understand their systems and the data",
+    "start": "570899",
+    "end": "576300"
+  },
+  {
+    "text": "that pixie provides is very applicable to those customers and what they really want to do is",
+    "start": "576300",
+    "end": "582240"
+  },
+  {
+    "text": "understand service to service interactions which is data that protocol tracing provides",
+    "start": "582240",
+    "end": "589459"
+  },
+  {
+    "text": "and finally Twitter's core instrumentation focuses on internal use cases",
+    "start": "590700",
+    "end": "596459"
+  },
+  {
+    "text": "what this means is that open source integration typically lags behind our internally developed projects",
+    "start": "596459",
+    "end": "603360"
+  },
+  {
+    "text": "so while we were hoping that pixie would give us better instrumentation for our",
+    "start": "603360",
+    "end": "608880"
+  },
+  {
+    "text": "finagle and our you know most widely used projects we were hoping it would raise the bar",
+    "start": "608880",
+    "end": "615480"
+  },
+  {
+    "text": "for the open source use cases that we didn't have enough time to fully build out Integrations with",
+    "start": "615480",
+    "end": "622700"
+  },
+  {
+    "text": "all right now that we've seen the that background here's the familiar TLS tracing diagram",
+    "start": "623279",
+    "end": "631920"
+  },
+  {
+    "text": "so finagle uses a project called Neti which is a Java networking Library",
+    "start": "631920",
+    "end": "638820"
+  },
+  {
+    "text": "and that Library underneath the hood uses a project called Neti TC native",
+    "start": "638820",
+    "end": "644940"
+  },
+  {
+    "text": "which provides its own shared Library that fulfills the same role as the open",
+    "start": "644940",
+    "end": "651060"
+  },
+  {
+    "text": "SSL shared Library so in the context of this we needed to trace libnetti TC native",
+    "start": "651060",
+    "end": "658740"
+  },
+  {
+    "text": "and it's unlike openssl typically it's statically linked with",
+    "start": "658740",
+    "end": "664440"
+  },
+  {
+    "text": "boring SSL another note about Neti is that it's pretty widely used across many Java",
+    "start": "664440",
+    "end": "671820"
+  },
+  {
+    "text": "projects so when we were embarking on this we were hoping that if we could",
+    "start": "671820",
+    "end": "677040"
+  },
+  {
+    "text": "solve this TLS tracing problem this wouldn't only solve it for Twitter's use case but it would",
+    "start": "677040",
+    "end": "682860"
+  },
+  {
+    "text": "implement it for Cassandra for elasticsearch Java grpc there's a large",
+    "start": "682860",
+    "end": "688019"
+  },
+  {
+    "text": "variety of use cases that all use this library and so I felt that there was a lot of potential",
+    "start": "688019",
+    "end": "693540"
+  },
+  {
+    "text": "here let's talk about the challenges that we",
+    "start": "693540",
+    "end": "699180"
+  },
+  {
+    "text": "had to overcome in order to get this tracing working",
+    "start": "699180",
+    "end": "704399"
+  },
+  {
+    "text": "so the first is that pixie's original openssl version detection did not work",
+    "start": "704399",
+    "end": "709800"
+  },
+  {
+    "text": "for finagle libnetti TC native it does contain the open SSL Version num",
+    "start": "709800",
+    "end": "717360"
+  },
+  {
+    "text": "symbol but it's local which means it exists in the Sim tab section of the elf",
+    "start": "717360",
+    "end": "723060"
+  },
+  {
+    "text": "file rather than the dynamic symbol table and so Pixies call to DL Sim would fail",
+    "start": "723060",
+    "end": "729899"
+  },
+  {
+    "text": "to find the function we can see that here in these two",
+    "start": "729899",
+    "end": "735860"
+  },
+  {
+    "text": "commands so the first one shows all of the dynamic symbols and greps for that",
+    "start": "736320",
+    "end": "742200"
+  },
+  {
+    "text": "symbol and we see it's not present whereas the second command shows all of",
+    "start": "742200",
+    "end": "747779"
+  },
+  {
+    "text": "the local and dynamic symbols and we see that it does show up so this was one area we needed to have a",
+    "start": "747779",
+    "end": "754620"
+  },
+  {
+    "text": "solution for the second is that the socket file descriptor was not",
+    "start": "754620",
+    "end": "761040"
+  },
+  {
+    "text": "populated in the SSL right and SSL read SSL struct",
+    "start": "761040",
+    "end": "766620"
+  },
+  {
+    "text": "so that was another area we knew we were going to have to solve this connection identity problem",
+    "start": "766620",
+    "end": "772380"
+  },
+  {
+    "text": "and finally boring SSL was used rather than openssl",
+    "start": "772380",
+    "end": "778260"
+  },
+  {
+    "text": "the most obvious difference here is that one of them is statically linked and the other is typically dynamically linked",
+    "start": "778260",
+    "end": "783480"
+  },
+  {
+    "text": "and we weren't really sure exactly what needed to be done here but we were pretty confident that there would",
+    "start": "783480",
+    "end": "789899"
+  },
+  {
+    "text": "be something to work out starting from the first one",
+    "start": "789899",
+    "end": "795600"
+  },
+  {
+    "text": "let's talk about how we determined the finagle TLS version so as I mentioned that openssl Version",
+    "start": "795600",
+    "end": "802980"
+  },
+  {
+    "text": "num function is in the elf file so one way to solve this is that we can",
+    "start": "802980",
+    "end": "809279"
+  },
+  {
+    "text": "actually calculate its raw address and call the function with a raw function pointer",
+    "start": "809279",
+    "end": "814740"
+  },
+  {
+    "text": "the code you see on this slide is an Abridged version of the code that exists within Pixi that does this called The",
+    "start": "814740",
+    "end": "821579"
+  },
+  {
+    "text": "Raw function pointer manager so you can see the kind of high level ideas is that we have an elf parser",
+    "start": "821579",
+    "end": "830700"
+  },
+  {
+    "text": "we also DL open the library so it's accessible within the user space daemon's virtual memory",
+    "start": "830700",
+    "end": "838440"
+  },
+  {
+    "text": "we then use the elf parser to determine the symbol offset and we add that to",
+    "start": "838440",
+    "end": "845100"
+  },
+  {
+    "text": "where the library is loaded in virtual memory and that gives us the function pointer that we need",
+    "start": "845100",
+    "end": "851579"
+  },
+  {
+    "text": "so from there we were able to determine the TLs version and that problem was out",
+    "start": "851579",
+    "end": "856800"
+  },
+  {
+    "text": "of the way next up is addressing the missing socket",
+    "start": "856800",
+    "end": "861839"
+  },
+  {
+    "text": "file descriptor and we solved this by Upstream upstreaming changes to Neti and Neti TC",
+    "start": "861839",
+    "end": "868800"
+  },
+  {
+    "text": "native to populate this on connection creation this pull request here is the one to",
+    "start": "868800",
+    "end": "875579"
+  },
+  {
+    "text": "Neti TC native which is the portion of Neti that does the actual TLS and native",
+    "start": "875579",
+    "end": "881279"
+  },
+  {
+    "text": "code if you look at the top part of this pull request you see that it's handling a",
+    "start": "881279",
+    "end": "888920"
+  },
+  {
+    "text": "bioc set FD case and what it's doing there is it's making",
+    "start": "888920",
+    "end": "894959"
+  },
+  {
+    "text": "sure that the num field on that bio struct is correctly populated",
+    "start": "894959",
+    "end": "902579"
+  },
+  {
+    "text": "the part of the pull request to the bottom is the change needed to export this",
+    "start": "902579",
+    "end": "909000"
+  },
+  {
+    "text": "functionality to be accessible by the Java runtime so what it's doing is it's defining a",
+    "start": "909000",
+    "end": "914519"
+  },
+  {
+    "text": "new method called bio set FD so that Java can call this in order to take",
+    "start": "914519",
+    "end": "920339"
+  },
+  {
+    "text": "advantage of this functionality the second piece to this was making this",
+    "start": "920339",
+    "end": "926880"
+  },
+  {
+    "text": "was actually using this in the Neti project Nettie has a concept called a channel",
+    "start": "926880",
+    "end": "932399"
+  },
+  {
+    "text": "which is a one-to-one mapping between a connection and it also provides some hooks into",
+    "start": "932399",
+    "end": "940079"
+  },
+  {
+    "text": "connection life cycles and so we there is a thing called Channel active which is called when a",
+    "start": "940079",
+    "end": "947399"
+  },
+  {
+    "text": "connection is created and so all we needed to do was call the function there and pass the",
+    "start": "947399",
+    "end": "953399"
+  },
+  {
+    "text": "channel in so that it was passed into the native code problem two was then",
+    "start": "953399",
+    "end": "960300"
+  },
+  {
+    "text": "solved and then the final piece the differences between boring SSL and",
+    "start": "960300",
+    "end": "966600"
+  },
+  {
+    "text": "openssl I mentioned that the boring SSL is",
+    "start": "966600",
+    "end": "971940"
+  },
+  {
+    "text": "statically linked and so what this means is you actually have to set u-probes on the application binary rather than the",
+    "start": "971940",
+    "end": "979260"
+  },
+  {
+    "text": "shared Library so if we take an example like Envoy you would actually put the BPF Probe on the",
+    "start": "979260",
+    "end": "986519"
+  },
+  {
+    "text": "envoy binary itself rather than binary or envoys TLS shared Library",
+    "start": "986519",
+    "end": "993660"
+  },
+  {
+    "text": "finagle's case is a little different because Java is not native code it has a",
+    "start": "993660",
+    "end": "998880"
+  },
+  {
+    "text": "runtime so it is still put on the shared Library but the shared Library doesn't have",
+    "start": "998880",
+    "end": "1005600"
+  },
+  {
+    "text": "Dynamic linking second thing is boring SSL is Source",
+    "start": "1005600",
+    "end": "1011660"
+  },
+  {
+    "text": "compatible with openssl but that doesn't guarantee that the offsets that we use to find the socket",
+    "start": "1011660",
+    "end": "1018740"
+  },
+  {
+    "text": "file descriptor are the same and what we found out after investigating this is that they are",
+    "start": "1018740",
+    "end": "1024500"
+  },
+  {
+    "text": "actually different and that boring SSL is written in C plus and so the layout",
+    "start": "1024500",
+    "end": "1030140"
+  },
+  {
+    "text": "in memory is very different from the opensslc implementation",
+    "start": "1030140",
+    "end": "1036140"
+  },
+  {
+    "text": "and so the way we solve that is we have different version offsets for boring SSL and different ones for",
+    "start": "1036140",
+    "end": "1043579"
+  },
+  {
+    "text": "openssl for each version that's supported",
+    "start": "1043579",
+    "end": "1048520"
+  },
+  {
+    "text": "all right with that I realized I called this a live demo before but it is pre-recorded let's see it in action",
+    "start": "1049220",
+    "end": "1058179"
+  },
+  {
+    "text": "I went ahead and installed pixie on a local Mini Cube cluster",
+    "start": "1060679",
+    "end": "1067179"
+  },
+  {
+    "text": "running in the pixie docks there is this Pixi",
+    "start": "1068539",
+    "end": "1074059"
+  },
+  {
+    "text": "CLI you can use to deploy to the cluster so I went ahead and done a px deploy",
+    "start": "1074059",
+    "end": "1081280"
+  },
+  {
+    "text": "in order to visualize this enable traffic setting up two applications one of them",
+    "start": "1081799",
+    "end": "1088160"
+  },
+  {
+    "text": "will be generating planes verify that the network traffic",
+    "start": "1088160",
+    "end": "1093700"
+  },
+  {
+    "text": "has plain Text data then set up an encrypted example",
+    "start": "1093700",
+    "end": "1099740"
+  },
+  {
+    "text": "and use T utus there as well to verify that the traffic is truly encrypted",
+    "start": "1099740",
+    "end": "1105080"
+  },
+  {
+    "text": "and then we will visualize that in the pixel UI so pixie comes",
+    "start": "1105080",
+    "end": "1112240"
+  },
+  {
+    "text": "the demos out of the box one of them being the",
+    "start": "1112280",
+    "end": "1119720"
+  },
+  {
+    "text": "the maple demo which generates thriftbox traffic at this time the finagle demo does not",
+    "start": "1119720",
+    "end": "1126380"
+  },
+  {
+    "text": "work with generating encrypted traffic so we will use that for the plaintext case",
+    "start": "1126380",
+    "end": "1133120"
+  },
+  {
+    "text": "pointed tlcili",
+    "start": "1134660",
+    "end": "1141799"
+  },
+  {
+    "text": "we set up the encrypted case I've ran some containers on the cluster manually",
+    "start": "1146780",
+    "end": "1153140"
+  },
+  {
+    "text": "since as I mentioned the demo does not support it yet let's dig into things",
+    "start": "1153140",
+    "end": "1158780"
+  },
+  {
+    "text": "so in this terminal window on the left hand side I have the TCP dump output",
+    "start": "1158780",
+    "end": "1164000"
+  },
+  {
+    "text": "from the plain text case and the logs from the enabled",
+    "start": "1164000",
+    "end": "1169340"
+  },
+  {
+    "text": "we can see that the client is constantly generating this hello ding traffic which is viewable in the TCP dump output",
+    "start": "1169340",
+    "end": "1177799"
+  },
+  {
+    "text": "because it's plain text on the right hand side we have the encrypted",
+    "start": "1177799",
+    "end": "1184000"
+  },
+  {
+    "text": "depth it is constantly receiving a string string response from the server",
+    "start": "1184220",
+    "end": "1190520"
+  },
+  {
+    "text": "and if we look at its TCP dump output we can see that the string string text does",
+    "start": "1190520",
+    "end": "1197900"
+  },
+  {
+    "text": "not show up validates that this case is using end-to-end encrypted traffic",
+    "start": "1197900",
+    "end": "1205340"
+  },
+  {
+    "text": "with that let's take a look at the Pixi UI and see how things look",
+    "start": "1205340",
+    "end": "1210679"
+  },
+  {
+    "text": "so the Pixi with a number of scripts out of the box which allow you to visualize your",
+    "start": "1210679",
+    "end": "1216620"
+  },
+  {
+    "text": "clusters data there is a upstreamed mux data script that supports viewing this",
+    "start": "1216620",
+    "end": "1224059"
+  },
+  {
+    "text": "mux protocol traffic I've went ahead and made some slight changes so that we can",
+    "start": "1224059",
+    "end": "1230679"
+  },
+  {
+    "text": "encrypted case versus the plain text case but otherwise it's the same as the the script",
+    "start": "1230720",
+    "end": "1237140"
+  },
+  {
+    "text": "so what we can see here is the mux protocol is a session layer protocol so",
+    "start": "1237140",
+    "end": "1242780"
+  },
+  {
+    "text": "in addition to sending requests and responses with the",
+    "start": "1242780",
+    "end": "1249140"
+  },
+  {
+    "text": "tissue has a",
+    "start": "1249140",
+    "end": "1251860"
+  },
+  {
+    "text": "looking at these individual entries we can see there are two different sources one of",
+    "start": "1261080",
+    "end": "1266720"
+  },
+  {
+    "text": "them is PX finagle which is the name of the the full name of the Pod that the",
+    "start": "1266720",
+    "end": "1273980"
+  },
+  {
+    "text": "demo is running C is able to understand who metadata and",
+    "start": "1273980",
+    "end": "1279140"
+  },
+  {
+    "text": "so that this localhost case is actually our",
+    "start": "1279140",
+    "end": "1284960"
+  },
+  {
+    "text": "encrypted demo so we can see that it doesn't have that rich data to attach to it since I'm running",
+    "start": "1284960",
+    "end": "1291380"
+  },
+  {
+    "text": "this cluster itself but we can we can see that both of them",
+    "start": "1291380",
+    "end": "1296659"
+  },
+  {
+    "text": "are generating traffic constantly so we can see that the plain text and encrypted cases",
+    "start": "1296659",
+    "end": "1302000"
+  },
+  {
+    "text": "cases are both working out of",
+    "start": "1302000",
+    "end": "1305080"
+  },
+  {
+    "text": "them all right hopefully you get a good view of how all that works end to end",
+    "start": "1308240",
+    "end": "1315399"
+  },
+  {
+    "text": "let me get back to my presentation oops",
+    "start": "1316580",
+    "end": "1323020"
+  },
+  {
+    "text": "all right I knew this was going to give me trouble",
+    "start": "1336740",
+    "end": "1340840"
+  },
+  {
+    "text": "foreign there we go all right so",
+    "start": "1348799",
+    "end": "1354260"
+  },
+  {
+    "text": "in conclusion uh I wanted to give an overview of the different",
+    "start": "1354260",
+    "end": "1360020"
+  },
+  {
+    "text": "dimensions of things you need to be aware of in order to support a TLS",
+    "start": "1360020",
+    "end": "1365240"
+  },
+  {
+    "text": "Library so to begin with we'll be just describing the differences between nginx",
+    "start": "1365240",
+    "end": "1371840"
+  },
+  {
+    "text": "and node.js and so for the SSL Library they both use",
+    "start": "1371840",
+    "end": "1377000"
+  },
+  {
+    "text": "openssl they are dynamically linked the SSL right and SSL read symbols",
+    "start": "1377000",
+    "end": "1384500"
+  },
+  {
+    "text": "are accessible and in the dynsim which means that we can set a u-probe with the symbol",
+    "start": "1384500",
+    "end": "1390620"
+  },
+  {
+    "text": "for the version detection so that we know which offsets to apply we can use the we can use DL Sim to call that",
+    "start": "1390620",
+    "end": "1398179"
+  },
+  {
+    "text": "openssl Version num function in nginx case the socket file descriptor",
+    "start": "1398179",
+    "end": "1403760"
+  },
+  {
+    "text": "is populated which results in pixie supporting that use case for node.js the socket file descriptor",
+    "start": "1403760",
+    "end": "1411320"
+  },
+  {
+    "text": "is not populated and pixie has additional u-probes to capture that data which results in node.js being supported",
+    "start": "1411320",
+    "end": "1420940"
+  },
+  {
+    "text": "moving on to Neti so for finagle we know the library is boring SSL",
+    "start": "1421039",
+    "end": "1426919"
+  },
+  {
+    "text": "the linking is static we are the SSL right and so read symbols",
+    "start": "1426919",
+    "end": "1432380"
+  },
+  {
+    "text": "were able to attach it with the symbol itself in for the version detection we are",
+    "start": "1432380",
+    "end": "1439039"
+  },
+  {
+    "text": "using the raw function pointers and the socket file descriptor is",
+    "start": "1439039",
+    "end": "1444080"
+  },
+  {
+    "text": "populated if you're using a TC native version greater than or equal to 2.0.5.3",
+    "start": "1444080",
+    "end": "1451220"
+  },
+  {
+    "text": "on the other use cases of Neti all of the other details are the same we",
+    "start": "1453140",
+    "end": "1459620"
+  },
+  {
+    "text": "believe that it should be supported but it's yet to be tested and as I mentioned before this is something that I think",
+    "start": "1459620",
+    "end": "1465200"
+  },
+  {
+    "text": "will be really powerful to for this one use case to support many popular projects",
+    "start": "1465200",
+    "end": "1472640"
+  },
+  {
+    "text": "and finally thinking about Envoy Envoy is another",
+    "start": "1472640",
+    "end": "1477740"
+  },
+  {
+    "text": "use case that uses boring SSL and one of the ones that the pixie team was actively working on",
+    "start": "1477740",
+    "end": "1485179"
+  },
+  {
+    "text": "its linking is obviously static the SSL write and SSL read symbols",
+    "start": "1485179",
+    "end": "1490760"
+  },
+  {
+    "text": "aren't present but we can do that raw address calculation so you have to set your",
+    "start": "1490760",
+    "end": "1497659"
+  },
+  {
+    "text": "uprobe with the raw address the version detection since the last",
+    "start": "1497659",
+    "end": "1502820"
+  },
+  {
+    "text": "time I checked in on this I believe it was to be determined and Envoy actually has apis that hide the socket file",
+    "start": "1502820",
+    "end": "1510440"
+  },
+  {
+    "text": "descriptor so that's not used and so as indicated here it's a work in progress",
+    "start": "1510440",
+    "end": "1517400"
+  },
+  {
+    "text": "and and just to note this is for istio istio also uses Envoy internally",
+    "start": "1517400",
+    "end": "1524539"
+  },
+  {
+    "text": "looking at vanilla Envoy though the SSL right and SSL read symbols are",
+    "start": "1524539",
+    "end": "1530480"
+  },
+  {
+    "text": "actually stripped from the binary entirely which means that we have no way of attaching the u-probe which",
+    "start": "1530480",
+    "end": "1536539"
+  },
+  {
+    "text": "ultimately mean means that unfortunately Envoy can't be supported through this",
+    "start": "1536539",
+    "end": "1541700"
+  },
+  {
+    "text": "type of tracing so in recap",
+    "start": "1541700",
+    "end": "1547039"
+  },
+  {
+    "text": "to talk about the current status and the future work finagle TLS tracing is one minor bug fix",
+    "start": "1547039",
+    "end": "1553279"
+  },
+  {
+    "text": "from being functional the rest of the functionality that we saw is already in pixie's latest release",
+    "start": "1553279",
+    "end": "1559520"
+  },
+  {
+    "text": "and upstreamed the building blocks introduced to support boring SSL will be shared by",
+    "start": "1559520",
+    "end": "1565880"
+  },
+  {
+    "text": "Future Integrations so I mentioned that istio use case it's piggybacking off of those changes",
+    "start": "1565880",
+    "end": "1572659"
+  },
+  {
+    "text": "and then looking to the future I mentioned that Neti TLS tracing has the potential to",
+    "start": "1572659",
+    "end": "1579320"
+  },
+  {
+    "text": "support many other projects this could include Java grpc elasticsearch",
+    "start": "1579320",
+    "end": "1585080"
+  },
+  {
+    "text": "Cassandra and I think it would be extremely powerful to have fully end-to-end",
+    "start": "1585080",
+    "end": "1590480"
+  },
+  {
+    "text": "tracing all the way through to your data store and so I'm excited to eventually",
+    "start": "1590480",
+    "end": "1595720"
+  },
+  {
+    "text": "pursue what that would look like that's all I have so thank you all for",
+    "start": "1595720",
+    "end": "1602179"
+  },
+  {
+    "text": "your time and I'm happy to take any questions you have [Applause]",
+    "start": "1602179",
+    "end": "1610820"
+  },
+  {
+    "text": "well we've got a question over here",
+    "start": "1610820",
+    "end": "1614380"
+  },
+  {
+    "text": "maybe while we're asking questions Mauricio could uh okay I'm sorry presentation ready",
+    "start": "1619940",
+    "end": "1627140"
+  },
+  {
+    "text": "dueling mics so through any of the work with any of the library or code",
+    "start": "1627140",
+    "end": "1633200"
+  },
+  {
+    "text": "maintainers was there ever any discussion about them modifying uh structures or emitting data or doing",
+    "start": "1633200",
+    "end": "1640460"
+  },
+  {
+    "text": "something to make it simpler for ebpf you know to observe",
+    "start": "1640460",
+    "end": "1646460"
+  },
+  {
+    "text": "sort of a meta question so as I dug into this problem I was once",
+    "start": "1646460",
+    "end": "1652640"
+  },
+  {
+    "text": "we identified that we thought pixie was a good first step into doing this so that we didn't have to build everything",
+    "start": "1652640",
+    "end": "1657919"
+  },
+  {
+    "text": "out ourselves we were working a lot with what already existed there and so as I",
+    "start": "1657919",
+    "end": "1664100"
+  },
+  {
+    "text": "mentioned in kind of the protocol tracing overview Pixies method is you",
+    "start": "1664100",
+    "end": "1669500"
+  },
+  {
+    "text": "know plucking that socket file descriptor out so we were kind of just continuing down to see what all would",
+    "start": "1669500",
+    "end": "1676340"
+  },
+  {
+    "text": "need to be done to unify that because we wanted the solution to work",
+    "start": "1676340",
+    "end": "1682120"
+  },
+  {
+    "text": "ideally in the same manner to minimize like one-off use cases I think now that",
+    "start": "1682120",
+    "end": "1687919"
+  },
+  {
+    "text": "we've like explored it fully like there could potentially be other things you know like thinking about ways to get",
+    "start": "1687919",
+    "end": "1695720"
+  },
+  {
+    "text": "that data with other methods and I was just thinking because there's some Twitter specific not not necessarily specific but lead",
+    "start": "1695720",
+    "end": "1703240"
+  },
+  {
+    "text": "projects in here but thank you other question oh we've got another one",
+    "start": "1703240",
+    "end": "1709159"
+  },
+  {
+    "text": "fantastic and then one here okay",
+    "start": "1709159",
+    "end": "1713679"
+  },
+  {
+    "text": "hey cool work uh my question is have you experimented with the kernel mtls that",
+    "start": "1717620",
+    "end": "1725179"
+  },
+  {
+    "text": "would also allow you to see uh the encrypted traffic or have you any comments on an adoption of that",
+    "start": "1725179",
+    "end": "1732559"
+  },
+  {
+    "text": "I know some of that's possible but I don't I haven't dug into it myself that's definitely something I think",
+    "start": "1732559",
+    "end": "1739340"
+  },
+  {
+    "text": "that's worth exploring and understanding more hey thanks for the talk this is a little",
+    "start": "1739340",
+    "end": "1746539"
+  },
+  {
+    "text": "lower than I usually know but I feel like I learned a lot um so it seems like you're kind of at the",
+    "start": "1746539",
+    "end": "1752320"
+  },
+  {
+    "text": "mercy I guess of like the the server the the networking framework that you use",
+    "start": "1752320",
+    "end": "1757760"
+  },
+  {
+    "text": "right to be able to expose the things that you need to do the tracing so I guess is there almost uh like a wider",
+    "start": "1757760",
+    "end": "1763580"
+  },
+  {
+    "text": "Call to Arms for different Frameworks to open up this access up so that we can have this kind of tracing throughout",
+    "start": "1763580",
+    "end": "1771320"
+  },
+  {
+    "text": "that's exactly what Ori was talking about in his talk earlier today about you know this is using you probes and",
+    "start": "1771320",
+    "end": "1779360"
+  },
+  {
+    "text": "fortunately for this use case SSL write and SSL read are more of a defined contract because boring SSL provides",
+    "start": "1779360",
+    "end": "1786740"
+  },
+  {
+    "text": "Source compatible support for it so it's less unstable in that sense but I do",
+    "start": "1786740",
+    "end": "1793340"
+  },
+  {
+    "text": "think that doubling down on like implementing ustts in popular libraries",
+    "start": "1793340",
+    "end": "1800539"
+  },
+  {
+    "text": "is the right way to go to get stable interfaces for getting the data out of this so fine",
+    "start": "1800539",
+    "end": "1806960"
+  },
+  {
+    "text": "Dory is the answer what was that",
+    "start": "1806960",
+    "end": "1812139"
+  },
+  {
+    "text": "hi for Java based applications with the jit compiler sometimes the code that is",
+    "start": "1812240",
+    "end": "1817520"
+  },
+  {
+    "text": "generated is native code for example a you call a function one time or ends and many times so it generates a native code",
+    "start": "1817520",
+    "end": "1824059"
+  },
+  {
+    "text": "so when you do the u-probes or even on the SSL or some other like and Java as",
+    "start": "1824059",
+    "end": "1830179"
+  },
+  {
+    "text": "its own SSL version so how do you cope with the digit compiler so I mentioned before Oh I don't have my",
+    "start": "1830179",
+    "end": "1837919"
+  },
+  {
+    "text": "slides in the um Nettie has kind of a sub project inside",
+    "start": "1837919",
+    "end": "1843620"
+  },
+  {
+    "text": "of it that's the Neti TC native part that's all Native code so the jit does",
+    "start": "1843620",
+    "end": "1849080"
+  },
+  {
+    "text": "not have any control over that I wouldn't consider myself a Java",
+    "start": "1849080",
+    "end": "1854659"
+  },
+  {
+    "text": "runtime expert but I believe it's it's separate in that sense",
+    "start": "1854659",
+    "end": "1860620"
+  },
+  {
+    "text": "oh",
+    "start": "1864260",
+    "end": "1866740"
+  },
+  {
+    "text": "what yeah hang on I'm coming",
+    "start": "1870140",
+    "end": "1876158"
+  },
+  {
+    "text": "sorry I'm asking when you have the jit compiler working and it's not out of it so how do you cope with it or if there",
+    "start": "1877220",
+    "end": "1883159"
+  },
+  {
+    "text": "is no solution you have to go higher levels for other type of instrumentation yeah",
+    "start": "1883159",
+    "end": "1889880"
+  },
+  {
+    "text": "so I believe there is a project to add you can do usdts in Java code I when I",
+    "start": "1889880",
+    "end": "1899179"
+  },
+  {
+    "text": "initially worked on this I thought we were going to have to explore that but then I was relieved that there was",
+    "start": "1899179",
+    "end": "1905059"
+  },
+  {
+    "text": "native code that I could attach to so that's something I would like to explore more but I barely scratched the surface",
+    "start": "1905059",
+    "end": "1912860"
+  },
+  {
+    "text": "they still have more questions this is great uh do you do you use this",
+    "start": "1912860",
+    "end": "1919760"
+  },
+  {
+    "text": "instrumentation and only for debugging when you have a problem or you can have",
+    "start": "1919760",
+    "end": "1925159"
+  },
+  {
+    "text": "it all the time running we are not using it today we're currently understanding",
+    "start": "1925159",
+    "end": "1932260"
+  },
+  {
+    "text": "where our first investment will be we aren't running a very small number of",
+    "start": "1932260",
+    "end": "1938240"
+  },
+  {
+    "text": "our use cases or on kubernetes so because pixie is a kubernetes observability tool we're understanding",
+    "start": "1938240",
+    "end": "1945200"
+  },
+  {
+    "text": "how we can run it outside of kubernetes and extract the data from it um and we are anticipating that we want",
+    "start": "1945200",
+    "end": "1951559"
+  },
+  {
+    "text": "it on all the time my question was do you have any do you",
+    "start": "1951559",
+    "end": "1957320"
+  },
+  {
+    "text": "foresee or have any performance impact when running this instrumentation so",
+    "start": "1957320",
+    "end": "1963919"
+  },
+  {
+    "text": "there is there should be a slight performance impact because the u-probe will cause a contact switch when that",
+    "start": "1963919",
+    "end": "1970460"
+  },
+  {
+    "text": "function is called from the issues that I've seen at Twitter of us not having good",
+    "start": "1970460",
+    "end": "1976460"
+  },
+  {
+    "text": "capabilities for slicing and dicing or investigating real-time issues I think",
+    "start": "1976460",
+    "end": "1982159"
+  },
+  {
+    "text": "that that's going to be worth it but it's not been measured yet",
+    "start": "1982159",
+    "end": "1986860"
+  }
+]

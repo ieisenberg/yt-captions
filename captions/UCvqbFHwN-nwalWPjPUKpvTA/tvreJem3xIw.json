@@ -1,0 +1,1712 @@
+[
+  {
+    "text": "my name is priya and a little bit about me i've worked as a software engineer at google for the past three years",
+    "start": "240",
+    "end": "6160"
+  },
+  {
+    "text": "and in that time i've maintained mini cube for the past year which is a tool for running a local kubernetes cluster",
+    "start": "6160",
+    "end": "13280"
+  },
+  {
+    "text": "on your machine i've also maintained other open source projects like scaffold and canico",
+    "start": "13280",
+    "end": "18480"
+  },
+  {
+    "text": "and if you're interested in keeping up with any of these tools i have my twitter and github information at the bottom of the slide i also just want to",
+    "start": "18480",
+    "end": "25359"
+  },
+  {
+    "text": "preface this talk by saying that this talk is about improving kubernetes performance and when i first started",
+    "start": "25359",
+    "end": "31279"
+  },
+  {
+    "text": "delving into this at the beginning of the year i was a complete beginner i didn't know a whole lot about how",
+    "start": "31279",
+    "end": "37120"
+  },
+  {
+    "text": "kubernetes itself worked and i definitely did not know a lot about performance engineering so here beginner as well or just here to",
+    "start": "37120",
+    "end": "43680"
+  },
+  {
+    "text": "learn about any of these things you're definitely in the right place",
+    "start": "43680",
+    "end": "48399"
+  },
+  {
+    "text": "and since this is a talk about performance a little bit about my machine as well i calculated a lot of numbers and data",
+    "start": "50079",
+    "end": "56800"
+  },
+  {
+    "text": "which we're going to see later in the talk and it was all done on my macbook pro",
+    "start": "56800",
+    "end": "63038"
+  },
+  {
+    "text": "so a quick agenda for this talk as i mentioned before i was a complete beginner when i started",
+    "start": "63359",
+    "end": "68640"
+  },
+  {
+    "text": "learning about performance at the beginning of the year so i'm going to start by talking about the different performance tools that i",
+    "start": "68640",
+    "end": "74240"
+  },
+  {
+    "text": "learned how to use mostly focusing on linux performance tools and go performance tools",
+    "start": "74240",
+    "end": "79759"
+  },
+  {
+    "text": "and then i'm going to talk about how i use the analyses from these tools to actually improve kubernetes overhead",
+    "start": "79759",
+    "end": "85759"
+  },
+  {
+    "text": "so as i mentioned before i maintain a tool called mini cube which runs kubernetes on your local machine",
+    "start": "85759",
+    "end": "91520"
+  },
+  {
+    "text": "and this talk is going to be a case study in how i improve performance for mini cube specifically but i think a",
+    "start": "91520",
+    "end": "98400"
+  },
+  {
+    "text": "lot of the tools and techniques that i'm going to talk about are applicable to any kubernetes cluster",
+    "start": "98400",
+    "end": "104079"
+  },
+  {
+    "text": "even not just a local single node cluster so um yeah stick around if you're",
+    "start": "104079",
+    "end": "109600"
+  },
+  {
+    "text": "interested in performance so for anyone who might not know what",
+    "start": "109600",
+    "end": "115200"
+  },
+  {
+    "text": "mini cube is i just want to cover what it is really quickly so minicube is",
+    "start": "115200",
+    "end": "120240"
+  },
+  {
+    "text": "an open source tool used to run kubernetes locally uh on either mac linux or windows",
+    "start": "120240",
+    "end": "125759"
+  },
+  {
+    "text": "and the way it works is it basically runs kubernetes either in a vm or in a container and it's basically the",
+    "start": "125759",
+    "end": "132319"
+  },
+  {
+    "text": "goal is to be able to develop on kubernetes as easily as possible on your local machine",
+    "start": "132319",
+    "end": "138400"
+  },
+  {
+    "text": "and typically users run a local single node cluster which will become important later on in",
+    "start": "138400",
+    "end": "143599"
+  },
+  {
+    "text": "the talk as it allowed us to make certain performance decisions",
+    "start": "143599",
+    "end": "148400"
+  },
+  {
+    "text": "so you might be wondering why we even wanted to improve mini q performance and the reason is it was highly",
+    "start": "149040",
+    "end": "155440"
+  },
+  {
+    "text": "requested by our users i don't know about you but when i'm developing on kubernetes especially",
+    "start": "155440",
+    "end": "160720"
+  },
+  {
+    "text": "locally i'm also usually working in an ide and streaming youtube videos and responding to emails all at the same",
+    "start": "160720",
+    "end": "167040"
+  },
+  {
+    "text": "time and this ends up taking up a lot of cpu and it seems like a lot of our users are",
+    "start": "167040",
+    "end": "173120"
+  },
+  {
+    "text": "doing the same thing um over the past few years we've gotten a lot of issues around minicube using up",
+    "start": "173120",
+    "end": "178560"
+  },
+  {
+    "text": "way too much cpu and the one that really stands out is the one on the bottom left vm has 50 resting cpu usage when idle",
+    "start": "178560",
+    "end": "187120"
+  },
+  {
+    "text": "and when you think about it that's pretty bad that means that just running kubernetes on your machine",
+    "start": "187120",
+    "end": "192319"
+  },
+  {
+    "text": "already costs you around 50 of a core and that number is only going to go up as you actually start to deploy your",
+    "start": "192319",
+    "end": "198159"
+  },
+  {
+    "text": "application and develop on it that issue has 38 upvotes which",
+    "start": "198159",
+    "end": "204000"
+  },
+  {
+    "text": "considering that we have more than 400 issues open in our repo at any given time is both kind of",
+    "start": "204000",
+    "end": "209200"
+  },
+  {
+    "text": "sad and impressive so because of all these user issues that had opened up we finally decided to tackle overhead at",
+    "start": "209200",
+    "end": "215200"
+  },
+  {
+    "text": "the beginning of the year and our goal was to reduce vm cpu overhead by 20",
+    "start": "215200",
+    "end": "221840"
+  },
+  {
+    "text": "this is pretty much how i imagined most of our users at the beginning of the year",
+    "start": "222480",
+    "end": "228159"
+  },
+  {
+    "text": "so the first step into improving overhead was to actually have a reliable way to calculate it and i wanted this",
+    "start": "228319",
+    "end": "233840"
+  },
+  {
+    "text": "for two reasons the first was i needed to know what our baseline was i needed to know what current overhead",
+    "start": "233840",
+    "end": "239519"
+  },
+  {
+    "text": "was so that i could actually know when we had reached our 20 goal and the second reason",
+    "start": "239519",
+    "end": "245519"
+  },
+  {
+    "text": "was that i needed to be able to prove that changes i was making to the code were actually improving overhead",
+    "start": "245519",
+    "end": "251840"
+  },
+  {
+    "text": "so there were two scripts that we used to measure overhead throughout the year and",
+    "start": "251840",
+    "end": "257680"
+  },
+  {
+    "text": "the first was a simple go script that i wrote called track cpu which basically just runs ps and keeps",
+    "start": "257680",
+    "end": "264080"
+  },
+  {
+    "text": "track of the overhead of a single process the other script that i used quite frequently was written by another mini",
+    "start": "264080",
+    "end": "270320"
+  },
+  {
+    "text": "cube maintainer thomas and it's called c-stat and c-stat is basically a more precise iostat",
+    "start": "270320",
+    "end": "276720"
+  },
+  {
+    "text": "and it calculates the overhead of the entire system and the way that we used it was we would use csat to calculate the system overhead with",
+    "start": "276720",
+    "end": "283680"
+  },
+  {
+    "text": "mini cube the system overhead without mini cube and then we would subtract those numbers to figure out what the overhead of mini cube was",
+    "start": "283680",
+    "end": "291840"
+  },
+  {
+    "text": "so the next question was where is overhead coming from so as i mentioned before minicube works",
+    "start": "293520",
+    "end": "299040"
+  },
+  {
+    "text": "by running kubernetes either in a vm or in a container but i didn't know if overhead was coming from the vm",
+    "start": "299040",
+    "end": "305199"
+  },
+  {
+    "text": "or if it was coming from kubernetes itself and so the first thing i needed to do was figure out",
+    "start": "305199",
+    "end": "310240"
+  },
+  {
+    "text": "where overhead was coming from so that i knew where i should focus on trying to improve it so",
+    "start": "310240",
+    "end": "316880"
+  },
+  {
+    "text": "i started by just calculating the overhead of running a vm on its own and this was actually pretty interesting as",
+    "start": "316880",
+    "end": "323120"
+  },
+  {
+    "text": "it turns out running a vm on your machine is actually pretty inexpensive in terms of cpu um running the vm on my machine",
+    "start": "323120",
+    "end": "330240"
+  },
+  {
+    "text": "only costed about zero to four percent of a core i then started running cube adm in that",
+    "start": "330240",
+    "end": "335360"
+  },
+  {
+    "text": "vm and overhead went up to around 10 to 15 over the course of a minute and then",
+    "start": "335360",
+    "end": "340880"
+  },
+  {
+    "text": "finally i calculated the overhead of all of minicube with all of the kubernetes component components running like std and the",
+    "start": "340880",
+    "end": "347840"
+  },
+  {
+    "text": "add-on manager and the storage provisioner and overhead went all the way up to 20 to 40",
+    "start": "347840",
+    "end": "354080"
+  },
+  {
+    "text": "and personally i was pretty happy with this result because it meant that the main contributor to",
+    "start": "354080",
+    "end": "359440"
+  },
+  {
+    "text": "overhead in minicube was kubernetes itself and personally i felt a lot more capable of improving kubernetes overhead than i",
+    "start": "359440",
+    "end": "366000"
+  },
+  {
+    "text": "did of say a vm and actually with this information we",
+    "start": "366000",
+    "end": "372080"
+  },
+  {
+    "text": "were already able to add a pretty cool feature to minicube since we knew that running a vm is",
+    "start": "372080",
+    "end": "377360"
+  },
+  {
+    "text": "pretty expensive and that kubernetes is like the expensive part of running mini cube in terms of cpu",
+    "start": "377360",
+    "end": "384400"
+  },
+  {
+    "text": "we realized that we could just pause kubernetes in mini cube when we didn't need it and this inspired the mini coupe",
+    "start": "384400",
+    "end": "390000"
+  },
+  {
+    "text": "pause for the mini cube unpause command so the idea is is that if you're running kubernetes on your local machine",
+    "start": "390000",
+    "end": "396319"
+  },
+  {
+    "text": "and then you deploy your application and you realize that maybe you don't need kubernetes for the next 20 minutes or",
+    "start": "396319",
+    "end": "401440"
+  },
+  {
+    "text": "something you can just run mini q pause which takes less than a second and it'll pause kubernetes in your vm",
+    "start": "401440",
+    "end": "408160"
+  },
+  {
+    "text": "and your application is still running so you can still interact with it but you don't have to deal with this unnecessary overhead of kubernetes when",
+    "start": "408160",
+    "end": "414319"
+  },
+  {
+    "text": "you're not actually using it and this brings me to the main topic of",
+    "start": "414319",
+    "end": "420560"
+  },
+  {
+    "text": "this talk which is how do we actually improve the performance of our kubernetes cluster",
+    "start": "420560",
+    "end": "426240"
+  },
+  {
+    "text": "so as a beginner i realized that the first thing i needed to do was learn how to use performance tools",
+    "start": "426240",
+    "end": "431599"
+  },
+  {
+    "text": "i figured if i could first analyze kubernetes then maybe that would help me kind of figure out where i should be looking for",
+    "start": "431599",
+    "end": "438000"
+  },
+  {
+    "text": "potential performance improvements and i focus on linux performance tools and go performance tools",
+    "start": "438000",
+    "end": "443840"
+  },
+  {
+    "text": "so i'm going to talk about the linux performance tools first and luckily there is a lot of really",
+    "start": "443840",
+    "end": "450319"
+  },
+  {
+    "text": "good information online around linux performance engineering and in particular brendan gregg's website was really",
+    "start": "450319",
+    "end": "456400"
+  },
+  {
+    "text": "helpful for me in learning about different methodologies and different techniques that i could use to analyze",
+    "start": "456400",
+    "end": "462240"
+  },
+  {
+    "text": "kubernetes and the three that i really focused on were the use method ebpf tools and flame graphs",
+    "start": "462240",
+    "end": "470479"
+  },
+  {
+    "text": "so the use method by brendan gregg is basically a methodology which allows you to analyze",
+    "start": "471280",
+    "end": "476960"
+  },
+  {
+    "text": "the components of any linux system and i thought that this would be a really good place to start because he",
+    "start": "476960",
+    "end": "482479"
+  },
+  {
+    "text": "basically provides this really handy checklist which lists all of the different components you might want to",
+    "start": "482479",
+    "end": "487520"
+  },
+  {
+    "text": "check things like cpu or memory or io the commands that you want to run to actually figure out what's happening",
+    "start": "487520",
+    "end": "494160"
+  },
+  {
+    "text": "with these different components and and then you can make conclusions based on the utilization of the components the",
+    "start": "494160",
+    "end": "500400"
+  },
+  {
+    "text": "saturation and any errors that might come up which is where the name comes from so",
+    "start": "500400",
+    "end": "505919"
+  },
+  {
+    "text": "i ran the use method on mini cube to kind of figure out what my baseline was and what was going on",
+    "start": "505919",
+    "end": "511520"
+  },
+  {
+    "text": "and you can see part of my use analysis on the side on the side of the slide so i was",
+    "start": "511520",
+    "end": "516719"
+  },
+  {
+    "text": "looking at cpu of the system cpu of the mini-q process memory and io",
+    "start": "516719",
+    "end": "521919"
+  },
+  {
+    "text": "and there's some commands on there that i ran to figure out what was going on with each of these components and some",
+    "start": "521919",
+    "end": "527279"
+  },
+  {
+    "text": "conclusions that i was able to make the next thing i looked at was were bcc",
+    "start": "527279",
+    "end": "533920"
+  },
+  {
+    "text": "tools so ebpf stands for extended berkeley packet filter and the recommended front end to use",
+    "start": "533920",
+    "end": "540480"
+  },
+  {
+    "text": "evpf are bcc tools and basically these are this is just a huge collection of tracing tools written in python",
+    "start": "540480",
+    "end": "547360"
+  },
+  {
+    "text": "which help you profile and trace the linux kernel so if you're interested in running bcc tools in minicube",
+    "start": "547360",
+    "end": "553040"
+  },
+  {
+    "text": "i have the link in that third bullet point on the slide but the really cool thing about this is",
+    "start": "553040",
+    "end": "559440"
+  },
+  {
+    "text": "the number of tools and the number of components of your kernel that you can observe and trace with these tools i",
+    "start": "559440",
+    "end": "566480"
+  },
+  {
+    "text": "took that diagram from the readme on their github page and there's just there were so many different commands and i ended",
+    "start": "566480",
+    "end": "573440"
+  },
+  {
+    "text": "up experimenting with running a bunch of them on minicube just to get a sense of what was going on",
+    "start": "573440",
+    "end": "579920"
+  },
+  {
+    "text": "and one of those commands was called biosnoop which is a command to trace block device io and it",
+    "start": "580800",
+    "end": "586240"
+  },
+  {
+    "text": "includes the pid of the caller and the latency of the call and i noticed that when i was running",
+    "start": "586240",
+    "end": "592399"
+  },
+  {
+    "text": "this command in the mini cube vm that lcd was writing to disk pretty frequently so keep that in mind",
+    "start": "592399",
+    "end": "601360"
+  },
+  {
+    "text": "the next thing i did was generate a flame graph of my of my system so flameclass are really",
+    "start": "602079",
+    "end": "608160"
+  },
+  {
+    "text": "useful for figuring out which code which functions in on your machine are contributing to",
+    "start": "608160",
+    "end": "614320"
+  },
+  {
+    "text": "overhead and this is a flame graph that i generated of my entire linux system over the course of a minute",
+    "start": "614320",
+    "end": "619760"
+  },
+  {
+    "text": "so if you look at the x-axis you can see stack profile population um ordered alphabetically and the wider",
+    "start": "619760",
+    "end": "627680"
+  },
+  {
+    "text": "that a frame is the more often that code path came up so if you look at the x-axis you can see that",
+    "start": "627680",
+    "end": "633360"
+  },
+  {
+    "text": "two cpus are assigned to kvm and they're contributing a bunch to overhead chrome is contributing a bunch something",
+    "start": "633360",
+    "end": "639680"
+  },
+  {
+    "text": "called swapper is contributing a lot as well but since i know that minicube",
+    "start": "639680",
+    "end": "646079"
+  },
+  {
+    "text": "is running in a vm and in this case i know that mini cube is running in kvm and i've assigned two cpus to it i knew that the two",
+    "start": "646079",
+    "end": "653519"
+  },
+  {
+    "text": "stacks on the far left were coming from kubernetes so let's zoom in on one of those stacks",
+    "start": "653519",
+    "end": "661839"
+  },
+  {
+    "text": "so this is the zoomed in stack for one of the cpus that was uh assigned to minicube and running",
+    "start": "662079",
+    "end": "667440"
+  },
+  {
+    "text": "kubernetes and i noticed that a syscall called ioctl was taking up like a huge chunk of",
+    "start": "667440",
+    "end": "674240"
+  },
+  {
+    "text": "the stack and was like pretty much like it looks like it's almost around 75",
+    "start": "674240",
+    "end": "679600"
+  },
+  {
+    "text": "of the entire frame width and so i was curious i was like oh what is it ctl",
+    "start": "679600",
+    "end": "685200"
+  },
+  {
+    "text": "and i didn't know so i googled it um i don't know about you but i really think that like 75",
+    "start": "685200",
+    "end": "690720"
+  },
+  {
+    "text": "of learning about kubernetes and performance engineering for me has been googling things um and unsurprisingly iocto has to do",
+    "start": "690720",
+    "end": "698959"
+  },
+  {
+    "text": "with io operations and this kind of reminded me of all the fct rights that i had seen",
+    "start": "698959",
+    "end": "704160"
+  },
+  {
+    "text": "when i was running biosnu and in my use analysis as well i had",
+    "start": "704160",
+    "end": "709279"
+  },
+  {
+    "text": "noticed that xcd was writing to disk a lot when i had run iotop as one of the commands",
+    "start": "709279",
+    "end": "715200"
+  },
+  {
+    "text": "so at this point i had this theory from all of these different sources that xcd rights were a big contributor",
+    "start": "715200",
+    "end": "721760"
+  },
+  {
+    "text": "to overhead but i had to prove it and so i needed to see if there was a way to tune how often",
+    "start": "721760",
+    "end": "728560"
+  },
+  {
+    "text": "etcd writes to disk and i found this flag called snapshot count which is the number of committed",
+    "start": "728560",
+    "end": "733839"
+  },
+  {
+    "text": "transactions to trigger a snapshot to disk so from my understanding i think that",
+    "start": "733839",
+    "end": "739680"
+  },
+  {
+    "text": "etcd as a database once enough every once in a while it needs to save",
+    "start": "739680",
+    "end": "745360"
+  },
+  {
+    "text": "the the current status of the cluster to disk so that if the cluster goes down it has a backup available so i thought",
+    "start": "745360",
+    "end": "752800"
+  },
+  {
+    "text": "that if i increase the value of snapshot count those backups would be saved to disc less frequently",
+    "start": "752800",
+    "end": "758000"
+  },
+  {
+    "text": "and maybe require less overhead so i tried tuning this value from values of 500",
+    "start": "758000",
+    "end": "763920"
+  },
+  {
+    "text": "all the way up to a hundred thousand and unfortunately i like didn't see any performance",
+    "start": "763920",
+    "end": "769519"
+  },
+  {
+    "text": "improvement in fact for almost every single value overhead actually got worse",
+    "start": "769519",
+    "end": "774560"
+  },
+  {
+    "text": "and except for one case one snapshot count was three thousand but in that case there was only two",
+    "start": "774560",
+    "end": "779839"
+  },
+  {
+    "text": "percent improvement so it didn't really seem statistically significant so at this point i have pretty much",
+    "start": "779839",
+    "end": "785920"
+  },
+  {
+    "text": "given up on snapshot count as a a flag that would help me actually",
+    "start": "785920",
+    "end": "791279"
+  },
+  {
+    "text": "improve scg overhead and this is a quick summary of",
+    "start": "791279",
+    "end": "796320"
+  },
+  {
+    "text": "what has happened so far in meme format um i basically learned how to use flame graphs and vcc tools",
+    "start": "796320",
+    "end": "802639"
+  },
+  {
+    "text": "uh and all and i created a use analysis to kind of have a general understanding of the performance of",
+    "start": "802639",
+    "end": "808320"
+  },
+  {
+    "text": "mini cube and of kubernetes and from all these things i noticed that scd",
+    "start": "808320",
+    "end": "814160"
+  },
+  {
+    "text": "was writing to disk a lot and that it seemed to be contributing to overhead so i tried tuning the snapshot count",
+    "start": "814160",
+    "end": "819600"
+  },
+  {
+    "text": "flag to see if it would reduce the number of scd rights and there was no performance improvement",
+    "start": "819600",
+    "end": "825279"
+  },
+  {
+    "text": "at all so i'm not gonna lie at this point i was a little bit discouraged because i had spent a lot of time",
+    "start": "825279",
+    "end": "832320"
+  },
+  {
+    "text": "investing and learning how to read a flame graph and trying to make bcc tools uh work in",
+    "start": "832320",
+    "end": "837440"
+  },
+  {
+    "text": "mini cube uh so i decided to kind of go back to the beginning and just look through my",
+    "start": "837440",
+    "end": "842480"
+  },
+  {
+    "text": "use analysis and see if i missed anything and i noticed this graph that i had",
+    "start": "842480",
+    "end": "849199"
+  },
+  {
+    "text": "created it basically just tracked cpu usage of kubernetes over the course of a minute and i noticed that there were these",
+    "start": "849199",
+    "end": "856560"
+  },
+  {
+    "text": "spikes in the graph and i didn't know where they were coming from you can kind of see that the baseline",
+    "start": "856560",
+    "end": "861680"
+  },
+  {
+    "text": "overhead is between 20 and 40 but then every few seconds there's like spikes all the way up to 80 and i",
+    "start": "861680",
+    "end": "870000"
+  },
+  {
+    "text": "wanted to figure out what was causing these spikes and so i ran this command called hidstat",
+    "start": "870000",
+    "end": "876480"
+  },
+  {
+    "text": "160 which had also been part of my use analysis and i noticed that every few seconds",
+    "start": "876480",
+    "end": "882480"
+  },
+  {
+    "text": "there was a crew control command that was using a ton of cpu so you can see that they're kind of in",
+    "start": "882480",
+    "end": "888720"
+  },
+  {
+    "text": "bold that these two control commands were using nine percent of a core and four percent of a core",
+    "start": "888720",
+    "end": "894639"
+  },
+  {
+    "text": "and this was significantly more than all of the other processes that we're running so i",
+    "start": "894639",
+    "end": "900160"
+  },
+  {
+    "text": "thought maybe this proof control command is causing the spikes because it's happening every few seconds and it seems to be using a ton of cpu",
+    "start": "900160",
+    "end": "906560"
+  },
+  {
+    "text": "compared to everything else so i appended the dash l flag onto the",
+    "start": "906560",
+    "end": "911760"
+  },
+  {
+    "text": "command just to see where it was coming from and i noticed that the food control command was uh control apply",
+    "start": "911760",
+    "end": "918079"
+  },
+  {
+    "text": "and it was being applied to the kubernetes add-ons directory and so i had a feeling that the add-on",
+    "start": "918079",
+    "end": "924560"
+  },
+  {
+    "text": "manager was responsible for running this command and the other thing i noticed is that this coupe control apply command was exactly the",
+    "start": "924560",
+    "end": "931120"
+  },
+  {
+    "text": "same being run every few seconds as if it was polling",
+    "start": "931120",
+    "end": "936720"
+  },
+  {
+    "text": "so i looked into the add-on manager so a quick bit a little bit of background around what the add-on manager is",
+    "start": "937600",
+    "end": "943680"
+  },
+  {
+    "text": "minicube basically uses a kubernetes project cube add-on manager to allow for enabling or disabling",
+    "start": "943680",
+    "end": "949680"
+  },
+  {
+    "text": "add-ons in the cluster the idea is once you spin up minicube you have kind of a standard",
+    "start": "949680",
+    "end": "955120"
+  },
+  {
+    "text": "kubernetes cluster but maybe you need some extra things in your cluster like helm or tiller or something else",
+    "start": "955120",
+    "end": "962800"
+  },
+  {
+    "text": "and so you can run mini cube add-ons enable helm tiller and what will happen once you do that is",
+    "start": "962800",
+    "end": "968320"
+  },
+  {
+    "text": "that minicube will copy the required kubernetes manifest for help for tiller",
+    "start": "968320",
+    "end": "974079"
+  },
+  {
+    "text": "into the kubernetes add-ons directory and then eventually add the add-on manager will run kube",
+    "start": "974079",
+    "end": "979199"
+  },
+  {
+    "text": "control apply on that directory and the required pause will pop up",
+    "start": "979199",
+    "end": "985040"
+  },
+  {
+    "text": "so at this point i had this hypothesis that the add-on manager was causing spikes in my graph because every few seconds it",
+    "start": "986240",
+    "end": "992639"
+  },
+  {
+    "text": "was pulling to run cube control apply on the add-ons directory so i tried increasing full time to see",
+    "start": "992639",
+    "end": "998560"
+  },
+  {
+    "text": "if that would improve overhead and it actually did you can see on the bottom left that when i set pull time equals 30 seconds the spikes",
+    "start": "998560",
+    "end": "1006000"
+  },
+  {
+    "text": "actually moved to be 30 seconds apart so at this point it became pretty clear that the add-on manager was",
+    "start": "1006000",
+    "end": "1012720"
+  },
+  {
+    "text": "creating these spikes and a really easy solution presented itself i could just increase pull time and the",
+    "start": "1012720",
+    "end": "1020160"
+  },
+  {
+    "text": "higher pull time was the lower average overhead would become but unfortunately this would create a",
+    "start": "1020160",
+    "end": "1027520"
+  },
+  {
+    "text": "trade-off between uh overhead and user experience because if the add-on manager is only",
+    "start": "1027520",
+    "end": "1033038"
+  },
+  {
+    "text": "polling every two minutes for changes in the directory it could take users up to two minutes to",
+    "start": "1033039",
+    "end": "1038079"
+  },
+  {
+    "text": "see add-ons changes in their cluster luckily in this case i didn't end up",
+    "start": "1038079",
+    "end": "1043760"
+  },
+  {
+    "text": "having to choose between the two i realized that we could remove the add-on manager entirely",
+    "start": "1043760",
+    "end": "1048799"
+  },
+  {
+    "text": "because as many cube users we know when users are making changes to the state of add-ons in the cluster",
+    "start": "1048799",
+    "end": "1054640"
+  },
+  {
+    "text": "they have to physically run mini cube add-ons enable or mini cube add-ons disable and i realized that we could just run",
+    "start": "1054640",
+    "end": "1060720"
+  },
+  {
+    "text": "the cube control apply command ourselves whenever a user said they wanted to make changes to the add-ons",
+    "start": "1060720",
+    "end": "1067039"
+  },
+  {
+    "text": "so in the end the solution was to just remove the add-on manager completely and rewrite it so that",
+    "start": "1067039",
+    "end": "1072400"
+  },
+  {
+    "text": "it was more efficient and met our use case",
+    "start": "1072400",
+    "end": "1076880"
+  },
+  {
+    "text": "this is a meme summary of what we did it's basically what i just said instead of increasing add-on management",
+    "start": "1078720",
+    "end": "1084320"
+  },
+  {
+    "text": "pulling we just removed it entirely and rewrote a version that was better seated for what we needed",
+    "start": "1084320",
+    "end": "1092080"
+  },
+  {
+    "text": "and this actually resulted in a 32 reduction in overhead which was really exciting because we",
+    "start": "1092320",
+    "end": "1097600"
+  },
+  {
+    "text": "pretty much met our goal just by removing one thing uh but at this point we kind of wanted to see like oh how much further can we",
+    "start": "1097600",
+    "end": "1104320"
+  },
+  {
+    "text": "take this like are there more improvements that can be made",
+    "start": "1104320",
+    "end": "1109840"
+  },
+  {
+    "text": "so the next thing i needed to figure out was how each part of kubernetes is contributing to overhead",
+    "start": "1109840",
+    "end": "1114960"
+  },
+  {
+    "text": "i figured that if i could figure out if i could like isolate the different components and figure out what was the",
+    "start": "1114960",
+    "end": "1120799"
+  },
+  {
+    "text": "biggest contributor that would be a good place to start when trying to figure out where i should start proving something",
+    "start": "1120799",
+    "end": "1127280"
+  },
+  {
+    "text": "so you can see on from this pit stat output which by the way pistat was probably my favorite command",
+    "start": "1127280",
+    "end": "1133679"
+  },
+  {
+    "text": "throughout this entire journey i learned a lot from it um but you can see that coupe api server",
+    "start": "1133679",
+    "end": "1139039"
+  },
+  {
+    "text": "is using up the most amount of cpu so i thought that api server would be a good place to start",
+    "start": "1139039",
+    "end": "1144799"
+  },
+  {
+    "text": "looking for performance improvements and the other thing of interest is that there are two processes called",
+    "start": "1144799",
+    "end": "1151520"
+  },
+  {
+    "text": "core dns and even though they're not using a whole lot of cpu there are two of them",
+    "start": "1151520",
+    "end": "1157120"
+  },
+  {
+    "text": "and that's because the core dns deployment by default spins up two replicas i realized",
+    "start": "1157120",
+    "end": "1163600"
+  },
+  {
+    "text": "that in a local single node cluster this probably wasn't necessary like a regular user probably only needs",
+    "start": "1163600",
+    "end": "1171039"
+  },
+  {
+    "text": "one instance of core dns for their application to work successfully and so i decided that scaling it down to",
+    "start": "1171039",
+    "end": "1178559"
+  },
+  {
+    "text": "one by default would be a pretty easy way to reduce overhead and not have to lose anything in terms of user",
+    "start": "1178559",
+    "end": "1185679"
+  },
+  {
+    "text": "experience well let's move on to the onto the api server and how we improved",
+    "start": "1185679",
+    "end": "1192080"
+  },
+  {
+    "text": "overhead there before we do that i want to talk a little bit about pprof so peop is a go tool for",
+    "start": "1192080",
+    "end": "1198720"
+  },
+  {
+    "text": "visualizing and analyzing profiling data and the way that it works is you basically import pprof as a library",
+    "start": "1198720",
+    "end": "1206000"
+  },
+  {
+    "text": "into your go application and then when you're as you're running your application every millisecond pprof will take a",
+    "start": "1206000",
+    "end": "1212720"
+  },
+  {
+    "text": "stacked trace of your application as it's running and then it'll kind of collate the functions that we're running",
+    "start": "1212720",
+    "end": "1219360"
+  },
+  {
+    "text": "the most and present them to you as in either a textual or a graphical",
+    "start": "1219360",
+    "end": "1224960"
+  },
+  {
+    "text": "visualization so you can see the textual on the bottom left and the visual on the bottom right and basically the",
+    "start": "1224960",
+    "end": "1231679"
+  },
+  {
+    "text": "important thing is that people tells you which functions are contributing to overhead and by how much so in the text output",
+    "start": "1231679",
+    "end": "1238880"
+  },
+  {
+    "text": "you can see that the biggest contributors to overhead in this go function was run where",
+    "start": "1238880",
+    "end": "1245039"
+  },
+  {
+    "text": "runtime.view text just call it syscall and runtime.usleap and rentsyscall.ciscall was running",
+    "start": "1245039",
+    "end": "1251280"
+  },
+  {
+    "text": "10.76 percent of the time runtime.futex was running 39.24 of the time and so i generated prop data",
+    "start": "1251280",
+    "end": "1260159"
+  },
+  {
+    "text": "for the cube api server and if anybody's interested in generating this data for themselves i",
+    "start": "1260159",
+    "end": "1265520"
+  },
+  {
+    "text": "have the commands that i ran up on the screen but i basically collected pdpof data",
+    "start": "1265520",
+    "end": "1272159"
+  },
+  {
+    "text": "over the course of a minute for the api server and the top contributors to overhead were a bunch of",
+    "start": "1272159",
+    "end": "1278240"
+  },
+  {
+    "text": "sys calls things like run time not view text since it's called what's this call and i did not really know what to make of this",
+    "start": "1278240",
+    "end": "1284480"
+  },
+  {
+    "text": "uh but luckily i was working on this with another mini q maintainer thomas and he was able to get",
+    "start": "1284480",
+    "end": "1290000"
+  },
+  {
+    "text": "somewhere so the cool thing about ppop is that you can represent the same data as a flame graph",
+    "start": "1290000",
+    "end": "1296799"
+  },
+  {
+    "text": "as well and thomas noticed that the api server was spending a lot of time",
+    "start": "1296799",
+    "end": "1303440"
+  },
+  {
+    "text": "dealing with incoming requests and so he wondered where are these incoming requests coming from",
+    "start": "1303440",
+    "end": "1308799"
+  },
+  {
+    "text": "because in theory if you can reduce the number of requests then maybe you can reduce overhead",
+    "start": "1308799",
+    "end": "1315759"
+  },
+  {
+    "text": "so to figure out where the requests were coming from uh we basically set verbosity on the api",
+    "start": "1315840",
+    "end": "1322080"
+  },
+  {
+    "text": "server to 10 so that every request would be would show up in the logs and then we wrote some bash to figure",
+    "start": "1322080",
+    "end": "1327360"
+  },
+  {
+    "text": "out where the requests were coming from so that second command basically pulls out the user agent from every get",
+    "start": "1327360",
+    "end": "1333600"
+  },
+  {
+    "text": "request and then sorts them and counts them and you can see that tons of requests were coming from",
+    "start": "1333600",
+    "end": "1340320"
+  },
+  {
+    "text": "cube controller manager and cube scheduler and all of these were around something called leader",
+    "start": "1340320",
+    "end": "1346080"
+  },
+  {
+    "text": "election so what is leader election so i looked",
+    "start": "1346080",
+    "end": "1351919"
+  },
+  {
+    "text": "it up in the kubernetes documentation once we found this but basically leader election guarantees",
+    "start": "1351919",
+    "end": "1357039"
+  },
+  {
+    "text": "that only one instance of keep scheduler or cube controller manager is making decisions at any given time and this makes sense",
+    "start": "1357039",
+    "end": "1363760"
+  },
+  {
+    "text": "if you have like a big cluster with lots of nodes and you have lots of instances of these things running",
+    "start": "1363760",
+    "end": "1369520"
+  },
+  {
+    "text": "but we realized that minicube is by default a single node cluster and we only ever expect to have",
+    "start": "1369520",
+    "end": "1375360"
+  },
+  {
+    "text": "one instance of cube schedule or cube controller manager running anyways so leader election is",
+    "start": "1375360",
+    "end": "1381520"
+  },
+  {
+    "text": "not really necessary for our use case so we wanted to know if we could turn your election off",
+    "start": "1381520",
+    "end": "1388159"
+  },
+  {
+    "text": "and luckily it's actually really easy to turn it off there's a flag on the controller manager and on the scheduler",
+    "start": "1388159",
+    "end": "1393520"
+  },
+  {
+    "text": "and so we were able to set it equal to false by default in mini cube",
+    "start": "1393520",
+    "end": "1399919"
+  },
+  {
+    "text": "and this resulted in an 18 reduction in overhead which is really exciting uh",
+    "start": "1400480",
+    "end": "1405600"
+  },
+  {
+    "text": "just from turning leader election requests off and from reducing core dns replicas to one and this is my",
+    "start": "1405600",
+    "end": "1412159"
+  },
+  {
+    "text": "meme summary we basically just said leo liked equals false and saw some really great improvements which",
+    "start": "1412159",
+    "end": "1417520"
+  },
+  {
+    "text": "was really nice so hopefully you remember because it's",
+    "start": "1417520",
+    "end": "1422559"
+  },
+  {
+    "text": "only been a few minutes since i talked about it but um the last time i looked at std overhead it was because",
+    "start": "1422559",
+    "end": "1428480"
+  },
+  {
+    "text": "i'd been running a lot of linux performance tools and they had indicated that scd rights were contributing to overhead",
+    "start": "1428480",
+    "end": "1434640"
+  },
+  {
+    "text": "and i hadn't really been able to get anywhere with that i decided to look at std one more time this time with",
+    "start": "1434640",
+    "end": "1441279"
+  },
+  {
+    "text": "p prof because i was a little bit more familiar with it now so first i looked at the ncd logs just",
+    "start": "1441279",
+    "end": "1447039"
+  },
+  {
+    "text": "because looking at the api server logs had been so useful but honestly i wasn't really able to",
+    "start": "1447039",
+    "end": "1452480"
+  },
+  {
+    "text": "make heads or tails of scd logs so i just moved on to collecting the pprof data",
+    "start": "1452480",
+    "end": "1458159"
+  },
+  {
+    "text": "um i have the commands on the slide again if anybody wants to collect their own pop data on nct uh but this is what i got over the",
+    "start": "1458159",
+    "end": "1464320"
+  },
+  {
+    "text": "course of a minute and it looks like it looked like forty percent of time was spent in",
+    "start": "1464320",
+    "end": "1469880"
+  },
+  {
+    "text": "syscall.cisco which i didn't really mean anything to me until i looked at the graphical",
+    "start": "1469880",
+    "end": "1475760"
+  },
+  {
+    "text": "version of the same data so this is the peep off graph this is the entire thing which is",
+    "start": "1475760",
+    "end": "1481200"
+  },
+  {
+    "text": "obviously pretty big but i've cut and pasted the relevant bits and you can see that the forty percent",
+    "start": "1481200",
+    "end": "1487600"
+  },
+  {
+    "text": "from this call.syscall actually originated with a function in the http library called the right frame",
+    "start": "1487600",
+    "end": "1494480"
+  },
+  {
+    "text": "async so i kind of started looking through sgd code to see where right from right where the http",
+    "start": "1494480",
+    "end": "1501679"
+  },
+  {
+    "text": "library was being called to see if maybe that was something i could tune it kind of like the api server i was",
+    "start": "1501679",
+    "end": "1507279"
+  },
+  {
+    "text": "thinking that if i could reduce the number of http requests then maybe i could also reduce overhead",
+    "start": "1507279",
+    "end": "1515279"
+  },
+  {
+    "text": "so searching through the code i was looking for calls to go's http library and i found a package called http proxy",
+    "start": "1515279",
+    "end": "1522720"
+  },
+  {
+    "text": "and in that package i found a function called new handler which basically proxies requests to the fcd cluster and",
+    "start": "1522720",
+    "end": "1529360"
+  },
+  {
+    "text": "periodically updates its view of the cluster i noticed that there was this argument",
+    "start": "1529360",
+    "end": "1534559"
+  },
+  {
+    "text": "passed into the function called refresh interval uh which is by default 30 seconds and can be set by the proxy",
+    "start": "1534559",
+    "end": "1540720"
+  },
+  {
+    "text": "refresh interval flag so if i lost you somewhere in this slide no worries the dldr",
+    "start": "1540720",
+    "end": "1546000"
+  },
+  {
+    "text": "is basically that i had this theory that proxy refresh interval was controlling how many http requests",
+    "start": "1546000",
+    "end": "1553600"
+  },
+  {
+    "text": "were being made of ncd and i thought that if i increased the value of this flag maybe the number of",
+    "start": "1553600",
+    "end": "1558880"
+  },
+  {
+    "text": "requests would go down or would be more spread out and so overhead would go down as well",
+    "start": "1558880",
+    "end": "1564240"
+  },
+  {
+    "text": "so i tried tuning this rag flag to see if anything would happen to overhead and i",
+    "start": "1564240",
+    "end": "1570720"
+  },
+  {
+    "text": "tuned it from the from 30 000 milliseconds which is the default all the way up to 120 000 milliseconds",
+    "start": "1570720",
+    "end": "1576400"
+  },
+  {
+    "text": "and i actually found much more promising data this time around uh every value as obviously refresh",
+    "start": "1576400",
+    "end": "1582480"
+  },
+  {
+    "text": "interval got bigger resulted in a decrease in overhead with a clear dip at 70 000. and so i wanted to",
+    "start": "1582480",
+    "end": "1591200"
+  },
+  {
+    "text": "my theory was oh maybe i can just set proxy refresh interval to 70 000 and enjoy decreased overhead but of",
+    "start": "1591200",
+    "end": "1598640"
+  },
+  {
+    "text": "course i did not want to i was worried that um user experience would suffer and i",
+    "start": "1598640",
+    "end": "1605039"
+  },
+  {
+    "text": "honestly like didn't really know what the repercussions of increasing the value of this flag would",
+    "start": "1605039",
+    "end": "1610840"
+  },
+  {
+    "text": "be so i tried looking up in the documentation and github issues what what would happen if i uh increased",
+    "start": "1610840",
+    "end": "1618960"
+  },
+  {
+    "text": "the value of this flag but i couldn't really find a whole lot online",
+    "start": "1618960",
+    "end": "1624159"
+  },
+  {
+    "text": "so i turned to the etsy slack channel and i thought maybe somebody on there would know and be able",
+    "start": "1624159",
+    "end": "1629440"
+  },
+  {
+    "text": "to answer my question and luckily somebody did thank you so much for responding to my question",
+    "start": "1629440",
+    "end": "1635360"
+  },
+  {
+    "text": "um and what they said was if you increase the time it will take longer for any endpoints to be proxied properly",
+    "start": "1635360",
+    "end": "1642399"
+  },
+  {
+    "text": "which uh it wasn't exactly what i thought this flag did when i first started tuning it but uh it was really helpful to know and",
+    "start": "1642399",
+    "end": "1649919"
+  },
+  {
+    "text": "at this point i just wanted to make sure that setting it to 70 000 wouldn't actually make user experience",
+    "start": "1649919",
+    "end": "1655760"
+  },
+  {
+    "text": "worse but i had no way of knowing how badly it would actually affect user experience",
+    "start": "1655760",
+    "end": "1662799"
+  },
+  {
+    "text": "so i decided to do a little test and basically test the time from starting miniqueue cluster to",
+    "start": "1663520",
+    "end": "1669760"
+  },
+  {
+    "text": "deploying an application to being able to visualize that application by a service url",
+    "start": "1669760",
+    "end": "1675120"
+  },
+  {
+    "text": "and i tested it with a proxy refresh interval equals 30 000 which is the default and 70 000 which is the value i",
+    "start": "1675120",
+    "end": "1681840"
+  },
+  {
+    "text": "wanted to change it to and in the end it actually didn't seem to impact user experience at all",
+    "start": "1681840",
+    "end": "1687760"
+  },
+  {
+    "text": "seventy thousand actually had actually ended up taking slightly less time uh it's time for the deployment to",
+    "start": "1687760",
+    "end": "1693840"
+  },
+  {
+    "text": "succeed so at this point i felt pretty comfortable setting proxy refresh interval equals 70 000 by default",
+    "start": "1693840",
+    "end": "1700880"
+  },
+  {
+    "text": "also because i knew that users could always change it back by a command line if they really needed to",
+    "start": "1700880",
+    "end": "1707520"
+  },
+  {
+    "text": "and this resulted in a four percent reduction in overhead",
+    "start": "1707840",
+    "end": "1713200"
+  },
+  {
+    "text": "so uh we're nearing the end of my talk um this is basically just a graph of",
+    "start": "1714880",
+    "end": "1720000"
+  },
+  {
+    "text": "overhead in 2020 since we began trying to improve overhead um you can see that we ended up",
+    "start": "1720000",
+    "end": "1726240"
+  },
+  {
+    "text": "actually reducing overhead by around 52 and that removing the add-on manager and turning off leader election",
+    "start": "1726240",
+    "end": "1732480"
+  },
+  {
+    "text": "were the biggest contributors to that so some takeaways from trying to improve",
+    "start": "1732480",
+    "end": "1739279"
+  },
+  {
+    "text": "performance for the past eight months i'd say the biggest one is definitely that removing unnecessary work is really",
+    "start": "1739279",
+    "end": "1744799"
+  },
+  {
+    "text": "great and we saw this uh with when we removed the add-on manager uh removing a core dns pod that we",
+    "start": "1744799",
+    "end": "1750399"
+  },
+  {
+    "text": "didn't need and removing leader election which we also didn't need removing that unnecessary work is a",
+    "start": "1750399",
+    "end": "1756080"
+  },
+  {
+    "text": "really great way to reduce overhead because you also don't risk losing anything in terms of user experience and that brings me to my",
+    "start": "1756080",
+    "end": "1763039"
+  },
+  {
+    "text": "second point which is that it's important to consider the trade-off between overhead and user experience and with",
+    "start": "1763039",
+    "end": "1768960"
+  },
+  {
+    "text": "like setting proxy refresh interval um it was really important to make sure that we weren't sacrificing",
+    "start": "1768960",
+    "end": "1775039"
+  },
+  {
+    "text": "uh anything just for a little for a small improvement in overhead",
+    "start": "1775039",
+    "end": "1780159"
+  },
+  {
+    "text": "and finally i think this is probably just general to engineering or maybe anything really but",
+    "start": "1780159",
+    "end": "1785679"
+  },
+  {
+    "text": "collaboration is really helpful and important i never would have been able to figure out the leader election",
+    "start": "1785679",
+    "end": "1792720"
+  },
+  {
+    "text": "equals false for the api server if i hadn't been working with other mini cube maintainers and i wouldn't have been",
+    "start": "1792720",
+    "end": "1798880"
+  },
+  {
+    "text": "pointed in the right direction unless uh people on the scd slack channel have been willing to help answer my questions",
+    "start": "1798880",
+    "end": "1804240"
+  },
+  {
+    "text": "so thank you very much to everybody who um who helped along this process",
+    "start": "1804240",
+    "end": "1810559"
+  },
+  {
+    "text": "and i just wanted to call out some of the websites online which really helped me learn about linux performance",
+    "start": "1810720",
+    "end": "1816159"
+  },
+  {
+    "text": "engineering and go performance um i would highly recommend both of these blogs to anybody's interested in",
+    "start": "1816159",
+    "end": "1822000"
+  },
+  {
+    "text": "either of these topics and if anybody's interested in related talks to this one there's a deep dive",
+    "start": "1822000",
+    "end": "1827600"
+  },
+  {
+    "text": "into mini cube tomorrow if you're interested in how it works or any of the cool new features we've been working on and there's a really cool looking",
+    "start": "1827600",
+    "end": "1833919"
+  },
+  {
+    "text": "performance talk on thursday which will focus on the perform on improving performance of a kubernetes",
+    "start": "1833919",
+    "end": "1838960"
+  },
+  {
+    "text": "application itself um so that pretty much brings me to the end of my talk um",
+    "start": "1838960",
+    "end": "1844080"
+  },
+  {
+    "text": "thank you so much for listening and i'll take any questions if anyone has them",
+    "start": "1844080",
+    "end": "1851840"
+  },
+  {
+    "text": "hi everyone um thanks for listening um i'm taking live questions now so if you have any um",
+    "start": "1856799",
+    "end": "1862880"
+  },
+  {
+    "text": "please ask them um i'll just get started on answering um so a few people have asked if the",
+    "start": "1862880",
+    "end": "1870799"
+  },
+  {
+    "text": "slides will be available and yes i think that they will be available um there should be i think somebody",
+    "start": "1870799",
+    "end": "1876159"
+  },
+  {
+    "text": "responded with the link um frederick asks in which version of minicube these changes were integrated",
+    "start": "1876159",
+    "end": "1883039"
+  },
+  {
+    "text": "um we've kind of been integrating them as we found them throughout the entire year but if you upgrade to the latest",
+    "start": "1883039",
+    "end": "1888480"
+  },
+  {
+    "text": "version it should have pretty much everything incorporated there",
+    "start": "1888480",
+    "end": "1893760"
+  },
+  {
+    "text": "um so michael asked does p-prof need to be run on each node or just",
+    "start": "1893760",
+    "end": "1898960"
+  },
+  {
+    "text": "against the api oh i don't know if someone just went on",
+    "start": "1898960",
+    "end": "1906000"
+  },
+  {
+    "text": "sorry um uh yeah michael asked does proc need to be run on each node or just against the api server",
+    "start": "1906000",
+    "end": "1911760"
+  },
+  {
+    "text": "so profit is run against a go application so when i ran it against the api server",
+    "start": "1911760",
+    "end": "1916880"
+  },
+  {
+    "text": "it was actually running against the api server code and you can run people on",
+    "start": "1916880",
+    "end": "1922399"
+  },
+  {
+    "text": "any application written and go",
+    "start": "1922399",
+    "end": "1926240"
+  },
+  {
+    "text": "um oh angela asked what happened during the period when performance degraded a bit i",
+    "start": "1932840",
+    "end": "1939279"
+  },
+  {
+    "text": "think that's related to the chart on this slide um honestly i i don't really know um a lot",
+    "start": "1939279",
+    "end": "1946559"
+  },
+  {
+    "text": "of our measurements are not super accurate they're kind of like um yeah i guess that's like my",
+    "start": "1946559",
+    "end": "1953679"
+  },
+  {
+    "text": "that's my best um answer is that a relatively graph was pretty flat between like february",
+    "start": "1953679",
+    "end": "1960000"
+  },
+  {
+    "text": "and june-ish in 2020 and that's because we hadn't really found any performance optimizations in",
+    "start": "1960000",
+    "end": "1966080"
+  },
+  {
+    "text": "that time um so a lot of these like a few like whether it was like a few percentage",
+    "start": "1966080",
+    "end": "1971919"
+  },
+  {
+    "text": "points off we didn't really take that as like a as like performance",
+    "start": "1971919",
+    "end": "1976960"
+  },
+  {
+    "text": "getting worse just kind of as like maybe a slight difference in the system that the numbers were being collected on on",
+    "start": "1976960",
+    "end": "1982399"
+  },
+  {
+    "text": "that day",
+    "start": "1982399",
+    "end": "1991760"
+  },
+  {
+    "text": "um wallace asks what do you think about micro case versus kind for local dev and um i think all the solutions are",
+    "start": "1991760",
+    "end": "1998399"
+  },
+  {
+    "text": "pretty good it kind of just depends on your use case um i haven't really used micro case before but i've used kind",
+    "start": "1998399",
+    "end": "2005039"
+  },
+  {
+    "text": "uh for integration testing for some of the other tools that i work on um it's really convenient to like use it",
+    "start": "2005039",
+    "end": "2010880"
+  },
+  {
+    "text": "to spin up a cluster in docker and then be able to like run integration tests against it",
+    "start": "2010880",
+    "end": "2016480"
+  },
+  {
+    "text": "easily so that's like the only experience i've had with kind and then obviously i maintain many cubes so i've had a lot of experience with",
+    "start": "2016480",
+    "end": "2022559"
+  },
+  {
+    "text": "mini cube as well but it really depends on your use case",
+    "start": "2022559",
+    "end": "2033840"
+  },
+  {
+    "text": "so",
+    "start": "2044840",
+    "end": "2047840"
+  },
+  {
+    "text": "we're getting a tabs versus faces question um",
+    "start": "2063599",
+    "end": "2068720"
+  },
+  {
+    "text": "you don't really have a strong preference",
+    "start": "2068720",
+    "end": "2075839"
+  },
+  {
+    "text": "oh god gotham asked 20 to 40 is a very wide range of mini cube overhead are",
+    "start": "2078000",
+    "end": "2083280"
+  },
+  {
+    "text": "there any clear patterns um which i think is probably related to this slide um where we were actually",
+    "start": "2083280",
+    "end": "2091040"
+  },
+  {
+    "text": "like measuring mini cube overhead at the very beginning so i think like the range or like the",
+    "start": "2091040",
+    "end": "2097118"
+  },
+  {
+    "text": "spikes here were caused by the add-on manager which was one of the things that i discussed later on in the talk",
+    "start": "2097119",
+    "end": "2102880"
+  },
+  {
+    "text": "um and then we actually have it we should actually probably look at mini cube overhead today and see",
+    "start": "2102880",
+    "end": "2108079"
+  },
+  {
+    "text": "if it's stabilized a bit my guess is that it has because a lot of these a lot of the things that we're pulling",
+    "start": "2108079",
+    "end": "2113760"
+  },
+  {
+    "text": "um have been removed and so i would expect that it's a little bit more stable now",
+    "start": "2113760",
+    "end": "2131838"
+  },
+  {
+    "text": "um i'll take one more question um have you tried any of the openshift",
+    "start": "2139520",
+    "end": "2146240"
+  },
+  {
+    "text": "based local development tools like crc or opd no i haven't but that sounds",
+    "start": "2146240",
+    "end": "2151280"
+  },
+  {
+    "text": "really interesting um i'll have to check those out um so if i think we're coming to time on this",
+    "start": "2151280",
+    "end": "2157839"
+  },
+  {
+    "text": "session but if anybody has any more questions uh please feel free to move them to the slack channel and app me just at prio and i'm happy to answer them",
+    "start": "2157839",
+    "end": "2165599"
+  },
+  {
+    "text": "there thank you for coming",
+    "start": "2165599",
+    "end": "2172400"
+  }
+]

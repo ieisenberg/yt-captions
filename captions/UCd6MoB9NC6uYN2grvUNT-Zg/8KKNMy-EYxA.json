@@ -1,0 +1,2072 @@
+[
+  {
+    "start": "0",
+    "end": "25000"
+  },
+  {
+    "text": "hey everybody we're from Airbnb I'm Greg and this is lien over here and we're",
+    "start": "60",
+    "end": "5759"
+  },
+  {
+    "text": "going to talk a little bit about some systems that we built to stream data out of Amazon RDS and dynamodb into our",
+    "start": "5759",
+    "end": "13380"
+  },
+  {
+    "text": "warehouse and other various services and infrastructure components so this would",
+    "start": "13380",
+    "end": "19500"
+  },
+  {
+    "text": "be a little bit more of a deep dive so hopefully we can kind of get get some some details out there",
+    "start": "19500",
+    "end": "25199"
+  },
+  {
+    "start": "25000",
+    "end": "25000"
+  },
+  {
+    "text": "so first we'll be talking about a database change data capture and a",
+    "start": "25199",
+    "end": "30779"
+  },
+  {
+    "text": "system that we built called spinal tap in order to do this and then I'll hand it over to Lee and where he'll talk more",
+    "start": "30779",
+    "end": "38610"
+  },
+  {
+    "text": "about improving the ETL processes to our data warehouse so a little bit before we",
+    "start": "38610",
+    "end": "46410"
+  },
+  {
+    "text": "go into the details about spinal tap this is not a new problem they're like systems out there that",
+    "start": "46410",
+    "end": "52829"
+  },
+  {
+    "text": "already do solve this and quite well so for example there's a data bus built by",
+    "start": "52829",
+    "end": "58320"
+  },
+  {
+    "text": "LinkedIn which was originally built to stream data out of Oracle databases and",
+    "start": "58320",
+    "end": "63480"
+  },
+  {
+    "text": "then extend it to my sequel and there's actually a new open source project that the folks at Red Hat came out with",
+    "start": "63480",
+    "end": "70020"
+  },
+  {
+    "text": "called de B's iam which is very similar to the architecture that we'll go through here but unfortunately it wasn't",
+    "start": "70020",
+    "end": "77130"
+  },
+  {
+    "text": "really available to us at the time and we wanted to standardize all of our kind of pub/sub stuff on khakha",
+    "start": "77130",
+    "end": "84240"
+  },
+  {
+    "text": "so none of these solutions kind of we're good fit so so we went with building our",
+    "start": "84240",
+    "end": "89909"
+  },
+  {
+    "text": "own so before we get into the specifics about spinal tap just kind of wanted to",
+    "start": "89909",
+    "end": "96270"
+  },
+  {
+    "start": "91000",
+    "end": "91000"
+  },
+  {
+    "text": "go over the architectural evolution of the application at Airbnb so like many",
+    "start": "96270",
+    "end": "101329"
+  },
+  {
+    "text": "you know kind of consumer applications that started out as a monolithic rails app and largely is so today but in order",
+    "start": "101329",
+    "end": "109530"
+  },
+  {
+    "text": "to scale the the business logic and just for sheer volume we've split it up into a couple specialized systems so for",
+    "start": "109530",
+    "end": "116729"
+  },
+  {
+    "text": "example we've moved business logic out into drop wizard Java services for",
+    "start": "116729",
+    "end": "121740"
+  },
+  {
+    "text": "things that need to be a little bit more performant we have a custom homes and",
+    "start": "121740",
+    "end": "127950"
+  },
+  {
+    "text": "now experience search system based on leucine we still",
+    "start": "127950",
+    "end": "132980"
+  },
+  {
+    "text": "use my sequel for many of our primary data stores and then we have Kafka is our kind of standardized pub/sub",
+    "start": "132980",
+    "end": "139700"
+  },
+  {
+    "text": "messaging bus and then on the other side of this we pump all this data into our data warehouse so we use a combination",
+    "start": "139700",
+    "end": "146269"
+  },
+  {
+    "text": "of HDFS and s3 to store data and then we access it using systems like hi and",
+    "start": "146269",
+    "end": "151819"
+  },
+  {
+    "text": "presto and HBase pervades various different use cases so splitting up the",
+    "start": "151819",
+    "end": "160700"
+  },
+  {
+    "start": "158000",
+    "end": "158000"
+  },
+  {
+    "text": "application in this way leads to a couple new new challenges one of the most significant things was that moving",
+    "start": "160700",
+    "end": "167810"
+  },
+  {
+    "text": "from the monolithic rails application world to this service-oriented world is that a lot of co-processing logic in the",
+    "start": "167810",
+    "end": "175160"
+  },
+  {
+    "text": "rails app kind of breaks down so we did a lot of stuff and you know active record after save kind of things",
+    "start": "175160",
+    "end": "182450"
+  },
+  {
+    "text": "firing messages off to a you know a message bus in the transaction context",
+    "start": "182450",
+    "end": "187880"
+  },
+  {
+    "text": "which we kind of can no longer do now that these pieces of logic live in different systems we had to vertically",
+    "start": "187880",
+    "end": "194750"
+  },
+  {
+    "text": "partition our my sequel database in order to to just scale for sheer volume",
+    "start": "194750",
+    "end": "199910"
+  },
+  {
+    "text": "of data and connections and everything so this you know kind of makes some",
+    "start": "199910",
+    "end": "205310"
+  },
+  {
+    "text": "things that could be easily done in transactions no longer possible and we'll have like I mentioned before",
+    "start": "205310",
+    "end": "212420"
+  },
+  {
+    "text": "specialized systems for certain use cases like analytics we run druid for",
+    "start": "212420",
+    "end": "217970"
+  },
+  {
+    "text": "some of this stuff we have like our search through scene clusters and just kind of various other things so before",
+    "start": "217970",
+    "end": "226549"
+  },
+  {
+    "start": "225000",
+    "end": "225000"
+  },
+  {
+    "text": "we kind of like dig dig in even more I wanted to talk a little bit about the architectural tenants behind this",
+    "start": "226549",
+    "end": "233380"
+  },
+  {
+    "text": "restructuring of the app specifically these two at the bottom that have been bolded and italicized so we operate on",
+    "start": "233380",
+    "end": "243049"
+  },
+  {
+    "text": "the principle that services should own their own data and not share their storage so we don't want to tie in a",
+    "start": "243049",
+    "end": "249200"
+  },
+  {
+    "text": "service to my sequel or dynamodb or any other kind of customized data stores just by virtue of it being easy to",
+    "start": "249200",
+    "end": "257150"
+  },
+  {
+    "text": "access a data via you know standardized mechanisms we kind",
+    "start": "257150",
+    "end": "263460"
+  },
+  {
+    "text": "of want to provide some layer of encapsulation to allow the the system to scale cleanly and by this owning their",
+    "start": "263460",
+    "end": "269550"
+  },
+  {
+    "text": "own data doesn't mean that another service can't look at a view of the data it's just that the source of truth is owned by one service and also mutations",
+    "start": "269550",
+    "end": "278909"
+  },
+  {
+    "text": "to data should be propagated via standardized events so we don't really want to expose the underlying storage",
+    "start": "278909",
+    "end": "284750"
+  },
+  {
+    "text": "format for example you probably want to look at like a you know boolean is",
+    "start": "284750",
+    "end": "290520"
+  },
+  {
+    "text": "booked field as opposed to you know the 8th bit in your Flags column in your database so this will just kind of allow",
+    "start": "290520",
+    "end": "297960"
+  },
+  {
+    "text": "less weird esoteric tribal knowledge things to make their way throughout the",
+    "start": "297960",
+    "end": "303270"
+  },
+  {
+    "text": "system so our goal for our change data capture service is to provide a stream",
+    "start": "303270",
+    "end": "310770"
+  },
+  {
+    "start": "304000",
+    "end": "304000"
+  },
+  {
+    "text": "of data mutations in near real time with time line consistency so in near",
+    "start": "310770",
+    "end": "317130"
+  },
+  {
+    "text": "real-time we want to you know if there is a change to a row it should be",
+    "start": "317130",
+    "end": "322259"
+  },
+  {
+    "text": "available in you know second issue agency and by timeline consistency here I mean that if you have two events a and",
+    "start": "322259",
+    "end": "329130"
+  },
+  {
+    "text": "B if you see a in the stream B will always come after it if it you know was",
+    "start": "329130",
+    "end": "334800"
+  },
+  {
+    "text": "originally after in the stream so you won't have these kind of eventually consistent scenarios in which you need",
+    "start": "334800",
+    "end": "341159"
+  },
+  {
+    "text": "to do read repair and you see kind of like like fluttering between the two to two row values it makes it a lot more",
+    "start": "341159",
+    "end": "348120"
+  },
+  {
+    "text": "easy to kind of write stateless applications that consume these streams",
+    "start": "348120",
+    "end": "353750"
+  },
+  {
+    "text": "so we have a couple options to achieve this a one option that is pretty easy",
+    "start": "353750",
+    "end": "359909"
+  },
+  {
+    "start": "354000",
+    "end": "354000"
+  },
+  {
+    "text": "it's just application driven dual writes so what this means is you know I have a",
+    "start": "359909",
+    "end": "365819"
+  },
+  {
+    "text": "transaction context or something a I am going to do an update to the database in",
+    "start": "365819",
+    "end": "370889"
+  },
+  {
+    "text": "addition to that I'll write something to a message bus like Kafka rabbitmq this",
+    "start": "370889",
+    "end": "377370"
+  },
+  {
+    "text": "is pretty easy to do and get like good looking data out of the other end because you control the data model in",
+    "start": "377370",
+    "end": "383340"
+  },
+  {
+    "text": "your application however you need to do something like two-phase commit or a consensus protocol in order to make sure",
+    "start": "383340",
+    "end": "390190"
+  },
+  {
+    "text": "you have strong consistency here which is fairly non-trivial so another option",
+    "start": "390190",
+    "end": "397210"
+  },
+  {
+    "start": "397000",
+    "end": "397000"
+  },
+  {
+    "text": "is database log mining so what this is meant what we mean by this is a you have",
+    "start": "397210",
+    "end": "404980"
+  },
+  {
+    "text": "a commit log in your database for example my sequel is the binary log DynamoDB provides a streams API and then",
+    "start": "404980",
+    "end": "413410"
+  },
+  {
+    "text": "all we need to do is process that stream and standardize on some kind of uniform",
+    "start": "413410",
+    "end": "419710"
+  },
+  {
+    "text": "event type so this makes consistency very easy we just leverage the commit",
+    "start": "419710",
+    "end": "424810"
+  },
+  {
+    "text": "log semantics and all the locking that the database is doing but it makes it kind of hard to parse DynamoDB actually",
+    "start": "424810",
+    "end": "433150"
+  },
+  {
+    "text": "provides very nice API but digging into the my sequel binary log is not the",
+    "start": "433150",
+    "end": "438250"
+  },
+  {
+    "text": "easiest thing in the world so we we chose to do the database log mining",
+    "start": "438250",
+    "end": "443590"
+  },
+  {
+    "start": "440000",
+    "end": "440000"
+  },
+  {
+    "text": "approach here on the the principle that parsing will be easier than consensus in",
+    "start": "443590",
+    "end": "448900"
+  },
+  {
+    "text": "many libraries and api's already exists to make this this easier and it our goal",
+    "start": "448900",
+    "end": "454540"
+  },
+  {
+    "text": "for timeline consistency it was a very natural fit to just look at the database change log so this is kind of the data",
+    "start": "454540",
+    "end": "464530"
+  },
+  {
+    "start": "462000",
+    "end": "462000"
+  },
+  {
+    "text": "ecosystem a very simplified view of the data ecosystem but the data ecosystem centered around this idea of change data",
+    "start": "464530",
+    "end": "471280"
+  },
+  {
+    "text": "capture so we'll have many services up here effectively writing to some primary",
+    "start": "471280",
+    "end": "476710"
+  },
+  {
+    "text": "store which exposes a database change log and that is processed by this spinal",
+    "start": "476710",
+    "end": "484360"
+  },
+  {
+    "text": "tap change data capture service this data is then pumped into Kafka and then",
+    "start": "484360",
+    "end": "490030"
+  },
+  {
+    "text": "we have a another class of applications",
+    "start": "490030",
+    "end": "495310"
+  },
+  {
+    "text": "that are like asynchronously Co processing these streams coming into Kafka and providing that nicer",
+    "start": "495310",
+    "end": "501460"
+  },
+  {
+    "text": "abstraction on top of the original event so spinal tap isn't really in the",
+    "start": "501460",
+    "end": "506830"
+  },
+  {
+    "text": "business of saying this should be the boolean flag not your Flags column but",
+    "start": "506830",
+    "end": "512409"
+  },
+  {
+    "text": "the original service implementer also has the ability to implement an asynchronous coprocessor that is",
+    "start": "512410",
+    "end": "519610"
+  },
+  {
+    "text": "basically a UDF that pumps things back into Kafka we can read those nicer events",
+    "start": "519610",
+    "end": "525480"
+  },
+  {
+    "text": "downstream for you know asynchronous business logic or in the warehouse and",
+    "start": "525480",
+    "end": "532770"
+  },
+  {
+    "text": "this this HBase component here I wanted to call out because this is what lien will go into in a little bit more detail",
+    "start": "532770",
+    "end": "539430"
+  },
+  {
+    "text": "but we're also leveraging this process in HBase in order to create these",
+    "start": "539430",
+    "end": "545400"
+  },
+  {
+    "text": "immutable views of data in our warehouse that people can then run MapReduce jobs",
+    "start": "545400",
+    "end": "550650"
+  },
+  {
+    "text": "or spark jobs on so the concrete requirements for this spinal tap service",
+    "start": "550650",
+    "end": "557190"
+  },
+  {
+    "start": "553000",
+    "end": "553000"
+  },
+  {
+    "text": "are like I mentioned timeline consistency with at least ones message delivery we should be able to easily add",
+    "start": "557190",
+    "end": "563970"
+  },
+  {
+    "text": "new sources to consume so what I mean by that is if we have a new my sequel",
+    "start": "563970",
+    "end": "569190"
+  },
+  {
+    "text": "instance we should be able to start consuming and producing events from that database change log without disrupting",
+    "start": "569190",
+    "end": "577770"
+  },
+  {
+    "text": "the existing streams we should be able to support low latency and high",
+    "start": "577770",
+    "end": "583080"
+  },
+  {
+    "text": "throughput use cases so the low latency one is kind of obvious we need to be able to do things like cache",
+    "start": "583080",
+    "end": "588780"
+  },
+  {
+    "text": "invalidation it should be flowing through the system as quickly as possible probably the kind of event",
+    "start": "588780",
+    "end": "594030"
+  },
+  {
+    "text": "level event level not like micro batch or anything but for better or worse we",
+    "start": "594030",
+    "end": "600150"
+  },
+  {
+    "text": "have a lot of you know rake tasks that do important things that we were running on like cron schedules I touch a lot of",
+    "start": "600150",
+    "end": "606780"
+  },
+  {
+    "text": "rows so we don't want the system to choke when we have these kind of big batches a big big batch use cases this",
+    "start": "606780",
+    "end": "615390"
+  },
+  {
+    "text": "system should also have high availability with automatic failover this is mostly important for when we",
+    "start": "615390",
+    "end": "622080"
+  },
+  {
+    "text": "want to do rolling restarts and make sure that all the streams are viewable",
+    "start": "622080",
+    "end": "628230"
+  },
+  {
+    "text": "in a consistent way downstream so nobody's really aware of any weirdness that are potential weirdness that we",
+    "start": "628230",
+    "end": "634500"
+  },
+  {
+    "text": "would introduce and we you know with the tenets of services owning their own data",
+    "start": "634500",
+    "end": "639810"
+  },
+  {
+    "text": "we don't want to tie ourselves to any particular database implementation so",
+    "start": "639810",
+    "end": "645120"
+  },
+  {
+    "text": "you know we have the two use cases of my sequel and Amazon DynamoDB but we may have other things that we need to be",
+    "start": "645120",
+    "end": "650970"
+  },
+  {
+    "text": "able to process later so I want to dive a little bit into the",
+    "start": "650970",
+    "end": "657230"
+  },
+  {
+    "start": "654000",
+    "end": "654000"
+  },
+  {
+    "text": "my sequel commit log or the binary log for those who aren't aren't super familiar so basically you have these two",
+    "start": "657230",
+    "end": "665360"
+  },
+  {
+    "text": "components like the DML so we're using the in ODB storage engine so this is largely only applicable to that but we",
+    "start": "665360",
+    "end": "673760"
+  },
+  {
+    "text": "have both the DML in the binary log so you'll see something for a given transaction like the query event which",
+    "start": "673760",
+    "end": "681380"
+  },
+  {
+    "text": "table it was for your right rows update rows delete rows which map to like inserts updates and deletes and then a",
+    "start": "681380",
+    "end": "688910"
+  },
+  {
+    "text": "final commit event so this is the event group in the binary log in addition to",
+    "start": "688910",
+    "end": "694820"
+  },
+  {
+    "text": "that we we logged the DDL so we're able to kind of know for which reason regions",
+    "start": "694820",
+    "end": "701389"
+  },
+  {
+    "text": "of bin log there is you know some specific schema applies to a specific region of bin log which becomes",
+    "start": "701389",
+    "end": "707949"
+  },
+  {
+    "text": "increasingly important as we do rapid product development and change those things all the time so luckily there's a",
+    "start": "707949",
+    "end": "714170"
+  },
+  {
+    "text": "pretty good Java library for parsing the binary log if you want to check it out",
+    "start": "714170",
+    "end": "719480"
+  },
+  {
+    "text": "there's the github repo and we've had pretty good experience with this",
+    "start": "719480",
+    "end": "724579"
+  },
+  {
+    "text": "we're running actually an older version I think a lot of things have been fixed but definitely not the most sketchy part",
+    "start": "724579",
+    "end": "731029"
+  },
+  {
+    "text": "of the system pretty good so one important thing that we need to kind of",
+    "start": "731029",
+    "end": "737630"
+  },
+  {
+    "text": "extract out of the binary log here is a logical clock so what I mean by that is",
+    "start": "737630",
+    "end": "742790"
+  },
+  {
+    "text": "that each event in the bin log should have a corresponding monotonically increasing logical ID so this allows us",
+    "start": "742790",
+    "end": "750199"
+  },
+  {
+    "text": "to disambiguate downstream you know if even if we have to roll back the kafka",
+    "start": "750199",
+    "end": "755930"
+  },
+  {
+    "text": "stream we know exactly which event was the the last one we don't have to rely on anything outside of my sequel",
+    "start": "755930",
+    "end": "761180"
+  },
+  {
+    "text": "introduce any potential more complexity you may ask what happens during a my",
+    "start": "761180",
+    "end": "766850"
+  },
+  {
+    "text": "sequel failover so we have this single master multi daisy setup so fortunately",
+    "start": "766850",
+    "end": "772880"
+  },
+  {
+    "text": "the my sequel in in ODB files are actually preserved during a failover so",
+    "start": "772880",
+    "end": "778519"
+  },
+  {
+    "text": "the binary log doesn't actually change this stands in contrast to a typical my",
+    "start": "778519",
+    "end": "783620"
+  },
+  {
+    "text": "sequel deployment where you may have a completely separate machine with its own binary log you know that you'll then",
+    "start": "783620",
+    "end": "791369"
+  },
+  {
+    "text": "start parsing after that master starts taking rights so this just is convenient we don't have to worry about that but",
+    "start": "791369",
+    "end": "797369"
+  },
+  {
+    "text": "that is totally solvable via introducing some some more metadata and then we",
+    "start": "797369",
+    "end": "803669"
+  },
+  {
+    "text": "leverage that X ID event it's kind of an OD B implementation details so this is where it kind of starts to get to get a",
+    "start": "803669",
+    "end": "810269"
+  },
+  {
+    "text": "little hairy in our assumptions but you know that's kind of the trade-off for doing this database log mining approach",
+    "start": "810269",
+    "end": "817489"
+  },
+  {
+    "text": "but we check point only on this this this event to make sure that we're",
+    "start": "817489",
+    "end": "822809"
+  },
+  {
+    "text": "processing transactions as units we don't kind of come back after a failure and start in the middle and screw",
+    "start": "822809",
+    "end": "829410"
+  },
+  {
+    "text": "everything up for DynamoDB we're using the streams Kinesis adapter the high",
+    "start": "829410",
+    "end": "836399"
+  },
+  {
+    "start": "831000",
+    "end": "831000"
+  },
+  {
+    "text": "level one which has a couple a couple guarantees that we're building off of each stream record will appear exactly",
+    "start": "836399",
+    "end": "842939"
+  },
+  {
+    "text": "once in the stream so it kind of makes it simpler to process things the stream",
+    "start": "842939",
+    "end": "848309"
+  },
+  {
+    "text": "records appear in the same sequence which allows us to achieve that timeline consistency guarantee however getting a",
+    "start": "848309",
+    "end": "855089"
+  },
+  {
+    "text": "monotonically increasing logical clock is a little bit hard because of the way dynamodb shards will split so we have",
+    "start": "855089",
+    "end": "862619"
+  },
+  {
+    "text": "the sequence number in here but we also kind of need to incorporate that Parent Child splitting semantics which we have",
+    "start": "862619",
+    "end": "869519"
+  },
+  {
+    "text": "punted on at the current moment because we're mostly just using this to update some some indexes and everything that I",
+    "start": "869519",
+    "end": "876359"
+  },
+  {
+    "text": "kind of don't really need to know there have strong consistency guarantees because we can always reboot strap them",
+    "start": "876359",
+    "end": "883160"
+  },
+  {
+    "start": "883000",
+    "end": "883000"
+  },
+  {
+    "text": "so our goal in the system is the kind of you know square peg round hole both of",
+    "start": "883160",
+    "end": "889019"
+  },
+  {
+    "text": "these things in this idea of an abstract mutation so we can continue to add these these sources as they you know use cases",
+    "start": "889019",
+    "end": "896549"
+  },
+  {
+    "text": "demand so the components here we have that monotonically increasing ID so this",
+    "start": "896549",
+    "end": "902639"
+  },
+  {
+    "text": "is just you know some long value that you know services and systems downstream",
+    "start": "902639",
+    "end": "907859"
+  },
+  {
+    "text": "can use will have the the OP code you know it's pretty simple insert update delete and by the way we had like this",
+    "start": "907859",
+    "end": "915049"
+  },
+  {
+    "text": "in my sequel use row based bin logging in order to both the before image of a row and the",
+    "start": "915049",
+    "end": "921689"
+  },
+  {
+    "text": "after image of the row so you know for these different operations they might be null when you insert there's obviously",
+    "start": "921689",
+    "end": "928290"
+  },
+  {
+    "text": "no before image when you update they're both non null but it's kind of the the",
+    "start": "928290",
+    "end": "935579"
+  },
+  {
+    "text": "nicest way if you wanted to look at a delta you could compute that using both the after image and the before image and",
+    "start": "935579",
+    "end": "942420"
+  },
+  {
+    "text": "we want to we have just you know blob of metadata for specific things that are relevant to the specific implementation",
+    "start": "942420",
+    "end": "950370"
+  },
+  {
+    "text": "that you know we can support but people probably shouldn't be using on a regular basis like maybe my sequel instance name",
+    "start": "950370",
+    "end": "957680"
+  },
+  {
+    "text": "but the idea is that we can encode this in a source agnostic format so you don't really have to worry about whether this",
+    "start": "957680",
+    "end": "963120"
+  },
+  {
+    "text": "is a 32-bit or 64-bit integer in my sequel it's just a thrift integer type",
+    "start": "963120",
+    "end": "969389"
+  },
+  {
+    "text": "right and then we can write this generic object to a message bus in our case",
+    "start": "969389",
+    "end": "975870"
+  },
+  {
+    "text": "Kafka but you could do it basically to anything we have some other libraries",
+    "start": "975870",
+    "end": "981240"
+  },
+  {
+    "text": "around our message bus infrastructure in order to change that out if we ever need to highly and unlikely that we'll do",
+    "start": "981240",
+    "end": "988050"
+  },
+  {
+    "start": "988000",
+    "end": "988000"
+  },
+  {
+    "text": "that though so now I want to talk a little bit about how we deploy this this",
+    "start": "988050",
+    "end": "994860"
+  },
+  {
+    "text": "service is a in a kind of clustered environment so our goal here is to",
+    "start": "994860",
+    "end": "1000290"
+  },
+  {
+    "text": "basically allow a distribution of these",
+    "start": "1000290",
+    "end": "1005629"
+  },
+  {
+    "text": "workloads evenly across a set of machines be able to add and remove these",
+    "start": "1005629",
+    "end": "1011449"
+  },
+  {
+    "text": "things that will and then make sure that during failures one can take over the",
+    "start": "1011449",
+    "end": "1016910"
+  },
+  {
+    "text": "work and have that workload distributed evenly so to accomplish this we're using a zookeeper based framework called",
+    "start": "1016910",
+    "end": "1023929"
+  },
+  {
+    "text": "Apache helix what this basically gives you is a distributed state machine",
+    "start": "1023929",
+    "end": "1029750"
+  },
+  {
+    "text": "abstraction so you can just implement callbacks on you know I'm going from offline to standby to leader that kind",
+    "start": "1029750",
+    "end": "1035688"
+  },
+  {
+    "text": "of stuff and then we'll use the leader standby model in this case in order to make sure that only one one worker is",
+    "start": "1035689",
+    "end": "1043370"
+  },
+  {
+    "text": "processing the one source at any given time this we excuse me we also get a",
+    "start": "1043370",
+    "end": "1049760"
+  },
+  {
+    "text": "couple nice to have from from this framework we can dynamically change source configuration",
+    "start": "1049760",
+    "end": "1055310"
+  },
+  {
+    "text": "without resetting these instances so for example we set up a helix resource for",
+    "start": "1055310",
+    "end": "1063230"
+  },
+  {
+    "text": "each of these sources and then we can dynamically change the table whitelist of the things that we want to be",
+    "start": "1063230",
+    "end": "1068320"
+  },
+  {
+    "text": "producing to the message bus at runtime without any downtime we also leverage a",
+    "start": "1068320",
+    "end": "1075740"
+  },
+  {
+    "text": "feature of helix called instance group tagging in order to separate the my sequel and DynamoDB nodes so it's",
+    "start": "1075740",
+    "end": "1083090"
+  },
+  {
+    "text": "basically homogeneous source types on a subset of nodes in the cluster this",
+    "start": "1083090",
+    "end": "1088310"
+  },
+  {
+    "text": "isn't so much for workload you know isolation and everything but if we need to make you know code changes to one of",
+    "start": "1088310",
+    "end": "1094310"
+  },
+  {
+    "text": "these things we shouldn't really be impacting the the other stuff like we we",
+    "start": "1094310",
+    "end": "1099530"
+  },
+  {
+    "text": "are working on the dynamodb one much more actively than the my sequel and that has stabilized so we don't really want to screw up all the my sequel stuff",
+    "start": "1099530",
+    "end": "1105730"
+  },
+  {
+    "text": "when we push new changes so if one of these nodes fails we basically are aware",
+    "start": "1105730",
+    "end": "1111830"
+  },
+  {
+    "start": "1109000",
+    "end": "1109000"
+  },
+  {
+    "text": "of that via the you know the zookeeper connection ephemeral nodes all dying and",
+    "start": "1111830",
+    "end": "1117980"
+  },
+  {
+    "text": "then the controller component here will be able to elect another replica of that",
+    "start": "1117980",
+    "end": "1122990"
+  },
+  {
+    "text": "of that source worker on another machine and then we won't really like miss a",
+    "start": "1122990",
+    "end": "1128240"
+  },
+  {
+    "text": "beat in the the processing so one thing that we need to do here in order to",
+    "start": "1128240",
+    "end": "1133430"
+  },
+  {
+    "text": "introduce no new inconsistency from our system is maintain this idea of a leader",
+    "start": "1133430",
+    "end": "1139430"
+  },
+  {
+    "text": "at Bach so whenever a partitioner like a",
+    "start": "1139430",
+    "end": "1144860"
+  },
+  {
+    "text": "worker for a given source asserts leadership it will update a monotonically increasing counter in",
+    "start": "1144860",
+    "end": "1151880"
+  },
+  {
+    "text": "zookeeper and will propagate that information for that leader's lifetime",
+    "start": "1151880",
+    "end": "1158020"
+  },
+  {
+    "text": "downstream in the events so a client can unambiguously process events and know",
+    "start": "1158020",
+    "end": "1165110"
+  },
+  {
+    "text": "about these stages issues without really needing to know about what happened in the cluster so you can think about this",
+    "start": "1165110",
+    "end": "1170930"
+  },
+  {
+    "text": "monotonically increasing idea is you know the first part is the leader at Bach you always filter out everything that's less than the highest one you've",
+    "start": "1170930",
+    "end": "1178070"
+  },
+  {
+    "text": "seen and then in the case of my sequel we have like bin log file and bin log position but then again we abstract that",
+    "start": "1178070",
+    "end": "1184310"
+  },
+  {
+    "text": "away from the the clients and they really just have to worry about some one monotonically",
+    "start": "1184310",
+    "end": "1189350"
+  },
+  {
+    "text": "increasing ID so like I mentioned before we use Kaka for our pub/sub and Kafka",
+    "start": "1189350",
+    "end": "1198380"
+  },
+  {
+    "start": "1192000",
+    "end": "1192000"
+  },
+  {
+    "text": "was kind of I'm sure a lot of you familiar was born as a kind of fire hose oriented system for clickstream data but",
+    "start": "1198380",
+    "end": "1206870"
+  },
+  {
+    "text": "then was modified throughout its lifetime in order to just to support Mordor but workloads that required more",
+    "start": "1206870",
+    "end": "1212990"
+  },
+  {
+    "text": "durability however is a little esoteric to configure it to support these things",
+    "start": "1212990",
+    "end": "1218960"
+  },
+  {
+    "text": "so I just kind of put these things down here if you're just in doing something similar for yourself but basically what",
+    "start": "1218960",
+    "end": "1225560"
+  },
+  {
+    "text": "this configuration gives you is three replicas of all the data this min in",
+    "start": "1225560",
+    "end": "1230840"
+  },
+  {
+    "text": "sync replicas configuration says that it should always it should never take a new",
+    "start": "1230840",
+    "end": "1236300"
+  },
+  {
+    "text": "right unless two replicas are there acknowledging it and this request required acts configuration says that it",
+    "start": "1236300",
+    "end": "1242990"
+  },
+  {
+    "text": "shouldn't respond to the client unless everybody did acknowledged so it's a",
+    "start": "1242990",
+    "end": "1248690"
+  },
+  {
+    "text": "little a little subtle it's kind of out of the scope of this talk but those are those are the ones that you'll need to worry about if you if you want to do",
+    "start": "1248690",
+    "end": "1254840"
+  },
+  {
+    "text": "something similar but basically this this system allows us to push all the",
+    "start": "1254840",
+    "end": "1261470"
+  },
+  {
+    "text": "data into copy I have it be durable and all these asynchronous coprocessors and downstream workers can be sure that that",
+    "start": "1261470",
+    "end": "1269900"
+  },
+  {
+    "text": "data came in it's available they can rely on it as if they were doing something like an after save after save",
+    "start": "1269900",
+    "end": "1277310"
+  },
+  {
+    "text": "call back in process and in active record so even when things go wrong in",
+    "start": "1277310",
+    "end": "1284390"
+  },
+  {
+    "text": "here you can have catastrophes you know Kafka nodes die will make sure to keep 24 hours of the my sequel binary log and",
+    "start": "1284390",
+    "end": "1291280"
+  },
+  {
+    "text": "we can alert on on problems on problems in this lower tier and then always",
+    "start": "1291280",
+    "end": "1296990"
+  },
+  {
+    "text": "rewind to in an earlier state and push all the data through so this gives us that at least once delivery guarantee",
+    "start": "1296990",
+    "end": "1304520"
+  },
+  {
+    "text": "with a high amount of reliability we trust a RDS to be to be pretty - pretty",
+    "start": "1304520",
+    "end": "1309740"
+  },
+  {
+    "text": "pretty good about that but to be even more paranoid we have an",
+    "start": "1309740",
+    "end": "1314930"
+  },
+  {
+    "start": "1312000",
+    "end": "1312000"
+  },
+  {
+    "text": "out-of-band online validation component the bin log is available in my sequel",
+    "start": "1314930",
+    "end": "1322179"
+  },
+  {
+    "text": "after it becomes flushed it's immutable so you can just download it and process it so what we do is have this other",
+    "start": "1322179",
+    "end": "1328900"
+  },
+  {
+    "text": "system that does that at a slower pace so this is happening more in batch and it'll check for holes and ordering",
+    "start": "1328900",
+    "end": "1335620"
+  },
+  {
+    "text": "violations by consuming that stream that we published a Kafka so this allows us to maintain low latency and have high",
+    "start": "1335620",
+    "end": "1342760"
+  },
+  {
+    "text": "confidence in the consistency of the stream and we can also use it for",
+    "start": "1342760",
+    "end": "1348429"
+  },
+  {
+    "text": "something like auto healing these these alerts can be fed back into the primary system or the online validation system",
+    "start": "1348429",
+    "end": "1356409"
+  },
+  {
+    "text": "can act as kind of a controller and then reset that bin logged position to an earlier earlier point if we detect too",
+    "start": "1356409",
+    "end": "1361990"
+  },
+  {
+    "text": "many failures in the in the system so just to kind of close out this this",
+    "start": "1361990",
+    "end": "1368980"
+  },
+  {
+    "start": "1365000",
+    "end": "1365000"
+  },
+  {
+    "text": "component just want to talk about some some weird production lessons that we learned like I mentioned before the",
+    "start": "1368980",
+    "end": "1375460"
+  },
+  {
+    "text": "schema changes kind of throw a wrench in in these gears you need to store the",
+    "start": "1375460",
+    "end": "1381039"
+  },
+  {
+    "text": "schema history store for for basically every region of the commit log in order to support the rewind and interpretation",
+    "start": "1381039",
+    "end": "1387100"
+  },
+  {
+    "text": "of things downstream so what we what we are kind of doing and like we have like",
+    "start": "1387100",
+    "end": "1393159"
+  },
+  {
+    "text": "various very solutions for this it's a little bit more manual and we're working on it but basically what you can do is",
+    "start": "1393159",
+    "end": "1399280"
+  },
+  {
+    "text": "parse that DDL that's in the commit log and do something like apply to a local my sequel you can look at the columns",
+    "start": "1399280",
+    "end": "1405130"
+  },
+  {
+    "text": "that were changed and in this Java process but basically some somehow reconstruct what the schema looks like",
+    "start": "1405130",
+    "end": "1411130"
+  },
+  {
+    "text": "for specific regions of bin log and this persists that to somewhere like like zookeeper another thing that we ran into",
+    "start": "1411130",
+    "end": "1418200"
+  },
+  {
+    "text": "were my sequel table encoding so like if you have a table that's in Latin 1 or",
+    "start": "1418200",
+    "end": "1423940"
+  },
+  {
+    "text": "utf-8 or something like that that'll start to act weird downstream and in these been logged parsing libraries so",
+    "start": "1423940",
+    "end": "1429400"
+  },
+  {
+    "text": "something to keep in mind something that we saw at a bigger scale",
+    "start": "1429400",
+    "end": "1434650"
+  },
+  {
+    "text": "is that this Kafka configuration could potentially hit every broker so you know",
+    "start": "1434650",
+    "end": "1439690"
+  },
+  {
+    "text": "you're kind of tying your fate to the slowest guy in there we saw a lot of like bad variants and in",
+    "start": "1439690",
+    "end": "1446520"
+  },
+  {
+    "text": "the in the produce times and throughput so we kind of added a slight hack in",
+    "start": "1446520",
+    "end": "1454080"
+  },
+  {
+    "text": "order to group things and we're nicely with knowledge of how things were partitioned in Kafka on the producer",
+    "start": "1454080",
+    "end": "1459990"
+  },
+  {
+    "text": "side and then you know like I mentioned before we have these cases in which there there are throughput latency",
+    "start": "1459990",
+    "end": "1466410"
+  },
+  {
+    "text": "concerns so we need to add some knobs there in order to make sure that we can handle on a per source basis these",
+    "start": "1466410",
+    "end": "1473520"
+  },
+  {
+    "text": "different styles of workload so to kind of recap and see this this in a in a",
+    "start": "1473520",
+    "end": "1480450"
+  },
+  {
+    "text": "different picture with or with more context we have all these services generating all these mutations",
+    "start": "1480450",
+    "end": "1486080"
+  },
+  {
+    "text": "persisting those initially to an OLTP style store like my sequel or DynamoDB",
+    "start": "1486080",
+    "end": "1491970"
+  },
+  {
+    "text": "and then we stream those mutations process them using spinal tap we have",
+    "start": "1491970",
+    "end": "1497160"
+  },
+  {
+    "text": "all of this data pumping into Kafka that can be processed by asynchronous",
+    "start": "1497160",
+    "end": "1502440"
+  },
+  {
+    "text": "coprocessors and later on other a secret is consumers can process that data and",
+    "start": "1502440",
+    "end": "1507990"
+  },
+  {
+    "text": "we pump it into HBase and thus the warehouse and I with that I'll hand it",
+    "start": "1507990",
+    "end": "1513630"
+  },
+  {
+    "text": "over to lien I will talk a little bit how use this for DB exports says Greg",
+    "start": "1513630",
+    "end": "1525330"
+  },
+  {
+    "text": "for the for talk about the spent app which is the key Punk component to develop this streaming ETL job to move",
+    "start": "1525330",
+    "end": "1532680"
+  },
+  {
+    "text": "the data from the ideas to the to the warehouse lengths so people can literally using the warehouse as with",
+    "start": "1532680",
+    "end": "1538530"
+  },
+  {
+    "text": "the replicas of the ideas or DynamoDB and take care of any arbitrary computation query against this database",
+    "start": "1538530",
+    "end": "1544620"
+  },
+  {
+    "text": "so let's go in some details so this is the basic architecture of data warehouse",
+    "start": "1544620",
+    "end": "1551610"
+  },
+  {
+    "start": "1547000",
+    "end": "1547000"
+  },
+  {
+    "text": "before we have the streaming world we have a one gold HDFS cluster which has",
+    "start": "1551610",
+    "end": "1557160"
+  },
+  {
+    "text": "to know the hive data and the Audis egg warehouse path data and we'll have to have a silver warehouse we have to",
+    "start": "1557160",
+    "end": "1563580"
+  },
+  {
+    "text": "warehouse to in order for the disaster recovery purpose also the resource isolation purpose people can run very",
+    "start": "1563580",
+    "end": "1570660"
+  },
+  {
+    "text": "high important like a high sales jobs in the gold cluster and also people care",
+    "start": "1570660",
+    "end": "1576810"
+  },
+  {
+    "text": "like any up to rate or ad-hoc jobs on the silver people can run different couraging like a pressed Ohio spark and",
+    "start": "1576810",
+    "end": "1584040"
+  },
+  {
+    "text": "we also have a batch job scheduling system called elf flow which can schedule this large Bell job with like",
+    "start": "1584040",
+    "end": "1590880"
+  },
+  {
+    "text": "multiple dependency so will the data come from the most of data come from to",
+    "start": "1590880",
+    "end": "1595980"
+  },
+  {
+    "text": "place where is the database change like where you have make a database mutation in a production you want to capture that",
+    "start": "1595980",
+    "end": "1602280"
+  },
+  {
+    "text": "in your warehouse so you can clear analytics queries the other is and X events which is really issued by the web",
+    "start": "1602280",
+    "end": "1609510"
+  },
+  {
+    "text": "tier or different various services so",
+    "start": "1609510",
+    "end": "1615380"
+  },
+  {
+    "start": "1615000",
+    "end": "1615000"
+  },
+  {
+    "text": "when the system growing we get a lot of new requirements thing people want to",
+    "start": "1615380",
+    "end": "1620400"
+  },
+  {
+    "text": "get more recent data in a warehouse they want to run these queries again most",
+    "start": "1620400",
+    "end": "1625680"
+  },
+  {
+    "text": "fresh data so they can run more effective jobs and the for the next",
+    "start": "1625680",
+    "end": "1630840"
+  },
+  {
+    "text": "event we we can do our repetitions so people can get most recent data and this",
+    "start": "1630840",
+    "end": "1635970"
+  },
+  {
+    "text": "fair they are reasonable but for the database mutation we have some challenges and the main is because we're",
+    "start": "1635970",
+    "end": "1642660"
+  },
+  {
+    "start": "1642000",
+    "end": "1642000"
+  },
+  {
+    "text": "using the point in time restore semantics together database snapshot so and the way it works is we issued I got",
+    "start": "1642660",
+    "end": "1651360"
+  },
+  {
+    "text": "on the daily boundary like a zero zero UTC we issued a point in time restore request to address so ideas will restore",
+    "start": "1651360",
+    "end": "1658830"
+  },
+  {
+    "text": "a new instance for us which had captured all the data changed up to that day boundary so basis group order change",
+    "start": "1658830",
+    "end": "1665280"
+  },
+  {
+    "text": "from the ideas and dumped into the hive warehouse the good part is this solution",
+    "start": "1665280",
+    "end": "1670650"
+  },
+  {
+    "text": "is very simple it's very easy to read about the correctness you can capture all the schema change nicely and it's",
+    "start": "1670650",
+    "end": "1677130"
+  },
+  {
+    "text": "very consistent you get literary get all the mutation before the 0 0 UTC the day boundary the problem is as the database",
+    "start": "1677130",
+    "end": "1684990"
+  },
+  {
+    "text": "grows every time you do the bridge story take a longer and longer for our biggest database it could take more than 20",
+    "start": "1684990",
+    "end": "1691620"
+  },
+  {
+    "text": "hours to restore instance that means the data in the warehouse is super stale and",
+    "start": "1691620",
+    "end": "1696720"
+  },
+  {
+    "text": "a lot of pipeline cannot be run there and the other feature training is using",
+    "start": "1696720",
+    "end": "1702960"
+  },
+  {
+    "text": "the stale data that's not the idea what we want Livi another things is we get a",
+    "start": "1702960",
+    "end": "1708930"
+  },
+  {
+    "text": "lot new requirement people want to before reduce data in a new real-time fashion they can want to they want to ruin any",
+    "start": "1708930",
+    "end": "1714840"
+  },
+  {
+    "text": "arbitrary like a presto I have query against a set and people want to create our a snapshot instead of daily so they",
+    "start": "1714840",
+    "end": "1721860"
+  },
+  {
+    "text": "can run a normal detection your hourly basis instead of daily basis and when",
+    "start": "1721860",
+    "end": "1727410"
+  },
+  {
+    "text": "the we need to able to store this hourly snapshot in a very low storage cost if",
+    "start": "1727410",
+    "end": "1732510"
+  },
+  {
+    "text": "we store them like a literary our petition basically we need to repeat store the same mutation repeatedly until",
+    "start": "1732510",
+    "end": "1739410"
+  },
+  {
+    "text": "they're low escalated so it's a lot of challenge over there we believe that charge these challenges",
+    "start": "1739410",
+    "end": "1745350"
+  },
+  {
+    "text": "is like a very common for a lot of ideas users and we come up a very general solution and we hope we can share that",
+    "start": "1745350",
+    "end": "1752000"
+  },
+  {
+    "text": "solutions to the audience so we can we can share some lessons over there so",
+    "start": "1752000",
+    "end": "1759540"
+  },
+  {
+    "start": "1759000",
+    "end": "1759000"
+  },
+  {
+    "text": "that that's the basic system we build we call our streaming DB export it's a real-time like a streaming ETL job to",
+    "start": "1759540",
+    "end": "1767250"
+  },
+  {
+    "text": "transfer the IDS mutations into the warehouse to make the warehouse literally as read replica",
+    "start": "1767250",
+    "end": "1773610"
+  },
+  {
+    "text": "it's a few minutes behind with the ideas and people carry different query engine on topic basically when the mutation",
+    "start": "1773610",
+    "end": "1780750"
+  },
+  {
+    "text": "happens in the IDS the spelling tab grab you just mentioned they were listening on the pin lock changes and publish all",
+    "start": "1780750",
+    "end": "1787169"
+  },
+  {
+    "text": "these mutations into Kafka then we will run a spark streaming job to consume all",
+    "start": "1787169",
+    "end": "1794610"
+  },
+  {
+    "text": "these mutations and replayed them in each place in the same order so Dow",
+    "start": "1794610",
+    "end": "1800730"
+  },
+  {
+    "text": "HBase start to have all the data changes in the database and in order to capture the comprehensive view of the database",
+    "start": "1800730",
+    "end": "1807450"
+  },
+  {
+    "text": "we need also receive the baseline of the of the of the IDS tables so we can",
+    "start": "1807450",
+    "end": "1813809"
+  },
+  {
+    "text": "receive the wrong ideas directly or we can receive it from hive partitions like yesterday's snapshot of view so once we",
+    "start": "1813809",
+    "end": "1821790"
+  },
+  {
+    "text": "have the comprehensive view HBase people can run different kind of queries from",
+    "start": "1821790",
+    "end": "1827370"
+  },
+  {
+    "text": "hi presidents Park we build various connector to help people to run this new",
+    "start": "1827370",
+    "end": "1834510"
+  },
+  {
+    "text": "real-time query against HBase and periodically we can also compact HBase",
+    "start": "1834510",
+    "end": "1839790"
+  },
+  {
+    "text": "and dump the most reasonable you to HDFS daily basis so all this batch pipeline",
+    "start": "1839790",
+    "end": "1845520"
+  },
+  {
+    "text": "can be Cameron there in addition to that we build a unified view on top of these",
+    "start": "1845520",
+    "end": "1853770"
+  },
+  {
+    "start": "1849000",
+    "end": "1849000"
+  },
+  {
+    "text": "streaming data and snapshot data in that way you for user perspective they are",
+    "start": "1853770",
+    "end": "1861180"
+  },
+  {
+    "text": "seeing the same schema the semantics from the streaming table and the snapshot date table",
+    "start": "1861180",
+    "end": "1866960"
+  },
+  {
+    "text": "so multiple computational logic from streaming Java and let's job offer",
+    "start": "1866960",
+    "end": "1871980"
+  },
+  {
+    "text": "interactive query they can yield use the same computation logic against these",
+    "start": "1871980",
+    "end": "1877110"
+  },
+  {
+    "text": "different dancers that's our starting point to implement the land architecture at the warehouse there's a lot of data",
+    "start": "1877110",
+    "end": "1886830"
+  },
+  {
+    "start": "1885000",
+    "end": "1885000"
+  },
+  {
+    "text": "movement between HBase and HDFS and we want to share some common techniques how",
+    "start": "1886830",
+    "end": "1891960"
+  },
+  {
+    "text": "to mitigate all this like a performance hit and it's make them more efficient",
+    "start": "1891960",
+    "end": "1898590"
+  },
+  {
+    "text": "the first one is we need to take our lid snaps onto the database the our snapshot",
+    "start": "1898590",
+    "end": "1905190"
+  },
+  {
+    "text": "if we move all data from HBase to HTF in your hourly basis basically it's very costly in terms of like iOS internal",
+    "start": "1905190",
+    "end": "1913080"
+  },
+  {
+    "text": "network bandwidth so with the way we did is we take a snapshot of HBase which is",
+    "start": "1913080",
+    "end": "1918570"
+  },
+  {
+    "text": "a zero copy it's all using the HDFS symbolic links so there's no copy over",
+    "start": "1918570",
+    "end": "1923670"
+  },
+  {
+    "text": "there and the we build our view on top of the hive table and the people can",
+    "start": "1923670",
+    "end": "1928679"
+  },
+  {
+    "text": "query this hive table as if they are querying the HDL data but underneath they are transformed to the HBase car so",
+    "start": "1928679",
+    "end": "1935670"
+  },
+  {
+    "text": "that do it on your copy any data from HBase to edge servers the other thing is",
+    "start": "1935670",
+    "end": "1941550"
+  },
+  {
+    "text": "where we want to receive the HBase our forage for HDFS if we simply using the",
+    "start": "1941550",
+    "end": "1948330"
+  },
+  {
+    "text": "put request go against HP's they will be very disruptive for HBase performance the real performance will be our",
+    "start": "1948330",
+    "end": "1954570"
+  },
+  {
+    "text": "suffered and also to take a long time so the way we did is we run some jobs",
+    "start": "1954570",
+    "end": "1960450"
+  },
+  {
+    "text": "batch jobs to transform all these HDFS file prepare them into HBase format",
+    "start": "1960450",
+    "end": "1966390"
+  },
+  {
+    "text": "let's call each file and the bulk upload to HBase in that way they don't have any act on the HBase style",
+    "start": "1966390",
+    "end": "1975140"
+  },
+  {
+    "start": "1974000",
+    "end": "1974000"
+  },
+  {
+    "text": "here's how here so how I we come bought new tables initially when we want about",
+    "start": "1975270",
+    "end": "1984179"
+  },
+  {
+    "text": "new tables they start to listen order streaming from the spend tab once you",
+    "start": "1984179",
+    "end": "1989909"
+  },
+  {
+    "text": "get all this data into the HBase we need to proceed either from the ideas we built our connector we can redraw ideas",
+    "start": "1989909",
+    "end": "1996330"
+  },
+  {
+    "text": "directly to receive edge base or we can Reseda from the high partitions so in",
+    "start": "1996330",
+    "end": "2004340"
+  },
+  {
+    "start": "2003000",
+    "end": "2003000"
+  },
+  {
+    "text": "order to make this pipeline super reliable we need to be we need to be able to tour into multiple failures due",
+    "start": "2004340",
+    "end": "2012260"
+  },
+  {
+    "text": "to the schema we design we can talk about the schema later but due to the schema we designed all the rights into",
+    "start": "2012260",
+    "end": "2017570"
+  },
+  {
+    "text": "HBase is idempotent and they can kind of do political rise nicely so all we want",
+    "start": "2017570",
+    "end": "2023539"
+  },
+  {
+    "text": "is the exact are at least once semantics from the streaming processing and we",
+    "start": "2023539",
+    "end": "2029510"
+  },
+  {
+    "text": "maintain all these checkpoints of different like a streaming sauce and checkpoint them version by time step",
+    "start": "2029510",
+    "end": "2035779"
+  },
+  {
+    "text": "into the HBase itself so in the case if the streaming job failed we were able to",
+    "start": "2035779",
+    "end": "2041330"
+  },
+  {
+    "text": "restart from where they left and in case they run into multiple failures and all",
+    "start": "2041330",
+    "end": "2048200"
+  },
+  {
+    "start": "2044000",
+    "end": "2044000"
+  },
+  {
+    "text": "some bad code or bad configuration is being pushed we will be able to rewind to a particular timestamp before the the",
+    "start": "2048200",
+    "end": "2056179"
+  },
+  {
+    "text": "failure happens and in the worst case if the Intel streaming is be disrupted by",
+    "start": "2056179",
+    "end": "2062270"
+  },
+  {
+    "text": "like a crop to the data or whatever like Kafka is down totally in that case we",
+    "start": "2062270",
+    "end": "2067368"
+  },
+  {
+    "text": "can totally forget about checkpoint read it from the latest and the receiver frontier now we can talk about more",
+    "start": "2067369",
+    "end": "2076099"
+  },
+  {
+    "text": "about the the schema we designed in the HBase how we replay all these like a ping logger mutations in jet rates the",
+    "start": "2076099",
+    "end": "2084320"
+  },
+  {
+    "start": "2084000",
+    "end": "2084000"
+  },
+  {
+    "text": "first key part to design HP schema is how we design the key space our",
+    "start": "2084320",
+    "end": "2089679"
+  },
+  {
+    "text": "literally we have hundreds of table need to export it into HBase and if we create",
+    "start": "2089679",
+    "end": "2095240"
+  },
+  {
+    "text": "a world HBase table for each ideas table it's going to call in a lot of metadata in the HBase there's no way we can scare",
+    "start": "2095240",
+    "end": "2102410"
+  },
+  {
+    "text": "in that way and they causing a lot of operational chaos so the first thing we did was we multiplex multiple",
+    "start": "2102410",
+    "end": "2108980"
+  },
+  {
+    "text": "ideas tables in a single HBase table the other the second requirement is a lot of",
+    "start": "2108980",
+    "end": "2115400"
+  },
+  {
+    "text": "stream inquiry or interpretive we need to query the primary keys for given database or table and so we need a very",
+    "start": "2115400",
+    "end": "2122480"
+  },
+  {
+    "text": "fast point to lookup in HBase for given primary keys and in both of case we need",
+    "start": "2122480",
+    "end": "2128630"
+  },
+  {
+    "text": "two sequential scan de Intel table so that means all the row keys for a given table need to be landed a continuously",
+    "start": "2128630",
+    "end": "2134570"
+  },
+  {
+    "text": "for in each each edge base region so we can be benefit from the sequential scan performance for HBase last but not least",
+    "start": "2134570",
+    "end": "2142609"
+  },
+  {
+    "text": "we need to be load balanced across multiple regions we don't need we don't want to have a single region's hotspot",
+    "start": "2142609",
+    "end": "2148250"
+  },
+  {
+    "text": "and according the performance digression so here's how we design the HBase",
+    "start": "2148250",
+    "end": "2153619"
+  },
+  {
+    "start": "2152000",
+    "end": "2152000"
+  },
+  {
+    "text": "schemas first we do a hash about the audience table name plus multiple",
+    "start": "2153619",
+    "end": "2159220"
+  },
+  {
+    "text": "primary keys combination get the hash number during the hash number we figure",
+    "start": "2159220",
+    "end": "2164540"
+  },
+  {
+    "text": "out which readiest belongs to instead of using the hash key we actually find out what's the region star key for that",
+    "start": "2164540",
+    "end": "2170990"
+  },
+  {
+    "text": "particular hash we press play to the HBase table into a fixed number of sharks so we know for that particular",
+    "start": "2170990",
+    "end": "2177530"
+  },
+  {
+    "text": "hash key which reading is supposed to be and they were using the region star key as the prefix of the for the Rocky then",
+    "start": "2177530",
+    "end": "2184700"
+  },
+  {
+    "text": "we're using that prefix append all this dip database table name plus all the primary keys in that way for a given",
+    "start": "2184700",
+    "end": "2192589"
+  },
+  {
+    "text": "primary key for the DB we can easily figure out what's the row key inche base so the point lookup can be very fast",
+    "start": "2192589",
+    "end": "2199160"
+  },
+  {
+    "text": "also for given table all these all these tape all these rows for same table will be continuously in",
+    "start": "2199160",
+    "end": "2207200"
+  },
+  {
+    "text": "each region each each region boundary so the sequential scan can be fast and",
+    "start": "2207200",
+    "end": "2212530"
+  },
+  {
+    "text": "since we're using the hash to randomly distribute all these row keys across multiple shots all the shots have can",
+    "start": "2212530",
+    "end": "2220250"
+  },
+  {
+    "text": "have the balancer Road the addition for the primary key will also be the secondary keys on top of the same system",
+    "start": "2220250",
+    "end": "2228260"
+  },
+  {
+    "start": "2223000",
+    "end": "2223000"
+  },
+  {
+    "text": "using the same format basically the prefix for given secondary index can be also I can also get the benefit of the",
+    "start": "2228260",
+    "end": "2235760"
+  },
+  {
+    "text": "sequential scan performance of HBase next we talk about the versions",
+    "start": "2235760",
+    "end": "2242400"
+  },
+  {
+    "start": "2239000",
+    "end": "2239000"
+  },
+  {
+    "text": "so when we replay all these blog mutations into HP's the first version",
+    "start": "2242400",
+    "end": "2247620"
+  },
+  {
+    "text": "we're using the timestamp to commit timestamp of the being logged mutations that's a very natural way to leverage",
+    "start": "2247620",
+    "end": "2254280"
+  },
+  {
+    "text": "HBase multi version schemas and and it's also very natural way where you want to",
+    "start": "2254280",
+    "end": "2260280"
+  },
+  {
+    "text": "take a snapshot of the HBase you can literally get the maximum like at the timestamp you want to snapshot so let's",
+    "start": "2260280",
+    "end": "2269070"
+  },
+  {
+    "text": "say there's two commit against the same role the latest commit the latest commit with help with the higher timestamp",
+    "start": "2269070",
+    "end": "2275520"
+  },
+  {
+    "text": "whirlwind and you can even go back to the previous version by space with the right time step so that's a good way to",
+    "start": "2275520",
+    "end": "2281700"
+  },
+  {
+    "text": "to get start so when we launch the system actually we we find the wolf the",
+    "start": "2281700",
+    "end": "2287160"
+  },
+  {
+    "text": "biggest and lesser we learn from from this project is the we basically assume",
+    "start": "2287160",
+    "end": "2292320"
+  },
+  {
+    "start": "2290000",
+    "end": "2290000"
+  },
+  {
+    "text": "the time the comet timestamp is in the same order as the big log commit commit order that's isn't ago is true in most",
+    "start": "2292320",
+    "end": "2300840"
+  },
+  {
+    "text": "of cases but in some cases not necessary that's why we figure out when we launched the project we figured there's",
+    "start": "2300840",
+    "end": "2306930"
+  },
+  {
+    "text": "a mismatch between the IDS snapshot and the HBase data the reason for that is",
+    "start": "2306930",
+    "end": "2314030"
+  },
+  {
+    "text": "the Bing when the NTP jitter happens the Bing log that the transaction has the",
+    "start": "2314030",
+    "end": "2320700"
+  },
+  {
+    "text": "higher Bing log of that may have a lower time step so the time step order and the",
+    "start": "2320700",
+    "end": "2325740"
+  },
+  {
+    "text": "Bing log order mean that may not be aligned in this case if we're using the timestamp as a version in HBase you will",
+    "start": "2325740",
+    "end": "2333750"
+  },
+  {
+    "text": "get inconsistent result so by fixed disk we basically have to using the bin log",
+    "start": "2333750",
+    "end": "2339990"
+  },
+  {
+    "text": "offset as the versioning edge base in that way we can guarantee we have the same semantics as how people replay",
+    "start": "2339990",
+    "end": "2346500"
+  },
+  {
+    "text": "being logs in in our days in Mexico that's actually lived into a new popular",
+    "start": "2346500",
+    "end": "2354090"
+  },
+  {
+    "text": "challenge how we implement the same on point in time restore semantics in the",
+    "start": "2354090",
+    "end": "2359370"
+  },
+  {
+    "text": "in this new HBase the streaming ET award when we when we take a look like a how",
+    "start": "2359370",
+    "end": "2365670"
+  },
+  {
+    "text": "my Sifu guarantee the point in time recover semantics they basically replay all the big log up to the first commit",
+    "start": "2365670",
+    "end": "2372150"
+  },
+  {
+    "text": "which is beyond the beyond the time boundary let's say in this example user 1/2 is",
+    "start": "2372150",
+    "end": "2379320"
+  },
+  {
+    "text": "your point in time recovery to an x name or q so they will replay the transaction",
+    "start": "2379320",
+    "end": "2384600"
+  },
+  {
+    "text": "commit as well 1 and they will see the next transaction coming timestamp restore the world 3 which is beyond that",
+    "start": "2384600",
+    "end": "2390900"
+  },
+  {
+    "text": "the time they requested so the ideas will stop replaying the ping log so in",
+    "start": "2390900",
+    "end": "2397500"
+  },
+  {
+    "text": "order to achieve the same semantics in the new system we basically have to build a secondary index to map the bean",
+    "start": "2397500",
+    "end": "2404490"
+  },
+  {
+    "start": "2401000",
+    "end": "2401000"
+  },
+  {
+    "text": "lock commit offset with the time so in that way we can easily figure out was",
+    "start": "2404490",
+    "end": "2409650"
+  },
+  {
+    "text": "the first mutation across the PID our boundary and was the last mutation and",
+    "start": "2409650",
+    "end": "2414690"
+  },
+  {
+    "text": "we can using the last mutations being log offset as the high-water mark at the boundary when we take the snapshots okay",
+    "start": "2414690",
+    "end": "2423660"
+  },
+  {
+    "start": "2422000",
+    "end": "2422000"
+  },
+  {
+    "text": "to recap so the problem what is obvious we want to get the audience data into",
+    "start": "2423660",
+    "end": "2430290"
+  },
+  {
+    "text": "warehouse as soon as possible so people can run edits that new real-time and it is query on top of it",
+    "start": "2430290",
+    "end": "2435930"
+  },
+  {
+    "text": "they can create our list nap shot and the problem for the initial solution is",
+    "start": "2435930",
+    "end": "2441330"
+  },
+  {
+    "text": "the pointing hand restore take a much longer time when the database grows and so we have to using a string way to get",
+    "start": "2441330",
+    "end": "2449880"
+  },
+  {
+    "text": "all the incremental change into the warehouse and we believe the new system is more consistent and they can handle",
+    "start": "2449880",
+    "end": "2457380"
+  },
+  {
+    "text": "all these new real-time query efficiently they can create all this overlay snapshotting a very low storage",
+    "start": "2457380",
+    "end": "2463619"
+  },
+  {
+    "text": "cost and they can be queried very different various like a stonker",
+    "start": "2463619",
+    "end": "2469590"
+  },
+  {
+    "text": "execution engine of course there are we need to continue to work on how to improve how we handle the schema change",
+    "start": "2469590",
+    "end": "2476940"
+  },
+  {
+    "text": "in the Indian tar paper as Greg mentioned yeah that's pretty much the talk and thank you all for your time and",
+    "start": "2476940",
+    "end": "2484170"
+  },
+  {
+    "text": "we can take some questions [Applause]",
+    "start": "2484170",
+    "end": "2493280"
+  }
+]

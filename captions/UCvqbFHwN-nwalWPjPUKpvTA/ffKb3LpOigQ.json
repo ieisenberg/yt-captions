@@ -1,0 +1,1442 @@
+[
+  {
+    "text": "hello everyone thanks for joining me today uh my name is Serge I'm software engineer at data do and uh today I'm",
+    "start": "599",
+    "end": "8360"
+  },
+  {
+    "text": "going to talk about uh subsetting in grpc so to give everyone a little bit of",
+    "start": "8360",
+    "end": "13960"
+  },
+  {
+    "text": "context I want to start with a quick a very quick introduction of load balancer load balancing in grpc and how it's",
+    "start": "13960",
+    "end": "20600"
+  },
+  {
+    "text": "related to the topic of subsetting so as many of you probably know on the client",
+    "start": "20600",
+    "end": "25640"
+  },
+  {
+    "text": "side grpc can act as a load balancer and what it means is that every client uh",
+    "start": "25640",
+    "end": "31599"
+  },
+  {
+    "text": "takes the list of available servers from a service Discovery system which is usually DNS and then it decides how to",
+    "start": "31599",
+    "end": "38600"
+  },
+  {
+    "text": "distribute a request across available servers so the simplest possible load balancer in grpc is called pick first",
+    "start": "38600",
+    "end": "45640"
+  },
+  {
+    "text": "and what it does it just sends all requests to a randomly picked server so now if you decided to look",
+    "start": "45640",
+    "end": "53199"
+  },
+  {
+    "text": "pick first the uh problem you might seen is that the uh resulting request distribution end up being very uneven as",
+    "start": "53199",
+    "end": "60000"
+  },
+  {
+    "text": "you can observe on this graph and as you can see uh from this slide it kind of",
+    "start": "60000",
+    "end": "65680"
+  },
+  {
+    "text": "makes sense because statistically the probability that uh every server will be picked exactly the same number of time",
+    "start": "65680",
+    "end": "72479"
+  },
+  {
+    "text": "across all clients is very low so the way you can deal with this is by using a",
+    "start": "72479",
+    "end": "77840"
+  },
+  {
+    "text": "different load balancer uh which is called round robin which works very differently so what it does it",
+    "start": "77840",
+    "end": "84560"
+  },
+  {
+    "text": "establishes connections with every available servers and uh as you can see",
+    "start": "84560",
+    "end": "89960"
+  },
+  {
+    "text": "is a resulting request distribution end up being almost completely and perfectly",
+    "start": "89960",
+    "end": "95560"
+  },
+  {
+    "text": "even so round robing is not a silver bullet though because it has its own challenges and the major problem with",
+    "start": "95560",
+    "end": "102399"
+  },
+  {
+    "text": "round robin is the number of connections it creates so those connections are mostly cheap but not exactly free and",
+    "start": "102399",
+    "end": "108840"
+  },
+  {
+    "text": "you can see especially you can see this overhead with TLS so another issue is",
+    "start": "108840",
+    "end": "114560"
+  },
+  {
+    "text": "that it's perfectly Balan as request but not uh server side load which is the",
+    "start": "114560",
+    "end": "120360"
+  },
+  {
+    "text": "metric most of the people care about and the last problem is that uh just because",
+    "start": "120360",
+    "end": "125840"
+  },
+  {
+    "text": "how many of those connections it manages it makes every connection very poorly utilized which makes it very hard to get",
+    "start": "125840",
+    "end": "133360"
+  },
+  {
+    "text": "meaningful client size statistic per connection and I'll tell about uh I'll",
+    "start": "133360",
+    "end": "138480"
+  },
+  {
+    "text": "talk about why this is a problem later in my presentation so now let's introduce",
+    "start": "138480",
+    "end": "143519"
+  },
+  {
+    "text": "subsetting so uh subsetting is an alternative load balancing strategy and",
+    "start": "143519",
+    "end": "148599"
+  },
+  {
+    "text": "basically what it does it taks a subset from all available servers and then",
+    "start": "148599",
+    "end": "154239"
+  },
+  {
+    "text": "distributes request across them so one useful way I like to think about",
+    "start": "154239",
+    "end": "159959"
+  },
+  {
+    "text": "subsetting is that it's uh something that sits between two extreme pick first and Round Robin so with subsetting",
+    "start": "159959",
+    "end": "167000"
+  },
+  {
+    "text": "number of connections you manage is well less that with round robin and you can directly tune this value by setting",
+    "start": "167000",
+    "end": "173879"
+  },
+  {
+    "text": "subset size but at the same time you have the flexibility to shift request between choosing servers in uh ways to",
+    "start": "173879",
+    "end": "181640"
+  },
+  {
+    "text": "minimize load in Balance across servers so let's talk about how this can",
+    "start": "181640",
+    "end": "187200"
+  },
+  {
+    "text": "be implemented and what we tried so before we dive into details uh I want to",
+    "start": "187200",
+    "end": "192840"
+  },
+  {
+    "text": "briefly mention a design goal we set for our s so we want all our new features we",
+    "start": "192840",
+    "end": "198400"
+  },
+  {
+    "text": "develop uh to be as close to zero config as possible and the reason is that if we",
+    "start": "198400",
+    "end": "204799"
+  },
+  {
+    "text": "manage to do this this is going to be win-win for both us and our users so we",
+    "start": "204799",
+    "end": "209840"
+  },
+  {
+    "text": "maximize the impact we provide across all servers in our organizations and our users don't need to care about lowlevel",
+    "start": "209840",
+    "end": "216959"
+  },
+  {
+    "text": "details such as connection management so uh let's get back to",
+    "start": "216959",
+    "end": "222200"
+  },
+  {
+    "text": "subsetting so uh one way to implement it which is an obvious one is to do a",
+    "start": "222200",
+    "end": "227760"
+  },
+  {
+    "text": "purely fully random subsetting which means every client just picks in random servers out of the list of available",
+    "start": "227760",
+    "end": "235120"
+  },
+  {
+    "text": "servers so one problem with this is that this potentially could lead to high",
+    "start": "235120",
+    "end": "240439"
+  },
+  {
+    "text": "connection charm during server allows so imagine what happens if a server got deleted like is Illustrated on the",
+    "start": "240439",
+    "end": "247239"
+  },
+  {
+    "text": "bottom diagram so at this point every client recalculates its subset and the",
+    "start": "247239",
+    "end": "252840"
+  },
+  {
+    "text": "probability that uh it will pick exactly or similar subset is very low and in red",
+    "start": "252840",
+    "end": "258720"
+  },
+  {
+    "text": "uh I marked all new connection and in green uh uh connections that are being preserved and as you can see most of the",
+    "start": "258720",
+    "end": "265440"
+  },
+  {
+    "text": "connections are completely replaced which is something we want to avoid",
+    "start": "265440",
+    "end": "270479"
+  },
+  {
+    "text": "the trick we use to deal with this is to use a technique called uh rendevu hashing so the way it works is by uh",
+    "start": "270479",
+    "end": "278400"
+  },
+  {
+    "text": "this so uh on Startup every client creates a random uh value which we call",
+    "start": "278400",
+    "end": "284360"
+  },
+  {
+    "text": "seed and then it uses seat uh to create uh compute a hash for every server using",
+    "start": "284360",
+    "end": "290840"
+  },
+  {
+    "text": "server IP address so given a seat and server IP the hash is stable so then uh",
+    "start": "290840",
+    "end": "296960"
+  },
+  {
+    "text": "our load balancer sorts all uh um servers by hash and pick first and",
+    "start": "296960",
+    "end": "303759"
+  },
+  {
+    "text": "servers from the list so as you can see if a server gets deleted this does not",
+    "start": "303759",
+    "end": "309080"
+  },
+  {
+    "text": "affect hashes uh for other servers as the IP addresses and seats are stable",
+    "start": "309080",
+    "end": "314800"
+  },
+  {
+    "text": "and uh connections are kind of sticky which is exactly the property we need so this diagram illustrates the",
+    "start": "314800",
+    "end": "322039"
+  },
+  {
+    "text": "effect of tuning different uh subsetting parameters and what resulting connection distribution we are going to have so the",
+    "start": "322039",
+    "end": "329440"
+  },
+  {
+    "text": "main take away from this slide is that uh the amount of imbalance you're going",
+    "start": "329440",
+    "end": "335240"
+  },
+  {
+    "text": "to have is directly correlated with the average number of connections your server is expect so uh on the top slide",
+    "start": "335240",
+    "end": "343440"
+  },
+  {
+    "text": "you can see that the average number of connection is close to five and distribution is terrible but uh on the",
+    "start": "343440",
+    "end": "349560"
+  },
+  {
+    "text": "bottom slide average number of connection is close to 1,000 and it's looks kind of tight but uh the bad news",
+    "start": "349560",
+    "end": "356880"
+  },
+  {
+    "text": "here is that average number of connections per server is is exactly the property we are trying to minimize so",
+    "start": "356880",
+    "end": "362160"
+  },
+  {
+    "text": "there are some uh tradeoffs here so uh we applied random subset into",
+    "start": "362160",
+    "end": "368319"
+  },
+  {
+    "text": "a few random uh apps in our um infrastructure and as you can see the",
+    "start": "368319",
+    "end": "373919"
+  },
+  {
+    "text": "results were great From perspective that uh resource utilization on the server went out down a lot but at the same time",
+    "start": "373919",
+    "end": "382960"
+  },
+  {
+    "text": "um uh load Distribution on the server uh became a lot more imbalanced and if you",
+    "start": "382960",
+    "end": "389240"
+  },
+  {
+    "text": "wonder why we care about this so much this is because service owners need to scale their deployments to account for",
+    "start": "389240",
+    "end": "395720"
+  },
+  {
+    "text": "the worst case and this directly correlates with cost so this is not",
+    "start": "395720",
+    "end": "401479"
+  },
+  {
+    "text": "ideal so we explored alternative approaches and we tried to use deterministic subsetting and uh engaged",
+    "start": "401479",
+    "end": "408680"
+  },
+  {
+    "text": "with uh grpc Community uh trying to contribute this so tldr of deterministic",
+    "start": "408680",
+    "end": "415319"
+  },
+  {
+    "text": "subsetting is this it's a technique that requires coordination between client",
+    "start": "415319",
+    "end": "420400"
+  },
+  {
+    "text": "uh so clients can choose their subsets in an optimal way such that they can can",
+    "start": "420400",
+    "end": "426560"
+  },
+  {
+    "text": "minimize uh both uh connection CH and server side load imbalance so in this",
+    "start": "426560",
+    "end": "432400"
+  },
+  {
+    "text": "slide I highlighted two most popular implementation we found of the internet one deterministic aperture from uh",
+    "start": "432400",
+    "end": "439639"
+  },
+  {
+    "text": "Twitter and another one from Google and if you're really interested in this topic I can mention that my current",
+    "start": "439639",
+    "end": "445879"
+  },
+  {
+    "text": "colleague Ruben is currently here with us today and he is the author of uh Twitter aperture implementation so I'll",
+    "start": "445879",
+    "end": "452479"
+  },
+  {
+    "text": "be happy to connect you with him if you have aot questions about this but the",
+    "start": "452479",
+    "end": "457599"
+  },
+  {
+    "text": "reason I just uh mentioned this so briefly is because this idea didn't fly",
+    "start": "457599",
+    "end": "462960"
+  },
+  {
+    "text": "so basically the response we get is that deterministic subsetting requires coordination and uh there is a standard",
+    "start": "462960",
+    "end": "470639"
+  },
+  {
+    "text": "way to do coordination in grpc which is XDS and if you use XDS you can as well",
+    "start": "470639",
+    "end": "477960"
+  },
+  {
+    "text": "just calculate your sub set on the control plane and then Feit every client",
+    "start": "477960",
+    "end": "483080"
+  },
+  {
+    "text": "its own subset so alternative way of doing a coordination between client",
+    "start": "483080",
+    "end": "488240"
+  },
+  {
+    "text": "won't be accepted by grpc uh project so we went ahead and explore",
+    "start": "488240",
+    "end": "495800"
+  },
+  {
+    "text": "different options what if we just run random subsetting and then use something on top of it to correct the imbalance",
+    "start": "495800",
+    "end": "502000"
+  },
+  {
+    "text": "generated by random subsetting and an obvious candidate here is a grpc load",
+    "start": "502000",
+    "end": "508280"
+  },
+  {
+    "text": "balancer which is called waited around Robin or W for sure so uh this is going",
+    "start": "508280",
+    "end": "514719"
+  },
+  {
+    "text": "to be important in uh later part of my presentation so I'm going to explain uh",
+    "start": "514719",
+    "end": "520240"
+  },
+  {
+    "text": "the mechanics of w a little bit so w relies on server side loads load reports",
+    "start": "520240",
+    "end": "527680"
+  },
+  {
+    "text": "which are delivered to every client via trailers in every grpc response so what",
+    "start": "527680",
+    "end": "532720"
+  },
+  {
+    "text": "it means that every client now has a coherent view about uh server",
+    "start": "532720",
+    "end": "538399"
+  },
+  {
+    "text": "utilization uh for all servers it is connected to then what WRR does it",
+    "start": "538399",
+    "end": "544959"
+  },
+  {
+    "text": "calculates soall cost per request function which I simplified it a bit but",
+    "start": "544959",
+    "end": "550079"
+  },
+  {
+    "text": "in an Essence it's just CPU divided by QPS and QPS is quaries per second and",
+    "start": "550079",
+    "end": "556079"
+  },
+  {
+    "text": "the reason why this metric was chosen because it represents the inherent parameters of the server like basically",
+    "start": "556079",
+    "end": "561720"
+  },
+  {
+    "text": "how powerful your server is but if you ask whether uh WRR can help us to",
+    "start": "561720",
+    "end": "568720"
+  },
+  {
+    "text": "mitigate the impact of random subsetting on server side load and balance the",
+    "start": "568720",
+    "end": "573760"
+  },
+  {
+    "text": "answer is no and it is no because cost per request function is stable no matter",
+    "start": "573760",
+    "end": "579279"
+  },
+  {
+    "text": "how many connection a given server receives so we need to try something else so all those conversations about",
+    "start": "579279",
+    "end": "586800"
+  },
+  {
+    "text": "deterministics subsetting and usage of wurr happened exactly a year ago uh here",
+    "start": "586800",
+    "end": "592839"
+  },
+  {
+    "text": "in sale during last JPC conf and I was a bit upset because it looked like we uh",
+    "start": "592839",
+    "end": "599760"
+  },
+  {
+    "text": "don't have a good pass forward so what I did I just started talking to different people and asking them okay how do you",
+    "start": "599760",
+    "end": "606360"
+  },
+  {
+    "text": "deal with subsetting in your infrastructure and one very interesting idea that I was suggested is to use",
+    "start": "606360",
+    "end": "613320"
+  },
+  {
+    "text": "proportional integral derivative controller or pad for shot to mitigate the imbalance generated by usage of",
+    "start": "613320",
+    "end": "620200"
+  },
+  {
+    "text": "random sub setting so what is pad and how do we use it so uh basically what we",
+    "start": "620200",
+    "end": "627000"
+  },
+  {
+    "text": "did we just forked double Ur load balancer and then we repl replaced waste",
+    "start": "627000",
+    "end": "633120"
+  },
+  {
+    "text": "uh generation uh part you remember this part which was using cost per request function we replaced it with P so what",
+    "start": "633120",
+    "end": "641200"
+  },
+  {
+    "text": "PID is doing basically it's a mechanism that is uh using a feedback loop to",
+    "start": "641200",
+    "end": "646800"
+  },
+  {
+    "text": "minimize uh realtime error the difference between desired State and current state so in order to calculate",
+    "start": "646800",
+    "end": "654320"
+  },
+  {
+    "text": "the error we use the difference between current server CPU utilization and the mean utilization so basically we converg",
+    "start": "654320",
+    "end": "661240"
+  },
+  {
+    "text": "in all CPU utilization to the mean we used existing W load reports mechanism",
+    "start": "661240",
+    "end": "668079"
+  },
+  {
+    "text": "uh to uh provide us feedback loop and we implemented a very simple procedure to",
+    "start": "668079",
+    "end": "674160"
+  },
+  {
+    "text": "convert the output of pad into uh W weight so I don't want to get into mass",
+    "start": "674160",
+    "end": "682320"
+  },
+  {
+    "text": "of pad to deep just to give you a very brief overview but basically output of p",
+    "start": "682320",
+    "end": "687839"
+  },
+  {
+    "text": "is a weighted sum of three components and when I wa say weighted sum means that we uh multiply every component by a",
+    "start": "687839",
+    "end": "695600"
+  },
+  {
+    "text": "special weight and I will refer to them as gains like proportional gain during",
+    "start": "695600",
+    "end": "700880"
+  },
+  {
+    "text": "later part of my presentation to avoid confusion so what those three components are the first one one is proportional",
+    "start": "700880",
+    "end": "708600"
+  },
+  {
+    "text": "which is the main one is basically the difference between Uh current and design State the second one is integral which",
+    "start": "708600",
+    "end": "716079"
+  },
+  {
+    "text": "allows you to take some history into account basically if you increase your input and You observe that the effect on",
+    "start": "716079",
+    "end": "722519"
+  },
+  {
+    "text": "the output is too small it would make sense to increase your input more next time and the derivative one has the",
+    "start": "722519",
+    "end": "730079"
+  },
+  {
+    "text": "opposite effect so if you increase your input and the effect on the output is too sharp so it would make sense to slow",
+    "start": "730079",
+    "end": "736240"
+  },
+  {
+    "text": "down uh increase because you are risking to get oscillations and overshoot if you don't do that even if you don't reach",
+    "start": "736240",
+    "end": "742760"
+  },
+  {
+    "text": "your uh Target value yet so in a sense increasing proportional and uh integral",
+    "start": "742760",
+    "end": "749680"
+  },
+  {
+    "text": "gains uh speed UPS conversions and uh but uh have higher risks of overshoot",
+    "start": "749680",
+    "end": "755639"
+  },
+  {
+    "text": "and oscillations and increasing uh derivative component has the opposite effect so I mentioned that we have a",
+    "start": "755639",
+    "end": "763480"
+  },
+  {
+    "text": "simple process to convert the output of P to W our weight and you can see the P",
+    "start": "763480",
+    "end": "769079"
+  },
+  {
+    "text": "code for this um on this slide so basically what we did we just start with",
+    "start": "769079",
+    "end": "774360"
+  },
+  {
+    "text": "weights equal one and then when when we receive positive output from pH we",
+    "start": "774360",
+    "end": "779600"
+  },
+  {
+    "text": "slightly increase the weight and if output is negative we decrease the weight and we do this proportionally to",
+    "start": "779600",
+    "end": "786120"
+  },
+  {
+    "text": "the absolute value uh we um get from P ID while working on this we discovered a",
+    "start": "786120",
+    "end": "793199"
+  },
+  {
+    "text": "few important takeaways so the first one is that load reports uh must be smooth",
+    "start": "793199",
+    "end": "799600"
+  },
+  {
+    "text": "and the reason is uh that if they are not the mean value measured on the",
+    "start": "799600",
+    "end": "805000"
+  },
+  {
+    "text": "client might be spiky or oscillating and trying to convert to a spike in or",
+    "start": "805000",
+    "end": "810199"
+  },
+  {
+    "text": "oscillating value uh doesn't make any sense so uh what we did we did uh",
+    "start": "810199",
+    "end": "817519"
+  },
+  {
+    "text": "smoothing using moving a average uh window algorithm on the server and in",
+    "start": "817519",
+    "end": "822600"
+  },
+  {
+    "text": "theory we can do this on the client as well but doing this on the server gave us access to the full CPU distribution",
+    "start": "822600",
+    "end": "829360"
+  },
+  {
+    "text": "so this smoothing can be done a lot more accurately so the second takeaway is uh",
+    "start": "829360",
+    "end": "835920"
+  },
+  {
+    "text": "that updates between p and w Ur weights must be synchronized and this point",
+    "start": "835920",
+    "end": "841880"
+  },
+  {
+    "text": "requires a little more clarification so how W works is this so whenever it",
+    "start": "841880",
+    "end": "849440"
+  },
+  {
+    "text": "receives a load report from any server it immediately recalculates the weight",
+    "start": "849440",
+    "end": "854600"
+  },
+  {
+    "text": "for this server and it can do this because in WRR weight updates are completely uh um independent from each",
+    "start": "854600",
+    "end": "863440"
+  },
+  {
+    "text": "other it doesn't maintain any state P does maintain State and um uh if we uh",
+    "start": "863440",
+    "end": "871399"
+  },
+  {
+    "text": "do something like this uh P updates and W weight updates can get as synchronized",
+    "start": "871399",
+    "end": "878839"
+  },
+  {
+    "text": "so uh I didn't mention that uh wurr has also a background process that applies",
+    "start": "878839",
+    "end": "884480"
+  },
+  {
+    "text": "weight once in a while by default and if uh uh if we do this uh then we can get",
+    "start": "884480",
+    "end": "891079"
+  },
+  {
+    "text": "UNS synchronization which is something we want to avoid the third takeaway is that we must",
+    "start": "891079",
+    "end": "897199"
+  },
+  {
+    "text": "clamp weights if we don't do this in cases when just a few clients using p",
+    "start": "897199",
+    "end": "902880"
+  },
+  {
+    "text": "the effect the cumulative effect that they can generate is too small so weights can naturally go up to infinity",
+    "start": "902880",
+    "end": "910959"
+  },
+  {
+    "text": "and down to zero and we just set Max and mean value to avoid this so this table summarizes all",
+    "start": "910959",
+    "end": "918320"
+  },
+  {
+    "text": "tunable parameters we have for pad so I already mentioned proportional and derivative gain here so uh we tune them",
+    "start": "918320",
+    "end": "926639"
+  },
+  {
+    "text": "in a way to uh be on the safe side so we kind of sacrifice conversion speed a",
+    "start": "926639",
+    "end": "931880"
+  },
+  {
+    "text": "little bit because we can easily tolerate convergence in order of seconds or even minutes in some cases uh but we",
+    "start": "931880",
+    "end": "939120"
+  },
+  {
+    "text": "want to minimize probability of overshoot on illation we use default W",
+    "start": "939120",
+    "end": "944360"
+  },
+  {
+    "text": "weight update period of 1 second which is uh fast enough for us we set our",
+    "start": "944360",
+    "end": "950800"
+  },
+  {
+    "text": "default subset size to 10 which is small enough value so uh we are confident this",
+    "start": "950800",
+    "end": "956160"
+  },
+  {
+    "text": "is not going to uh give us excessive overhead from too many connections but at the same time pad have the",
+    "start": "956160",
+    "end": "962560"
+  },
+  {
+    "text": "flexibility to shift load within given subset and we tune moving average window",
+    "start": "962560",
+    "end": "968480"
+  },
+  {
+    "text": "which is a smoothing parameter we set it to one minute basically by observing gra CPU graphs with different uh moving",
+    "start": "968480",
+    "end": "976519"
+  },
+  {
+    "text": "average window size uh on the real servers we have so here you can see some results",
+    "start": "976519",
+    "end": "983480"
+  },
+  {
+    "text": "and by looking at this graph you can easily say at which moment of Time Pad was applied and as you can see the",
+    "start": "983480",
+    "end": "990720"
+  },
+  {
+    "text": "effect on the server side load load imbalance was huge so in the end of my presentation I",
+    "start": "990720",
+    "end": "998519"
+  },
+  {
+    "text": "want to briefly mention next steps so how do we plan to use uh subsetting to",
+    "start": "998519",
+    "end": "1004880"
+  },
+  {
+    "text": "further Drive reliability in our organization so let's consider the following use case so suppose you have a",
+    "start": "1004880",
+    "end": "1011440"
+  },
+  {
+    "text": "lot of servers and one of those servers is misbehaving so you want to avoid sending too much traffic to it but how",
+    "start": "1011440",
+    "end": "1017839"
+  },
+  {
+    "text": "can you protect this from the client side and if you use just plain round",
+    "start": "1017839",
+    "end": "1023480"
+  },
+  {
+    "text": "robin the answer is that you need to take a few full round trip across all",
+    "start": "1023480",
+    "end": "1028959"
+  },
+  {
+    "text": "your servers doing them in round robin fashion to detect this failure which is too slow so subsetting helps you to uh",
+    "start": "1028959",
+    "end": "1037760"
+  },
+  {
+    "text": "reduce this time a lot because we can use uh much smaller subsets and uh now",
+    "start": "1037760",
+    "end": "1044798"
+  },
+  {
+    "text": "we can efficiently use JPC features such as uh out detection so we can detect B",
+    "start": "1044799",
+    "end": "1051400"
+  },
+  {
+    "text": "hosts very uh fast and then we can send a smaller amount of traffic to the bad",
+    "start": "1051400",
+    "end": "1058880"
+  },
+  {
+    "text": "host or host that generate High latency so now let's revisit our goal",
+    "start": "1058880",
+    "end": "1064960"
+  },
+  {
+    "text": "that we set for ourself so I can claim that um just random subsetting is",
+    "start": "1064960",
+    "end": "1071320"
+  },
+  {
+    "text": "already useful enough feature it provides a lot of benefits for many application but it requires developers",
+    "start": "1071320",
+    "end": "1077159"
+  },
+  {
+    "text": "to understand some tradeoffs at the same time combination of random subsetting and P accordingly to our experimentation",
+    "start": "1077159",
+    "end": "1085039"
+  },
+  {
+    "text": "is a strict improvement over around Robin so what we are doing right now we're in the process of applying this by",
+    "start": "1085039",
+    "end": "1091039"
+  },
+  {
+    "text": "default and basically transparently replacing round robin with a combination",
+    "start": "1091039",
+    "end": "1096360"
+  },
+  {
+    "text": "of p and subsetting which should give us the benefits I uh talked about",
+    "start": "1096360",
+    "end": "1102600"
+  },
+  {
+    "text": "before I also can uh mention that providing a generic features is the goal",
+    "start": "1102600",
+    "end": "1108799"
+  },
+  {
+    "text": "that is very well aligned with the goals of uh grpc uh community and grpc",
+    "start": "1108799",
+    "end": "1113919"
+  },
+  {
+    "text": "maintainers so we submitted two gfcs one about random subsetting another about uh",
+    "start": "1113919",
+    "end": "1120520"
+  },
+  {
+    "text": "p and the first was is already merged the second one is still under review but didn't get any blocking or negative",
+    "start": "1120520",
+    "end": "1127520"
+  },
+  {
+    "text": "feedback yet uh so uh I can say that going through this grfc process uh slows",
+    "start": "1127520",
+    "end": "1136039"
+  },
+  {
+    "text": "down us a lot because we need to spend a lot of time and effort discussing different features but at the same time",
+    "start": "1136039",
+    "end": "1142760"
+  },
+  {
+    "text": "it really forces us to think about uh generic features and come up with the uh",
+    "start": "1142760",
+    "end": "1149720"
+  },
+  {
+    "text": "design that is a lot better that we could come up with otherwise so that's it for me we'll be",
+    "start": "1149720",
+    "end": "1157280"
+  },
+  {
+    "text": "happy to answer all the questions",
+    "start": "1157280",
+    "end": "1161240"
+  },
+  {
+    "text": "so thank you for for the talk so I'm part from an expert on on subsets but I've been reading a little bit there's a paper that came out of Google in 2022",
+    "start": "1176799",
+    "end": "1183720"
+  },
+  {
+    "text": "that talked about the rockier algorithm wondering how that compares because it doesn't like mention the P or anything",
+    "start": "1183720",
+    "end": "1189280"
+  },
+  {
+    "text": "wondering if you evaluated it and it wasn't doable in grpc or it actually isn't as good algorithm as uh as what",
+    "start": "1189280",
+    "end": "1195280"
+  },
+  {
+    "text": "you did so uh yeah that's a great question I can get back here to my slide",
+    "start": "1195280",
+    "end": "1200760"
+  },
+  {
+    "text": "where I talked about deterministic subsetting and the second paper is actually me is the one mention in rock",
+    "start": "1200760",
+    "end": "1207480"
+  },
+  {
+    "text": "stadia subsetting so this is one example of deterministic subsetting and we tried",
+    "start": "1207480",
+    "end": "1212760"
+  },
+  {
+    "text": "we actually implemented proof of concept for it but yeah the outcome was that uh this is not something we can add to grpc",
+    "start": "1212760",
+    "end": "1220799"
+  },
+  {
+    "text": "by default okay for the reasons yeah I explained here because it's like excellent thank you yeah",
+    "start": "1220799",
+    "end": "1228640"
+  },
+  {
+    "text": "can you briefly touch upon the benefits that this overall subsiding strategy brought for your projects in terms of",
+    "start": "1231039",
+    "end": "1238120"
+  },
+  {
+    "text": "say monetary benefits or the resource utilization so uh basically here uh when",
+    "start": "1238120",
+    "end": "1244840"
+  },
+  {
+    "text": "I talked about problems with uh round robbing so those are the problems we are",
+    "start": "1244840",
+    "end": "1253240"
+  },
+  {
+    "text": "trying to address uh with uh subsetting so basically resource over hat uh like",
+    "start": "1253240",
+    "end": "1260000"
+  },
+  {
+    "text": "number of connections uh reduces significantly if you use uh subsetting",
+    "start": "1260000",
+    "end": "1266120"
+  },
+  {
+    "text": "compared to round robin so uh combination of random subsetting plus P",
+    "start": "1266120",
+    "end": "1273159"
+  },
+  {
+    "text": "actually help us to address the second problem here which is like with okay with round robing you get perfect",
+    "start": "1273159",
+    "end": "1278880"
+  },
+  {
+    "text": "request distribution but load distribution might be different across server and uh PID helped to address this",
+    "start": "1278880",
+    "end": "1287039"
+  },
+  {
+    "text": "part so it's uh us a smaller number of connections and resulted in better load",
+    "start": "1287039",
+    "end": "1293720"
+  },
+  {
+    "text": "distribution so server owners can scale down their deployments because uh load",
+    "start": "1293720",
+    "end": "1299240"
+  },
+  {
+    "text": "distribution is more tight and uh last one is that uh something I mentioned in",
+    "start": "1299240",
+    "end": "1305039"
+  },
+  {
+    "text": "the end of my presentation which is like better observability on the client side so we can have high fidelity metric on",
+    "start": "1305039",
+    "end": "1311799"
+  },
+  {
+    "text": "the client side so we can detect bad hosts which is something we plan to use to drive reliability",
+    "start": "1311799",
+    "end": "1319879"
+  },
+  {
+    "text": "thank you one um this is regarding the P values",
+    "start": "1321039",
+    "end": "1326919"
+  },
+  {
+    "text": "that we were showing I guess the I value was probably zero in your case um the",
+    "start": "1326919",
+    "end": "1332080"
+  },
+  {
+    "text": "question that I have is how did you iterate for the P I think 0 0.1 I probably zero and D was one how did you",
+    "start": "1332080",
+    "end": "1339279"
+  },
+  {
+    "text": "iterate to get the right values for your project uh so uh basically this is a",
+    "start": "1339279",
+    "end": "1346159"
+  },
+  {
+    "text": "more trial an error approach like uh there are mathematical models how to",
+    "start": "1346159",
+    "end": "1351679"
+  },
+  {
+    "text": "tune your PID uh applying those models in practice",
+    "start": "1351679",
+    "end": "1357240"
+  },
+  {
+    "text": "it's kind of hard and for this particular problem uh it's twice as hard",
+    "start": "1357240",
+    "end": "1363559"
+  },
+  {
+    "text": "because p is applied in a distributed uh way so it's not a single pad controller",
+    "start": "1363559",
+    "end": "1370240"
+  },
+  {
+    "text": "it's uh thousands of pad controller uh deployed to multiple application so uh",
+    "start": "1370240",
+    "end": "1377679"
+  },
+  {
+    "text": "the m main property we we're trying to preserve is to make sure we're not",
+    "start": "1377679",
+    "end": "1383360"
+  },
+  {
+    "text": "getting oscillations and uh we kind of uh the first value we tuned is this",
+    "start": "1383360",
+    "end": "1390480"
+  },
+  {
+    "text": "server side uh moving average window which makes our load smooth so once we",
+    "start": "1390480",
+    "end": "1395960"
+  },
+  {
+    "text": "get this smoothing parameter we can guarantee that during like for example 1 second the average uh value as measured",
+    "start": "1395960",
+    "end": "1404080"
+  },
+  {
+    "text": "on the client will not change significantly and then if we know this value we can tune proportional and uh",
+    "start": "1404080",
+    "end": "1412799"
+  },
+  {
+    "text": "derivative gain in a way that guarantees that uh like uh",
+    "start": "1412799",
+    "end": "1418400"
+  },
+  {
+    "text": "during um some amount of time uh we like",
+    "start": "1418400",
+    "end": "1424200"
+  },
+  {
+    "text": "Waits we can guarantee how fast weights on a given client can change and then we",
+    "start": "1424200",
+    "end": "1431400"
+  },
+  {
+    "text": "tested it out with both synthetic benchmarks and real application and then",
+    "start": "1431400",
+    "end": "1436440"
+  },
+  {
+    "text": "we like uh grab graphs the CH uh changes of weights and we see that okay indeed",
+    "start": "1436440",
+    "end": "1443360"
+  },
+  {
+    "text": "our weights as tested by multiple application they just converge but never",
+    "start": "1443360",
+    "end": "1449400"
+  },
+  {
+    "text": "isolate it's part of grpc and if anyone wants to use it they need to follow the",
+    "start": "1449400",
+    "end": "1454640"
+  },
+  {
+    "text": "same process and follow the best practice that you have done so would some of your work be available for the",
+    "start": "1454640",
+    "end": "1460480"
+  },
+  {
+    "text": "community if they want to use this P GPC I don't think it's uh they need to follow the same process because this",
+    "start": "1460480",
+    "end": "1467399"
+  },
+  {
+    "text": "kind of tuning to be uh done once it's uh this is our assumption so the value",
+    "start": "1467399",
+    "end": "1473320"
+  },
+  {
+    "text": "we came up with actually proved to work for uh different application with different like request profile error",
+    "start": "1473320",
+    "end": "1480320"
+  },
+  {
+    "text": "rates whatever else and uh as I mentioned before we are kind of on the safe side so we even increase our",
+    "start": "1480320",
+    "end": "1487840"
+  },
+  {
+    "text": "parameters to kind of sacrifice converence speed a little bit so the claim we want to make is that defaults",
+    "start": "1487840",
+    "end": "1494360"
+  },
+  {
+    "text": "we came up with should be applicable for like I don't know 99% of applications and if there is an",
+    "start": "1494360",
+    "end": "1501960"
+  },
+  {
+    "text": "application for which conversion speed is critical then yes people need to tune it themselves but uh it's really not uh",
+    "start": "1501960",
+    "end": "1510679"
+  },
+  {
+    "text": "the goal for most applications because like uh they can easily toate some amount of imbalance on the server Lo",
+    "start": "1510679",
+    "end": "1519679"
+  },
+  {
+    "text": "utilization um one of the cons shown for the random sub setting was the high connection charm uh in the final state",
+    "start": "1523279",
+    "end": "1529720"
+  },
+  {
+    "text": "are you still fine with the connection CH or so the connection CH part uh let",
+    "start": "1529720",
+    "end": "1535840"
+  },
+  {
+    "text": "me get back here so this part is completely uh like almost completely",
+    "start": "1535840",
+    "end": "1541679"
+  },
+  {
+    "text": "eliminated by using rendu Hasen so the end uh product that we have using a",
+    "start": "1541679",
+    "end": "1548080"
+  },
+  {
+    "text": "combination of random subsetting with randoming plus P so kind of this",
+    "start": "1548080",
+    "end": "1553440"
+  },
+  {
+    "text": "addresses the problem and it's like uh our connection con CH is very low",
+    "start": "1553440",
+    "end": "1559640"
+  },
+  {
+    "text": "after we apply this um I have a different question um",
+    "start": "1559640",
+    "end": "1567159"
+  },
+  {
+    "text": "so like if I understand right you have to deploy P ID controller for like maybe",
+    "start": "1567159",
+    "end": "1573279"
+  },
+  {
+    "text": "per application or like for a bunch of applications I'm curious how the deployment cost of having this new",
+    "start": "1573279",
+    "end": "1580520"
+  },
+  {
+    "text": "controller U compares to the you know server load and the server resource",
+    "start": "1580520",
+    "end": "1586360"
+  },
+  {
+    "text": "savings that you saw from the improve low balancing algorithm when you say deployment cost what do you mean the",
+    "start": "1586360",
+    "end": "1592360"
+  },
+  {
+    "text": "time we spent to kind of migrate applications or what ex oh no I mean I",
+    "start": "1592360",
+    "end": "1597600"
+  },
+  {
+    "text": "assume the P ID controller too needs like CPU and resources to run which you're saving from the server load but",
+    "start": "1597600",
+    "end": "1604520"
+  },
+  {
+    "text": "you're bringing up these controllers for the subsetting I'm curious if the costs compare or it's an a of magnitude yes so",
+    "start": "1604520",
+    "end": "1612600"
+  },
+  {
+    "text": "basically the question is about the overhead of P yes and this is a great question so uh basically the overhead of",
+    "start": "1612600",
+    "end": "1619960"
+  },
+  {
+    "text": "P directly depends on how often we recalculate the weight because the p ID",
+    "start": "1619960",
+    "end": "1625200"
+  },
+  {
+    "text": "calculation itself like measuring like uh proportional uh component here is a",
+    "start": "1625200",
+    "end": "1631440"
+  },
+  {
+    "text": "single uh operation and uh like for derivative and integral part it's really",
+    "start": "1631440",
+    "end": "1636559"
+  },
+  {
+    "text": "like I don't know two mathematical operation it doesn't really matter in the uh compared to other expensive",
+    "start": "1636559",
+    "end": "1643120"
+  },
+  {
+    "text": "scenes like protuff serialization it's not even noticeable at all the most expens ensive part when using p and dou",
+    "start": "1643120",
+    "end": "1650760"
+  },
+  {
+    "text": "urr because p is based on wur is this weight update part when we need to log",
+    "start": "1650760",
+    "end": "1656320"
+  },
+  {
+    "text": "sces and kind of apply weights and you can directly tune this impact by uh",
+    "start": "1656320",
+    "end": "1662880"
+  },
+  {
+    "text": "changing uh let me get back quickly to this slide yeah here so there is a weight",
+    "start": "1662880",
+    "end": "1670799"
+  },
+  {
+    "text": "update period which is specific for both pad and double urr and we use default uh",
+    "start": "1670799",
+    "end": "1678200"
+  },
+  {
+    "text": "W value which is 1 second and uh this is proved to be uh like super low overhead",
+    "start": "1678200",
+    "end": "1686000"
+  },
+  {
+    "text": "I didn't hear about anyone complaining of overhead of this operation but even",
+    "start": "1686000",
+    "end": "1691559"
+  },
+  {
+    "text": "even if it does you can still like set it I don't know to 5 seconds or 10 seconds you have control over it makes",
+    "start": "1691559",
+    "end": "1698320"
+  },
+  {
+    "text": "sense thank you one question around the same context so about the WR and this",
+    "start": "1698320",
+    "end": "1703480"
+  },
+  {
+    "text": "PID U we update you mention that lesson learn from your journey you synchronize these two uh steps and I was wondering",
+    "start": "1703480",
+    "end": "1711080"
+  },
+  {
+    "text": "what uh disaster can happen if you do not is it just delayer of the weight update or it's a data corruption Etc so",
+    "start": "1711080",
+    "end": "1718679"
+  },
+  {
+    "text": "it's not like data corruption it doesn't affect requests or anything but what happens and what we observe while doing",
+    "start": "1718679",
+    "end": "1726240"
+  },
+  {
+    "text": "experimentation is this so uh PID receives a load report and see that okay",
+    "start": "1726240",
+    "end": "1733000"
+  },
+  {
+    "text": "for a given server I need to increase the weight because um like",
+    "start": "1733000",
+    "end": "1739000"
+  },
+  {
+    "text": "This Server should really receive more request so p uh does it calculation",
+    "start": "1739000",
+    "end": "1744840"
+  },
+  {
+    "text": "updates the weight but this weight is not applied next next uh report come ups",
+    "start": "1744840",
+    "end": "1750200"
+  },
+  {
+    "text": "for the same server and P does it increase again but the actual weight",
+    "start": "1750200",
+    "end": "1755600"
+  },
+  {
+    "text": "that is used by the load balancer is not affected and uh so what uh it results in",
+    "start": "1755600",
+    "end": "1762080"
+  },
+  {
+    "text": "practice is a little bit more of oscillations like pad can end up overshooting its internal state compared",
+    "start": "1762080",
+    "end": "1768760"
+  },
+  {
+    "text": "to the current state of wur and our fix for this was really simple so what we",
+    "start": "1768760",
+    "end": "1773880"
+  },
+  {
+    "text": "did we just ignore uh load reports if we cannot apply them",
+    "start": "1773880",
+    "end": "1781039"
+  },
+  {
+    "text": "immediately I have a question um so I'm wondering about the",
+    "start": "1784080",
+    "end": "1789640"
+  },
+  {
+    "text": "trade-off of speed of convergence um is this sort of a property that we want to preserve for PID or is there like if I'm",
+    "start": "1789640",
+    "end": "1797159"
+  },
+  {
+    "text": "thinking about I want faster convergence is this in service of better tail latencies or how do I think about this",
+    "start": "1797159",
+    "end": "1803320"
+  },
+  {
+    "text": "as as sort of a service owner I know we don't want to tune these things but how do you think about those things so uh",
+    "start": "1803320",
+    "end": "1809080"
+  },
+  {
+    "text": "the speed of convergence is important in the following scenario so uh suppose",
+    "start": "1809080",
+    "end": "1815279"
+  },
+  {
+    "text": "your uh like when you run a benchmark you just start your server and start all",
+    "start": "1815279",
+    "end": "1822880"
+  },
+  {
+    "text": "your clients and then your clients use deterministic uh not deterministic random setting and the initial state is",
+    "start": "1822880",
+    "end": "1830159"
+  },
+  {
+    "text": "very imbalanced so how fast you go from imbalanced to balanced state is the",
+    "start": "1830159",
+    "end": "1836000"
+  },
+  {
+    "text": "property we uh care about and in real life this event happened almost never",
+    "start": "1836000",
+    "end": "1842120"
+  },
+  {
+    "text": "because like uh real servers uh like run continuously we never like uh really",
+    "start": "1842120",
+    "end": "1849880"
+  },
+  {
+    "text": "restart them but uh this might have some importance when traffic patterns change",
+    "start": "1849880",
+    "end": "1857000"
+  },
+  {
+    "text": "so uh I I don't know a given uh client is restarted and it picked a different",
+    "start": "1857000",
+    "end": "1863000"
+  },
+  {
+    "text": "subset which result in some form of imbalance okay so how fast we get to the",
+    "start": "1863000",
+    "end": "1868519"
+  },
+  {
+    "text": "state that is balanced oh we we are run out running out of time that's the",
+    "start": "1868519",
+    "end": "1873639"
+  },
+  {
+    "text": "question okay yeah let's uh take the discussion outside yeah and close this",
+    "start": "1873639",
+    "end": "1879159"
+  },
+  {
+    "text": "up yes thank you",
+    "start": "1879159",
+    "end": "1882960"
+  }
+]

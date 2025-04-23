@@ -1,0 +1,1512 @@
+[
+  {
+    "text": "all right uh hey everyone welcome to uh our talk today we're gonna be talking about uh multi-cluster stateful set",
+    "start": "1020",
+    "end": "7919"
+  },
+  {
+    "text": "migrations uh and how they can solve some of your upgrade payments um my name is Matt I'm a software engineer",
+    "start": "7919",
+    "end": "15540"
+  },
+  {
+    "text": "at chronosphere where I work on the infrastructure team dealing with all things storage reliability scalability",
+    "start": "15540",
+    "end": "21359"
+  },
+  {
+    "text": "and for chronosphere I was an SRE at Uber on the observability platform there",
+    "start": "21359",
+    "end": "27840"
+  },
+  {
+    "text": "and I'm Peter I work at Google on Staple workloads on gke so deal with storage",
+    "start": "27840",
+    "end": "33680"
+  },
+  {
+    "text": "drivers that GK uses we're connecting to storage infrastructure",
+    "start": "33680",
+    "end": "40199"
+  },
+  {
+    "text": "uh so a little general idea of what we're going to be talking about today I'm going to give you a bit of context",
+    "start": "40500",
+    "end": "46320"
+  },
+  {
+    "text": "on uh how we use kubernetes at chronosphere uh some of the use cases",
+    "start": "46320",
+    "end": "52079"
+  },
+  {
+    "text": "and challenges we have with uh cross cluster stateful workloads uh Peter is",
+    "start": "52079",
+    "end": "57300"
+  },
+  {
+    "text": "going to tell you about some of the work going on in open source kubernetes to make these use cases possible and we're",
+    "start": "57300",
+    "end": "64198"
+  },
+  {
+    "text": "going to show you a demo of how it all ties together so first to give you a little bit of",
+    "start": "64199",
+    "end": "70380"
+  },
+  {
+    "text": "context about what chronosphere does and how we use kubernetes",
+    "start": "70380",
+    "end": "75920"
+  },
+  {
+    "text": "chronosphere is a software as a service observability platform particularly built for high scale use cases in",
+    "start": "75920",
+    "end": "83220"
+  },
+  {
+    "text": "cloud-native environments and given how Mission critical observability is we",
+    "start": "83220",
+    "end": "89159"
+  },
+  {
+    "text": "have a really high SLA and we take reliability incredibly seriously to meet that SLA so although we have three nines",
+    "start": "89159",
+    "end": "96600"
+  },
+  {
+    "text": "uh in our SLA we aim for four nines and have achieved four nines in production",
+    "start": "96600",
+    "end": "102680"
+  },
+  {
+    "text": "uh part of the way that we achieve these reliability and fault tolerance needs is",
+    "start": "102680",
+    "end": "108900"
+  },
+  {
+    "text": "by running on top of kubernetes so our kubernetes footprint spans multiple",
+    "start": "108900",
+    "end": "114299"
+  },
+  {
+    "text": "regions with thousands of kubernetes nodes in total and over 40 000 pods in",
+    "start": "114299",
+    "end": "120479"
+  },
+  {
+    "text": "total each of these clusters were on a mix of stateless and stateful workloads but the",
+    "start": "120479",
+    "end": "127740"
+  },
+  {
+    "text": "largest stateful workload is our metrics data store which I'm going to tell you more about",
+    "start": "127740",
+    "end": "134420"
+  },
+  {
+    "text": "so the architecture of our metrics data store really heavily influences how we operate it how we deploy about it or",
+    "start": "134760",
+    "end": "141900"
+  },
+  {
+    "text": "sorry how we operate it how we think about it deploy it and kind of architect our clusters for it",
+    "start": "141900",
+    "end": "147599"
+  },
+  {
+    "text": "so our metrics data store is based on M3 which is an open source metrics engine",
+    "start": "147599",
+    "end": "153560"
+  },
+  {
+    "text": "and Metric datastore clusters are deployed as three separate stateful sets",
+    "start": "153560",
+    "end": "159720"
+  },
+  {
+    "text": "each in a separate Zone and each having the full copy of the data so data is",
+    "start": "159720",
+    "end": "165540"
+  },
+  {
+    "text": "sharded and started across multiple nodes in a stateful set and then each",
+    "start": "165540",
+    "end": "171180"
+  },
+  {
+    "text": "staple set owns an entire copy of the data all reads and writes are done through",
+    "start": "171180",
+    "end": "177180"
+  },
+  {
+    "text": "client-side Quorum so when you go to write uh data as long as to the three",
+    "start": "177180",
+    "end": "182280"
+  },
+  {
+    "text": "nodes that own that Shard acknowledge the right and persisted on disk then we",
+    "start": "182280",
+    "end": "187319"
+  },
+  {
+    "text": "consider the right successful a similar pattern for reads but because all this Quorum is done",
+    "start": "187319",
+    "end": "194040"
+  },
+  {
+    "text": "client-side it means that the clients have to be aware of each unique database",
+    "start": "194040",
+    "end": "199379"
+  },
+  {
+    "text": "node in the cluster have to be able to open a connection to it and have to be able to individually address each",
+    "start": "199379",
+    "end": "205140"
+  },
+  {
+    "text": "database node so you might be used to some systems like Cassandra where is there where",
+    "start": "205140",
+    "end": "210540"
+  },
+  {
+    "text": "there's the concept of a hinted handoff or kind of coordinating rights between database nodes in our database there's",
+    "start": "210540",
+    "end": "218340"
+  },
+  {
+    "text": "none of that it's all done on the client side so we have a number of kind of robust",
+    "start": "218340",
+    "end": "226319"
+  },
+  {
+    "text": "operational workflows um and general day-to-day workflows that are uniquely aware of the databases",
+    "start": "226319",
+    "end": "233700"
+  },
+  {
+    "text": "architecture its replication strategy and uh fault yeah and Quorum",
+    "start": "233700",
+    "end": "241019"
+  },
+  {
+    "text": "requirements so for example things like moving a database cluster between node",
+    "start": "241019",
+    "end": "246599"
+  },
+  {
+    "text": "pools coordinating resizing of the underlying storage or upgrading the",
+    "start": "246599",
+    "end": "252900"
+  },
+  {
+    "text": "database cluster but there have been times where we've wanted to move one of our metrics data",
+    "start": "252900",
+    "end": "259560"
+  },
+  {
+    "text": "stores between kubernetes clusters and the complexity was that was going to be",
+    "start": "259560",
+    "end": "264840"
+  },
+  {
+    "text": "involved pretty much required us to find Alternatives any design that we came up with was",
+    "start": "264840",
+    "end": "272220"
+  },
+  {
+    "text": "going to involve deleting stateful sets within or with the orphan propagation policy and then manually moving nodes",
+    "start": "272220",
+    "end": "279240"
+  },
+  {
+    "text": "between clusters and hoping that there were no other disruptions in the meantime anything was going to be kind",
+    "start": "279240",
+    "end": "285479"
+  },
+  {
+    "text": "of a disaster and you know if you lost other pods during the migration then you could lose",
+    "start": "285479",
+    "end": "291840"
+  },
+  {
+    "text": "Quorum so we had to find alternatives okay",
+    "start": "291840",
+    "end": "297300"
+  },
+  {
+    "text": "and in terms of why you might want to do this why you might want to move a staple workload between clusters there can be a",
+    "start": "297300",
+    "end": "304320"
+  },
+  {
+    "text": "number of reasons a lot of organizations will start off with just one or two production kubernetes clusters",
+    "start": "304320",
+    "end": "311759"
+  },
+  {
+    "text": "um and uh over time have to split up those workloads so maybe your cluster",
+    "start": "311759",
+    "end": "317280"
+  },
+  {
+    "text": "has maybe your kubernetes cluster has grown too large and you're worried about control plane scalability or maybe you",
+    "start": "317280",
+    "end": "323699"
+  },
+  {
+    "text": "just want to reduce the blast radius of any one kubernetes control plane failure",
+    "start": "323699",
+    "end": "329720"
+  },
+  {
+    "text": "either way you and you might want to end up splitting your workloads across multiple clusters",
+    "start": "329720",
+    "end": "336360"
+  },
+  {
+    "text": "um you might also have to move workloads from one region to another so maybe you",
+    "start": "336360",
+    "end": "341580"
+  },
+  {
+    "text": "need some data to be in a specific region for compliance or data severity purposes uh or maybe you just want to",
+    "start": "341580",
+    "end": "348780"
+  },
+  {
+    "text": "move some data closer to your users maybe you have a large user segment in a new geography and you want your data to",
+    "start": "348780",
+    "end": "355560"
+  },
+  {
+    "text": "be as close to them as possible there are also some cloud provider features that might only be available on",
+    "start": "355560",
+    "end": "362520"
+  },
+  {
+    "text": "new clusters that you might want to take advantage of or maybe you're re-architecting your clusters",
+    "start": "362520",
+    "end": "367759"
+  },
+  {
+    "text": "or you're swapping out kind of low level components like maybe you're changing your cni implementation",
+    "start": "367759",
+    "end": "374220"
+  },
+  {
+    "text": "and kind of doing that on a live cluster can be like changing the engine of a plane mid-flight and kind of terrifying",
+    "start": "374220",
+    "end": "382759"
+  },
+  {
+    "text": "and if you find yourself in the situation of wanting to move workloads between clusters for stateless workloads",
+    "start": "382919",
+    "end": "389220"
+  },
+  {
+    "text": "there are a number of solutions that the community has come up with that make moving workloads between clusters easier",
+    "start": "389220",
+    "end": "395360"
+  },
+  {
+    "text": "the most notable ones are multi-cluster services and multi-cluster ingresses",
+    "start": "395360",
+    "end": "400800"
+  },
+  {
+    "text": "both of which are implemented by multiple Open Source service meshes as well as cloud provider implementations",
+    "start": "400800",
+    "end": "407819"
+  },
+  {
+    "text": "so if you're running a purely stateless workload then you can just bring up a new kubernetes cluster bring up your",
+    "start": "407819",
+    "end": "414300"
+  },
+  {
+    "text": "workloads in that cluster and then shift and then shift traffic over to them using one of these tools but for",
+    "start": "414300",
+    "end": "421139"
+  },
+  {
+    "text": "stateful workloads the story isn't really as clear and for our workload specifically given the requirement of",
+    "start": "421139",
+    "end": "429060"
+  },
+  {
+    "text": "the client having to address each database node we can't just put a load",
+    "start": "429060",
+    "end": "434280"
+  },
+  {
+    "text": "balancer in front of a staple set and then move them over and call it a day",
+    "start": "434280",
+    "end": "439758"
+  },
+  {
+    "text": "so I'm going to talk about some of the challenges you may face with performing across cluster migration",
+    "start": "442740",
+    "end": "449639"
+  },
+  {
+    "text": "um so we have the complexity of managing multiple kubernetes control planes if you're running in a single kubernetes",
+    "start": "449639",
+    "end": "454860"
+  },
+  {
+    "text": "cluster you have a bunch of invariants that your API server will enforce you have uniqueness guarantees per pod you",
+    "start": "454860",
+    "end": "461580"
+  },
+  {
+    "text": "have at most one semantics of a staple set and those are enforced through API",
+    "start": "461580",
+    "end": "467340"
+  },
+  {
+    "text": "server now if we're dealing with migrating a logical application across clusters if you're dealing with two API",
+    "start": "467340",
+    "end": "473880"
+  },
+  {
+    "text": "servers so you're managing State across two API servers two clusters you don't",
+    "start": "473880",
+    "end": "479880"
+  },
+  {
+    "text": "have the same invariance so um that's that's one of the main main",
+    "start": "479880",
+    "end": "485099"
+  },
+  {
+    "text": "challenges here and we're going to cover like both this orchestration networking and storage",
+    "start": "485099",
+    "end": "491460"
+  },
+  {
+    "text": "um but this is kind of a cement uh illustration here of say a migration you",
+    "start": "491460",
+    "end": "496500"
+  },
+  {
+    "text": "have a migration that's partly underway um you have some some subset of replicas",
+    "start": "496500",
+    "end": "501780"
+  },
+  {
+    "text": "in a new cluster um and you're you're scaling down replica as a normal cluster",
+    "start": "501780",
+    "end": "507599"
+  },
+  {
+    "text": "um while still referencing uh your storage layer between the Clusters",
+    "start": "507599",
+    "end": "513300"
+  },
+  {
+    "text": "so let's talk about Network first what are the challenges here um first one is clients need access to",
+    "start": "513300",
+    "end": "520680"
+  },
+  {
+    "text": "updated application endpoints so as Matt mentioned clients of m3db need to be",
+    "start": "520680",
+    "end": "526320"
+  },
+  {
+    "text": "able to uniquely address the replicas that are running and so for this you need to have a way for clients to",
+    "start": "526320",
+    "end": "532019"
+  },
+  {
+    "text": "discover replicas as they turn up in a new cluster so usually clients will communicate",
+    "start": "532019",
+    "end": "538560"
+  },
+  {
+    "text": "through a cluster IP or balancer or through a headless service within the cluster um but since we're moving across",
+    "start": "538560",
+    "end": "545399"
+  },
+  {
+    "text": "clusters we need some other sort of solution to handle that um the other the other issue is peer",
+    "start": "545399",
+    "end": "550440"
+  },
+  {
+    "text": "Discovery so peers need a reliable stable endpoint to connect to um or Discovery service to determine",
+    "start": "550440",
+    "end": "557100"
+  },
+  {
+    "text": "which replicas are currently available um so in a single cluster you know there is",
+    "start": "557100",
+    "end": "563339"
+  },
+  {
+    "text": "peers are assigned with the same DNS endpoint the name is consistent even though an IP address might change as",
+    "start": "563339",
+    "end": "568860"
+  },
+  {
+    "text": "Pond life cycle changes and DNS updates are almost instant thanks to cube proxy",
+    "start": "568860",
+    "end": "576420"
+  },
+  {
+    "text": "um but across clusters replicas even though you're they're uniquely addressable they may not have consistent",
+    "start": "576420",
+    "end": "582959"
+  },
+  {
+    "text": "DNS naming based on your service measure of choice and the fully qualified domain",
+    "start": "582959",
+    "end": "588120"
+  },
+  {
+    "text": "name might not be consistent so that's that's something that we need to account for um and then finally when we're actually",
+    "start": "588120",
+    "end": "594680"
+  },
+  {
+    "text": "migrating an application we don't want to have to re-architect our application to support cross-clusters",
+    "start": "594680",
+    "end": "601940"
+  },
+  {
+    "text": "there may be some changes that we need to do to use a different peer Discovery endpoint but we don't want to actually",
+    "start": "601940",
+    "end": "608459"
+  },
+  {
+    "text": "have to modify the application significantly before we incorporate this",
+    "start": "608459",
+    "end": "613680"
+  },
+  {
+    "text": "cross cluster move because that's just a bunch of extra engineering that we don't want to do",
+    "start": "613680",
+    "end": "619160"
+  },
+  {
+    "text": "so that's another constraint of the system",
+    "start": "619160",
+    "end": "623600"
+  },
+  {
+    "text": "um the other challenge here is storage so um we have",
+    "start": "625800",
+    "end": "631800"
+  },
+  {
+    "text": "a typical applications may use I guess for read write many that's fairly simple",
+    "start": "631800",
+    "end": "638519"
+  },
+  {
+    "text": "because we have application storage that may be accessible across both clusters just through a network endpoint that",
+    "start": "638519",
+    "end": "644399"
+  },
+  {
+    "text": "stays consistent but if we're using read write once we need to make sure that our storage references are able to be shared",
+    "start": "644399",
+    "end": "652620"
+  },
+  {
+    "text": "across clusters so let's consider this case where say we have an application that's using a",
+    "start": "652620",
+    "end": "658920"
+  },
+  {
+    "text": "persistent disk in one cluster and how do we get the other cluster to recognize that persistent disk can use",
+    "start": "658920",
+    "end": "666720"
+  },
+  {
+    "text": "it once it's no longer being used in the original cluster if we're moving over a replica",
+    "start": "666720",
+    "end": "672600"
+  },
+  {
+    "text": "um so we need to have a way to have this data be accessible across both clusters or at least this data reference",
+    "start": "672600",
+    "end": "679740"
+  },
+  {
+    "text": "um and within a single cluster PVS are a global resource um but now that we are kind of breaking",
+    "start": "679740",
+    "end": "686760"
+  },
+  {
+    "text": "out of the cluster and going outside of the cluster boundary we need to still enforce this invariant so that's another",
+    "start": "686760",
+    "end": "692760"
+  },
+  {
+    "text": "challenge we have to we have to handle so yeah API server isn't enforcing the PVE to PVC uniqueness so we need the",
+    "start": "692760",
+    "end": "700140"
+  },
+  {
+    "text": "orchestration layer to handle that something that's outside the cluster that's able to make sure the application",
+    "start": "700140",
+    "end": "705240"
+  },
+  {
+    "text": "still obeys these semantics we want it to obey even though we don't have the invariance",
+    "start": "705240",
+    "end": "711300"
+  },
+  {
+    "text": "um of that API server is enforcing and finally the major challenge here is",
+    "start": "711300",
+    "end": "716459"
+  },
+  {
+    "text": "orchestration um so there's a number of things we need to think about number one is um",
+    "start": "716459",
+    "end": "723000"
+  },
+  {
+    "text": "replicas need to follow storage so if we're using Dynamic provisioning if we simply scale down replicas in the source",
+    "start": "723000",
+    "end": "729480"
+  },
+  {
+    "text": "cluster and bring them up in a destination cluster um and we're using dynamic revisioning",
+    "start": "729480",
+    "end": "735740"
+  },
+  {
+    "text": "we may get volumes provision that we don't want and really we want to have our data layer be migrated",
+    "start": "735740",
+    "end": "742860"
+  },
+  {
+    "text": "so storage replicas need to follow storage and we need to bring up storage in the new cluster so that our",
+    "start": "742860",
+    "end": "748860"
+  },
+  {
+    "text": "application can access it in the in the destination cluster um the other challenge is POD disruption",
+    "start": "748860",
+    "end": "754980"
+  },
+  {
+    "text": "budget so how do we make sure that during a migration any infrastructure changes maybe a cluster update or",
+    "start": "754980",
+    "end": "762240"
+  },
+  {
+    "text": "maintenance events don't affect the application and don't disrupt the budget of the global application that's kind of",
+    "start": "762240",
+    "end": "768959"
+  },
+  {
+    "text": "logically running across both clusters so we need some way to enforce a pod disruption budget or",
+    "start": "768959",
+    "end": "775079"
+  },
+  {
+    "text": "maintain a certain budget of availability while we're migrating",
+    "start": "775079",
+    "end": "780480"
+  },
+  {
+    "text": "um and the other challenge is with network so we touched on that we need some way",
+    "start": "780480",
+    "end": "786959"
+  },
+  {
+    "text": "to have clients be able to connect and pure is able to connect to other peers",
+    "start": "786959",
+    "end": "792240"
+  },
+  {
+    "text": "um but the mechanism that we're using as I mentioned you know in Cube Cube proxy is very quick you know we can update a",
+    "start": "792240",
+    "end": "798420"
+  },
+  {
+    "text": "DNS endpoint obvious and pod IP will get reflected there but if we're using a service mesh that spans across clusters",
+    "start": "798420",
+    "end": "804899"
+  },
+  {
+    "text": "our DNS updates might not propagate as quickly as Q proxy so we need some way",
+    "start": "804899",
+    "end": "810360"
+  },
+  {
+    "text": "of signaling to our orchestration system that maybe a DNS endpoint isn't ready to",
+    "start": "810360",
+    "end": "816899"
+  },
+  {
+    "text": "be served for clients and we need to wait for that to happen so that's another thing we need to be aware of the",
+    "start": "816899",
+    "end": "823200"
+  },
+  {
+    "text": "other challenge is with if we're using an operator um the an operator typically will reconcile",
+    "start": "823200",
+    "end": "830220"
+  },
+  {
+    "text": "to a particular state so if we have some orchestration that's sitting outside of a cluster that's moving replicas over in",
+    "start": "830220",
+    "end": "837180"
+  },
+  {
+    "text": "a staple set we need to have the operator remain in sync with what we're doing",
+    "start": "837180",
+    "end": "842700"
+  },
+  {
+    "text": "um if we simply you know move replicas from a stapler set an operator will try",
+    "start": "842700",
+    "end": "848700"
+  },
+  {
+    "text": "to reconcile back to its specified state so we need to have some way to either have that operator be aware of the",
+    "start": "848700",
+    "end": "854940"
+  },
+  {
+    "text": "migration or let an operator know that we're scaling down and not to get in the",
+    "start": "854940",
+    "end": "860639"
+  },
+  {
+    "text": "way and fight over staple set resources so I'm going to talk about some of the",
+    "start": "860639",
+    "end": "867120"
+  },
+  {
+    "text": "some of the ways in open source we can maybe tackle these problems um so the first building block I'm going to introduce is multi-cluster services",
+    "start": "867120",
+    "end": "873740"
+  },
+  {
+    "text": "and so this is kep 1645 it's introduced in 2020",
+    "start": "873740",
+    "end": "879500"
+  },
+  {
+    "text": "and it provides a specification for cross-cluster domain naming so the",
+    "start": "879500",
+    "end": "885300"
+  },
+  {
+    "text": "benefit we get here if we look at pure discovery that one problem I talked about before is that we can use a",
+    "start": "885300",
+    "end": "891300"
+  },
+  {
+    "text": "headless service a headless multicluster service to uniquely to allow replicas across clusters to be uniquely",
+    "start": "891300",
+    "end": "897120"
+  },
+  {
+    "text": "identifiable so that solves this problem of having unique identity but also having a",
+    "start": "897120",
+    "end": "903660"
+  },
+  {
+    "text": "discovery service so if we query the discovery service similar to a headless service within the cluster we can",
+    "start": "903660",
+    "end": "909540"
+  },
+  {
+    "text": "discover all of the peers that are behind this multi-cluster headless service and then for client networking",
+    "start": "909540",
+    "end": "916279"
+  },
+  {
+    "text": "as Matt mentioned m3db as this constraint of clients needing access uniquely to replicas",
+    "start": "916279",
+    "end": "925100"
+  },
+  {
+    "text": "multi-cluster Services provides us a way to uniquely address these these",
+    "start": "925100",
+    "end": "930240"
+  },
+  {
+    "text": "endpoints as long as they're qualified by the the cluster ID that these replicas are in so",
+    "start": "930240",
+    "end": "938100"
+  },
+  {
+    "text": "addition in addition to that yeah we we have this uniqueness um",
+    "start": "938100",
+    "end": "943199"
+  },
+  {
+    "text": "provided by multiple search services and we have some way to discover these endpoints",
+    "start": "943199",
+    "end": "949399"
+  },
+  {
+    "text": "the other building block I want to introduce is staple set slices so this is a new cap",
+    "start": "951180",
+    "end": "957540"
+  },
+  {
+    "text": "that we're working on for 126 and we're targeting Alpha but at its core it's a",
+    "start": "957540",
+    "end": "963120"
+  },
+  {
+    "text": "way of segmenting a staple set into a subset of",
+    "start": "963120",
+    "end": "969180"
+  },
+  {
+    "text": "of replica IDs so it enables you to take a staple set of say like n replicas and",
+    "start": "969180",
+    "end": "975839"
+  },
+  {
+    "text": "split it into two to have like a a set that you can scale down in a source",
+    "start": "975839",
+    "end": "982860"
+  },
+  {
+    "text": "cluster and scale up in a destination cluster in a complementary fashion so one of the challenges of the staple sets",
+    "start": "982860",
+    "end": "988680"
+  },
+  {
+    "text": "today is you know they they if you're using ordered ready they scale from zero to n and they scale down from n to zero",
+    "start": "988680",
+    "end": "995720"
+  },
+  {
+    "text": "if we simply scale down in cluster a and then try to scale up in cluster B we're going to be scaling up from zero and so",
+    "start": "995720",
+    "end": "1002959"
+  },
+  {
+    "text": "we have an overlap of replicas but with this cap we're able to kind of provide",
+    "start": "1002959",
+    "end": "1008180"
+  },
+  {
+    "text": "more granular control over those replica ordinals um and scale in from replica n and down",
+    "start": "1008180",
+    "end": "1014360"
+  },
+  {
+    "text": "to zero in the destination cluster so we can have a complementary slice to the one that we've just scaled down in",
+    "start": "1014360",
+    "end": "1020180"
+  },
+  {
+    "text": "cluster a so how do we tie these together to build",
+    "start": "1020180",
+    "end": "1026240"
+  },
+  {
+    "text": "a solution from for cross-cluster migration um so we need to coordinate the building blocks we need to leverage multi-cluster",
+    "start": "1026240",
+    "end": "1033558"
+  },
+  {
+    "text": "endpoints or incorporate a peer Discovery protocol that allows for communication across",
+    "start": "1033559",
+    "end": "1038839"
+  },
+  {
+    "text": "these clusters we need applications to provide signals that they're healthy whether that's the application finding",
+    "start": "1038839",
+    "end": "1045980"
+  },
+  {
+    "text": "Quorum from its peers if DNS propagation is an issue making sure that the",
+    "start": "1045980",
+    "end": "1052040"
+  },
+  {
+    "text": "application is able to notify us when it's client endpoints are ready we have",
+    "start": "1052040",
+    "end": "1058760"
+  },
+  {
+    "text": "to make sure that operators can coexist with application orchestration",
+    "start": "1058760",
+    "end": "1064160"
+  },
+  {
+    "text": "um and we need to if you're using say like a CI CD pipeline for managing your",
+    "start": "1064160",
+    "end": "1069500"
+  },
+  {
+    "text": "staple sets you need some way to signal to that um so that you don't have contention between migration and uh in your git Ops",
+    "start": "1069500",
+    "end": "1077480"
+  },
+  {
+    "text": "github's workload um and then we also need to migrate our dependencies over so",
+    "start": "1077480",
+    "end": "1083360"
+  },
+  {
+    "text": "um this is our storage layer or our config apps that we're referencing those need to be moved over to the other",
+    "start": "1083360",
+    "end": "1088880"
+  },
+  {
+    "text": "clusters that we can bring up our staple set in cluster B",
+    "start": "1088880",
+    "end": "1095740"
+  },
+  {
+    "text": "so we're going to Showcase a demo here of m3db migration and some context on",
+    "start": "1095780",
+    "end": "1101660"
+  },
+  {
+    "text": "this demo so we're running m3db across three zones so we have three staple sets",
+    "start": "1101660",
+    "end": "1106760"
+  },
+  {
+    "text": "and we're going to migrate these one by one so one percent um and in this demo we're using",
+    "start": "1106760",
+    "end": "1112400"
+  },
+  {
+    "text": "multi-cluster services on gke for the orchestration of these staple sets we're using cap 335 so it's a",
+    "start": "1112400",
+    "end": "1120200"
+  },
+  {
+    "text": "modified kubernetes cluster that has this enhancement and then to move the migration over both",
+    "start": "1120200",
+    "end": "1127760"
+  },
+  {
+    "text": "of these clusters are running in the same zone so the same or the same region so they have the same zono footprint so",
+    "start": "1127760",
+    "end": "1133700"
+  },
+  {
+    "text": "as you as you migrate our storage reference is over we're still referencing the same underlying",
+    "start": "1133700",
+    "end": "1138919"
+  },
+  {
+    "text": "persistent disc and so as long as our compute resources match the storage resources our replicas are able to come",
+    "start": "1138919",
+    "end": "1146660"
+  },
+  {
+    "text": "up as our storage gets attached to the Computer Resources in the new cluster",
+    "start": "1146660",
+    "end": "1152720"
+  },
+  {
+    "text": "so we're going to roll this demo here and I'm just going to through it as we go",
+    "start": "1152720",
+    "end": "1159640"
+  },
+  {
+    "text": "so we're just kicking off this with a crd so on the left here we have our source cluster and that's running a 3db",
+    "start": "1166160",
+    "end": "1172580"
+  },
+  {
+    "text": "on the right we have a destination cluster that doesn't have anything in it and so orchestration just kicked off and",
+    "start": "1172580",
+    "end": "1178700"
+  },
+  {
+    "text": "it started scaling down the source staple set and bringing up the destination sample set and as I",
+    "start": "1178700",
+    "end": "1184039"
+  },
+  {
+    "text": "mentioned replicas need to follow storage so the first thing we did was migrate the storage references so taking those PV",
+    "start": "1184039",
+    "end": "1191059"
+  },
+  {
+    "text": "PVC config map dependencies and moving those over to the destination cluster",
+    "start": "1191059",
+    "end": "1196480"
+  },
+  {
+    "text": "once that happened we were able to create a new staple set that referenced one of these uh one of one of the",
+    "start": "1196480",
+    "end": "1204559"
+  },
+  {
+    "text": "replicas that we wanted to migrate over so we migrated over one of the zones if",
+    "start": "1204559",
+    "end": "1210020"
+  },
+  {
+    "text": "this staple set had more replicas we would scale in the highest replica first",
+    "start": "1210020",
+    "end": "1215240"
+  },
+  {
+    "text": "um but we're just moving over staple sets of replica size one in order to fit",
+    "start": "1215240",
+    "end": "1221480"
+  },
+  {
+    "text": "it on the screen here and at the top we have the commit log traffic for our m3db",
+    "start": "1221480",
+    "end": "1228679"
+  },
+  {
+    "text": "application so we can see as replicas are scaled down our traffic scales down",
+    "start": "1228679",
+    "end": "1233960"
+  },
+  {
+    "text": "to that particular replica and we start to see as DNS propagates we can see there",
+    "start": "1233960",
+    "end": "1239799"
+  },
+  {
+    "text": "traffic starts to scale up on the destination cluster and so I've sped up",
+    "start": "1239799",
+    "end": "1246140"
+  },
+  {
+    "text": "the demo and cut out kind of the boring sections where we're waiting for our DNS names to propagate to our clients",
+    "start": "1246140",
+    "end": "1252880"
+  },
+  {
+    "text": "but in effect we're able to Showcase how that scale is up and scales down and clients are able to get updated",
+    "start": "1252880",
+    "end": "1259220"
+  },
+  {
+    "text": "endpoints as we're migrating over this is a little glitch in Q proxy I just had",
+    "start": "1259220",
+    "end": "1265220"
+  },
+  {
+    "text": "to restart it here but our applications back up and we'll just wait for the final",
+    "start": "1265220",
+    "end": "1270919"
+  },
+  {
+    "text": "instance to come healthy and then that should be the end of the demo there so the other thing to mention is for for",
+    "start": "1270919",
+    "end": "1278299"
+  },
+  {
+    "text": "Readiness what we're using here is POD Readiness gates to to note that a pot is",
+    "start": "1278299",
+    "end": "1283520"
+  },
+  {
+    "text": "ready um and we can tie in the network piece here as well so once that endpoint",
+    "start": "1283520",
+    "end": "1290059"
+  },
+  {
+    "text": "becomes ready with our multi-cluster DNS name then we can signal the Pod Health",
+    "start": "1290059",
+    "end": "1296299"
+  },
+  {
+    "text": "propagate that up to staple set health and then our orchestrator is able to know it's safe to to to to move on to",
+    "start": "1296299",
+    "end": "1303020"
+  },
+  {
+    "text": "the next replica or the next Zone depending how we configured migration",
+    "start": "1303020",
+    "end": "1308980"
+  },
+  {
+    "text": "okay so what's next um so safety that's one thing I didn't",
+    "start": "1313760",
+    "end": "1319640"
+  },
+  {
+    "text": "really touch on but I did mention as a constraint we need to make manage budget across our clusters so making sure we've",
+    "start": "1319640",
+    "end": "1326000"
+  },
+  {
+    "text": "protected our application across clusters we're modifying the Pod reception budget in a distributed way so",
+    "start": "1326000",
+    "end": "1331460"
+  },
+  {
+    "text": "that both clusters have a global view of budget and we maintain budget if there's",
+    "start": "1331460",
+    "end": "1336799"
+  },
+  {
+    "text": "any maintenance events increasing the speed so aligning our unavailability budget with failure domains in this case",
+    "start": "1336799",
+    "end": "1343640"
+  },
+  {
+    "text": "we're moving one zone at a time because that's kind of the constraint of m3db we",
+    "start": "1343640",
+    "end": "1348919"
+  },
+  {
+    "text": "need two out of three zones up in order to handle rights but we can speed this",
+    "start": "1348919",
+    "end": "1354080"
+  },
+  {
+    "text": "up based on failure domains maybe we take one zone down at a time or maybe we",
+    "start": "1354080",
+    "end": "1359900"
+  },
+  {
+    "text": "can handle a subset of replicas with within a single zone and we want to have a Max unavailable per Zone that we're",
+    "start": "1359900",
+    "end": "1365960"
+  },
+  {
+    "text": "managing at a time um data flexibility so being able to move data across regions you know this demo",
+    "start": "1365960",
+    "end": "1372320"
+  },
+  {
+    "text": "just showed moving across a single zone we're still referencing the same underlying disk but you can imagine you",
+    "start": "1372320",
+    "end": "1377840"
+  },
+  {
+    "text": "know instead of using that same disk reference rather than just using it",
+    "start": "1377840",
+    "end": "1383179"
+  },
+  {
+    "text": "directly and we if we want to migrate across across zones we could replicate",
+    "start": "1383179",
+    "end": "1388880"
+  },
+  {
+    "text": "that underlying storage to another Zone and then bring up a new replica on the other zone so there is some additional",
+    "start": "1388880",
+    "end": "1395120"
+  },
+  {
+    "text": "challenges here in terms of network latency if we have the other cluster in another region during the migration so",
+    "start": "1395120",
+    "end": "1400580"
+  },
+  {
+    "text": "you know this would probably want you probably want to do this only during a period of lower traffic during a regular",
+    "start": "1400580",
+    "end": "1406460"
+  },
+  {
+    "text": "maintenance window um and then finally operator compatibility so supporting General operators so for this demo we made some",
+    "start": "1406460",
+    "end": "1414440"
+  },
+  {
+    "text": "changes to make the m3db operator multi-cluster aware um but we do want to make some",
+    "start": "1414440",
+    "end": "1421159"
+  },
+  {
+    "text": "improvements in open source to kind of have a specification for multiple op like generic operators kind of tie into",
+    "start": "1421159",
+    "end": "1427640"
+  },
+  {
+    "text": "to handle this operation so how do we signal between um",
+    "start": "1427640",
+    "end": "1433280"
+  },
+  {
+    "text": "orchestration systems that are outside of clusters to operators within clusters that orchestration should be deferred to",
+    "start": "1433280",
+    "end": "1441320"
+  },
+  {
+    "text": "another another controller so that's kind of the idea here making it multi-cluster aware",
+    "start": "1441320",
+    "end": "1447440"
+  },
+  {
+    "text": "um then I'll hand it back to Matt for closing out all right so uh that's about it that we",
+    "start": "1447440",
+    "end": "1452900"
+  },
+  {
+    "text": "have uh if you want to come hear more about uh stateful set War Stories I will",
+    "start": "1452900",
+    "end": "1458360"
+  },
+  {
+    "text": "be at the current zero Booth today which is right near the gcp booth so you can find Peter as well",
+    "start": "1458360",
+    "end": "1464539"
+  },
+  {
+    "text": "um and we will take some time for questions now as well",
+    "start": "1464539",
+    "end": "1469360"
+  },
+  {
+    "text": "because we have a we have a hand up in like row six over there",
+    "start": "1477080",
+    "end": "1482860"
+  },
+  {
+    "text": "thank you uh so how do you handle the dependency in in between two",
+    "start": "1491419",
+    "end": "1496580"
+  },
+  {
+    "text": "applications so as an example I have an application which is kind of dependent on other applications and that",
+    "start": "1496580",
+    "end": "1503539"
+  },
+  {
+    "text": "application needs to be migrated first to the second cluster yeah so for dependencies",
+    "start": "1503539",
+    "end": "1509000"
+  },
+  {
+    "text": "um like in this example m3db has a dependency on hcd and so in this scenario we configured at",
+    "start": "1509000",
+    "end": "1515659"
+  },
+  {
+    "text": "CD to be multi-cluster to be behind a model cluster endpoint and m3db was communicating with NCD through its",
+    "start": "1515659",
+    "end": "1521780"
+  },
+  {
+    "text": "multi-cluster domain name and so as m3db migrated SCD remained in the source",
+    "start": "1521780",
+    "end": "1527840"
+  },
+  {
+    "text": "cluster what what you can do after you've migrated say that application or maybe",
+    "start": "1527840",
+    "end": "1534980"
+  },
+  {
+    "text": "you migrate your dependency first like we could have migrated STD first and then migrated m3db",
+    "start": "1534980",
+    "end": "1540320"
+  },
+  {
+    "text": "um or vice versa but we do need to think about like which pieces which building blocks do we want",
+    "start": "1540320",
+    "end": "1545900"
+  },
+  {
+    "text": "to migrate um as we're going in with like the applications do need to be multi-cluster",
+    "start": "1545900",
+    "end": "1552140"
+  },
+  {
+    "text": "available to kind of have this cross-cluster dependency be resolved",
+    "start": "1552140",
+    "end": "1558580"
+  },
+  {
+    "text": "hey um I have a question here all right oh by the way thanks for the",
+    "start": "1561260",
+    "end": "1567440"
+  },
+  {
+    "text": "great talk um so one of the things that I wanted to understand is how do we kind of are there today Provisions to cut off",
+    "start": "1567440",
+    "end": "1574340"
+  },
+  {
+    "text": "traffic for stateful workloads in the sense that if I wanted to ensure that in-flight lights are",
+    "start": "1574340",
+    "end": "1581179"
+  },
+  {
+    "text": "persisted to the backing store are there hooks to ensure that those are flushed",
+    "start": "1581179",
+    "end": "1586520"
+  },
+  {
+    "text": "before we kind of move over and what kind of support do we have within the",
+    "start": "1586520",
+    "end": "1591559"
+  },
+  {
+    "text": "I'm just going to step up here in front of the monitor so I can hear a bit better okay uh so as we migrate workloads one of the",
+    "start": "1591559",
+    "end": "1599299"
+  },
+  {
+    "text": "things that we want to ensure that data that is written onto one of the stateful states is fully written so is there a",
+    "start": "1599299",
+    "end": "1606380"
+  },
+  {
+    "text": "way to ensure that rights on the Final Destination store are complete is there a way is there some mechanism to ensure",
+    "start": "1606380",
+    "end": "1613400"
+  },
+  {
+    "text": "that that is notified before the orchestrator kind of kicks off and moves it over to the other cluster what kind",
+    "start": "1613400",
+    "end": "1619279"
+  },
+  {
+    "text": "of mechanisms do we have on the um on the you know the kubernetes control plane too",
+    "start": "1619279",
+    "end": "1625000"
+  },
+  {
+    "text": "you know ensure that this is done yeah so if we're confirmative concerned about data consistency from a single replica",
+    "start": "1625000",
+    "end": "1630679"
+  },
+  {
+    "text": "yeah um one thing we can do is make sure that our application has the right",
+    "start": "1630679",
+    "end": "1636080"
+  },
+  {
+    "text": "Primitives and built-ins to make sure we're flushing that data to our rewrite once disk as it's being terminated so",
+    "start": "1636080",
+    "end": "1642679"
+  },
+  {
+    "text": "that means setting up appropriate graceful termination Windows",
+    "start": "1642679",
+    "end": "1647779"
+  },
+  {
+    "text": "um so that we can gracefully terminate and flush our rights to that disk before we actually migrate the replicas",
+    "start": "1647779",
+    "end": "1654440"
+  },
+  {
+    "text": "so as as long as we kind of have that API semantics of allowing like the",
+    "start": "1654440",
+    "end": "1659539"
+  },
+  {
+    "text": "kubernetes API to take down a pod and have it terminate gracefully we can control orchestration safely and have",
+    "start": "1659539",
+    "end": "1666679"
+  },
+  {
+    "text": "that consistent set of data written to the disk before we bring up",
+    "start": "1666679",
+    "end": "1671860"
+  },
+  {
+    "text": "a new replica starting in the new cluster because effectively if we're using the same disk reference it's no",
+    "start": "1671860",
+    "end": "1677360"
+  },
+  {
+    "text": "different than say a pod being restarted for like a maintenance or an application upgrade or a termination event",
+    "start": "1677360",
+    "end": "1684020"
+  },
+  {
+    "text": "also in this example the workload migration controller gives feedback to",
+    "start": "1684020",
+    "end": "1690080"
+  },
+  {
+    "text": "any operator that's observing it about where you are in the migration so if you build your application to kind of be",
+    "start": "1690080",
+    "end": "1696140"
+  },
+  {
+    "text": "aware of when it's being migrated or when the thing that your operator is controlling is being migrated",
+    "start": "1696140",
+    "end": "1702500"
+  },
+  {
+    "text": "um then it doesn't just have to be this opaque migration you can kind of inform your application and you know like you",
+    "start": "1702500",
+    "end": "1708440"
+  },
+  {
+    "text": "said shut it down to ensure that like all rights have been flushed or something before it moves",
+    "start": "1708440",
+    "end": "1714860"
+  },
+  {
+    "text": "okay okay thank you Peter one more question",
+    "start": "1714860",
+    "end": "1720080"
+  },
+  {
+    "text": "over there if if we have time",
+    "start": "1720080",
+    "end": "1723580"
+  },
+  {
+    "text": "So within a single cluster the attached controller is responsible for making sure read write once volumes are",
+    "start": "1727640",
+    "end": "1733159"
+  },
+  {
+    "text": "attached one to one node going forward like how how is attached attachment across both clusters are",
+    "start": "1733159",
+    "end": "1739100"
+  },
+  {
+    "text": "going to work together to yeah so that that's one of the challenges I mentioned that these invariants that are enforced and single",
+    "start": "1739100",
+    "end": "1745700"
+  },
+  {
+    "text": "cluster today they're not enforced across clusters so whatever is doing your migration so whatever is",
+    "start": "1745700",
+    "end": "1751580"
+  },
+  {
+    "text": "orchestrating your migration outside of the Clusters needs to make sure that those invariants are logically",
+    "start": "1751580",
+    "end": "1757159"
+  },
+  {
+    "text": "um kept even though there's no way to enforce it through a pi server um so yeah we're kind of dealing with",
+    "start": "1757159",
+    "end": "1763640"
+  },
+  {
+    "text": "like a split brain scenario because there's two attached attached controllers running in two separate control planes",
+    "start": "1763640",
+    "end": "1769220"
+  },
+  {
+    "text": "um so it's really on the the orchestrator to make sure that we've safely shut down a pod and that disk is",
+    "start": "1769220",
+    "end": "1777080"
+  },
+  {
+    "text": "no longer attached um to that VM so there we do need to make sure that like",
+    "start": "1777080",
+    "end": "1783919"
+  },
+  {
+    "text": "our signaling is appropriate for termination State when a pod is actually brought down",
+    "start": "1783919",
+    "end": "1789980"
+  },
+  {
+    "text": "before we bring it up in a new cluster there are also archive some safety checks you know most storage limitations",
+    "start": "1789980",
+    "end": "1795380"
+  },
+  {
+    "text": "whether it's a cloud provider or something else like they won't let you attach a read write one disk in multiple",
+    "start": "1795380",
+    "end": "1801320"
+  },
+  {
+    "text": "places so worst case you get an error and hopefully not just totally corrupted",
+    "start": "1801320",
+    "end": "1806360"
+  },
+  {
+    "text": "application state thank you",
+    "start": "1806360",
+    "end": "1811419"
+  },
+  {
+    "text": "just on the same note I have another question and stateful set if your application is",
+    "start": "1813260",
+    "end": "1820760"
+  },
+  {
+    "text": "so close to attached to this in this case is a DB and we are not going for",
+    "start": "1820760",
+    "end": "1826340"
+  },
+  {
+    "text": "cluster migration we are going from blue green for that specific DB schema change",
+    "start": "1826340",
+    "end": "1832059"
+  },
+  {
+    "text": "how we will do that because existing DB is still supporting and we need to spin",
+    "start": "1832059",
+    "end": "1837320"
+  },
+  {
+    "text": "up and we need to validate the new DB schema is that something you have",
+    "start": "1837320",
+    "end": "1842779"
+  },
+  {
+    "text": "thought about yeah so blue green kind of scenario so this here is kind of like",
+    "start": "1842779",
+    "end": "1848120"
+  },
+  {
+    "text": "we're both migrating to a new cluster we're also doing application upgrade at the same time right yeah so I agree that",
+    "start": "1848120",
+    "end": "1854539"
+  },
+  {
+    "text": "definitely adds like additional complexity um so I think that's it's not something that we showcased in this demo",
+    "start": "1854539",
+    "end": "1860960"
+  },
+  {
+    "text": "um and I think it can be done under the right safety protocols um but it certainly is a bit of a challenge because usually when you",
+    "start": "1860960",
+    "end": "1866360"
+  },
+  {
+    "text": "migrate a database schema to an updated version you can't roll back say for MySQL you update minor version you can't",
+    "start": "1866360",
+    "end": "1872899"
+  },
+  {
+    "text": "roll back to the previous minor version it's just not supported um so I I think that in to ensure safety",
+    "start": "1872899",
+    "end": "1879919"
+  },
+  {
+    "text": "and kind of like uh isolate some of the changes to your system it's better to do",
+    "start": "1879919",
+    "end": "1885200"
+  },
+  {
+    "text": "these updates separately so that you're kind of minimizing this like the benefit of moving across clusters is you can you",
+    "start": "1885200",
+    "end": "1891620"
+  },
+  {
+    "text": "can you can roll back if we have the same database schema across clusters but um doing this doing this upgrade does",
+    "start": "1891620",
+    "end": "1898580"
+  },
+  {
+    "text": "kind of introduce risk and kind of makes the the rollback option no longer",
+    "start": "1898580",
+    "end": "1904700"
+  },
+  {
+    "text": "possible so it's kind of like reducing the safety of this of this cross-cluster migration anyway so",
+    "start": "1904700",
+    "end": "1910700"
+  },
+  {
+    "text": "thanks thank you everyone [Applause]",
+    "start": "1910700",
+    "end": "1916739"
+  }
+]

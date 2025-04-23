@@ -1,0 +1,1651 @@
+[
+  {
+    "start": "0",
+    "end": "41000"
+  },
+  {
+    "text": "hello i'm tony allen uh i'm gonna talk about load chatting uh in envoy um",
+    "start": "240",
+    "end": "7600"
+  },
+  {
+    "text": "i'm a software engineer at a megacorp um and you can find me at those uh social",
+    "start": "7600",
+    "end": "13280"
+  },
+  {
+    "text": "media platforms so this talk is going to kind of take the form of two halves the first half is not",
+    "start": "13280",
+    "end": "19760"
+  },
+  {
+    "text": "going to have all that much to do with envoy specifically but i am going to talk about some concepts which i think are important",
+    "start": "19760",
+    "end": "26160"
+  },
+  {
+    "text": "and it kind of sets the stage to talk about all the different load shedding mechanisms uh in envoy there's gonna be",
+    "start": "26160",
+    "end": "33280"
+  },
+  {
+    "text": "a bunch of graphs um and i'm hoping you know it changes the way",
+    "start": "33280",
+    "end": "38320"
+  },
+  {
+    "text": "people think about load chatting so let's start with what is load um",
+    "start": "38320",
+    "end": "44640"
+  },
+  {
+    "start": "41000",
+    "end": "41000"
+  },
+  {
+    "text": "when i'm referring to load in this talk i'm talking about layer seven requests that are proxy through an envoy right",
+    "start": "44640",
+    "end": "50800"
+  },
+  {
+    "text": "that are using resources on some application that the envoy would be proxying for",
+    "start": "50800",
+    "end": "57360"
+  },
+  {
+    "text": "uh the resource on the application could be uh time on the cpu cores memory right",
+    "start": "57360",
+    "end": "62640"
+  },
+  {
+    "text": "the often overlooked network bandwidth and disk bandwidth right",
+    "start": "62640",
+    "end": "67760"
+  },
+  {
+    "text": "and as the load increases on a server these things are contended and",
+    "start": "67760",
+    "end": "73600"
+  },
+  {
+    "text": "uh there's not enough of it to go around for all of the active requests on the server",
+    "start": "73600",
+    "end": "79439"
+  },
+  {
+    "text": "so i'm going to talk a little bit about little's law here which i'm sure like folks have seen this before but uh",
+    "start": "79439",
+    "end": "85360"
+  },
+  {
+    "start": "80000",
+    "end": "80000"
+  },
+  {
+    "text": "it was kind of brought forth in 1960 in some operations research journal",
+    "start": "85360",
+    "end": "91200"
+  },
+  {
+    "text": "and it's the expected number of units in a system is equal to the expected time uh spent by a unit in that system",
+    "start": "91200",
+    "end": "98799"
+  },
+  {
+    "text": "times well the rate of units entering that system we can interpret this as",
+    "start": "98799",
+    "end": "104880"
+  },
+  {
+    "text": "average concurrency equals average rate times average latency",
+    "start": "104880",
+    "end": "110159"
+  },
+  {
+    "text": "so it seems obvious to a lot of people but there's some nuance here like it's",
+    "start": "110159",
+    "end": "115840"
+  },
+  {
+    "text": "independent of the arrival distribution of the requests right so it can take as long as the average",
+    "start": "115840",
+    "end": "122079"
+  },
+  {
+    "text": "is whatever you're plugging into the formula right we can have like giant tails or it can all be that exact same",
+    "start": "122079",
+    "end": "127360"
+  },
+  {
+    "text": "value it doesn't really matter um and the concurrency in a system right",
+    "start": "127360",
+    "end": "132800"
+  },
+  {
+    "text": "and by system i mean an application here uh is going to mean uh or it can take on",
+    "start": "132800",
+    "end": "138480"
+  },
+  {
+    "text": "any form right it can be a queue or we can just have a bunch of floating requests that we're interleaving between and juggling until we you know tip over",
+    "start": "138480",
+    "end": "145680"
+  },
+  {
+    "text": "um and another interesting thing to keep in mind here is that the time spent cued in",
+    "start": "145680",
+    "end": "151360"
+  },
+  {
+    "text": "the system is what's contributing to like observed latency right by whoever sent that unit into the system",
+    "start": "151360",
+    "end": "158239"
+  },
+  {
+    "text": "so this kind of explains why our latencies go up as concurrent work increases because we're interleaving between it or we're waiting in line",
+    "start": "158239",
+    "end": "164879"
+  },
+  {
+    "text": "until there's some kind of service so if we apply this to a server right",
+    "start": "164879",
+    "end": "170560"
+  },
+  {
+    "start": "167000",
+    "end": "167000"
+  },
+  {
+    "text": "request comes in response comes out uh we can explain it uh",
+    "start": "170560",
+    "end": "176400"
+  },
+  {
+    "text": "some servers have uh an executor that's pulling from some kind of work queue right so you have some worker threads",
+    "start": "176400",
+    "end": "181920"
+  },
+  {
+    "text": "pull from a queue and go like a channel or something right and there's a fixed service time so",
+    "start": "181920",
+    "end": "187360"
+  },
+  {
+    "text": "you know i process a request it takes me some unit of time and it always does that",
+    "start": "187360",
+    "end": "192720"
+  },
+  {
+    "text": "right the latency that's observed from a client is going to be the amount of time it would spend in the queue",
+    "start": "192720",
+    "end": "198480"
+  },
+  {
+    "text": "okay so it's the q delay plus the actual service time which doesn't change uh depending on the",
+    "start": "198480",
+    "end": "204080"
+  },
+  {
+    "text": "size of that queue okay in other cases we just have you know a server that just like takes a",
+    "start": "204080",
+    "end": "210319"
+  },
+  {
+    "text": "request spins off a go routine while it does its thing and then just keeps doing this right uh and we end up in this",
+    "start": "210319",
+    "end": "216080"
+  },
+  {
+    "text": "scenario where we're interleaving between all of the requests so the service time for request",
+    "start": "216080",
+    "end": "222159"
+  },
+  {
+    "text": "uh is some function of the number of things that we're juggling the number of active requests we have in the system",
+    "start": "222159",
+    "end": "227440"
+  },
+  {
+    "text": "right and in this scenario the service time is going to increase as you get more",
+    "start": "227440",
+    "end": "233120"
+  },
+  {
+    "text": "requests into the system right and since the latency is the queue delay",
+    "start": "233120",
+    "end": "238879"
+  },
+  {
+    "text": "plus the service time right where we're increasing directly the amount of",
+    "start": "238879",
+    "end": "244480"
+  },
+  {
+    "text": "time it takes to work on that request as we put more uh requests in",
+    "start": "244480",
+    "end": "249599"
+  },
+  {
+    "text": "and then the increased latency from that means more concurrent requests because we're slowing down",
+    "start": "249599",
+    "end": "254720"
+  },
+  {
+    "text": "and then the service time increases and you kind of get the idea we end up in this feedback loop right",
+    "start": "254720",
+    "end": "263040"
+  },
+  {
+    "text": "so there was a recent 2011 paper where john little revisits little's law in a",
+    "start": "263280",
+    "end": "268400"
+  },
+  {
+    "text": "computational context he's like uh let's graph some things that are active requests and latency right so on the",
+    "start": "268400",
+    "end": "275120"
+  },
+  {
+    "text": "left side we have uh requests per second on the x axis and the requests in process right so",
+    "start": "275120",
+    "end": "281600"
+  },
+  {
+    "text": "in in envoy terms this would be our active upstream active request or something uh",
+    "start": "281600",
+    "end": "288000"
+  },
+  {
+    "text": "on the right side we have requests per second on the x-axis and latency",
+    "start": "288000",
+    "end": "294000"
+  },
+  {
+    "text": "on the y and you'll notice that they both kind of have this linear relationship right or this uh linear",
+    "start": "294000",
+    "end": "299840"
+  },
+  {
+    "text": "curve uh in the beginning and then things kind of go real bad at around the same time",
+    "start": "299840",
+    "end": "304880"
+  },
+  {
+    "text": "so this is uh that feedback loop i was talking about earlier right it's also referred to as a",
+    "start": "304880",
+    "end": "311440"
+  },
+  {
+    "text": "congestive collapse sometimes um so to avoid this kind of scenario",
+    "start": "311440",
+    "end": "317120"
+  },
+  {
+    "start": "313000",
+    "end": "313000"
+  },
+  {
+    "text": "uh given that little's law relationship there are a few things we can do here right we can",
+    "start": "317120",
+    "end": "322320"
+  },
+  {
+    "text": "uh if we care about is like fixing the latency right",
+    "start": "322320",
+    "end": "327520"
+  },
+  {
+    "text": "if we want to limit concurrency uh we think of it as bounding queues right putting an upper bound on how many",
+    "start": "327520",
+    "end": "333280"
+  },
+  {
+    "text": "we can have there in envoy we sort of do this with circuit breakers or adaptive concurrency which we'll talk about later",
+    "start": "333280",
+    "end": "340320"
+  },
+  {
+    "text": "and in an application right you can do this with uh worker threads in a work queue where you put a bound on that or",
+    "start": "340320",
+    "end": "346400"
+  },
+  {
+    "text": "queue timeouts in some cases with a rate we can adjust that by just sending less things right or rate",
+    "start": "346400",
+    "end": "353440"
+  },
+  {
+    "text": "limiting so we do that in envoy or the application and then what some people don't think",
+    "start": "353440",
+    "end": "358880"
+  },
+  {
+    "text": "about is latency we do have control over what the request latencies are in the service times we do this with timeouts",
+    "start": "358880",
+    "end": "364400"
+  },
+  {
+    "text": "so we place an upper bound on the amount of time that we spend servicing a request right and assuming",
+    "start": "364400",
+    "end": "369680"
+  },
+  {
+    "text": "we have some kind of cancellation mechanism in the application we can also make use of",
+    "start": "369680",
+    "end": "374960"
+  },
+  {
+    "text": "deadline propagation so uh i'm gonna do some simulations because",
+    "start": "374960",
+    "end": "382080"
+  },
+  {
+    "start": "378000",
+    "end": "378000"
+  },
+  {
+    "text": "i think you know it's nice to see uh some of the stuff in action and to understand how it works uh i'm using",
+    "start": "382080",
+    "end": "387840"
+  },
+  {
+    "text": "this buffer bloater project on my github which has 19 stars it's a very popular open source projects",
+    "start": "387840",
+    "end": "394560"
+  },
+  {
+    "text": "with a thriving ecosystem and community so feel free to you know send a pull request",
+    "start": "394560",
+    "end": "400240"
+  },
+  {
+    "text": "the way you think the way it works is you spin up this go program and it kicks off a bunch of client routines it's",
+    "start": "400479",
+    "end": "406639"
+  },
+  {
+    "text": "configurable number and it kicks off a bunch of server go routines and the clients proxy requests through some",
+    "start": "406639",
+    "end": "412479"
+  },
+  {
+    "text": "external envoy process and they're sent to one of the server go routines okay so",
+    "start": "412479",
+    "end": "418800"
+  },
+  {
+    "text": "the actual server go routine what it does is it you know can juggle any number of requests and what it does the interleaving business right so uh it'll",
+    "start": "418800",
+    "end": "426080"
+  },
+  {
+    "text": "randomly pick some active request and each of these requests will have some service time associated with them right",
+    "start": "426080",
+    "end": "432400"
+  },
+  {
+    "text": "and we'll just decrement 100 microseconds of remaining work sleep for 100 microseconds",
+    "start": "432400",
+    "end": "437919"
+  },
+  {
+    "text": "and if we've completed that request right we've decremented it to zero then hey send the reply",
+    "start": "437919",
+    "end": "444080"
+  },
+  {
+    "text": "we're done otherwise just you know keep just keep doing this and put it back in the pool",
+    "start": "444080",
+    "end": "449440"
+  },
+  {
+    "text": "so the output of that program looks like this right so at the top we have an offered load which",
+    "start": "449440",
+    "end": "455280"
+  },
+  {
+    "text": "is an rps that the clients are sending to the servers we have an observed latency around there",
+    "start": "455280",
+    "end": "460880"
+  },
+  {
+    "text": "in the middle right you see this banding because you can configure that generator",
+    "start": "460880",
+    "end": "466080"
+  },
+  {
+    "text": "to have a distribution of various latencies so each one of those points is an observed",
+    "start": "466080",
+    "end": "471759"
+  },
+  {
+    "text": "latency and good put at the bottom so good put is the amount of useful work that a system is doing or system is uh",
+    "start": "471759",
+    "end": "479440"
+  },
+  {
+    "text": "working with there so it's a portmanteau of good and throughput",
+    "start": "479440",
+    "end": "484800"
+  },
+  {
+    "text": "so if i have 10 requests and i reply 200 to all of them then i have a good put of",
+    "start": "484800",
+    "end": "490240"
+  },
+  {
+    "text": "10 for whatever unit of time that was if i time out half of them then i have a good put of five requests per",
+    "start": "490240",
+    "end": "496879"
+  },
+  {
+    "text": "unit of time uh and i should mention uh i made this this this program before nighthawk",
+    "start": "496879",
+    "end": "504160"
+  },
+  {
+    "text": "existed and then i figured it's just easy to reuse so don't actually use this for anything",
+    "start": "504160",
+    "end": "509199"
+  },
+  {
+    "text": "substantial so the active requests on the server are also plotted and you can see this",
+    "start": "509199",
+    "end": "516640"
+  },
+  {
+    "text": "so where there's a load spike and that offered load uh graph at the top",
+    "start": "516640",
+    "end": "521760"
+  },
+  {
+    "text": "you'll see the latencies go up the good put slightly increases too and then the number of active requests kind",
+    "start": "521760",
+    "end": "527920"
+  },
+  {
+    "text": "of spikes up so you're seeing that the concurrency as that increases is affecting the latency",
+    "start": "527920",
+    "end": "535200"
+  },
+  {
+    "text": "right but we're getting more you know productive throughput through it so this is like your classic latency versus",
+    "start": "535200",
+    "end": "540800"
+  },
+  {
+    "text": "throughput trade-off um in case you didn't see it there they are",
+    "start": "540800",
+    "end": "548080"
+  },
+  {
+    "start": "548000",
+    "end": "548000"
+  },
+  {
+    "text": "so i'm going to kind of go through all the different load shedding mechanisms",
+    "start": "548080",
+    "end": "555760"
+  },
+  {
+    "text": "and first we'll talk about no load shedding in the scenarios i'll bring up uh we'll",
+    "start": "555920",
+    "end": "562080"
+  },
+  {
+    "text": "talk about rate limiting circuit breaking and then the fancy mechanisms uh towards the end there uh are we",
+    "start": "562080",
+    "end": "567279"
+  },
+  {
+    "text": "allowed to just take questions in the middle before we go on i want to make sure we're all we're all on the same page as",
+    "start": "567279",
+    "end": "573680"
+  },
+  {
+    "text": "far as cueing goes uh okay cool we're all experts now",
+    "start": "573680",
+    "end": "579760"
+  },
+  {
+    "text": "so here's a scenario uh i have some reasonable amount of load",
+    "start": "579760",
+    "end": "585120"
+  },
+  {
+    "text": "and then there is a spike in traffic and it increases it by you know i don't",
+    "start": "585120",
+    "end": "590480"
+  },
+  {
+    "text": "know 50 60 for a short period of time and then things go back to normal right so we can",
+    "start": "590480",
+    "end": "595839"
+  },
+  {
+    "text": "see this at the top of the offered load you'll see how it affects latency okay latency is whatever the service was",
+    "start": "595839",
+    "end": "602160"
+  },
+  {
+    "text": "doing and then it climbs up until it hits whatever three is the the actual",
+    "start": "602160",
+    "end": "607200"
+  },
+  {
+    "text": "units don't really matter we're just looking for the relationship so things will start timing out right",
+    "start": "607200",
+    "end": "613040"
+  },
+  {
+    "text": "and you can take a look at the good put there at the bottom so those vertical bars are the area in which the uh offered load",
+    "start": "613040",
+    "end": "619279"
+  },
+  {
+    "text": "was uh higher than what the normal steady state is right you'll see the good puts like kind of",
+    "start": "619279",
+    "end": "625279"
+  },
+  {
+    "text": "fine it's you know hobbling along until eventually crashes to zero",
+    "start": "625279",
+    "end": "631040"
+  },
+  {
+    "text": "we're timing out all of our requests because the server is spending all of its time uh juggling active requests",
+    "start": "631040",
+    "end": "637519"
+  },
+  {
+    "text": "the majority of which are timed out so it's not doing any kind of useful work right but we're just we keep sending it more traffic anyway",
+    "start": "637519",
+    "end": "645040"
+  },
+  {
+    "text": "so this is your classic overload scenario uh and we know that this thing works",
+    "start": "645040",
+    "end": "651120"
+  },
+  {
+    "text": "because you know this is we see this in real life all the time",
+    "start": "651120",
+    "end": "656640"
+  },
+  {
+    "text": "um so let's use the local rate limit filter right so in envoy we have",
+    "start": "656640",
+    "end": "661839"
+  },
+  {
+    "text": "the local rate limiting and the global rate limiting global rate limiting i'm not going to talk about because that's like you need an external service and",
+    "start": "661839",
+    "end": "667760"
+  },
+  {
+    "text": "there's this interaction that's kind of complex right so uh we'll just look at the local rate limit filter local decisions with a",
+    "start": "667760",
+    "end": "674560"
+  },
+  {
+    "text": "token bucket okay and the way the token buckets work is there's some refresh time we refresh",
+    "start": "674560",
+    "end": "679760"
+  },
+  {
+    "text": "a bucket with some number of tokens and then whenever something wants to make it through the filter right it grabs a",
+    "start": "679760",
+    "end": "685600"
+  },
+  {
+    "text": "token so 510 tokens in the bucket only 10 requests are going to get",
+    "start": "685600",
+    "end": "690800"
+  },
+  {
+    "text": "through until i refresh again um so i see a lot of people uh in places i've worked that want to protect a",
+    "start": "690800",
+    "end": "697760"
+  },
+  {
+    "text": "microservice or something by performing rate limiting and i mean it tends to work out right so you",
+    "start": "697760",
+    "end": "704000"
+  },
+  {
+    "text": "see this like thrashing this up and down motion uh with the latency uh in the middle there that's just because we keep",
+    "start": "704000",
+    "end": "710800"
+  },
+  {
+    "text": "refreshing with tokens so we just have these bursts of requests and then we stop sending requests and we burst the request and then we stop sending the",
+    "start": "710800",
+    "end": "716079"
+  },
+  {
+    "text": "request so the queue forms q burns down a queue forms a cube burns them",
+    "start": "716079",
+    "end": "721200"
+  },
+  {
+    "text": "so we observe that but it didn't tip over right you'll notice that the good put is uh good it's about 2500 which is",
+    "start": "721200",
+    "end": "727440"
+  },
+  {
+    "text": "what i happen to configure the rate limit at uh there it is in case you missed it",
+    "start": "727440",
+    "end": "735680"
+  },
+  {
+    "text": "uh but what this doesn't really protect us against is a server degradation right so in that previous scenario right we have",
+    "start": "735680",
+    "end": "742399"
+  },
+  {
+    "text": "a server that is uh you know some number of milliseconds uh servicing a request right and there's",
+    "start": "742399",
+    "end": "748720"
+  },
+  {
+    "text": "not really a distribution it's just you know a synthetic uh three milliseconds per request",
+    "start": "748720",
+    "end": "754480"
+  },
+  {
+    "text": "uh and we offered more load which is we increased the rps term in that little's law uh",
+    "start": "754480",
+    "end": "761040"
+  },
+  {
+    "text": "relationship but if a server degrades what that would look like is the uh service time for a",
+    "start": "761040",
+    "end": "767680"
+  },
+  {
+    "text": "request increases right under ideal conditions so if we bump it from like three milliseconds to 10 milliseconds",
+    "start": "767680",
+    "end": "773680"
+  },
+  {
+    "text": "right what ends up happening oh no this is trouble uh we we're not doing anything useful we",
+    "start": "773680",
+    "end": "780000"
+  },
+  {
+    "text": "don't we don't shed we just drop good put uh down to",
+    "start": "780000",
+    "end": "785360"
+  },
+  {
+    "text": "like half uh and then we go to zero uh a q formed uh",
+    "start": "785360",
+    "end": "791279"
+  },
+  {
+    "text": "somewhere our latency increased right um our good put is lower that makes sense",
+    "start": "791279",
+    "end": "798240"
+  },
+  {
+    "text": "because uh under ideal conditions we're taking more time per request right but then",
+    "start": "798240",
+    "end": "804720"
+  },
+  {
+    "text": "we had our congestive collapse anyway right so",
+    "start": "804720",
+    "end": "809760"
+  },
+  {
+    "text": "it's because the rate limits config is derived from some kind of latency snapshot right we normally just look at some service we go all right yeah things",
+    "start": "809760",
+    "end": "816480"
+  },
+  {
+    "text": "look good and it's at you know what 10 000 rps let's set a limit at like",
+    "start": "816480",
+    "end": "821839"
+  },
+  {
+    "text": "10 and 500 right but then you know somebody some intern pushes",
+    "start": "821839",
+    "end": "828320"
+  },
+  {
+    "text": "code performance degrades on our system or like just years and years of baggage uh and we never tweak our configs or we",
+    "start": "828320",
+    "end": "835440"
+  },
+  {
+    "text": "move to a new instance type right we end up in trouble here um and we don't want to keep tweaking our rate limit configs",
+    "start": "835440",
+    "end": "843040"
+  },
+  {
+    "text": "so what we could do instead is put a bound on the concurrency right",
+    "start": "843040",
+    "end": "848320"
+  },
+  {
+    "text": "so we could say all right well i mean i'm getting these high latencies because some q is forming somewhere let's just go ahead and",
+    "start": "848320",
+    "end": "853680"
+  },
+  {
+    "text": "uh put a limit on how big that queue can get right and obviously this will only work if we have control over that like",
+    "start": "853680",
+    "end": "859440"
+  },
+  {
+    "text": "if i have a fleet of envoys and there's one server and all requests are going through this whole fleet of envoys to",
+    "start": "859440",
+    "end": "865120"
+  },
+  {
+    "text": "that server we have zero control it's not a closed system right we can't apply any of this hand wavy cueing theory stuff right and",
+    "start": "865120",
+    "end": "872480"
+  },
+  {
+    "text": "circuit breakers aren't going to be much help um but that's not a scenario we're talking about here so let's see how it",
+    "start": "872480",
+    "end": "878720"
+  },
+  {
+    "text": "performs uh traffic spike occurs uh our latencies look like it looks much better",
+    "start": "878720",
+    "end": "884959"
+  },
+  {
+    "text": "right uh and then the good put increases to about 2500. what's interesting here is that",
+    "start": "884959",
+    "end": "890320"
+  },
+  {
+    "text": "it increased to 2500 just like that rate limit did right because of uh what i",
+    "start": "890320",
+    "end": "896880"
+  },
+  {
+    "text": "did so we have eight uh threads on the the fake server okay each request",
+    "start": "896880",
+    "end": "903440"
+  },
+  {
+    "text": "takes about three milliseconds so i think if you just divide eight by 0.003 uh you'll end up with about 2500",
+    "start": "903440",
+    "end": "911360"
+  },
+  {
+    "text": "right just it's pretty cool like all i did was i just bounded the queue and then uh i got the behavior i wanted",
+    "start": "911360",
+    "end": "917760"
+  },
+  {
+    "text": "right if i take a oh okay there's the math boom uh so we divide eight by 0.03 we get 2 666",
+    "start": "917760",
+    "end": "926880"
+  },
+  {
+    "text": "rps that's you know error bars on that are good enough for me right especially since all we're doing is",
+    "start": "926880",
+    "end": "932560"
+  },
+  {
+    "text": "saying hey the queue can't get any bigger than this don't admit anything through until that until it you know",
+    "start": "932560",
+    "end": "937759"
+  },
+  {
+    "text": "finishes this plate right so we nailed it circuit breakers don't",
+    "start": "937759",
+    "end": "943759"
+  },
+  {
+    "text": "use rate limiting unless uh well we'll get to that let's look at the server degradation scenario",
+    "start": "943759",
+    "end": "951360"
+  },
+  {
+    "text": "the request latency does go up a little bit right which makes sense because the server degraded like under ideal",
+    "start": "951360",
+    "end": "957360"
+  },
+  {
+    "text": "conditions the latency would have increased anyway right but our good put did not drop to zero",
+    "start": "957360",
+    "end": "962480"
+  },
+  {
+    "text": "this time it dropped down to some other value right",
+    "start": "962480",
+    "end": "967600"
+  },
+  {
+    "text": "you put a bound on the queue it doesn't matter how long like what the the capabilities of that server are right",
+    "start": "967600",
+    "end": "973839"
+  },
+  {
+    "text": "so uh this is pretty sweet uh",
+    "start": "973839",
+    "end": "978320"
+  },
+  {
+    "text": "i get excited easily so let's compare the two local rate limit filter versus circuit breakers at the bottom we're",
+    "start": "979440",
+    "end": "984880"
+  },
+  {
+    "text": "looking at the good put graphs uh we see that the local rate limit filter had its congestive collapse you know somewhere",
+    "start": "984880",
+    "end": "990880"
+  },
+  {
+    "text": "in the middle of that uh degradation region right and the circuit breaker didn't it just you know",
+    "start": "990880",
+    "end": "996800"
+  },
+  {
+    "text": "it's another day in the life for it so um yeah you'll notice that the good put dropped to zero at the end of that",
+    "start": "996800",
+    "end": "1002880"
+  },
+  {
+    "text": "simulation uh i uh i think that was just how long it took and i didn't i forgot to plot like",
+    "start": "1002880",
+    "end": "1009279"
+  },
+  {
+    "text": "there wasn't anything fancy there's only one event in these simulations so uh",
+    "start": "1009279",
+    "end": "1014800"
+  },
+  {
+    "start": "1014000",
+    "end": "1014000"
+  },
+  {
+    "text": "okay so rate and bandwidth limits versus concurrency control if you're trying to be resilient right you're like i want to",
+    "start": "1014800",
+    "end": "1020480"
+  },
+  {
+    "text": "protect this microservice from tipping over under load or something right just use circuit breaking limit concurrency",
+    "start": "1020480",
+    "end": "1025839"
+  },
+  {
+    "text": "somehow okay whether that's in your application or via envoy",
+    "start": "1025839",
+    "end": "1031280"
+  },
+  {
+    "text": "right but i mean you need rate limiting if you're like charging someone for an api right like someone pays you for some",
+    "start": "1031280",
+    "end": "1037280"
+  },
+  {
+    "text": "plan then you know this is what you get and why would i give you more right even if i have the capability to service",
+    "start": "1037280",
+    "end": "1042720"
+  },
+  {
+    "text": "those extra requests right so that all depends but you you would still want to use circuit breaking",
+    "start": "1042720",
+    "end": "1049600"
+  },
+  {
+    "text": "under those circumstances right to actually protect the backend server",
+    "start": "1049600",
+    "end": "1056320"
+  },
+  {
+    "text": "yeah in the rate limiting cases the precious resource is a number of requests not",
+    "start": "1056400",
+    "end": "1063440"
+  },
+  {
+    "text": "server latency um circuit breakers have their own",
+    "start": "1063440",
+    "end": "1068960"
+  },
+  {
+    "start": "1066000",
+    "end": "1066000"
+  },
+  {
+    "text": "shortcomings right so uh i i have to know like i knew how many",
+    "start": "1068960",
+    "end": "1074320"
+  },
+  {
+    "text": "worker threads that uh fake server had and it was an ideal condition right and a lot of times you",
+    "start": "1074320",
+    "end": "1079360"
+  },
+  {
+    "text": "can kind of have more requests than are uh necessary uh you can have it juggle",
+    "start": "1079360",
+    "end": "1084480"
+  },
+  {
+    "text": "you know as many requests as it needs to and uh it's not how many worker threads it has and you get good performance uh",
+    "start": "1084480",
+    "end": "1091360"
+  },
+  {
+    "text": "and circuit breaker is very unforgiving at burst it's just this is the limit where i don't care uh if if we go up",
+    "start": "1091360",
+    "end": "1098240"
+  },
+  {
+    "text": "temporarily right and burn that queue down um yeah so they are notoriously difficult to",
+    "start": "1098240",
+    "end": "1104799"
+  },
+  {
+    "text": "configure properly i don't have a citation for that you know there's just some manic data right just uh",
+    "start": "1104799",
+    "end": "1110080"
+  },
+  {
+    "text": "in my experience when people have to configure envoy and they they just kind of guess at a circuit",
+    "start": "1110080",
+    "end": "1115200"
+  },
+  {
+    "text": "breaker value and then you know you don't check to see if the seat belts work until you get into crash and then you find out whoops",
+    "start": "1115200",
+    "end": "1121039"
+  },
+  {
+    "text": "didn't configure that well at all um so what if i told you there was a better",
+    "start": "1121039",
+    "end": "1126640"
+  },
+  {
+    "start": "1125000",
+    "end": "1125000"
+  },
+  {
+    "text": "way what if i told you the adaptive",
+    "start": "1126640",
+    "end": "1131679"
+  },
+  {
+    "start": "1130000",
+    "end": "1130000"
+  },
+  {
+    "text": "concurrency filter can uh well it's alternative it's not perfect but what it's going to do is",
+    "start": "1131679",
+    "end": "1137440"
+  },
+  {
+    "text": "it'll adjust the concurrency limit real time based on latency measurements right",
+    "start": "1137440",
+    "end": "1142640"
+  },
+  {
+    "text": "so [Music] i didn't tell you why this is called for evil wizards in the adapted concurrency",
+    "start": "1142640",
+    "end": "1148320"
+  },
+  {
+    "text": "talk last year i didn't go too in depth about how this thing worked i just showed you how it worked and i hand",
+    "start": "1148320",
+    "end": "1153840"
+  },
+  {
+    "text": "waved away all the complicated you know hellscape of yaml to actually get it to work uh we're going to go in on that so",
+    "start": "1153840",
+    "end": "1159919"
+  },
+  {
+    "text": "put on your robe and wizard hats it's going to take a measurement of",
+    "start": "1159919",
+    "end": "1165280"
+  },
+  {
+    "text": "ideal latencies as a baseline right so imagine this i'm an envoy i'm fronting some instance okay",
+    "start": "1165280",
+    "end": "1171520"
+  },
+  {
+    "text": "requests are coming in and i'm just kind of letting them through right but i picked some like",
+    "start": "1171520",
+    "end": "1177919"
+  },
+  {
+    "text": "lower bound for the concurrency i'm like this thing can handle like five active requests",
+    "start": "1177919",
+    "end": "1183600"
+  },
+  {
+    "text": "and i only let five active requests through and i'm just seeing how it does right i'm 503 anything in excess of that",
+    "start": "1183600",
+    "end": "1189840"
+  },
+  {
+    "text": "and i'm just getting some kind of baseline latency and then uh once i'm you know satisfied",
+    "start": "1189840",
+    "end": "1196320"
+  },
+  {
+    "text": "with that right i measure like whatever the p95s end up being uh i open the floodgates i'm just gonna let everything",
+    "start": "1196320",
+    "end": "1201840"
+  },
+  {
+    "text": "through right and i'm just gonna sample all the latencies that are coming in so we're going to divide it up into periods",
+    "start": "1201840",
+    "end": "1207039"
+  },
+  {
+    "text": "right and then we're going to say i have now an rtt ideal which is just you know shorthand for round trip time that's",
+    "start": "1207039",
+    "end": "1213440"
+  },
+  {
+    "text": "sent to request i got a reply back right so an ideal time for that and then i have sampled",
+    "start": "1213440",
+    "end": "1219679"
+  },
+  {
+    "text": "round trip times and i'm just going to look at the difference between the two right i'm going to have this thing called a",
+    "start": "1219679",
+    "end": "1225200"
+  },
+  {
+    "text": "gradient which is the ideal round trip time divided by the sampled which has the",
+    "start": "1225200",
+    "end": "1230400"
+  },
+  {
+    "text": "convenient property of if the sampled latencies start to climb higher than what we would actually want them to be",
+    "start": "1230400",
+    "end": "1236480"
+  },
+  {
+    "text": "this gradient gets smaller right but then if it is pretty much what the gradient",
+    "start": "1236480",
+    "end": "1241919"
+  },
+  {
+    "text": "is uh or sorry if it if it takes on the the ideal value",
+    "start": "1241919",
+    "end": "1247360"
+  },
+  {
+    "text": "um a gradient's about one right so if you multiply it by things it doesn't",
+    "start": "1247360",
+    "end": "1252559"
+  },
+  {
+    "text": "change because you're doing something right so this is based on latency based tcp",
+    "start": "1252559",
+    "end": "1258720"
+  },
+  {
+    "text": "congestion control algorithms so uh normally you know like in school you're like how does tcp work i drop the packet",
+    "start": "1258720",
+    "end": "1265200"
+  },
+  {
+    "text": "and i have now cut my you know concurrency window in half right and then i additively increase it",
+    "start": "1265200",
+    "end": "1272240"
+  },
+  {
+    "text": "again okay uh in a latency based case i've measured what my uh handshake like how long that",
+    "start": "1272240",
+    "end": "1278559"
+  },
+  {
+    "text": "took and i'm like yeah this links that's how fast it should be and then i start tweaking things based on you know whether there's latency there if i'm",
+    "start": "1278559",
+    "end": "1284480"
+  },
+  {
+    "text": "sitting in a nick buffer somewhere waiting to be routed um so uh",
+    "start": "1284480",
+    "end": "1291200"
+  },
+  {
+    "text": "i told you about how great the grading is if the ideal is less than the sampled uh",
+    "start": "1291200",
+    "end": "1296799"
+  },
+  {
+    "text": "a queue is formed right because our latencies are climbing for some reason if the idea is about",
+    "start": "1296799",
+    "end": "1302400"
+  },
+  {
+    "text": "what the sample is we did it right what i failed to mention and i go into great detail and another talk is that we",
+    "start": "1302400",
+    "end": "1309840"
+  },
+  {
+    "text": "periodically re-measure this thing right the ideal because you know we migrate vms or we uh",
+    "start": "1309840",
+    "end": "1316480"
+  },
+  {
+    "text": "who knows aws has a bad day i don't know right um so",
+    "start": "1316480",
+    "end": "1322080"
+  },
+  {
+    "start": "1320000",
+    "end": "1320000"
+  },
+  {
+    "text": "let's look at this gradient like how are we calculating this concurrency limit well uh we are uh adjusting the",
+    "start": "1322080",
+    "end": "1327840"
+  },
+  {
+    "text": "concurrency limit by uh just multiplying it by the gradient right this",
+    "start": "1327840",
+    "end": "1332960"
+  },
+  {
+    "text": "works out uh and then you know what about headroom i want to burst and you're like yeah no problem just like",
+    "start": "1332960",
+    "end": "1338240"
+  },
+  {
+    "text": "add on some headroom value make it the square root of the new limit this has this is nice because now uh i",
+    "start": "1338240",
+    "end": "1344400"
+  },
+  {
+    "text": "just keep probing up against like i'm just gonna keep letting more stuff in until you know something goes wrong and i'll clamp down aggressively",
+    "start": "1344400",
+    "end": "1351360"
+  },
+  {
+    "text": "on it so uh this is a simulation of that right this isn't real but this is the behavior we would have this orange ideal",
+    "start": "1351360",
+    "end": "1358400"
+  },
+  {
+    "start": "1352000",
+    "end": "1352000"
+  },
+  {
+    "text": "concurrency look at this it degraded and then it went back to normal well this concurrency limit in blue uh just",
+    "start": "1358400",
+    "end": "1364640"
+  },
+  {
+    "text": "follows the ideal it bobs up and down right we're probing we get latency we cut it down we probe again we get",
+    "start": "1364640",
+    "end": "1370080"
+  },
+  {
+    "text": "latency we cut it down um so uh this is an adaptive concurrency",
+    "start": "1370080",
+    "end": "1376000"
+  },
+  {
+    "start": "1373000",
+    "end": "1373000"
+  },
+  {
+    "text": "configuration okay this is this is awful uh this is in one of the downsides of",
+    "start": "1376000",
+    "end": "1381360"
+  },
+  {
+    "text": "using this thing but it's really nice once you get it dialed in uh the sample aggregate percentile that's",
+    "start": "1381360",
+    "end": "1386960"
+  },
+  {
+    "text": "like when i'm summarizing samples like the rtt i'm looking at this percentile like i'm not taking an average right so if",
+    "start": "1386960",
+    "end": "1393120"
+  },
+  {
+    "text": "you care about tail latencies you would set this to like a p95 or something right so that's what you're tracking and",
+    "start": "1393120",
+    "end": "1398480"
+  },
+  {
+    "text": "keeping under control but you know if you don't really care like set it to a median whatever you know uh the concurrency update interval how often",
+    "start": "1398480",
+    "end": "1405360"
+  },
+  {
+    "text": "are we updating this concurrency limit right i'm taking samples and then in this case after 0.25 seconds",
+    "start": "1405360",
+    "end": "1411200"
+  },
+  {
+    "text": "i uh do something with those samples and update the concurrency limit and then i",
+    "start": "1411200",
+    "end": "1417360"
+  },
+  {
+    "text": "clear all my other samples and start again uh there's a buffer value right so it's",
+    "start": "1417360",
+    "end": "1422400"
+  },
+  {
+    "text": "like you know if i exceed my ideal round trip time by like 0.1 or something right",
+    "start": "1422400",
+    "end": "1429679"
+  },
+  {
+    "text": "who cares right so you just kind of give it some wiggle room right before you clamp down aggressively on it with this",
+    "start": "1429679",
+    "end": "1434799"
+  },
+  {
+    "text": "buffer and uh the request count is just how many requests am i uh",
+    "start": "1434799",
+    "end": "1440640"
+  },
+  {
+    "text": "gonna take in before i go okay this is the ideal round trip time now right so",
+    "start": "1440640",
+    "end": "1445919"
+  },
+  {
+    "text": "we have like a super high rps service like who cares what this is because you'll just you'll make your measurement very quickly",
+    "start": "1445919",
+    "end": "1452240"
+  },
+  {
+    "text": "um the actual math and stuff behind how this works is well documented uh on the envoy docs",
+    "start": "1452240",
+    "end": "1459360"
+  },
+  {
+    "text": "let's uh oh sorry and then there's a min concurrency this is basically like what am i going to clamp to when i'm measuring my ideal latency",
+    "start": "1459360",
+    "end": "1466559"
+  },
+  {
+    "text": "okay so in this case i'm like 10. you can handle 10 right of course you can if you can't like who cares the adaptive",
+    "start": "1466559",
+    "end": "1472080"
+  },
+  {
+    "text": "concurrency works uh we have other problems right so that's that's usually how i go about uh",
+    "start": "1472080",
+    "end": "1477520"
+  },
+  {
+    "text": "figuring this out so let's see how it does with the traffic spike okay scenario uh you'll notice there's",
+    "start": "1477520",
+    "end": "1483120"
+  },
+  {
+    "text": "this huge spike but that's it's not really that bad so the uh",
+    "start": "1483120",
+    "end": "1488559"
+  },
+  {
+    "text": "the latency the ideal latency is uh three milliseconds 0.003 right and",
+    "start": "1488559",
+    "end": "1493600"
+  },
+  {
+    "text": "this goes to 0.125 shortly there are some requests that did this and then uh drops down to some",
+    "start": "1493600",
+    "end": "1500640"
+  },
+  {
+    "text": "value i don't even know right but you'll notice the good put because didn't even sweat nothing didn't notice anything",
+    "start": "1500640",
+    "end": "1506400"
+  },
+  {
+    "text": "right so what this did was it was like oh god like i let too many things in and then it clamps down",
+    "start": "1506400",
+    "end": "1511760"
+  },
+  {
+    "text": "uh lets no more requests through and then it does the bombing motion right so",
+    "start": "1511760",
+    "end": "1517360"
+  },
+  {
+    "text": "there it is in case you missed it uh server degradation scenario right same deal same behavior with the latency",
+    "start": "1517360",
+    "end": "1523360"
+  },
+  {
+    "text": "pretty much right um good put drops down to about where it was when we had the perfectly configured",
+    "start": "1523360",
+    "end": "1528559"
+  },
+  {
+    "text": "circuit breaker so all right it works uh now",
+    "start": "1528559",
+    "end": "1534640"
+  },
+  {
+    "text": "uh when does this not well here's some drawbacks it's really it's spectacularly complicated like you're dialing this in",
+    "start": "1534640",
+    "end": "1540559"
+  },
+  {
+    "start": "1535000",
+    "end": "1535000"
+  },
+  {
+    "text": "like it's a pid controller right so if you understand your environment",
+    "start": "1540559",
+    "end": "1545600"
+  },
+  {
+    "text": "pretty well you can just set the you can set these defaults right and then just let it go it's nice because you're not",
+    "start": "1545600",
+    "end": "1550640"
+  },
+  {
+    "text": "like looking at a service and making it bespoke for that service you're looking at your environment and then setting some values and that kind of just",
+    "start": "1550640",
+    "end": "1556720"
+  },
+  {
+    "text": "blanket applies everywhere right maybe you'll tweak things here and there if you if you're a pro and uh requests need to be a proxy for",
+    "start": "1556720",
+    "end": "1563600"
+  },
+  {
+    "text": "resource utilization right like if i have a database query like who knows what that thing is going to do to my",
+    "start": "1563600",
+    "end": "1568799"
+  },
+  {
+    "text": "server i don't know what's in it and i'm not looking so i can't you know circuit breakers kind of break down here too right database",
+    "start": "1568799",
+    "end": "1575760"
+  },
+  {
+    "text": "people are on their own i'm sorry i have no answer for you um let's talk about emission control",
+    "start": "1575760",
+    "end": "1582000"
+  },
+  {
+    "start": "1579000",
+    "end": "1579000"
+  },
+  {
+    "text": "okay what does the mission control filter do it probabilistically rejects requests",
+    "start": "1582000",
+    "end": "1587039"
+  },
+  {
+    "text": "based on a sliding window error rate okay uh so basically i'm like uh how",
+    "start": "1587039",
+    "end": "1593919"
+  },
+  {
+    "text": "many of my requests were successful in the last you know period of time okay let's derive",
+    "start": "1593919",
+    "end": "1600159"
+  },
+  {
+    "text": "a success rate out of that and then based on that success rate i'll reject requests",
+    "start": "1600159",
+    "end": "1606000"
+  },
+  {
+    "text": "okay we know we all should know what a sliding window is right we look at the success over the total that's our success rate and we use it",
+    "start": "1606000",
+    "end": "1613279"
+  },
+  {
+    "text": "if you want to know where this came from this google site reliability engineering book is just a gold mine of wisdom",
+    "start": "1613279",
+    "end": "1620880"
+  },
+  {
+    "text": "and this was in there i just saw it was like let's do it uh but first let's",
+    "start": "1620880",
+    "end": "1627120"
+  },
+  {
+    "text": "let's change some things uh that that site reliability engineering book only has this linear relationship right",
+    "start": "1627120",
+    "end": "1633919"
+  },
+  {
+    "text": "uh which it may be fine for some people but it wasn't for uh the use case uh we",
+    "start": "1633919",
+    "end": "1639200"
+  },
+  {
+    "text": "needed so i threw in this threshold value and this aggression term which did awesome stuff",
+    "start": "1639200",
+    "end": "1646000"
+  },
+  {
+    "text": "check this out x-axis is success rate and then rejection probability is on the y-axis",
+    "start": "1646000",
+    "end": "1652840"
+  },
+  {
+    "text": "so um this kind of makes sense you're like okay well as my request success rate drops to zero right i am more and more",
+    "start": "1652840",
+    "end": "1660000"
+  },
+  {
+    "text": "likely to reject a request uh this is kind of nice uh somebody uh sent",
+    "start": "1660000",
+    "end": "1667360"
+  },
+  {
+    "text": "a pull request that also added a upper bound to the rejection probability so you know it's defaulted to 80 now this is a",
+    "start": "1667360",
+    "end": "1673760"
+  },
+  {
+    "text": "little out of date but i i don't remember how i generated this graph um",
+    "start": "1673760",
+    "end": "1679760"
+  },
+  {
+    "text": "okay don't use this thing in this configuration all of the other load chatting mechanisms i talked about i'm",
+    "start": "1679760",
+    "end": "1685360"
+  },
+  {
+    "text": "assuming like i'm an envoy i'm fronting this one instance uh come at me requests right in this case we do not want to do",
+    "start": "1685360",
+    "end": "1692159"
+  },
+  {
+    "text": "this because uh here's why if i increase offered load and then i uh",
+    "start": "1692159",
+    "end": "1698720"
+  },
+  {
+    "text": "sorry hang on how am i doing on time two minutes okay we're almost done uh",
+    "start": "1698720",
+    "end": "1704799"
+  },
+  {
+    "text": "you'll see this this kind of behavior we don't want this because our success rate drops to zero we're like oh no i'm",
+    "start": "1704799",
+    "end": "1711039"
+  },
+  {
+    "text": "shedding load i'm letting things through things are recovering okay awesome success rate climbs and then i let too",
+    "start": "1711039",
+    "end": "1716320"
+  },
+  {
+    "text": "many things through and then i'm waiting for more errors so we don't want that what we want to do",
+    "start": "1716320",
+    "end": "1721919"
+  },
+  {
+    "text": "is uh client-side throttling with this admission control filter okay why is that useful what if i brown out",
+    "start": "1721919",
+    "end": "1728880"
+  },
+  {
+    "text": "like that server is shedding load and that's what's tipping it over there's so many requests or like the network is saturated we have so many clients that",
+    "start": "1728880",
+    "end": "1736240"
+  },
+  {
+    "text": "one request from them is just you know uh well a raindrop in the flood",
+    "start": "1736240",
+    "end": "1742480"
+  },
+  {
+    "text": "um so that's it sorry all right can we do questions",
+    "start": "1742480",
+    "end": "1748399"
+  },
+  {
+    "text": "one or two questions if people have them",
+    "start": "1748399",
+    "end": "1752840"
+  },
+  {
+    "text": "i had a question about the you mentioned that the it wouldn't be protecting databases but",
+    "start": "1761200",
+    "end": "1767360"
+  },
+  {
+    "text": "i'm wondering from the client perspective wouldn't any like database latencies or issues just be",
+    "start": "1767360",
+    "end": "1773600"
+  },
+  {
+    "text": "reflected as like server side server degradation anyway",
+    "start": "1773600",
+    "end": "1779039"
+  },
+  {
+    "text": "right yeah yeah but so if you think of it like if i'm limiting concurrency to like 10 requests right",
+    "start": "1779039",
+    "end": "1784799"
+  },
+  {
+    "text": "i'm thinking this in terms of like okay well i'm using 10 units of resources on this server right",
+    "start": "1784799",
+    "end": "1790000"
+  },
+  {
+    "text": "which makes sense for a lot of services but a database it doesn't because i can have some like just bananas insane query",
+    "start": "1790000",
+    "end": "1795679"
+  },
+  {
+    "text": "right and then another one could just be a no op right so if i have like 10 no ops i'm good if i had 10 of these crazy",
+    "start": "1795679",
+    "end": "1801120"
+  },
+  {
+    "text": "queries then like i'm asleep at the wheel right and that's what i meant by that",
+    "start": "1801120",
+    "end": "1807520"
+  },
+  {
+    "text": "got it i saw another hand i saw another hand",
+    "start": "1807520",
+    "end": "1812640"
+  },
+  {
+    "text": "somewhere okay go on once",
+    "start": "1812640",
+    "end": "1819039"
+  },
+  {
+    "text": "okay oh man at least i'm just making them work",
+    "start": "1819039",
+    "end": "1825840"
+  },
+  {
+    "text": "so i guess the same question kind of applies to a heterogeneous service right like if you have",
+    "start": "1829279",
+    "end": "1835679"
+  },
+  {
+    "text": "posts that take away the longer or whatever it is like one thing has an upper bound like",
+    "start": "1835679",
+    "end": "1841279"
+  },
+  {
+    "text": "10 minutes because that's how that api works you would have the same thing as with databases right",
+    "start": "1841279",
+    "end": "1849120"
+  },
+  {
+    "text": "do you mean are you asking about like like if you have a bimodal distribution or something of your life yes if you have however many apis guarded by this",
+    "start": "1849120",
+    "end": "1856880"
+  },
+  {
+    "text": "envoy config i guess house how finally can you slice it as i guess the question right that's a real good question uh",
+    "start": "1856880",
+    "end": "1862720"
+  },
+  {
+    "text": "this comes up a few times uh and there's new information since i last addressed it uh one is okay if i have a",
+    "start": "1862720",
+    "end": "1870000"
+  },
+  {
+    "text": "bimodal distribution right like i have you know a bunch of requests take one millisecond and then a ton to take 150 and that's totally normal right and",
+    "start": "1870000",
+    "end": "1876159"
+  },
+  {
+    "text": "there's they have their own little distributions uh if you're tracking the like p99 latency for this whole batch",
+    "start": "1876159",
+    "end": "1882880"
+  },
+  {
+    "text": "right then you're really tracking this this the mode that's in the tail um",
+    "start": "1882880",
+    "end": "1888880"
+  },
+  {
+    "text": "and you're you're kind of crossing your fingers hoping that the distribution of those requests doesn't really change right",
+    "start": "1888880",
+    "end": "1894240"
+  },
+  {
+    "text": "and that you know it seemed good enough for at the time now uh some some issues were opened uh regarding this and uh now",
+    "start": "1894240",
+    "end": "1902320"
+  },
+  {
+    "text": "we're thinking about um by we i mean like it's who knows who's gonna do this right but uh making it per route right",
+    "start": "1902320",
+    "end": "1910159"
+  },
+  {
+    "text": "so you just have like a type whatever the filter config is where you can have it per route and then you basically have a concurrency controller for each route",
+    "start": "1910159",
+    "end": "1917279"
+  },
+  {
+    "text": "because they're like super cheap you know to make and track admission control will really benefit from this too",
+    "start": "1917279",
+    "end": "1922960"
+  },
+  {
+    "text": "a real rent that's it okay i'm gone goodbye everyone",
+    "start": "1922960",
+    "end": "1928180"
+  },
+  {
+    "text": "[Applause]",
+    "start": "1928180",
+    "end": "1932289"
+  }
+]

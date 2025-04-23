@@ -1,0 +1,1772 @@
+[
+  {
+    "text": "hey my name is lisis D Santos and I'm here to talk about how we implemented multicast with ebpf and",
+    "start": "80",
+    "end": "8719"
+  },
+  {
+    "text": "psyllium first uh who am I right uh I'm a data path engineer at Cisco uh we were",
+    "start": "8719",
+    "end": "15480"
+  },
+  {
+    "text": "ISO vent before Cisco acquired us I focus on Linux kernel networking and",
+    "start": "15480",
+    "end": "21480"
+  },
+  {
+    "text": "ebpf I've worked in open source for quite some time now and all my free time",
+    "start": "21480",
+    "end": "26760"
+  },
+  {
+    "text": "I like to develop neovin plugins and play around with li Linux desktop development like uh whin and gtk4",
+    "start": "26760",
+    "end": "35440"
+  },
+  {
+    "text": "stuff okay so what are we going to cover in this talk we're going to do a really gentle",
+    "start": "35440",
+    "end": "41039"
+  },
+  {
+    "text": "uh introduction to multicast and then I'm going to go over how we implemented multicast using EPF and the celium data",
+    "start": "41039",
+    "end": "48160"
+  },
+  {
+    "text": "path it's going to be a super nerdy talk so you can go ahead and follow it uh our",
+    "start": "48160",
+    "end": "53280"
+  },
+  {
+    "text": "BPF code at this link if you want to okay a couple disclaimers before we",
+    "start": "53280",
+    "end": "59680"
+  },
+  {
+    "text": "start I wouldn't necessarily consider myself a multicast expert I got pretty",
+    "start": "59680",
+    "end": "65360"
+  },
+  {
+    "text": "acquainted to it with uh this project but some of the larger multicast deployments out there um just guard your",
+    "start": "65360",
+    "end": "72439"
+  },
+  {
+    "text": "questions as far as how deep you want to go uh at the end we're going to talk about multicast",
+    "start": "72439",
+    "end": "78280"
+  },
+  {
+    "text": "in the context of kubernetes and celium so any kind of sources or subscribers to",
+    "start": "78280",
+    "end": "84360"
+  },
+  {
+    "text": "multicast groups outside the cluster are a little bit of uh out of scope for this talk and and again we're going to focus",
+    "start": "84360",
+    "end": "90880"
+  },
+  {
+    "text": "on the ebpf data path right all right so what is multicast",
+    "start": "90880",
+    "end": "97079"
+  },
+  {
+    "text": "right uh it was introduced in RFC 1112 it's a layer three technology right",
+    "start": "97079",
+    "end": "103320"
+  },
+  {
+    "text": "so it works at the IP layer any kind of layers on top uh any protocols on top",
+    "start": "103320",
+    "end": "108399"
+  },
+  {
+    "text": "are usually connectionless it's very common to see multicast and UDP working",
+    "start": "108399",
+    "end": "113439"
+  },
+  {
+    "text": "together and multicast is the unicast delivery to a group of hosts done",
+    "start": "113439",
+    "end": "118520"
+  },
+  {
+    "text": "efficiently right it removes the burden from the source so if you look at that",
+    "start": "118520",
+    "end": "124240"
+  },
+  {
+    "text": "diagram right there you don't see the source on the left sending packets to each uh",
+    "start": "124240",
+    "end": "130440"
+  },
+  {
+    "text": "subscriber instead the IP infrastructure in the middle is doing that work for",
+    "start": "130440",
+    "end": "135480"
+  },
+  {
+    "text": "you so where is multicast used broadcasting and media streaming right",
+    "start": "135480",
+    "end": "141440"
+  },
+  {
+    "text": "your favorite movie sometimes it's being delivered to millions of clients at a time in financial services it's pretty",
+    "start": "141440",
+    "end": "148360"
+  },
+  {
+    "text": "popular uh Market update data is usually like broadcasted out to a bunch of",
+    "start": "148360",
+    "end": "154000"
+  },
+  {
+    "text": "subscribers and online gaming is another one where you might have a session with a bunch of online Gamers and you want to",
+    "start": "154000",
+    "end": "161080"
+  },
+  {
+    "text": "broadcast the game state to everyone all right so how does it work",
+    "start": "161080",
+    "end": "166879"
+  },
+  {
+    "text": "uh the first thing we should talk about is uh multicast group addresses these are just IP addresses right uh they're",
+    "start": "166879",
+    "end": "173239"
+  },
+  {
+    "text": "class D addresses there are some specific ones here that you might want to glance at and uh uh when a traffic is",
+    "start": "173239",
+    "end": "180959"
+  },
+  {
+    "text": "sent to these groups the IP infrastructure goes ahead and replicates those packets and sends them to anyone",
+    "start": "180959",
+    "end": "187560"
+  },
+  {
+    "text": "that's in the group so that begs the question how do these hosts get into this group and leave these groups right",
+    "start": "187560",
+    "end": "194599"
+  },
+  {
+    "text": "so we need a concept of group management and the igmp protocol does this for us",
+    "start": "194599",
+    "end": "199840"
+  },
+  {
+    "text": "right it means internet group management protocol it's the Workhorse protocol of",
+    "start": "199840",
+    "end": "204959"
+  },
+  {
+    "text": "multicast it implements the leaving and joining of groups from hosts and it also",
+    "start": "204959",
+    "end": "210360"
+  },
+  {
+    "text": "allows routers and IP uh infrastructure to query who is in a group it's a layer",
+    "start": "210360",
+    "end": "216480"
+  },
+  {
+    "text": "three protocol with the protocol number two and there are two major objects that are uh always referred to um membership",
+    "start": "216480",
+    "end": "225239"
+  },
+  {
+    "text": "reports this is how a host says hey I'm part of this group and membership queries this is how the IP",
+    "start": "225239",
+    "end": "231319"
+  },
+  {
+    "text": "infrastructure says hey who is in this group there's three versions of",
+    "start": "231319",
+    "end": "237760"
+  },
+  {
+    "text": "multicast IGN mpv1 is for the most part deprecated as far as I can tell it's",
+    "start": "237760",
+    "end": "243159"
+  },
+  {
+    "text": "really that core implementation of everything we just said on the previous slide igmpv2 was introduced in RFC",
+    "start": "243159",
+    "end": "251920"
+  },
+  {
+    "text": "2236 and it adds the ability for um group specific membership queries so",
+    "start": "251920",
+    "end": "258000"
+  },
+  {
+    "text": "this is uh the IP infrastructure can say okay only tell me who's in this specific group and a leave message was added as",
+    "start": "258000",
+    "end": "265680"
+  },
+  {
+    "text": "well for you for a host to quickly leave a multicast group group igmp 3 uh was introduced in RFC",
+    "start": "265680",
+    "end": "275960"
+  },
+  {
+    "text": "3376 and it adds Source filtering now there's a little Aster there right that's because psyllium does not support",
+    "start": "275960",
+    "end": "282440"
+  },
+  {
+    "text": "Source filtering and that's going to play a role in a little bit when we talk about igmp",
+    "start": "282440",
+    "end": "287880"
+  },
+  {
+    "text": "parsing okay so what does it look like on the wire right igmp V1 is a very",
+    "start": "287880",
+    "end": "293039"
+  },
+  {
+    "text": "simple protocol right you have 8 bytes uh this is the kernel representation",
+    "start": "293039",
+    "end": "298360"
+  },
+  {
+    "text": "which we're going to use in our EB PF code you only have two type codes you have the query and the report and the",
+    "start": "298360",
+    "end": "304639"
+  },
+  {
+    "text": "way this works is that when a um when the IP infrastructure sends a query the",
+    "start": "304639",
+    "end": "311280"
+  },
+  {
+    "text": "hosts respond with a report also from the RFC uh anytime a multicast",
+    "start": "311280",
+    "end": "317080"
+  },
+  {
+    "text": "application is instantiated on the host it must send a membership report to say",
+    "start": "317080",
+    "end": "323080"
+  },
+  {
+    "text": "hey I just joined this right the code is unused and the group is the multicast",
+    "start": "323080",
+    "end": "329280"
+  },
+  {
+    "text": "group address address igmpv2 keeps the format almost exactly the same we just add some new",
+    "start": "329280",
+    "end": "335880"
+  },
+  {
+    "text": "type codes here type codes ox1 and ox12 are there for compatibility they're just",
+    "start": "335880",
+    "end": "342560"
+  },
+  {
+    "text": "saying okay we're going to use the formats from igmp V1 uh Ox 16 is a new membership report",
+    "start": "342560",
+    "end": "350840"
+  },
+  {
+    "text": "V2 and uh 17 is that leave um message which I went over earlier it's just a",
+    "start": "350840",
+    "end": "357600"
+  },
+  {
+    "text": "way for a host to quickly leave uh a group so now with the membership V2 this",
+    "start": "357600",
+    "end": "363560"
+  },
+  {
+    "text": "code uh field is now actually used and it allows uh when the IP infrastructure",
+    "start": "363560",
+    "end": "371720"
+  },
+  {
+    "text": "makes a query it can set a maximum time for hosts to respond and this is to",
+    "start": "371720",
+    "end": "377479"
+  },
+  {
+    "text": "avoid uh Thundering Herd issues right you might not want all these uh membership reports coming back all at",
+    "start": "377479",
+    "end": "382759"
+  },
+  {
+    "text": "the same time that maximum time allows the clients to pick a variable uh period where it can actually send as long as it",
+    "start": "382759",
+    "end": "389120"
+  },
+  {
+    "text": "doesn't go over the threshold and group stays the same okay so very simple so far right so mmp3 mixes things up a bit",
+    "start": "389120",
+    "end": "398599"
+  },
+  {
+    "text": "uh now we actually change this into a variable sized protocol and the way this works is it",
+    "start": "398599",
+    "end": "405400"
+  },
+  {
+    "text": "adds a new type code O x22 is a new membership report format right if you",
+    "start": "405400",
+    "end": "412360"
+  },
+  {
+    "text": "notice that the report is actually the same size other than a variable array at the bottom so when we actually see ox 22",
+    "start": "412360",
+    "end": "420080"
+  },
+  {
+    "text": "come in we say okay this is no longer igmp header we literally just cast it into the igmp V3 report and now you have",
+    "start": "420080",
+    "end": "428240"
+  },
+  {
+    "text": "this substructure called a group record let's dive into that right this",
+    "start": "428240",
+    "end": "434360"
+  },
+  {
+    "text": "is how they actually Implement Source filtering so if we look at the group uh",
+    "start": "434360",
+    "end": "440520"
+  },
+  {
+    "text": "record Fields you have type which gives us a way to interpret the list of",
+    "start": "440520",
+    "end": "445960"
+  },
+  {
+    "text": "sources all the way at the last field auxor words is not used oh sorry is not",
+    "start": "445960",
+    "end": "452879"
+  },
+  {
+    "text": "used number of sources tells us the bound of that final um field",
+    "start": "452879",
+    "end": "458360"
+  },
+  {
+    "text": "sources MCA now holds the group um the multicast group",
+    "start": "458360",
+    "end": "464000"
+  },
+  {
+    "text": "address and source is now a list of sources that should be filtered like I said psyllium does not support this so",
+    "start": "464000",
+    "end": "470159"
+  },
+  {
+    "text": "we're not going to dig into that too much but this is how uh this is just your knowledge when we go into actually",
+    "start": "470159",
+    "end": "476199"
+  },
+  {
+    "text": "parsing igmpv3 and why does it become work complicated",
+    "start": "476199",
+    "end": "481560"
+  },
+  {
+    "text": "right all right so let's put igmp into action right what how does this thing",
+    "start": "481560",
+    "end": "486879"
+  },
+  {
+    "text": "even work well there's igmp snooping by the IP infrastructure so you have a router",
+    "start": "486879",
+    "end": "493159"
+  },
+  {
+    "text": "in the middle here and he's snooping igmp messages going back and forth and when he sees igmp reports he adds these",
+    "start": "493159",
+    "end": "502080"
+  },
+  {
+    "text": "uh these messages to his State table right so an igmp is going to be a ipv4",
+    "start": "502080",
+    "end": "507120"
+  },
+  {
+    "text": "packet and the source is going to be the vender so now we can say okay the group",
+    "start": "507120",
+    "end": "512200"
+  },
+  {
+    "text": "address that's in the igmp uh membership report and the source of the packet is",
+    "start": "512200",
+    "end": "517240"
+  },
+  {
+    "text": "now part of that group it's requesting to be in now we have packet replication right",
+    "start": "517240",
+    "end": "524720"
+  },
+  {
+    "text": "so the IP infrastructure already built its little State table by sniffing out all the membership reports now we have a",
+    "start": "524720",
+    "end": "532000"
+  },
+  {
+    "text": "source on the left who wants to send to that uh group of 22410 do0 because we",
+    "start": "532000",
+    "end": "538440"
+  },
+  {
+    "text": "have this state table bill built up the IP infrastructure can go ahead replicate those packets and send a copy to each",
+    "start": "538440",
+    "end": "545200"
+  },
+  {
+    "text": "person in that group right all right that was super gentle introduction it's obviously more complex",
+    "start": "545200",
+    "end": "551440"
+  },
+  {
+    "text": "than that but it's a intermediate talk so we'll start there all right so now",
+    "start": "551440",
+    "end": "556800"
+  },
+  {
+    "text": "let's talk about how do we go and take those steps and translate this into the",
+    "start": "556800",
+    "end": "562040"
+  },
+  {
+    "text": "ebpf world with the cium data path right so what I want to quickly go over is",
+    "start": "562040",
+    "end": "567920"
+  },
+  {
+    "text": "like 10,000 foot view of like what does a cium node even look",
+    "start": "567920",
+    "end": "573120"
+  },
+  {
+    "text": "like so this is probably as simplified as I can explain what a kubernetes node",
+    "start": "573120",
+    "end": "579440"
+  },
+  {
+    "text": "with psyllium uh looks like right you have a pod and you have the host in",
+    "start": "579440",
+    "end": "586200"
+  },
+  {
+    "text": "there's a virtual interface that Bridges the two and celium is going to attach ebpf to the host side V right and that's",
+    "start": "586200",
+    "end": "594560"
+  },
+  {
+    "text": "where we can go ahead and hook in all that beautiful cium magic right uh um",
+    "start": "594560",
+    "end": "600079"
+  },
+  {
+    "text": "also we do the same thing for egress devices so that's your native devices right your actual real Nicks maybe uh",
+    "start": "600079",
+    "end": "607640"
+  },
+  {
+    "text": "that go out to the land we also put ebpf there and from ebpf there's like two",
+    "start": "607640",
+    "end": "612839"
+  },
+  {
+    "text": "pretty common operations that we do we can either redirect you to another interface or we can just drop you to the",
+    "start": "612839",
+    "end": "619240"
+  },
+  {
+    "text": "stack and let Linux kernel handle you right cool so this is uh logical",
+    "start": "619240",
+    "end": "627040"
+  },
+  {
+    "text": "representation of what we want to accomplish with with multicast cium and ebpf right so when a pod sends to a",
+    "start": "627040",
+    "end": "634680"
+  },
+  {
+    "text": "group we have these hook points right at the Pod uh the host side V where we can hook in some logic we want to check out",
+    "start": "634680",
+    "end": "642120"
+  },
+  {
+    "text": "uh is it a multicast destination if it is then we want to do local delivery right because some of our",
+    "start": "642120",
+    "end": "648120"
+  },
+  {
+    "text": "subscribers might be on the same host and we also want to do remote delivery because some of our subscribers might be",
+    "start": "648120",
+    "end": "653880"
+  },
+  {
+    "text": "on a remote host right all right so what are the puzzle pieces that we playing here with like",
+    "start": "653880",
+    "end": "660639"
+  },
+  {
+    "text": "what do we need to implement in ebpf so we have group management we have the",
+    "start": "660639",
+    "end": "665800"
+  },
+  {
+    "text": "packet replication local multicast delivery and remote uh multicast",
+    "start": "665800",
+    "end": "671480"
+  },
+  {
+    "text": "delivery right these are the things that we need to pay attention to as we Implement them in",
+    "start": "671480",
+    "end": "677079"
+  },
+  {
+    "text": "ebpf so group management we need some concept of that state table right we have to like store this state somehow",
+    "start": "677079",
+    "end": "683600"
+  },
+  {
+    "text": "well ebpf has Maps right maps are just inernal data structures they're created",
+    "start": "683600",
+    "end": "689040"
+  },
+  {
+    "text": "in user space there are some general type Maps which are hashes and arrays",
+    "start": "689040",
+    "end": "694200"
+  },
+  {
+    "text": "then we have some specific Maps which are nested maps and there's a little Aster there maybe a little bit of",
+    "start": "694200",
+    "end": "699480"
+  },
+  {
+    "text": "foreshadowing uh there's LPM Maps which are long as prefix batch program Maps which hold other BPF programs and",
+    "start": "699480",
+    "end": "705839"
+  },
+  {
+    "text": "there's a ton of these right and Maps provide us State between ebpf",
+    "start": "705839",
+    "end": "711320"
+  },
+  {
+    "text": "invocations right maybe you don't need user space maybe you just want to have a map to store around some data between",
+    "start": "711320",
+    "end": "717120"
+  },
+  {
+    "text": "Your ebpf Hooks and then they also allow us to talk to and communicate with user space right this map allows user space",
+    "start": "717120",
+    "end": "724200"
+  },
+  {
+    "text": "to go ahead and actually interact with our ebf ebpf",
+    "start": "724200",
+    "end": "729279"
+  },
+  {
+    "text": "programs all right so conceptually like what is the data model that we need we want to be able to look up a group and",
+    "start": "729760",
+    "end": "737639"
+  },
+  {
+    "text": "then get a list of subscribers right and what is the best fit mat type for that",
+    "start": "737639",
+    "end": "743399"
+  },
+  {
+    "text": "it actually winds up being a nested map right nested map structures are outer",
+    "start": "743399",
+    "end": "748720"
+  },
+  {
+    "text": "Maps and inner maps and when you look up on the outer map you get back a map right so this winded up working very",
+    "start": "748720",
+    "end": "755959"
+  },
+  {
+    "text": "well for us because we can go ahead and do a lookup on the multicast address and get back a hashmap which has all the",
+    "start": "755959",
+    "end": "763240"
+  },
+  {
+    "text": "subscribers which is keyed by their Source",
+    "start": "763240",
+    "end": "768320"
+  },
+  {
+    "text": "address so this is the map definition it looks pretty busy right and it is you're not going crazy but when we let's start",
+    "start": "769360",
+    "end": "776440"
+  },
+  {
+    "text": "all the way at the bottom there this is actually how you define find a nested map the outer map has a type right",
+    "start": "776440",
+    "end": "783160"
+  },
+  {
+    "text": "that's our hash of maps then our key type is just a 32-bit integer right",
+    "start": "783160",
+    "end": "788440"
+  },
+  {
+    "text": "because that's exactly what a multicast group address is right it's just a 32bit in uh the pinning stuff you can ignore",
+    "start": "788440",
+    "end": "796480"
+  },
+  {
+    "text": "even value you can kind of ignore because to define a nested map we actually use this new values field all",
+    "start": "796480",
+    "end": "802680"
+  },
+  {
+    "text": "the way at the bottom and then that defines the structure of the inner map right now the structure of the inner map",
+    "start": "802680",
+    "end": "809360"
+  },
+  {
+    "text": "is keyed by another 32-bit address which is just the ipv4 unicast address for the",
+    "start": "809360",
+    "end": "814519"
+  },
+  {
+    "text": "subscriber right and a value size of the uh mcast",
+    "start": "814519",
+    "end": "822120"
+  },
+  {
+    "text": "subscriber V4 structure right so we're going to map subscribers Source IPS to a",
+    "start": "822120",
+    "end": "827720"
+  },
+  {
+    "text": "metadata structure which is going to help us actually do replication and delivery right so inside that metadata",
+    "start": "827720",
+    "end": "834600"
+  },
+  {
+    "text": "structure we have the source address right matches the key we have the if Index this is the interface that you",
+    "start": "834600",
+    "end": "840959"
+  },
+  {
+    "text": "want to redirect to to get that multiclass packet closer to the destination right we have some padding",
+    "start": "840959",
+    "end": "847639"
+  },
+  {
+    "text": "because you need padding or else you're going to be in a bunch of pain later and then we have Flags which are going to",
+    "start": "847639",
+    "end": "852839"
+  },
+  {
+    "text": "tell us is this a remote subscriber or is this a local subscriber",
+    "start": "852839",
+    "end": "859000"
+  },
+  {
+    "text": "right all right now we need to think about how do we do igmp snooping in ebpf",
+    "start": "859120",
+    "end": "865120"
+  },
+  {
+    "text": "right well we have you already are acquainted with our map structure but just as a review for MMP snooping what",
+    "start": "865120",
+    "end": "872560"
+  },
+  {
+    "text": "do we want to do when we see a membership request which is telling us to do a join we want to look up the",
+    "start": "872560",
+    "end": "878600"
+  },
+  {
+    "text": "group address get the subscriber map and just add the subscriber to the map right pretty simple this is like crud uh same",
+    "start": "878600",
+    "end": "886279"
+  },
+  {
+    "text": "thing on leave right when we want to leave we do the same thing we get the subscriber map and then we just remove that",
+    "start": "886279",
+    "end": "893320"
+  },
+  {
+    "text": "subscriber so where do we want to Snoop so I hope you remember that super simple diagram that I uh showed you before uh",
+    "start": "893320",
+    "end": "900279"
+  },
+  {
+    "text": "we're going to Snoop right at the PO uh the host side V right all traffic leaving the Pod is going to end up there",
+    "start": "900279",
+    "end": "907120"
+  },
+  {
+    "text": "so when multicast traffic is sent that's the perfect place to watch for it right it's the first place we",
+    "start": "907120",
+    "end": "913920"
+  },
+  {
+    "text": "can all right so let's go into the technical details of how you would do the snooping right this is the fun stuff",
+    "start": "914639",
+    "end": "921079"
+  },
+  {
+    "text": "if you ask me I don't know if you think it is uh but basically the first thing we want to do is identify that we have",
+    "start": "921079",
+    "end": "927639"
+  },
+  {
+    "text": "MMP traffic now now this first function at the top the celium data PASS gives us",
+    "start": "927639",
+    "end": "933079"
+  },
+  {
+    "text": "an ipv4 header pretty early to play with so super simple right we're just going to look up the protocol we're going to",
+    "start": "933079",
+    "end": "939000"
+  },
+  {
+    "text": "see if it's ignp igmp is an IP uh layer technology right so it's directly in the",
+    "start": "939000",
+    "end": "945079"
+  },
+  {
+    "text": "protocol uh um sorry the IP header from there things get a little bit more interesting so you saw that all",
+    "start": "945079",
+    "end": "952319"
+  },
+  {
+    "text": "igmp header um structures basically had a type right",
+    "start": "952319",
+    "end": "957959"
+  },
+  {
+    "text": "so we want to go ahead and take out that type to figure out what are we going to even parse so the first thing we do here",
+    "start": "957959",
+    "end": "965199"
+  },
+  {
+    "text": "is we go ahead and we create a pointer to an igmp header right next we're going to compute the the uh length of the ipv4",
+    "start": "965199",
+    "end": "972360"
+  },
+  {
+    "text": "header and now this little section here right right this is uh pretty important",
+    "start": "972360",
+    "end": "978199"
+  },
+  {
+    "text": "what this is doing is if you ever heard about the ebpf verifier we need to prove to the verifier that if we go ahead and",
+    "start": "978199",
+    "end": "985319"
+  },
+  {
+    "text": "we touch any data pointers which this is actually the uh the actual bits of your packet right",
+    "start": "985319",
+    "end": "993240"
+  },
+  {
+    "text": "this is what's on the wire that we received if we touch any of those we need to prove to the verifier that we're",
+    "start": "993240",
+    "end": "999120"
+  },
+  {
+    "text": "not going to go above the bounds of that array right or else that's a problem that could crash the kernel that could",
+    "start": "999120",
+    "end": "1004880"
+  },
+  {
+    "text": "give you garbage data and that's the verifier uh point is to make sure that you don't do anything like that so you",
+    "start": "1004880",
+    "end": "1010639"
+  },
+  {
+    "text": "can the this is like uh this is proving to the verifier to say okay if you are",
+    "start": "1010639",
+    "end": "1016519"
+  },
+  {
+    "text": "going to go over the uh bounds of the data array you're not even going to go",
+    "start": "1016519",
+    "end": "1022240"
+  },
+  {
+    "text": "into that next line of code right you're just going to drop and you're going to go return from this function so as long as we pass that",
+    "start": "1022240",
+    "end": "1028880"
+  },
+  {
+    "text": "function then all we do is we uh go ahead and we do actually seek that data pointer which is our packet buffer right",
+    "start": "1028880",
+    "end": "1035360"
+  },
+  {
+    "text": "we seek it right into uh past the ipv4 header to get to igmp",
+    "start": "1035360",
+    "end": "1042160"
+  },
+  {
+    "text": "oops and then we return the type right because it's an igmp header so after we",
+    "start": "1042160",
+    "end": "1048919"
+  },
+  {
+    "text": "extracted the type now we can go ahead and figure out what version we're working with right our implementation",
+    "start": "1048919",
+    "end": "1055880"
+  },
+  {
+    "text": "only really cares about looking for membership reports which is a pod telling us that it wants to join a group",
+    "start": "1055880",
+    "end": "1061480"
+  },
+  {
+    "text": "right or a leave message which is a pod telling us it wants to leave the group so we get the type and then we just go",
+    "start": "1061480",
+    "end": "1068400"
+  },
+  {
+    "text": "into a switch case which says okay like let's match what the type uh we found",
+    "start": "1068400",
+    "end": "1074679"
+  },
+  {
+    "text": "was now we're going to go into how would you parse igmpv2 igmpv2 again simple",
+    "start": "1075120",
+    "end": "1081159"
+  },
+  {
+    "text": "protocol right so what we can do here is we can actually create our subscriber",
+    "start": "1081159",
+    "end": "1086240"
+  },
+  {
+    "text": "like I mentioned earlier this is uh still an ipv4 packet right just it's",
+    "start": "1086240",
+    "end": "1091280"
+  },
+  {
+    "text": "just an igmp um packet as well and our source of our subscriber is actually",
+    "start": "1091280",
+    "end": "1096640"
+  },
+  {
+    "text": "just the ipv4 source right then we can set the if Index right because we are",
+    "start": "1096640",
+    "end": "1102480"
+  },
+  {
+    "text": "snooping at the host side V of the pod that's the first Ingress interface that",
+    "start": "1102480",
+    "end": "1108960"
+  },
+  {
+    "text": "the traffic comes into the host uh networking namespace right so this is correct we we we get the subscribers if",
+    "start": "1108960",
+    "end": "1116360"
+  },
+  {
+    "text": "index that if we were to send traffic to it that is its V it'll go right over the V parent into the Pod right for the most",
+    "start": "1116360",
+    "end": "1123919"
+  },
+  {
+    "text": "part here this is stuff we've just discussed right this is all just like making the verifier happy and then we go",
+    "start": "1123919",
+    "end": "1130559"
+  },
+  {
+    "text": "ahead and we get um a pointer to our igmp header the igmp header has the",
+    "start": "1130559",
+    "end": "1137200"
+  },
+  {
+    "text": "multicast group and now we finally get to use our group map that we discussed before right we do a map lookup and get",
+    "start": "1137200",
+    "end": "1143640"
+  },
+  {
+    "text": "the subscriber map and as long as we have a subscriber map we go ahead and add the subscriber to the map right",
+    "start": "1143640",
+    "end": "1150400"
+  },
+  {
+    "text": "pretty simple this last part is just because this looked a little bit magic but you can see that we're just you know",
+    "start": "1150400",
+    "end": "1156039"
+  },
+  {
+    "text": "pulling out the necessary bits we need uh Source address when we actually do the ad",
+    "start": "1156039",
+    "end": "1161760"
+  },
+  {
+    "text": "there cool so igmpv3 it's a bit more complex because it's a more complex",
+    "start": "1161760",
+    "end": "1167960"
+  },
+  {
+    "text": "protocol right so the way igmpv3 works is is now variable sized and an igmpv3 report has",
+    "start": "1167960",
+    "end": "1176679"
+  },
+  {
+    "text": "one or more group records within it right each group record is going to have",
+    "start": "1176679",
+    "end": "1182000"
+  },
+  {
+    "text": "a type which tells us how to interpret this the list of sources and that MCA",
+    "start": "1182000",
+    "end": "1188000"
+  },
+  {
+    "text": "field right there is going to be our multicast group address right",
+    "start": "1188000",
+    "end": "1195039"
+  },
+  {
+    "text": "cool all right so how do we actually parse this right so this is this is truncated code",
+    "start": "1195960",
+    "end": "1202919"
+  },
+  {
+    "text": "a bit and you can imagine that we did all the work to already grab the igmp header",
+    "start": "1202919",
+    "end": "1208240"
+  },
+  {
+    "text": "right but now we saw the igmp header and it's an O x22 meaning it's a membership",
+    "start": "1208240",
+    "end": "1213600"
+  },
+  {
+    "text": "report V3 and that's where we're picking up so now that we know it's a membership report V3 we can go ahead and get the",
+    "start": "1213600",
+    "end": "1221320"
+  },
+  {
+    "text": "number of Records in the report right uh and then we start actually",
+    "start": "1221320",
+    "end": "1226960"
+  },
+  {
+    "text": "looping over each item within the report as we Loop over them we do",
+    "start": "1226960",
+    "end": "1232640"
+  },
+  {
+    "text": "another we got to make the verifier happy again right because now we're basically indexing into the data",
+    "start": "1232640",
+    "end": "1238480"
+  },
+  {
+    "text": "buffer so we're going to go ahead and do that and then for each record we go ahead and we do a subscriber map",
+    "start": "1238480",
+    "end": "1246880"
+  },
+  {
+    "text": "lookup for the MCA field now in the record right so it's it's basically the",
+    "start": "1246880",
+    "end": "1252320"
+  },
+  {
+    "text": "same thing as igmp V2 other than this next part right now because we have",
+    "start": "1252320",
+    "end": "1259480"
+  },
+  {
+    "text": "these type Fields this is actually tells us how to interpret the source list of sources right now as I mentioned before",
+    "start": "1259480",
+    "end": "1266880"
+  },
+  {
+    "text": "celium does not support Source filtering so we can always assume that the source array is zero and then you have this type which I",
+    "start": "1266880",
+    "end": "1274720"
+  },
+  {
+    "text": "guess is a way to kind of be extremely flexible with this protocol but if you think about it these types can be either",
+    "start": "1274720",
+    "end": "1281000"
+  },
+  {
+    "text": "changed to exclude or change to include right so if we're changing to exclude",
+    "start": "1281000",
+    "end": "1286240"
+  },
+  {
+    "text": "zero that's saying give me all all the multicast traffic that's coming from that group I have no",
+    "start": "1286240",
+    "end": "1292520"
+  },
+  {
+    "text": "filter on the opposite side if you're changing to include zero I don't want any traffic right there's no sources",
+    "start": "1292520",
+    "end": "1299720"
+  },
+  {
+    "text": "here so it's this kind of like white deny list white list deny list uh that they kind of implemented in the binary",
+    "start": "1299720",
+    "end": "1306600"
+  },
+  {
+    "text": "protocol there but again we don't like this is as much as we care about because we're not doing too much with those",
+    "start": "1306600",
+    "end": "1312960"
+  },
+  {
+    "text": "sources yet in the future if we do support Source filtering this becomes way more relevant",
+    "start": "1312960",
+    "end": "1319279"
+  },
+  {
+    "text": "okay and then parsing leaves is very simple right it's most of what we talked about before as far as just getting an",
+    "start": "1319279",
+    "end": "1325200"
+  },
+  {
+    "text": "igmp header and then we go ahead and we check uh what is the type and as long as",
+    "start": "1325200",
+    "end": "1330600"
+  },
+  {
+    "text": "we find a subscriber map for the group uh address that's in that header then we",
+    "start": "1330600",
+    "end": "1336080"
+  },
+  {
+    "text": "just do a uh removal just like we did before",
+    "start": "1336080",
+    "end": "1342279"
+  },
+  {
+    "text": "cool okay so now in ebpf we have to talk about packet replication right",
+    "start": "1342840",
+    "end": "1350520"
+  },
+  {
+    "text": "so in the kernel it's common to hear these phrases called redirect clone so",
+    "start": "1351279",
+    "end": "1357240"
+  },
+  {
+    "text": "what is that right like a ebpf redirect it's a way for you to inject a packet",
+    "start": "1357240",
+    "end": "1363159"
+  },
+  {
+    "text": "back into the Linux Network stack as if it came or is going to",
+    "start": "1363159",
+    "end": "1368720"
+  },
+  {
+    "text": "another network interface right now clone is a way for you to copy",
+    "start": "1368720",
+    "end": "1374279"
+  },
+  {
+    "text": "a packet but keep that data buffer uh the same so it's kind of like a",
+    "start": "1374279",
+    "end": "1379600"
+  },
+  {
+    "text": "lightweight clone right I think anyone that does rust is like this is embedded into your head but uh",
+    "start": "1379600",
+    "end": "1386840"
+  },
+  {
+    "text": "so we want to do both for our multicast right we want to duplicate a packet and",
+    "start": "1386840",
+    "end": "1394240"
+  },
+  {
+    "text": "then we want to redirect it to the interface that we get for that subscriber the uh the unfortunate there",
+    "start": "1394240",
+    "end": "1401960"
+  },
+  {
+    "text": "well the fortunate part is that there is an ebpf helper that does this a slight unfortunate part is that there's a typ",
+    "start": "1401960",
+    "end": "1408720"
+  },
+  {
+    "text": "in it that makes it sound like it doesn't do this and I'll explain this a bit so when you're using any kind of other redirect from",
+    "start": "1408720",
+    "end": "1415520"
+  },
+  {
+    "text": "ebpf the redirection happens after the ebpf program is done right so you go you",
+    "start": "1415520",
+    "end": "1421880"
+  },
+  {
+    "text": "go to redirect you get back the the exit code and then you you're supposed to finish your program what we need to do because We're",
+    "start": "1421880",
+    "end": "1428679"
+  },
+  {
+    "text": "looping right we need to actually do that replication and delivery multiple",
+    "start": "1428679",
+    "end": "1434360"
+  },
+  {
+    "text": "times within a program and that exists that is this helper that we have have B BPF clone redirect but if you simply",
+    "start": "1434360",
+    "end": "1442120"
+  },
+  {
+    "text": "replace that word in that documentation it becomes much more easier to understand that that actually",
+    "start": "1442120",
+    "end": "1448640"
+  },
+  {
+    "text": "exists in the kernel and it's hard to make a PR for a for a typo fix in the",
+    "start": "1448640",
+    "end": "1453720"
+  },
+  {
+    "text": "kernel right so that's just the world we live in and uh if you were ever confused about if you can do this or not and you",
+    "start": "1453720",
+    "end": "1459000"
+  },
+  {
+    "text": "read that and you were like well maybe you can't then uh you can",
+    "start": "1459000",
+    "end": "1465200"
+  },
+  {
+    "text": "cool all right so let's talk about the multicast delivery conceptually",
+    "start": "1465200",
+    "end": "1470799"
+  },
+  {
+    "text": "right like I said we have two types of multicast delivery we want to accomplish we have the local case right so in this",
+    "start": "1470799",
+    "end": "1477480"
+  },
+  {
+    "text": "case we have pod a who's sending to a destination multicast a group like I",
+    "start": "1477480",
+    "end": "1483640"
+  },
+  {
+    "text": "mentioned before all that traffic is going to go out to that pod facing uh I'm sorry that host facing V interface",
+    "start": "1483640",
+    "end": "1489720"
+  },
+  {
+    "text": "right at that point we're going to we have EPF ebpf which we can hook into and",
+    "start": "1489720",
+    "end": "1495880"
+  },
+  {
+    "text": "we're going to do uh we're going to make sure that it's IGM right then we're going to do a subscriber lookup in our",
+    "start": "1495880",
+    "end": "1502039"
+  },
+  {
+    "text": "map and then we're going to do a clone and redirect to the interface right it's a local pod so that interface is going",
+    "start": "1502039",
+    "end": "1508960"
+  },
+  {
+    "text": "to just be another virtual interface on our host networking namespace right uh that will go ahead and will go",
+    "start": "1508960",
+    "end": "1516200"
+  },
+  {
+    "text": "to that host facing uh I'm sorry the Pod facing V and then go over into pod B and",
+    "start": "1516200",
+    "end": "1522360"
+  },
+  {
+    "text": "then ultimately be delivered to your multicast application uh in the Pod name space",
+    "start": "1522360",
+    "end": "1530320"
+  },
+  {
+    "text": "okay so now we have uh remote multicast delivery right uh this",
+    "start": "1530840",
+    "end": "1537240"
+  },
+  {
+    "text": "is essentially the same however you can't exactly route multicast without a",
+    "start": "1537240",
+    "end": "1543640"
+  },
+  {
+    "text": "multicast Damon and this is one of the nice things that we did in celium you don't need it right we're doing this all",
+    "start": "1543640",
+    "end": "1549039"
+  },
+  {
+    "text": "in ebpf so how do you go ahead and Route the multicast across nodes well we're going to use vxlan right everything in",
+    "start": "1549039",
+    "end": "1556880"
+  },
+  {
+    "text": "networking can be solved by encapsulation I'm pretty I'm pretty convinced so we're going to encapsulate",
+    "start": "1556880",
+    "end": "1562159"
+  },
+  {
+    "text": "it in VXL send it over and then from there it's just local delivery right pretty",
+    "start": "1562159",
+    "end": "1568159"
+  },
+  {
+    "text": "simple okay so now let's look at what that means in the code right what does the EF code look like well like I said",
+    "start": "1568159",
+    "end": "1575799"
+  },
+  {
+    "text": "we want to identify that it is multicast traffic rip that macro right from the kernel right all it's doing is checking",
+    "start": "1575799",
+    "end": "1582159"
+  },
+  {
+    "text": "that it's a Class D address right it's as simple as that if it is then we do an ebpf tail call uh tail call if you're",
+    "start": "1582159",
+    "end": "1589399"
+  },
+  {
+    "text": "not familiar is just a way to kind of jump to another EF program you actually trash the stack so you can never return",
+    "start": "1589399",
+    "end": "1595720"
+  },
+  {
+    "text": "to where you were uh but it allows you to like jump to a whole new uh BPF",
+    "start": "1595720",
+    "end": "1600799"
+  },
+  {
+    "text": "program uh as if it's a fresh context right okay uh then this is um I'll kind",
+    "start": "1600799",
+    "end": "1609440"
+  },
+  {
+    "text": "of describe this as like the setup for iterating over the subscriber map right",
+    "start": "1609440",
+    "end": "1616000"
+  },
+  {
+    "text": "so when we get here right uh uh this little bit here it's kind of",
+    "start": "1616000",
+    "end": "1621159"
+  },
+  {
+    "text": "interesting this little bit here we're setting up uh some state which we're going to give to an iterator we're",
+    "start": "1621159",
+    "end": "1627279"
+  },
+  {
+    "text": "setting it up on the stack right so we have a little stack pointer here which we will eventually pass to the iterator",
+    "start": "1627279",
+    "end": "1632520"
+  },
+  {
+    "text": "here uh but before that we actually have to rewrite our Mac uh I didn't dig into",
+    "start": "1632520",
+    "end": "1637720"
+  },
+  {
+    "text": "that too much but when you're delivering multicast traffic Layer Two there's like a uh specific Mac encoding it's in the",
+    "start": "1637720",
+    "end": "1644360"
+  },
+  {
+    "text": "RFC if you're if you're so inclined to check it out uh but we do have to rewrite the MAC address um and it's",
+    "start": "1644360",
+    "end": "1650880"
+  },
+  {
+    "text": "encoded via bits of the ipv4 destination address um yeah so after we rewrite um",
+    "start": "1650880",
+    "end": "1658760"
+  },
+  {
+    "text": "the Mac then we go ahead and we start using this other helper called for each mapm which will iterate over a map and",
+    "start": "1658760",
+    "end": "1666519"
+  },
+  {
+    "text": "allow you to run a call back for every item that is in the map if you're",
+    "start": "1666519",
+    "end": "1672279"
+  },
+  {
+    "text": "confused about what's in the map it's that subscriber metadata structure that we went over before right Source address",
+    "start": "1672279",
+    "end": "1678399"
+  },
+  {
+    "text": "index Flags this this stuff all right so this looks way busier",
+    "start": "1678399",
+    "end": "1683600"
+  },
+  {
+    "text": "and and intimidating than it is but it's actually extremely simple so all we're doing here for each subscriber right we",
+    "start": "1683600",
+    "end": "1690080"
+  },
+  {
+    "text": "do this from overlay check which I'll explain in a minute but after that we're want to go ahead and we want to say okay",
+    "start": "1690080",
+    "end": "1696000"
+  },
+  {
+    "text": "is it a remote subscriber if it is we need to set up tunnel Keys tunnel keys",
+    "start": "1696000",
+    "end": "1701519"
+  },
+  {
+    "text": "are a way for you to configure your encapsulation before you send it off to the VX land driver right believe it's",
+    "start": "1701519",
+    "end": "1708799"
+  },
+  {
+    "text": "called metadata mode when when the vxlan device is in metadata mode it actually expects all the information to to do the",
+    "start": "1708799",
+    "end": "1715480"
+  },
+  {
+    "text": "encapsulation in those tunnel keys so you'll have to set that up before we do the redirect if you weren't a remote",
+    "start": "1715480",
+    "end": "1722960"
+  },
+  {
+    "text": "subscriber then very simple right we just get the subscriber we find the if index and we do a clone and redirect at",
+    "start": "1722960",
+    "end": "1730679"
+  },
+  {
+    "text": "that point we took the packet that we have uh in context we made a copy of it and we send that copy off as a redirect",
+    "start": "1730679",
+    "end": "1737399"
+  },
+  {
+    "text": "to the pod uh interface right or the VXL interface if it's remote",
+    "start": "1737399",
+    "end": "1743480"
+  },
+  {
+    "text": "delivery now the from overlay bit right so you can think about this if you're coming from the",
+    "start": "1743480",
+    "end": "1749760"
+  },
+  {
+    "text": "overlay that means some other host sent you for remote delivery right that other",
+    "start": "1749760",
+    "end": "1757440"
+  },
+  {
+    "text": "host then also sent multicast packets to all the other remotes if we were to go",
+    "start": "1757440",
+    "end": "1763559"
+  },
+  {
+    "text": "and send packets to the remote we would just Loop right everyone all the remotes would be sending to all the remotes all the time so that's why that little check",
+    "start": "1763559",
+    "end": "1770200"
+  },
+  {
+    "text": "is there all right cool so that sums it up for me I have some other uh links here",
+    "start": "1770200",
+    "end": "1776240"
+  },
+  {
+    "text": "if you're interested the documentation let's say you want to go and play around with multicast feel free there's some",
+    "start": "1776240",
+    "end": "1782320"
+  },
+  {
+    "text": "documentation there and if you are like okay that looked pretty cool I want to write ebf code that is the code and",
+    "start": "1782320",
+    "end": "1789159"
+  },
+  {
+    "text": "maybe having this in your head now and looking at the code gets you a little bit more acquainted to playing around with",
+    "start": "1789159",
+    "end": "1794880"
+  },
+  {
+    "text": "stuff cool that's it [Applause]",
+    "start": "1794880",
+    "end": "1802820"
+  },
+  {
+    "text": "got questions whoops hi there I have a question um say",
+    "start": "1810840",
+    "end": "1818720"
+  },
+  {
+    "text": "we have an application that currently does multicast that we can go and put in a container is it just um drop in to a",
+    "start": "1818720",
+    "end": "1828000"
+  },
+  {
+    "text": "cluster that's using celum and it'll work or is there things you have to enable to get that to yeah you might have to restart your app but other than",
+    "start": "1828000",
+    "end": "1834279"
+  },
+  {
+    "text": "that that's about it if you noticed we never talked about queries right so because we're doing this all in",
+    "start": "1834279",
+    "end": "1840919"
+  },
+  {
+    "text": "ebpf we just kind of hopped over the need to say like do we need a Damon piece that's going to send queries for",
+    "start": "1840919",
+    "end": "1847360"
+  },
+  {
+    "text": "us but instead okay maybe you can restart your app because we need that join we need that igmp membership",
+    "start": "1847360",
+    "end": "1853519"
+  },
+  {
+    "text": "request the RFC says any application that's starting must that so as long as",
+    "start": "1853519",
+    "end": "1858799"
+  },
+  {
+    "text": "your application is compliant and you restart it it'll just work okay and I have one other quick one real quick um",
+    "start": "1858799",
+    "end": "1865279"
+  },
+  {
+    "text": "if your application dies and it doesn't send the leave request does that get handled",
+    "start": "1865279",
+    "end": "1870639"
+  },
+  {
+    "text": "or uh that's a good question at this time I don't believe",
+    "start": "1870639",
+    "end": "1876720"
+  },
+  {
+    "text": "that would happen yeah like I said this is very beta so it's not completely fleshed out uh but the leave request",
+    "start": "1876720",
+    "end": "1882679"
+  },
+  {
+    "text": "would have to happen gracefully right now okay thank you yep no problem hi",
+    "start": "1882679",
+    "end": "1889559"
+  },
+  {
+    "text": "oh I'm sorry go on all right so I had three questions so if I do if config um",
+    "start": "1889559",
+    "end": "1895519"
+  },
+  {
+    "text": "if the Linux command if config for ethernet um interface enable multicast",
+    "start": "1895519",
+    "end": "1901760"
+  },
+  {
+    "text": "what's the difference between a standard command like that versus doing the multicast Via ebpf well to implement",
+    "start": "1901760",
+    "end": "1908159"
+  },
+  {
+    "text": "multicast you kind of need a multicast Damon and yeah the idea is that a lot of",
+    "start": "1908159",
+    "end": "1913679"
+  },
+  {
+    "text": "people didn't want to do that right sure you can have multicast locally but then if you want to start routing your multicast and doing it cross cluster",
+    "start": "1913679",
+    "end": "1921080"
+  },
+  {
+    "text": "then you need to add the multicast routing Damon it has to hold open a net link socket and keep those routes alive",
+    "start": "1921080",
+    "end": "1927200"
+  },
+  {
+    "text": "so it's I think the entire goal here was to kind of like make it extremely dumb",
+    "start": "1927200",
+    "end": "1932760"
+  },
+  {
+    "text": "so you don't have to think too much about it and just turn it on and it works right so you so the the goal is to",
+    "start": "1932760",
+    "end": "1938760"
+  },
+  {
+    "text": "not make you think about how am I going to configure those interfaces why am I going to do this Damon on the Node just",
+    "start": "1938760",
+    "end": "1945039"
+  },
+  {
+    "text": "to get multicast this type of stuff okay so the next question is um putting myself into a distributed database",
+    "start": "1945039",
+    "end": "1951519"
+  },
+  {
+    "text": "situation where a node communicates or node or part communicates to a set of",
+    "start": "1951519",
+    "end": "1957159"
+  },
+  {
+    "text": "other parts within that particular cluster right so in this particular case um it's all TCP communication right but",
+    "start": "1957159",
+    "end": "1964799"
+  },
+  {
+    "text": "multicast is UDP I believe right so how does ef enabling in in the distributed",
+    "start": "1964799",
+    "end": "1972799"
+  },
+  {
+    "text": "database for example Cassandra how does that come into play or where does it intersect yeah so I don't really know",
+    "start": "1972799",
+    "end": "1980120"
+  },
+  {
+    "text": "too much about using multicast with TCP and I don't think it's really done",
+    "start": "1980120",
+    "end": "1985880"
+  },
+  {
+    "text": "too often so that almost seems to me like maybe I'm wrong but it seems to me like an application issue not so much of",
+    "start": "1985880",
+    "end": "1992480"
+  },
+  {
+    "text": "a psyllium issue cuz celum is expecting just the multicast protocol right right",
+    "start": "1992480",
+    "end": "1997960"
+  },
+  {
+    "text": "I'm saying uh I enabled ebpf and celium multicast in my cluster right on top of",
+    "start": "1997960",
+    "end": "2003880"
+  },
+  {
+    "text": "the cluster my u m the application is in the cases a distributed computing or",
+    "start": "2003880",
+    "end": "2009720"
+  },
+  {
+    "text": "distributed databases which only wants to communicate to a certain parts right so if I have that how does the CM a",
+    "start": "2009720",
+    "end": "2017320"
+  },
+  {
+    "text": "layer below knows not to do multicast for certain things that's my question",
+    "start": "2017320",
+    "end": "2022360"
+  },
+  {
+    "text": "see what I say well we're only going to do multicast things for multicast addresses right so if the Pod is sending",
+    "start": "2022360",
+    "end": "2028320"
+  },
+  {
+    "text": "to a multicast group like that group poost like a Class D uh address then",
+    "start": "2028320",
+    "end": "2035279"
+  },
+  {
+    "text": "yeah we're going to do multicast stuff but that's all we're going to do multicast for thank you my final",
+    "start": "2035279",
+    "end": "2040639"
+  },
+  {
+    "text": "question uh celum is an option right to enable this whole multicast ebpf uh I",
+    "start": "2040639",
+    "end": "2048200"
+  },
+  {
+    "text": "know Intel has got their own cnis is there any other things from in the industry equivalent of this right mtus",
+    "start": "2048200",
+    "end": "2056638"
+  },
+  {
+    "text": "cni celium cni what other tools are like this is there for for us to enable the",
+    "start": "2056639",
+    "end": "2062079"
+  },
+  {
+    "text": "ebpf specifically well I I don't think any Cloud cnis will do this it's",
+    "start": "2062079",
+    "end": "2068320"
+  },
+  {
+    "text": "possible maybe like a flannel or Calico has this but I don't honestly know yeah",
+    "start": "2068320",
+    "end": "2074320"
+  },
+  {
+    "text": "you might have to do a little research there thank you yeah hi I had a quick question about the",
+    "start": "2074320",
+    "end": "2080800"
+  },
+  {
+    "text": "uh replication um in the example you use you guys did a for a for Loop over the uh the map itself is there any uh",
+    "start": "2080800",
+    "end": "2087560"
+  },
+  {
+    "text": "performance or difference in function from using the broadcast flag on on a on",
+    "start": "2087560",
+    "end": "2092960"
+  },
+  {
+    "text": "a straight redirect map call a broadcast flag on a well",
+    "start": "2092960",
+    "end": "2098160"
+  },
+  {
+    "text": "so I'm maybe uh incorrect here",
+    "start": "2098160",
+    "end": "2104440"
+  },
+  {
+    "text": "but we had to use clone and redirect to do that redirection uh during the loop right",
+    "start": "2104680",
+    "end": "2111280"
+  },
+  {
+    "text": "this broadcast flag exists for that it does exist for clone and redirect if you pass in the broadcast flag it redirects",
+    "start": "2111280",
+    "end": "2117200"
+  },
+  {
+    "text": "it to all members of the map oh interesting well I just did not know about that so that's some learning for",
+    "start": "2117200",
+    "end": "2123960"
+  },
+  {
+    "text": "me maybe I'll take a look at that and second have you do do you guys have any published performance numbers on uh",
+    "start": "2123960",
+    "end": "2129160"
+  },
+  {
+    "text": "latency increases or like between like like the ratio for the number of replications versus like difference",
+    "start": "2129160",
+    "end": "2135119"
+  },
+  {
+    "text": "Jitter things that there has been I'm not sure if I have them in my purview uh",
+    "start": "2135119",
+    "end": "2141920"
+  },
+  {
+    "text": "but if you would like to maybe leave an email or something like that we definitely have those numbers but more from like you know like our sales",
+    "start": "2141920",
+    "end": "2148760"
+  },
+  {
+    "text": "engineers and this type of stuff right I don't know if I have those numbers per se all right thank you yeah for",
+    "start": "2148760",
+    "end": "2154560"
+  },
+  {
+    "text": "sure um quick one how does the set of multi subscribers for a given group propagate",
+    "start": "2154560",
+    "end": "2159880"
+  },
+  {
+    "text": "across the cluster do you just propagate the join message everywhere or so so at",
+    "start": "2159880",
+    "end": "2165640"
+  },
+  {
+    "text": "this time it's a manual configuration right okay yeah and that's where if you go to that document oh my",
+    "start": "2165640",
+    "end": "2172520"
+  },
+  {
+    "text": "bad well I don't know if it's still up or not but that documentation page will kind of describe that a little bit about",
+    "start": "2172520",
+    "end": "2179160"
+  },
+  {
+    "text": "how you might want to do that so right now it's like you said uh like I mentioned it's still kind of like a beta",
+    "start": "2179160",
+    "end": "2184200"
+  },
+  {
+    "text": "thing and we do kind of like rely on maybe like scripts to do this for us right okay cool cool we didn't want to",
+    "start": "2184200",
+    "end": "2191560"
+  },
+  {
+    "text": "package up the scripts hey um quick question any plans for V6 support I mean",
+    "start": "2191560",
+    "end": "2198240"
+  },
+  {
+    "text": "I don't know how uh multicast works on V6 because there's no class D address is",
+    "start": "2198240",
+    "end": "2204359"
+  },
+  {
+    "text": "there no well just for now you know I just haven't looked at it but if it's one of those things where like I don't know if",
+    "start": "2204359",
+    "end": "2210800"
+  },
+  {
+    "text": "an issue comes up and there's like 10,000 thumbs up then it'll probably start being looked at but as far as I",
+    "start": "2210800",
+    "end": "2216760"
+  },
+  {
+    "text": "know I don't know many people doing multicast with IPv6 or if there might be",
+    "start": "2216760",
+    "end": "2222160"
+  },
+  {
+    "text": "just an alternative for multicast baked into IPv6 I'm not really sure instead",
+    "start": "2222160",
+    "end": "2228640"
+  },
+  {
+    "text": "of yeah yep yep igmp is no good there I think it's the other way around uh there",
+    "start": "2228640",
+    "end": "2235079"
+  },
+  {
+    "text": "is no broadcast in V6 if I'm mistaken it's all multicast yes yes yes yes yes",
+    "start": "2235079",
+    "end": "2241160"
+  },
+  {
+    "text": "yeah so um my question um are you doing anything with North South traffic out in and out of the cluster or is this just",
+    "start": "2241160",
+    "end": "2247000"
+  },
+  {
+    "text": "multicasting inside the cluster for now just inside the cluster for now okay do you do you have any long range plans there or um I haven't heard anything",
+    "start": "2247000",
+    "end": "2255680"
+  },
+  {
+    "text": "yeah so I'm not completely sure um yeah what's up AC we accept PRS that okay",
+    "start": "2255680",
+    "end": "2263040"
+  },
+  {
+    "text": "that's Joe by the way he works with me cool it's not just some random guy thanks",
+    "start": "2263040",
+    "end": "2270520"
+  },
+  {
+    "text": "yeah that's it all right well thanks [Applause]",
+    "start": "2270520",
+    "end": "2277130"
+  }
+]

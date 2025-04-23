@@ -1,0 +1,1886 @@
+[
+  {
+    "start": "0",
+    "end": "107000"
+  },
+  {
+    "text": "welcome to uh kubecon welcome to our talk it's so great to be here in person and to see uh everyone here uh it's been",
+    "start": "160",
+    "end": "7919"
+  },
+  {
+    "text": "a tough two years and it's really great that we're doing these things again",
+    "start": "7919",
+    "end": "13040"
+  },
+  {
+    "text": "so today we're going to talk about the time that it wasn't dns everything seemed to tell us that it was",
+    "start": "13040",
+    "end": "19359"
+  },
+  {
+    "text": "dns the logs it felt like dns it had to be dns and it wasn't",
+    "start": "19359",
+    "end": "25760"
+  },
+  {
+    "text": "so first off we're here representing datadog uh this is a talk about datadog's infrastructure",
+    "start": "25760",
+    "end": "32719"
+  },
+  {
+    "text": "not about uh the product that we have but just in case you're not familiar we're an observability platform we",
+    "start": "32719",
+    "end": "38800"
+  },
+  {
+    "text": "monitor all the things we have a sweet booth in the exhibition hall and you should go check it out we're doing a",
+    "start": "38800",
+    "end": "44079"
+  },
+  {
+    "text": "raffle for a nintendo switch uh this afternoon so you should go get your badge scanned and see what we have to",
+    "start": "44079",
+    "end": "49280"
+  },
+  {
+    "text": "offer anyway uh the numbers that i want to focus on for this talk are the way that we run kubernetes and we're really big",
+    "start": "49280",
+    "end": "55520"
+  },
+  {
+    "text": "on that technology we run it at a big scale just to give you an idea we have some figures on the right-hand column",
+    "start": "55520",
+    "end": "61280"
+  },
+  {
+    "text": "here so we run thousands of tens of thousands of nodes and hundreds of thousands of pods we",
+    "start": "61280",
+    "end": "67040"
+  },
+  {
+    "text": "have dozens of kubernetes clusters with anywhere from hundreds to thousands of",
+    "start": "67040",
+    "end": "72320"
+  },
+  {
+    "text": "nodes so we're running this at a very large scale we run on uh all the major cloud providers and we're growing very",
+    "start": "72320",
+    "end": "78400"
+  },
+  {
+    "text": "quickly but before we dive too deep into the talk i'll let you know who we are so i'm",
+    "start": "78400",
+    "end": "83520"
+  },
+  {
+    "text": "elijah andrews i'm a software engineer at datadog i work on our service discovery and network infrastructure",
+    "start": "83520",
+    "end": "90079"
+  },
+  {
+    "text": "and i'm lauren birnai i'm staff engineer i work in an infrastructure also and i like to focus and dive into weird",
+    "start": "90079",
+    "end": "97759"
+  },
+  {
+    "text": "and fun networking issues as the one we're going to discuss today",
+    "start": "97759",
+    "end": "102560"
+  },
+  {
+    "text": "all right so let's talk about how this all started so we have a we have a service called the metric service at",
+    "start": "103439",
+    "end": "109200"
+  },
+  {
+    "start": "107000",
+    "end": "107000"
+  },
+  {
+    "text": "datadog and the people who operate the service notice that when they did a rollout and a rolling restart they would",
+    "start": "109200",
+    "end": "115439"
+  },
+  {
+    "text": "see a large spike in errors so you can see there are two lines here on that top graph the one of the lines",
+    "start": "115439",
+    "end": "121360"
+  },
+  {
+    "text": "the the purple one corresponds to the server and you can see here that during a rolling restart which is what was",
+    "start": "121360",
+    "end": "127280"
+  },
+  {
+    "text": "happening here uh there's a huge spike in errors the red line there is showing the this",
+    "start": "127280",
+    "end": "132720"
+  },
+  {
+    "text": "from the client's perspective the client actually retried so it didn't show up as an error rate in the client",
+    "start": "132720",
+    "end": "138560"
+  },
+  {
+    "text": "however our latency went up by a lot because the clients had to retry and",
+    "start": "138560",
+    "end": "143840"
+  },
+  {
+    "text": "this was degrading performance in our application so",
+    "start": "143840",
+    "end": "149120"
+  },
+  {
+    "text": "as we always do when we have problems with our infrastructure we check the logs and when we trace the requests that",
+    "start": "149120",
+    "end": "154560"
+  },
+  {
+    "text": "were failing we saw that uh they were telling us that it was dns that was having a problem",
+    "start": "154560",
+    "end": "160319"
+  },
+  {
+    "text": "and it really looked like a dns problem uh it had to be dns it's always dns",
+    "start": "160319",
+    "end": "165840"
+  },
+  {
+    "text": "right okay so let's talk about dns now so uh",
+    "start": "165840",
+    "end": "171200"
+  },
+  {
+    "text": "before we go too far into details i'm just going to give you like a high-level view of the applications involved here",
+    "start": "171200",
+    "end": "176480"
+  },
+  {
+    "start": "172000",
+    "end": "172000"
+  },
+  {
+    "text": "so at the center we have the metric service this is a service that powers our time series data system at datadog",
+    "start": "176480",
+    "end": "183680"
+  },
+  {
+    "text": "so what it does is it provides uh like when you go to open up a dashboard in our product and it shows you time series",
+    "start": "183680",
+    "end": "190319"
+  },
+  {
+    "text": "data that's all collected by the metric service it also powers our alerting engine so in datadog you can set uh",
+    "start": "190319",
+    "end": "197280"
+  },
+  {
+    "text": "thresholds and monitors on time series data and when those conditions are met it can alert you and that the alerting",
+    "start": "197280",
+    "end": "203519"
+  },
+  {
+    "text": "engine pulls the metric service in order to evaluate the your your monitors",
+    "start": "203519",
+    "end": "208959"
+  },
+  {
+    "text": "behind the scenes the metric service has a few dependencies it has to talk to an index for our time series data and our",
+    "start": "208959",
+    "end": "214959"
+  },
+  {
+    "text": "storage layer so what it's really just doing is stitching together all the time series data from the different sources that it knows about",
+    "start": "214959",
+    "end": "222239"
+  },
+  {
+    "text": "so here's what was happening we are seeing the clients of the metric service see query errors when a rolling restart",
+    "start": "222239",
+    "end": "228000"
+  },
+  {
+    "text": "was happening and the dns errors that we were seeing were corresponding to the service discovery to discover its",
+    "start": "228000",
+    "end": "233360"
+  },
+  {
+    "text": "dependencies the index and the store we use dns for service discovery and so here's what our dns setup looks",
+    "start": "233360",
+    "end": "240000"
+  },
+  {
+    "start": "237000",
+    "end": "237000"
+  },
+  {
+    "text": "like so this is a somewhat conventional kubernetes dns setup we run the metric",
+    "start": "240000",
+    "end": "245120"
+  },
+  {
+    "text": "service in a pod in kubernetes and over udp a dns request flows to no local dns",
+    "start": "245120",
+    "end": "251280"
+  },
+  {
+    "text": "so no local dns is a caching and forwarding dns resolver it's a stripped-down core dns configuration",
+    "start": "251280",
+    "end": "258560"
+  },
+  {
+    "text": "and then when no local dns if node local dns receives a query and it doesn't have it",
+    "start": "258560",
+    "end": "263680"
+  },
+  {
+    "text": "in its cache the query then flows to cluster dns which is a cluster-wide core dns configuration that also does caching",
+    "start": "263680",
+    "end": "270960"
+  },
+  {
+    "text": "and it can result it is authoritative for resources that exist within the cluster",
+    "start": "270960",
+    "end": "276400"
+  },
+  {
+    "text": "however you saw in our first slide we run dozens of kubernetes clusters and they all talk to each other so sometimes",
+    "start": "276400",
+    "end": "281759"
+  },
+  {
+    "text": "resources exist outside of the cluster need to be discovered in order to do that we use an external dns provider in",
+    "start": "281759",
+    "end": "287600"
+  },
+  {
+    "text": "this case we are running our stuff on ec2 in aws so our external dns provider was route 53 which is their dns solution",
+    "start": "287600",
+    "end": "295120"
+  },
+  {
+    "text": "and so any resource that metric service needs to discover that doesn't exist in the same cluster is resolved by rev53",
+    "start": "295120",
+    "end": "303440"
+  },
+  {
+    "text": "and so here we are seeing the dns errors emanating from the metric service and",
+    "start": "303440",
+    "end": "308720"
+  },
+  {
+    "text": "interestingly we saw that the failure was happening in no local dns itself which is kind of weird because that's",
+    "start": "308720",
+    "end": "314320"
+  },
+  {
+    "text": "just happening over the node interface like it's not going over a network and it's not really where we expected to see",
+    "start": "314320",
+    "end": "319680"
+  },
+  {
+    "text": "the problem so we dug in and we actually saw that no local dns was running out of memory",
+    "start": "319680",
+    "end": "326560"
+  },
+  {
+    "text": "and this was really surprising to us because it should never happen the reason it should never happen is because",
+    "start": "326560",
+    "end": "331759"
+  },
+  {
+    "text": "we set a concurrent request limit in no local dns we say if you uh",
+    "start": "331759",
+    "end": "337759"
+  },
+  {
+    "text": "if you receive over a thousand requests at a time you should reject them and put back pressure on the client so that you",
+    "start": "337759",
+    "end": "343360"
+  },
+  {
+    "text": "don't run out of memory so this just implied to us that the sizing that we had for no local dns was wrong like",
+    "start": "343360",
+    "end": "349199"
+  },
+  {
+    "text": "maybe we weren't giving it enough memory to serve a thousand concurrent requests so the first thing that we did here was",
+    "start": "349199",
+    "end": "354880"
+  },
+  {
+    "text": "we increased the amount of memory that we were giving it this runs as a daemon set so it's like kind of expensive to",
+    "start": "354880",
+    "end": "359919"
+  },
+  {
+    "text": "give it too much memory um but we quadrupled the amount of memory we went from 64 megabytes to 256 megabytes of",
+    "start": "359919",
+    "end": "366720"
+  },
+  {
+    "text": "memory and this stopped the um kills but we still saw the errors during the rolling restart very surprisingly",
+    "start": "366720",
+    "end": "374960"
+  },
+  {
+    "start": "375000",
+    "end": "375000"
+  },
+  {
+    "text": "and so at this point we started doing a little bit of math and nothing that we are seeing really made any sense so we",
+    "start": "376000",
+    "end": "381759"
+  },
+  {
+    "text": "looked at the number of queries that node local dns was receiving on that node and you can see you know it's",
+    "start": "381759",
+    "end": "387919"
+  },
+  {
+    "text": "usually around 100 requests per second and then when we do the rolling restart there's a little spike here but we're",
+    "start": "387919",
+    "end": "393680"
+  },
+  {
+    "text": "not going that high like the highest number of requests per second that it's serving is 400",
+    "start": "393680",
+    "end": "398880"
+  },
+  {
+    "text": "and we allow a thousand congress requests concurrently and if we get if we say that each dns",
+    "start": "398880",
+    "end": "405120"
+  },
+  {
+    "text": "request takes like five milliseconds to resolve which is quite generous um that's like not taking caching into",
+    "start": "405120",
+    "end": "410880"
+  },
+  {
+    "text": "account or anything no local dns in theory should be able to serve hundreds of thousands of requests per second but",
+    "start": "410880",
+    "end": "417199"
+  },
+  {
+    "text": "we're hitting max concurrent with under 400 requests per second very strange",
+    "start": "417199",
+    "end": "422560"
+  },
+  {
+    "text": "so we looked more at uh all of our all of our graphs and tried to figure out what was happening and this one stood",
+    "start": "422560",
+    "end": "428160"
+  },
+  {
+    "text": "out to us so node local dns has a layer called a forwarding layer and that's the layer",
+    "start": "428160",
+    "end": "434080"
+  },
+  {
+    "text": "that it's a plug-in a core dns plug-in that is responsible for forwarding the request to cluster dns",
+    "start": "434080",
+    "end": "440080"
+  },
+  {
+    "text": "and we noticed that the forward plug-in was telling us that no local dns was",
+    "start": "440080",
+    "end": "445120"
+  },
+  {
+    "text": "having health check failures when trying to talk to the cluster level resolver",
+    "start": "445120",
+    "end": "450400"
+  },
+  {
+    "text": "so um the way that that works is those connections happen over tcp and they're reused for requests but every 10 seconds",
+    "start": "450400",
+    "end": "456880"
+  },
+  {
+    "text": "those connections expire and they have to be recreated and so no local dns was unable to connect to cluster dns",
+    "start": "456880",
+    "end": "464400"
+  },
+  {
+    "text": "and this explained why we were hitting max concurrent here we looked at the timeout for creating a connection from",
+    "start": "464400",
+    "end": "469680"
+  },
+  {
+    "text": "the local dns to cluster dns and we saw that it was five seconds and so if an incoming query comes in and there's no",
+    "start": "469680",
+    "end": "476639"
+  },
+  {
+    "text": "connection to the to cluster dns that request will block for five seconds as we timeout trying to create the",
+    "start": "476639",
+    "end": "482080"
+  },
+  {
+    "text": "connection and this means that we'll hit max and current of a thousand with only 200 requests per second so it's starting",
+    "start": "482080",
+    "end": "488000"
+  },
+  {
+    "text": "to make a bit of sense but it's still really weird at this point we thought maybe we were having a networking issue like perhaps",
+    "start": "488000",
+    "end": "494400"
+  },
+  {
+    "start": "491000",
+    "end": "491000"
+  },
+  {
+    "text": "we were saturating the network on this instance um and so we looked at what we should be able to achieve so we run this",
+    "start": "494400",
+    "end": "501120"
+  },
+  {
+    "text": "on m5 4x large which is an ec2 aws instance type and that instance is",
+    "start": "501120",
+    "end": "507039"
+  },
+  {
+    "text": "allowed to peak at 10 gigs per second on network throughput and it should be able to sustain 5 gigabits per second",
+    "start": "507039",
+    "end": "513919"
+  },
+  {
+    "text": "and you can see our graph of the throughput here we're nowhere near even the sustained guarantee so that all",
+    "start": "513919",
+    "end": "520320"
+  },
+  {
+    "text": "looks okay but we're still seeing things that suggest that our network is saturated right we're seeing tcp",
+    "start": "520320",
+    "end": "525600"
+  },
+  {
+    "text": "retransmits we're dropping packets and maybe we're seeing microbursts instead right there could be really spiky",
+    "start": "525600",
+    "end": "532480"
+  },
+  {
+    "text": "traffic that's coming in but uh the graphs that we're looking at here are aggregated for every 15 seconds so",
+    "start": "532480",
+    "end": "538720"
+  },
+  {
+    "text": "maybe like that data is kind of being eaten by our reporting and when you see this type of thing in",
+    "start": "538720",
+    "end": "543839"
+  },
+  {
+    "text": "networks what you normally do is look at the counters in the network driver uh which count like events that happen and",
+    "start": "543839",
+    "end": "549200"
+  },
+  {
+    "text": "aren't subject to this sort of like time aggregation like observability issue that we see a lot in networking",
+    "start": "549200",
+    "end": "555279"
+  },
+  {
+    "text": "uh and luckily about two weeks before we hit this incident we added support for",
+    "start": "555279",
+    "end": "560640"
+  },
+  {
+    "text": "the elastic network adapter metrics so if you're not familiar with the elastic network adapter it's uh",
+    "start": "560640",
+    "end": "567839"
+  },
+  {
+    "text": "it's a networking uh interface that runs in aws's hypervisor so this is like outside of our vms that run in aws like",
+    "start": "567839",
+    "end": "574640"
+  },
+  {
+    "text": "they have like big real machines and a hypervisor that performs the platform components and the elastic network",
+    "start": "574640",
+    "end": "580080"
+  },
+  {
+    "text": "adapter is one of them and they added a feature where if you run um ftool.s on it it will actually give you",
+    "start": "580080",
+    "end": "587120"
+  },
+  {
+    "text": "counters about the virtualized network interface and laurel's going to tell you more",
+    "start": "587120",
+    "end": "593120"
+  },
+  {
+    "text": "about what we saw there in a second but just to summarize what was happening so far when the metric service was being",
+    "start": "593120",
+    "end": "598160"
+  },
+  {
+    "text": "restarted we're seeing dns errors and we noticed that no local dns couldn't establish connections to the cluster dns",
+    "start": "598160",
+    "end": "603760"
+  },
+  {
+    "text": "resolver which implied some sort of network saturation issue",
+    "start": "603760",
+    "end": "609120"
+  },
+  {
+    "text": "and this gets us to chapter two aws networking where we're going to try",
+    "start": "609680",
+    "end": "615040"
+  },
+  {
+    "text": "and look what's happening on the networking card of the instance",
+    "start": "615040",
+    "end": "620160"
+  },
+  {
+    "text": "so our first hypothesis was that we were accelerating the instance network-wise during rollouts and as elijah was just",
+    "start": "620160",
+    "end": "627839"
+  },
+  {
+    "text": "saying we're imagining that it was due to microburst because the averages were good so it was like very short spikes",
+    "start": "627839",
+    "end": "634079"
+  },
+  {
+    "text": "so once we had instrumented the instances to look at the low-level ena metrics um we saw this promising graph",
+    "start": "634079",
+    "end": "640880"
+  },
+  {
+    "text": "on the bottom left side of the slide which showed that we're actually actually exceeding the limit however if",
+    "start": "640880",
+    "end": "646560"
+  },
+  {
+    "text": "you look at all the autograph it's not correlated with the deployment we're always going over the limit sometimes",
+    "start": "646560",
+    "end": "652079"
+  },
+  {
+    "text": "but it's maybe just normal tcp behavior right tcp is self-regulating and it's not correlated with the graph",
+    "start": "652079",
+    "end": "658320"
+  },
+  {
+    "text": "so it's not another problem once we had enabled the new aws metrics",
+    "start": "658320",
+    "end": "664480"
+  },
+  {
+    "text": "we had quite a few of them and so we looked at all of them and this one really stood out because it was",
+    "start": "664480",
+    "end": "670240"
+  },
+  {
+    "text": "completely correlated with deployments every time where the deployment in errors this metric was spiking up and",
+    "start": "670240",
+    "end": "676160"
+  },
+  {
+    "text": "i'm talking about the metric called contract exceeded here and at that point we had absolutely no",
+    "start": "676160",
+    "end": "682160"
+  },
+  {
+    "text": "idea what this metric was because we had never encountered it before so we went to the aws documentation and",
+    "start": "682160",
+    "end": "689120"
+  },
+  {
+    "text": "aws explained that in order to do security group which are stateful firewalls they have to do connection",
+    "start": "689120",
+    "end": "694480"
+  },
+  {
+    "text": "tracking at the hypervisor level and this metric is actually telling you that the connection tracking table used",
+    "start": "694480",
+    "end": "700640"
+  },
+  {
+    "text": "by the hypervisor is for the interesting thing is as we were saying before we're running tens of",
+    "start": "700640",
+    "end": "705839"
+  },
+  {
+    "text": "thousands of aws hosts and we have never we had never encountered anything",
+    "start": "705839",
+    "end": "711200"
+  },
+  {
+    "text": "related to contracting at on the edubles level before so that was very surprising to us i mean it made sense that the",
+    "start": "711200",
+    "end": "716880"
+  },
+  {
+    "text": "limit existed but we had never seen it before which was a surprise so the first thing we did is well we",
+    "start": "716880",
+    "end": "722560"
+  },
+  {
+    "start": "721000",
+    "end": "721000"
+  },
+  {
+    "text": "tried other instance types so the first instance type we tried was networked optimized instances because they have",
+    "start": "722560",
+    "end": "729040"
+  },
+  {
+    "text": "highest throughput so it's very good as you can see here the two lines in the middle show ingress",
+    "start": "729040",
+    "end": "735040"
+  },
+  {
+    "text": "and ingress drops for the network optimized instances so it's much better so it was very promising",
+    "start": "735040",
+    "end": "742160"
+  },
+  {
+    "text": "however it had no impact on the contract issue and errors right so it's better in terms of packet drop and throughput but",
+    "start": "742160",
+    "end": "748399"
+  },
+  {
+    "text": "it's not impacting the contract at all and we're still seeing issues so we tried bigger instances instead",
+    "start": "748399",
+    "end": "755440"
+  },
+  {
+    "start": "753000",
+    "end": "753000"
+  },
+  {
+    "text": "we we took an instance that was twice bigger and as you can see on this graph here it solved the issue completely",
+    "start": "755440",
+    "end": "761040"
+  },
+  {
+    "text": "right you can compare the light blue graph and the purple one and you can see the purple one is much better because",
+    "start": "761040",
+    "end": "766720"
+  },
+  {
+    "text": "everything is basically zero no contract exceeded errors no errors so extremely promising for us",
+    "start": "766720",
+    "end": "772480"
+  },
+  {
+    "text": "except well it's addressing our issue but it would mean that our metric service infrastructure would get twice",
+    "start": "772480",
+    "end": "778320"
+  },
+  {
+    "text": "as expensive which was a bit of a hard sell so we wanted to understand exactly what was happening and how to address it",
+    "start": "778320",
+    "end": "785120"
+  },
+  {
+    "text": "so we reached out to aws because eddie grace mentioned that uh there are limits to the contracting",
+    "start": "785519",
+    "end": "791360"
+  },
+  {
+    "text": "system but there's there's no public number and they told us don't worry you can track hundreds of thousands of flows",
+    "start": "791360",
+    "end": "797120"
+  },
+  {
+    "text": "it's usually not an issue except if you have a very good behavior they also told us that yes bigger instances had",
+    "start": "797120",
+    "end": "803920"
+  },
+  {
+    "text": "a bigger table which would make sense based on our tests",
+    "start": "803920",
+    "end": "808720"
+  },
+  {
+    "text": "so given that edwards had told us they were able to track hundreds of thousands of flows in this instance type we looked at",
+    "start": "809200",
+    "end": "815920"
+  },
+  {
+    "text": "the host where we were running the metric service right and this host has a contract tool like the linux one",
+    "start": "815920",
+    "end": "821839"
+  },
+  {
+    "text": "and we were trying to see if things aligned so the host as you can see on this graph is usually",
+    "start": "821839",
+    "end": "827680"
+  },
+  {
+    "text": "using about 13 000 connections and spiking up to uh 50 000 during rollouts so this is",
+    "start": "827680",
+    "end": "834959"
+  },
+  {
+    "text": "pretty high but this is like another method lower that what we expect the",
+    "start": "834959",
+    "end": "840079"
+  },
+  {
+    "text": "hypervisor to handle so that's that's very weird",
+    "start": "840079",
+    "end": "844399"
+  },
+  {
+    "start": "844000",
+    "end": "844000"
+  },
+  {
+    "text": "at that point uh we had no idea what to do because things made no sense and so we went uh even lower level and we tried",
+    "start": "845120",
+    "end": "853760"
+  },
+  {
+    "text": "uh we started looking at the vpc for logs which are basically like uh if you're familiar with cisco it's like",
+    "start": "853760",
+    "end": "860399"
+  },
+  {
+    "text": "netflow type of data where you have information about tcp connections you",
+    "start": "860399",
+    "end": "866320"
+  },
+  {
+    "text": "have one floor in each direction because they are not stitched together and you get very detailed information on what's",
+    "start": "866320",
+    "end": "871440"
+  },
+  {
+    "text": "up what's happening on the network of course it's a huge amount of data it's pretty hard to pass but it's very",
+    "start": "871440",
+    "end": "876639"
+  },
+  {
+    "text": "detailed because you get all the flows coming in and out from an instance",
+    "start": "876639",
+    "end": "882079"
+  },
+  {
+    "text": "so the first thing we did is because we knew that no local dns was not able to establish connection to upstream dns",
+    "start": "882079",
+    "end": "889199"
+  },
+  {
+    "text": "servers we looked at egress flows and we grouped flows by source ip",
+    "start": "889199",
+    "end": "895040"
+  },
+  {
+    "text": "and as you can see on this graph here we have flows from the old ip during our",
+    "start": "895040",
+    "end": "900079"
+  },
+  {
+    "text": "wall out and then flows from a new ip which makes sense right we we roll out we replace the pods the ip change so we",
+    "start": "900079",
+    "end": "906639"
+  },
+  {
+    "text": "see flows created by the old pod and then focused but no one what's",
+    "start": "906639",
+    "end": "912399"
+  },
+  {
+    "text": "pretty weird there is the very big spike you're seeing where we're spiking up to 50 000 flows",
+    "start": "912399",
+    "end": "919680"
+  },
+  {
+    "text": "so at that point we're we were i mean as i was mentioning before uh this",
+    "start": "921120",
+    "end": "927040"
+  },
+  {
+    "text": "information is we you have two connections we have two flows for its connection one for egress",
+    "start": "927040",
+    "end": "932079"
+  },
+  {
+    "text": "one for egress and and so we were trying to see what was happening for ingress flow so flow actually getting into the",
+    "start": "932079",
+    "end": "938079"
+  },
+  {
+    "text": "instance and the graph is exactly similar which makes sense right because tcp when you have a connection with tcp",
+    "start": "938079",
+    "end": "943920"
+  },
+  {
+    "text": "you have flow in both directions except there's a second spike that is not aligned at all with uh with what we",
+    "start": "943920",
+    "end": "950320"
+  },
+  {
+    "text": "see egress so everything is the same except the spike where there's no matching traffic egressing the instance",
+    "start": "950320",
+    "end": "957839"
+  },
+  {
+    "start": "958000",
+    "end": "958000"
+  },
+  {
+    "text": "so what we did at that point is we dip we focused on the on traffic ingress traffic to the old ip",
+    "start": "958639",
+    "end": "964959"
+  },
+  {
+    "text": "to understand exactly what was happening and on this graph here what we're showing is the flags that we were seeing",
+    "start": "964959",
+    "end": "970959"
+  },
+  {
+    "text": "in the under on these connections so all the blue line is showing you flows",
+    "start": "970959",
+    "end": "976399"
+  },
+  {
+    "text": "without any flag which makes sense for long-lived established connections because there's no tcp flag set the red",
+    "start": "976399",
+    "end": "982320"
+  },
+  {
+    "text": "line is flows terminating which makes sense right when doing a rollout we're stopping our application",
+    "start": "982320",
+    "end": "987839"
+  },
+  {
+    "text": "and flows are terminating so we're seeing thin packets and the yellow line is is seen so",
+    "start": "987839",
+    "end": "993600"
+  },
+  {
+    "text": "connection attempts and this is the one that's very surprising because this is the one spiking very high and and the",
+    "start": "993600",
+    "end": "998800"
+  },
+  {
+    "text": "total is above 100 000 connections over 90 seconds",
+    "start": "998800",
+    "end": "1003600"
+  },
+  {
+    "start": "1003000",
+    "end": "1003000"
+  },
+  {
+    "text": "and if we try to compare this with what we're seeing for egress traffic there's something that's very interesting here is you can see that the",
+    "start": "1004160",
+    "end": "1010639"
+  },
+  {
+    "text": "first spike of scenes is actually matched by resets so scenes are coming to the instance and the",
+    "start": "1010639",
+    "end": "1017279"
+  },
+  {
+    "text": "instance is ending reset because there's nothing listening anymore but after that we have nothing for the",
+    "start": "1017279",
+    "end": "1022800"
+  },
+  {
+    "text": "for the news incoming so",
+    "start": "1022800",
+    "end": "1028000"
+  },
+  {
+    "text": "this was starting to give us a good idea what was happening reset was were kind of expected right because the metric",
+    "start": "1028000",
+    "end": "1034160"
+  },
+  {
+    "text": "service is a good application during grpc it's doing a graceful stop with the timeout of 10 seconds and what happens",
+    "start": "1034160",
+    "end": "1040959"
+  },
+  {
+    "text": "when you do a graceful stop in grpc is the server stops accepting connections and this is why we're getting resets",
+    "start": "1040959",
+    "end": "1047520"
+  },
+  {
+    "text": "it waits for this connection to finish and tell the clients to terminate so during these 10 seconds it makes",
+    "start": "1047520",
+    "end": "1054320"
+  },
+  {
+    "text": "complete sense to get resets because this is what grpc is going to do however after this 10 seconds the body is",
+    "start": "1054320",
+    "end": "1059840"
+  },
+  {
+    "text": "deleted and the ip is not there anymore right it's deleted so there's nothing to answer and that's why we're not saying",
+    "start": "1059840",
+    "end": "1066080"
+  },
+  {
+    "text": "an answer to this in packets another thing we knew at that time is uh",
+    "start": "1066080",
+    "end": "1072000"
+  },
+  {
+    "text": "well given we have all the flows we could identify the application connecting to our metric service and we",
+    "start": "1072000",
+    "end": "1077919"
+  },
+  {
+    "text": "identified that the alerting engine was actually making the connections",
+    "start": "1077919",
+    "end": "1082960"
+  },
+  {
+    "text": "and well we looked at the contract on the host of much highlighting engine nodes and as you can",
+    "start": "1082960",
+    "end": "1089520"
+  },
+  {
+    "text": "see here they are spiking very high so it seems to confirm that this is what's happening",
+    "start": "1089520",
+    "end": "1095840"
+  },
+  {
+    "text": "so at that point what we know is well we have dns errors because no local dns can connect to upstream",
+    "start": "1095840",
+    "end": "1101760"
+  },
+  {
+    "text": "we know we're actually saturating the breast contract because we've we've seen hundreds of thousands of sins right and",
+    "start": "1101760",
+    "end": "1107919"
+  },
+  {
+    "text": "we know which application is seen flooding the metric service the but it doesn't explain why what",
+    "start": "1107919",
+    "end": "1113280"
+  },
+  {
+    "text": "we're seeing in the instance is so different from what edwards is seeing in its uh at the apparel level",
+    "start": "1113280",
+    "end": "1119760"
+  },
+  {
+    "text": "so let's dive into nerd networking so on our nodes we use we use celium to",
+    "start": "1119760",
+    "end": "1125760"
+  },
+  {
+    "start": "1122000",
+    "end": "1122000"
+  },
+  {
+    "text": "provide cni and the way this works is we have the serium operator allocate ip",
+    "start": "1125760",
+    "end": "1131200"
+  },
+  {
+    "text": "additional ip to nodes that are used for pods and we allocate ips on an additional interface so not the main",
+    "start": "1131200",
+    "end": "1136880"
+  },
+  {
+    "text": "interface of the host an interface dedicated to pods and once the um so the operator is",
+    "start": "1136880",
+    "end": "1143200"
+  },
+  {
+    "text": "responsible for maintaining an ipo for pods and when you create a pod the serial agent is going to grab an f3 ip",
+    "start": "1143200",
+    "end": "1149039"
+  },
+  {
+    "text": "allocate it to the pod that's all good but then you need traffic to flow into the pod right so",
+    "start": "1149039",
+    "end": "1154720"
+  },
+  {
+    "text": "what the cdm agent is doing is it's also adding a rare entry to say traffic to this pod ip should be sent on this",
+    "start": "1154720",
+    "end": "1161360"
+  },
+  {
+    "text": "virtual interface we also need to route traffic outside of the pod and and and we need",
+    "start": "1161360",
+    "end": "1168000"
+  },
+  {
+    "text": "to use the right uh interface so to do that we use source routing and we achieve this with an ip rule so selem is",
+    "start": "1168000",
+    "end": "1174480"
+  },
+  {
+    "text": "creating the ip rule and say traffic from this ip should be using this route table which will use the additional",
+    "start": "1174480",
+    "end": "1179679"
+  },
+  {
+    "text": "interface to get traffic out so in a stable state where an alerting",
+    "start": "1179679",
+    "end": "1185440"
+  },
+  {
+    "start": "1183000",
+    "end": "1183000"
+  },
+  {
+    "text": "node is sending in trying to connect to a metric service pod",
+    "start": "1185440",
+    "end": "1191039"
+  },
+  {
+    "text": "it sends a scene and you can see the contract is consistent everywhere where the connection is uh starting to open",
+    "start": "1191039",
+    "end": "1197520"
+  },
+  {
+    "text": "then we get the synag and the connection transition to establish state and it's aligned everywhere on the node in the",
+    "start": "1197520",
+    "end": "1203280"
+  },
+  {
+    "text": "hypervisor in on the alerting node what happens when we delete a pod",
+    "start": "1203280",
+    "end": "1209600"
+  },
+  {
+    "start": "1209000",
+    "end": "1209000"
+  },
+  {
+    "text": "so when we delete the pod and we still get traffic to the old ip because it takes some time for service cover",
+    "start": "1209600",
+    "end": "1215440"
+  },
+  {
+    "text": "information to propagate so client will try to reconnect to the old ip and the ip is still held by the by the",
+    "start": "1215440",
+    "end": "1222000"
+  },
+  {
+    "text": "interface so the vbc fabric will send traffic to the to the node",
+    "start": "1222000",
+    "end": "1227679"
+  },
+  {
+    "text": "and the thing is we have this scene and this ip is not known anymore right because the all the routing information has been garbage collected",
+    "start": "1228240",
+    "end": "1235120"
+  },
+  {
+    "text": "so we were wondering what what's happening to this packet all right so we have this in packet incoming and we don't know",
+    "start": "1235120",
+    "end": "1240640"
+  },
+  {
+    "start": "1236000",
+    "end": "1236000"
+  },
+  {
+    "text": "where it's going so what we did is well we tried to to to do a connection ourselves and and simulate it so we",
+    "start": "1240640",
+    "end": "1246720"
+  },
+  {
+    "text": "connected from another node and we capture traffic with tcp dump and so we see the syn packet coming but no",
+    "start": "1246720",
+    "end": "1253440"
+  },
+  {
+    "text": "answer whatsoever nothing at all at that point we're like well we have a",
+    "start": "1253440",
+    "end": "1258720"
+  },
+  {
+    "text": "syn packet but where would where should it be running or routing two right and so we asked the kernel like if you see a",
+    "start": "1258720",
+    "end": "1265280"
+  },
+  {
+    "text": "packet of this type with this source ip to this uh target incoming on this interface what are you",
+    "start": "1265280",
+    "end": "1271280"
+  },
+  {
+    "text": "going to do with it and this is where things start to get a bit more interesting and more fun which",
+    "start": "1271280",
+    "end": "1276720"
+  },
+  {
+    "text": "is this error message here which shows that we're hitting reverse pass filtering like the candle refuses to do",
+    "start": "1276720",
+    "end": "1282080"
+  },
+  {
+    "text": "something with this packet because it's doing something wrong according to the kernel",
+    "start": "1282080",
+    "end": "1288320"
+  },
+  {
+    "text": "and reverse pass filtering um is a security feature we're going to talk about just after but this was confirmed",
+    "start": "1288480",
+    "end": "1294000"
+  },
+  {
+    "text": "in the kernel logs where we see this warning there which is was something about we're seeing a machine packet so packet we should never see on this",
+    "start": "1294000",
+    "end": "1299760"
+  },
+  {
+    "text": "interface um for those of you who are not familiar",
+    "start": "1299760",
+    "end": "1305200"
+  },
+  {
+    "start": "1302000",
+    "end": "1302000"
+  },
+  {
+    "text": "with reverse pass filtering it's a secret feature from the kernel to prevent ip spoofing so you can send a",
+    "start": "1305200",
+    "end": "1311120"
+  },
+  {
+    "text": "packet with a source ip that's not supposed to be there and you have",
+    "start": "1311120",
+    "end": "1316720"
+  },
+  {
+    "text": "different modes the standard mode is if the return pass would use a different interface",
+    "start": "1316720",
+    "end": "1321840"
+  },
+  {
+    "text": "drop the packet so that's tricks mode and and load the seven as much in packets",
+    "start": "1321840",
+    "end": "1327600"
+  },
+  {
+    "text": "and there's lose mode which is only drop packet if there's no return route",
+    "start": "1327600",
+    "end": "1333120"
+  },
+  {
+    "text": "so in our case well we're seeing the kernel logs with the martian packets and",
+    "start": "1333120",
+    "end": "1338400"
+  },
+  {
+    "text": "and so it makes sense now the syn packet isn't coming and it's dropped because we're hitting this",
+    "start": "1338400",
+    "end": "1344080"
+  },
+  {
+    "text": "what does this mean in terms of connection tracking so what's interesting here is",
+    "start": "1344400",
+    "end": "1349760"
+  },
+  {
+    "text": "if applications attempt to connect they will follow their own contract they will feel the hypervisor contract but then",
+    "start": "1349760",
+    "end": "1355280"
+  },
+  {
+    "text": "the same packet hits reverse pass filtering in the kernel and it's just dropped so it's not added to the note contract which which explains why the",
+    "start": "1355280",
+    "end": "1362000"
+  },
+  {
+    "text": "contract is so different in terms of size compared to the others",
+    "start": "1362000",
+    "end": "1366720"
+  },
+  {
+    "text": "so everything made sense except this which was very confusing to us you remember before i was saying that",
+    "start": "1367679",
+    "end": "1372960"
+  },
+  {
+    "text": "reverse pass filtering can be both in it can either be in strict mode or lose mode and",
+    "start": "1372960",
+    "end": "1378720"
+  },
+  {
+    "text": "we set it to lose mode we see the default in most distributions and the thing is when it's set to lose mode",
+    "start": "1378720",
+    "end": "1384320"
+  },
+  {
+    "text": "it means that you only drop a packet if there's no possible egress routes for the source ip but of course we have a",
+    "start": "1384320",
+    "end": "1390559"
+  },
+  {
+    "text": "default route on the nodes right the the main port the main interface on the node and so we should be able to route",
+    "start": "1390559",
+    "end": "1395840"
+  },
+  {
+    "text": "traffic through this so the traffic should be incoming on es6 the pod interface and egressing on ens-5 and",
+    "start": "1395840",
+    "end": "1401760"
+  },
+  {
+    "text": "then just be dropped by aws but it's not what's happening so that was very confusing to us",
+    "start": "1401760",
+    "end": "1407280"
+  },
+  {
+    "text": "at that point we had absolutely no idea what to do so we want to look at the reverse pass filtering code it's",
+    "start": "1407280",
+    "end": "1412559"
+  },
+  {
+    "text": "actually not that complicated so we knew that this is the error we",
+    "start": "1412559",
+    "end": "1418400"
+  },
+  {
+    "text": "were getting um and so we just looked at the code and and went back so to to hit this error",
+    "start": "1418400",
+    "end": "1424080"
+  },
+  {
+    "text": "there you have to go through this label uh erpf to get to this label you need to",
+    "start": "1424080",
+    "end": "1429600"
+  },
+  {
+    "text": "go through the last results label okay all this makes sense now and this is starting to get interesting the only",
+    "start": "1429600",
+    "end": "1436240"
+  },
+  {
+    "text": "way to get to this error was actually if this variable there no idea was set to",
+    "start": "1436240",
+    "end": "1441520"
+  },
+  {
+    "text": "true and this viable is set very early in the function and it's set to true if the",
+    "start": "1441520",
+    "end": "1447440"
+  },
+  {
+    "text": "interface has no ip so it turns out",
+    "start": "1447440",
+    "end": "1453039"
+  },
+  {
+    "text": "our pod interface doesn't have an ip address assigned because they don't need one right we just transit traffic through them and we don't set an ip on",
+    "start": "1453039",
+    "end": "1459679"
+  },
+  {
+    "text": "it and so at this point like maybe this is the problem of heating so we simulate it so the first step is the one we did",
+    "start": "1459679",
+    "end": "1465360"
+  },
+  {
+    "text": "before and then we're like well let's add a random ip whatever on the additional interface and see what's happening and",
+    "start": "1465360",
+    "end": "1472000"
+  },
+  {
+    "text": "as you can see here as soon as we've added a random ip to the additional interface uh it's actually working now right we",
+    "start": "1472000",
+    "end": "1478640"
+  },
+  {
+    "text": "have a we have a route through ens 5. so to summarize we're hitting reverse pass",
+    "start": "1478640",
+    "end": "1484720"
+  },
+  {
+    "text": "featuring because the pod interface has no ip if it had one the traffic would be routed to the main interface and dropped",
+    "start": "1484720",
+    "end": "1491360"
+  },
+  {
+    "text": "so it wouldn't be great but at least the contracts would have been consistent and we would have understood what was happening much earlier",
+    "start": "1491360",
+    "end": "1497520"
+  },
+  {
+    "text": "and something that's interesting is we noticed it and we did a small pull request to cilium to make sure that we",
+    "start": "1497520",
+    "end": "1503440"
+  },
+  {
+    "text": "can notify clients when this happens so what now when you delete the pod you can tell psyllium to send an icmp error",
+    "start": "1503440",
+    "end": "1509279"
+  },
+  {
+    "text": "message saying that this ip is not reachable anymore which means the client will know very early that there's an",
+    "start": "1509279",
+    "end": "1514320"
+  },
+  {
+    "text": "issue so here is the status now uh so you",
+    "start": "1514320",
+    "end": "1520080"
+  },
+  {
+    "text": "remember we have dns issues because the code dns can connect to upstream we're actually seen flooding the aws contract",
+    "start": "1520080",
+    "end": "1525919"
+  },
+  {
+    "text": "and we're still flooding the contract but we're not impacting the contract on the host because we're dropping packets",
+    "start": "1525919",
+    "end": "1532400"
+  },
+  {
+    "text": "because we're hitting reverse pass filtering because of a weird edge case in the kernel where we don't have an ip",
+    "start": "1532400",
+    "end": "1537600"
+  },
+  {
+    "text": "on the interface so now let's get back to the original issue which is like why are we seeing flooding anyway",
+    "start": "1537600",
+    "end": "1544799"
+  },
+  {
+    "text": "so in order to understand why we are sending so many sins we have to look at the way that our rpc system is set up",
+    "start": "1545919",
+    "end": "1552559"
+  },
+  {
+    "text": "so we had two main questions here why were we sending sin requests for so long like there was a long period where",
+    "start": "1552559",
+    "end": "1558400"
+  },
+  {
+    "start": "1553000",
+    "end": "1553000"
+  },
+  {
+    "text": "we were sending a bunch of these requests and also there were a bunch of like really big spikes in there and we",
+    "start": "1558400",
+    "end": "1564400"
+  },
+  {
+    "text": "were wondering why those were happening and so just a reminder about what our rpc setup is here so",
+    "start": "1564400",
+    "end": "1570960"
+  },
+  {
+    "start": "1566000",
+    "end": "1566000"
+  },
+  {
+    "text": "we use dns for service discovery that goes out and hits the external dns provider in",
+    "start": "1570960",
+    "end": "1576320"
+  },
+  {
+    "text": "this case rep53 and we also use grpc as our rpc mechanism and one important",
+    "start": "1576320",
+    "end": "1582159"
+  },
+  {
+    "text": "thing it's going to be important in a second is that we do client-side load balancing so this means that the",
+    "start": "1582159",
+    "end": "1587760"
+  },
+  {
+    "text": "every alerting engine talks to a bunch of metric services directly like they they have a bunch of ips and they talk",
+    "start": "1587760",
+    "end": "1593039"
+  },
+  {
+    "text": "to them there's no like load balancer or any connection pooling in the middle okay so first why were we sending sin",
+    "start": "1593039",
+    "end": "1599600"
+  },
+  {
+    "start": "1598000",
+    "end": "1598000"
+  },
+  {
+    "text": "requests for so long so in order to understand why why that period was so long as it was we had to look we looked",
+    "start": "1599600",
+    "end": "1606240"
+  },
+  {
+    "text": "at um the way that our external dns was configured so if you're not familiar with external dns this is a controller",
+    "start": "1606240",
+    "end": "1613120"
+  },
+  {
+    "text": "that you can run in your kubernetes clusters and what it does is it looks at pod events like pods coming online and",
+    "start": "1613120",
+    "end": "1618720"
+  },
+  {
+    "text": "pods going offline and then it takes the ips that it returns and it puts them into an external like cloud provider dns",
+    "start": "1618720",
+    "end": "1625520"
+  },
+  {
+    "text": "provider and so what was happening here was like when a metric service pod was being deleted uh",
+    "start": "1625520",
+    "end": "1631919"
+  },
+  {
+    "text": "external dns would capture that event and then go and update route 53. and so what we noticed was um",
+    "start": "1631919",
+    "end": "1638880"
+  },
+  {
+    "text": "we actually found a really interesting uh piece of behavior in the version of external dns where we are running so",
+    "start": "1638880",
+    "end": "1645039"
+  },
+  {
+    "text": "this first step here the metric service pod is deleted and then it the pod receives sig term and we give it a 10",
+    "start": "1645039",
+    "end": "1651600"
+  },
+  {
+    "text": "second timeout and at this point we call grpc graceful stop it sends go aways",
+    "start": "1651600",
+    "end": "1657120"
+  },
+  {
+    "text": "to its existing connections and resets to new connections coming in but one thing we found is that in our version of",
+    "start": "1657120",
+    "end": "1662559"
+  },
+  {
+    "text": "external dns it was not when sig term was sent to the pod that it was deregistered from dns it would actually",
+    "start": "1662559",
+    "end": "1670159"
+  },
+  {
+    "text": "only happen when the pod itself was deleted which meant that we normally took about 10 seconds after receiving sig term to even start removing it from",
+    "start": "1670159",
+    "end": "1676799"
+  },
+  {
+    "text": "dns and then after this external dns runs in a sync loop there's a fun balancing act here between",
+    "start": "1676799",
+    "end": "1683520"
+  },
+  {
+    "text": "like how frequently you want updates and how big you want your batches to be because you can hit problems with rate",
+    "start": "1683520",
+    "end": "1689200"
+  },
+  {
+    "text": "limits in your cloud provider if you don't if you if your batches are too small so here we set our sync loop to 15",
+    "start": "1689200",
+    "end": "1695200"
+  },
+  {
+    "text": "seconds so that meant that it took up to 15 seconds for that loop to run and be updated in rep 53 and then again there's",
+    "start": "1695200",
+    "end": "1702320"
+  },
+  {
+    "text": "a in dns you have to set a ttl on a record and it's a balance between how frequently you want things to be queried",
+    "start": "1702320",
+    "end": "1709200"
+  },
+  {
+    "text": "and how up to date you want them to be and so we set a ttl of 15 seconds",
+    "start": "1709200",
+    "end": "1715279"
+  },
+  {
+    "text": "and then the last thing that we needed to figure out was how frequently is the alerting engine",
+    "start": "1715279",
+    "end": "1720399"
+  },
+  {
+    "text": "re-querying that dns record so it turns out that this is actually bound by a grpc setting called min time",
+    "start": "1720399",
+    "end": "1727360"
+  },
+  {
+    "text": "between resolutions and we use the default value which is set to 30 seconds so the interesting thing about this is",
+    "start": "1727360",
+    "end": "1733520"
+  },
+  {
+    "text": "that actually the updates that the alerting engine would see were actually quantized in like 30 second increments so it would",
+    "start": "1733520",
+    "end": "1740320"
+  },
+  {
+    "text": "see an update either after 30 seconds or more likely after 60 seconds if you look at like the average for all the other",
+    "start": "1740320",
+    "end": "1746000"
+  },
+  {
+    "text": "delays and sometimes even 90 seconds but nothing in between and that quantization was actually really confusing to us when",
+    "start": "1746000",
+    "end": "1752000"
+  },
+  {
+    "text": "we were looking at all the uh all the graphs and seeing that everything was like a minute or 90 seconds and we were",
+    "start": "1752000",
+    "end": "1758159"
+  },
+  {
+    "text": "that solved that mystery and so this lines up with the propagation time that we are seeing uh",
+    "start": "1758159",
+    "end": "1763679"
+  },
+  {
+    "text": "in the graphs lahore was showing earlier so the deletion starts we see a huge spike in sins and then um the clients",
+    "start": "1763679",
+    "end": "1770880"
+  },
+  {
+    "text": "progressively start using the new ips and eventually after like 60 or 90 seconds no clients are using the old ips",
+    "start": "1770880",
+    "end": "1777440"
+  },
+  {
+    "text": "so that makes sense um if this is really a balancing act like if we wanted to",
+    "start": "1777440",
+    "end": "1782640"
+  },
+  {
+    "text": "make this shorter we would have to put more load on our dns infrastructure and on the cloud provider and so like we",
+    "start": "1782640",
+    "end": "1789360"
+  },
+  {
+    "text": "were okay living with this to understand why we're seeing those huge spikes this one's a bit more",
+    "start": "1789360",
+    "end": "1795760"
+  },
+  {
+    "text": "complicated to explain and it requires you to understand the way that we use grpc at datadog so we started using grpc",
+    "start": "1795760",
+    "end": "1803760"
+  },
+  {
+    "text": "at datadog many years ago and when we started using it we had the",
+    "start": "1803760",
+    "end": "1809200"
+  },
+  {
+    "text": "way that we would chart our applications was by writing really thick clients so the clients were completely aware of how",
+    "start": "1809200",
+    "end": "1815360"
+  },
+  {
+    "text": "their servers were sharded like they would download partitioning tables and stuff and",
+    "start": "1815360",
+    "end": "1820399"
+  },
+  {
+    "text": "we would actually resolve the dns uh entries into ips and just pass the",
+    "start": "1820399",
+    "end": "1825760"
+  },
+  {
+    "text": "ips to grpc but the way that grpc is really intended to be used is actually",
+    "start": "1825760",
+    "end": "1831039"
+  },
+  {
+    "text": "you give it a host name and it resolves that ip like in the background and your application doesn't have to worry about",
+    "start": "1831039",
+    "end": "1836399"
+  },
+  {
+    "text": "that at all and we actually started having a bunch of incidents uh where we were using grpc",
+    "start": "1836399",
+    "end": "1841760"
+  },
+  {
+    "text": "in an in conventional way that people weren't used to because we were passing it ips we were using some weird settings to support that so at one point we",
+    "start": "1841760",
+    "end": "1848159"
+  },
+  {
+    "text": "switched to using like the normal way of using grpc where you just pass it a hostname and when you do that change one thing",
+    "start": "1848159",
+    "end": "1854480"
+  },
+  {
+    "text": "you have to change is the grpc load balancing policy so the default load balancing policy in grpc is called pick",
+    "start": "1854480",
+    "end": "1861919"
+  },
+  {
+    "text": "first and what it will do is it'll just pick one ip and use that form a connection to it and use it and when",
+    "start": "1861919",
+    "end": "1867200"
+  },
+  {
+    "text": "that connection fails it'll pick another one but when you're trying to do client-side load balancing and you have",
+    "start": "1867200",
+    "end": "1872480"
+  },
+  {
+    "text": "a bunch of ips behind a single host name you need a different load balancing policy and that load balancing policy in",
+    "start": "1872480",
+    "end": "1878559"
+  },
+  {
+    "text": "in uh grpc is called round robin and so we made that change like six months",
+    "start": "1878559",
+    "end": "1883679"
+  },
+  {
+    "text": "before this incident started um and when we we traced it back to when uh we",
+    "start": "1883679",
+    "end": "1888960"
+  },
+  {
+    "text": "switched the grpc load bouncing policy and so at first we thought oh okay it's",
+    "start": "1888960",
+    "end": "1894559"
+  },
+  {
+    "text": "obvious like we were using pick first and we switched to round robin so like we all the uh alerting engines were",
+    "start": "1894559",
+    "end": "1900399"
+  },
+  {
+    "text": "talking to one metric service and then they started talking to all of them but that actually wasn't the case it wasn't",
+    "start": "1900399",
+    "end": "1906399"
+  },
+  {
+    "text": "that simple remember we are still doing cloud inside load balancing in either case in either case we still had uh one",
+    "start": "1906399",
+    "end": "1912480"
+  },
+  {
+    "text": "grpc channel with one ip the only thing that we actually ended up changing was the layer in which the dns resolution is",
+    "start": "1912480",
+    "end": "1918640"
+  },
+  {
+    "text": "taking place which was super weird so we dug a bit more we read the grpc",
+    "start": "1918640",
+    "end": "1924000"
+  },
+  {
+    "start": "1923000",
+    "end": "1923000"
+  },
+  {
+    "text": "code and we realized that pick first and round robin actually have a very subtle but important difference in the way that",
+    "start": "1924000",
+    "end": "1930720"
+  },
+  {
+    "text": "they handle connection failures so they manage connections in the background for you so you don't have to",
+    "start": "1930720",
+    "end": "1936159"
+  },
+  {
+    "text": "have that in your application code but in pick first when that disconnection when a when a connection is severed um",
+    "start": "1936159",
+    "end": "1943200"
+  },
+  {
+    "text": "it actually doesn't try to reconnect until you try to use it it does on-demand reconnection",
+    "start": "1943200",
+    "end": "1948880"
+  },
+  {
+    "text": "and this means that like when you make a request it will block the request as it tries to make the reconnect in pick",
+    "start": "1948880",
+    "end": "1954159"
+  },
+  {
+    "text": "first or in round robin rather they tried to be a bit smarter here they said wouldn't it be cool if in a background",
+    "start": "1954159",
+    "end": "1960320"
+  },
+  {
+    "text": "thread it automatically tried to reconnect so that by the time your application went to go use that",
+    "start": "1960320",
+    "end": "1965840"
+  },
+  {
+    "text": "connection it was ready and one thing that we did when we were using pick first load balancing is like many",
+    "start": "1965840",
+    "end": "1972320"
+  },
+  {
+    "text": "years ago we set the default max reconnect back off time to 300 milliseconds and this made a bit more",
+    "start": "1972320",
+    "end": "1979840"
+  },
+  {
+    "text": "sense when we were doing on-demand reconnects because we didn't want to block our requests for very long when a connection didn't exist so a request",
+    "start": "1979840",
+    "end": "1985919"
+  },
+  {
+    "text": "would come in and we would retry every 300 milliseconds to form the connection um and that worked however when we",
+    "start": "1985919",
+    "end": "1992080"
+  },
+  {
+    "text": "started using round robin instead of that happening just in the request path when it was on demand this was just",
+    "start": "1992080",
+    "end": "1997120"
+  },
+  {
+    "text": "happening in background threads everywhere for every single connection that it had and we did some math and uh so we had",
+    "start": "1997120",
+    "end": "2005279"
+  },
+  {
+    "text": "thousands of alerting engines that were all trying to reconnect to each metric service pod every 300 milliseconds which",
+    "start": "2005279",
+    "end": "2011440"
+  },
+  {
+    "text": "meant that we were sending tens of thousands of sins per second we were just sin flooding ourselves and this explains those huge spikes that",
+    "start": "2011440",
+    "end": "2018320"
+  },
+  {
+    "text": "we are seeing in those graphs and so the fix here was actually just deleting a few lines of configuration",
+    "start": "2018320",
+    "end": "2025039"
+  },
+  {
+    "text": "surprisingly so we just use the default reconnection settings in grpc where it",
+    "start": "2025039",
+    "end": "2030080"
+  },
+  {
+    "text": "tries to reconnect like on the order of seconds not milliseconds um and we just sort of like let it do",
+    "start": "2030080",
+    "end": "2035440"
+  },
+  {
+    "text": "its job as it was intended and it turns out that was actually the core problem",
+    "start": "2035440",
+    "end": "2040720"
+  },
+  {
+    "text": "here that stopped our syn floods so here you can see we did a rollout here",
+    "start": "2040720",
+    "end": "2046480"
+  },
+  {
+    "text": "thank you",
+    "start": "2046480",
+    "end": "2048879"
+  },
+  {
+    "text": "yes we were very happy when we finally fixed this after this took months for us to find",
+    "start": "2051839",
+    "end": "2058000"
+  },
+  {
+    "text": "you can see here uh client errors are good server errors are good we don't see a spike in response time contract is",
+    "start": "2058000",
+    "end": "2064079"
+  },
+  {
+    "text": "totally sane and that ended up being the problem",
+    "start": "2064079",
+    "end": "2069200"
+  },
+  {
+    "text": "and so we we learned a lot from this incident because as you've seen it was it was a bit a bit complex",
+    "start": "2070960",
+    "end": "2077839"
+  },
+  {
+    "start": "2077000",
+    "end": "2077000"
+  },
+  {
+    "text": "so the key first lesson is well sometimes it's not dns i promise you sometimes it's not i know it's rare but",
+    "start": "2077839",
+    "end": "2083839"
+  },
+  {
+    "text": "sometimes it's not dns more seriously i mean we we use very powerful abstractions uh we use",
+    "start": "2083839",
+    "end": "2091118"
+  },
+  {
+    "text": "cloud networking we use kubernetes networkings these abstractions are very powerful and magical in a sense where",
+    "start": "2091119",
+    "end": "2096878"
+  },
+  {
+    "text": "when they work and honestly most of them they work perfectly but when they don't and they leak the underlying complexity",
+    "start": "2096879",
+    "end": "2103040"
+  },
+  {
+    "text": "to you you have to dive deep into it and it's sometimes pretty pretty difficult well grpc setup can be complex and as",
+    "start": "2103040",
+    "end": "2110160"
+  },
+  {
+    "text": "and and we've seen that making changes can be dangerous we noticed that very low level",
+    "start": "2110160",
+    "end": "2115280"
+  },
+  {
+    "text": "instruments very low level metrics and and and logs uh can be extremely interesting so here the ena metrics and",
+    "start": "2115280",
+    "end": "2121839"
+  },
+  {
+    "text": "the vpc flow logs actually helped us make sense of what we're seeing as elijah was just saying this required",
+    "start": "2121839",
+    "end": "2128079"
+  },
+  {
+    "text": "a very complex team efforts it took us weeks to to fix and so we also we're only two on stage",
+    "start": "2128079",
+    "end": "2134160"
+  },
+  {
+    "text": "today but wendell madden knife also helped quite a lot so as you can imagine debugging this",
+    "start": "2134160",
+    "end": "2140160"
+  },
+  {
+    "text": "incident was was long and painful but we really learned a lot and that's also why we're here sharing it because we believe",
+    "start": "2140160",
+    "end": "2146320"
+  },
+  {
+    "text": "that many of you could be could be interested in by this and we're just over time so we won't be",
+    "start": "2146320",
+    "end": "2151440"
+  },
+  {
+    "text": "able to take questions but we're going to stick around for sometimes if you want if you're interested in that kind of fun",
+    "start": "2151440",
+    "end": "2157680"
+  },
+  {
+    "text": "debugging issues we're definitely hiring and we have a lot of other subtle problems like this one so",
+    "start": "2157680",
+    "end": "2164319"
+  },
+  {
+    "text": "and of course you can reach out by email or on twitter if you want to reach out to us thank you",
+    "start": "2164400",
+    "end": "2171079"
+  },
+  {
+    "text": "you",
+    "start": "2173920",
+    "end": "2176000"
+  }
+]

@@ -1,0 +1,1612 @@
+[
+  {
+    "start": "0",
+    "end": "431000"
+  },
+  {
+    "text": "welcome to the Vitesse deep dive my name is Dan Kozlowski",
+    "start": "30",
+    "end": "5759"
+  },
+  {
+    "text": "I am the minister of engineering at planet-scale also and yes and the co-founder of the",
+    "start": "5759",
+    "end": "21240"
+  },
+  {
+    "text": "Tess so I have labeled this presentation failure is always an option and I am",
+    "start": "21240",
+    "end": "28289"
+  },
+  {
+    "text": "going to run completely out of time because I got started late and I have way too much to cover so one of the",
+    "start": "28289",
+    "end": "35280"
+  },
+  {
+    "text": "things I love about the tests I always say it's normally a cloud native database it's the first cloud native beta database and whenever you're",
+    "start": "35280",
+    "end": "41640"
+  },
+  {
+    "text": "operating in a cloud native fashion you have to plan for things to fail so in a",
+    "start": "41640",
+    "end": "47340"
+  },
+  {
+    "text": "perfect world we don't care about our machines we don't care about their connections what we really care about is the service so with that what I wanted",
+    "start": "47340",
+    "end": "56070"
+  },
+  {
+    "text": "to do is go in-depth a little bit about the different ways that things with Vitesse can fail and how we recover them",
+    "start": "56070",
+    "end": "62989"
+  },
+  {
+    "text": "so just things that you already know right failure is part of life machines",
+    "start": "62989",
+    "end": "68939"
+  },
+  {
+    "text": "go down all the time there's two things you can do when something fails you can",
+    "start": "68939",
+    "end": "74850"
+  },
+  {
+    "text": "handle it or you can just pass it on down the line for somebody else to handle it for Vitesse we've actually put",
+    "start": "74850",
+    "end": "81299"
+  },
+  {
+    "text": "a lot of things into the tests that handle the failures at the database level so if you have a node go down or",
+    "start": "81299",
+    "end": "87630"
+  },
+  {
+    "text": "if you have a whole data center go down that doesn't necessarily get propagated up to your the clients downstream so you",
+    "start": "87630",
+    "end": "96900"
+  },
+  {
+    "text": "decided that you would like to have a cloud alright you've decided you'd like",
+    "start": "96900",
+    "end": "103229"
+  },
+  {
+    "text": "to have a cloud native database that can survive failure there's a few things that you have to think about before you",
+    "start": "103229",
+    "end": "108869"
+  },
+  {
+    "text": "even begin this the first is where you're gonna place things to handle them doesn't matter what system you're running right if you have your entire",
+    "start": "108869",
+    "end": "115170"
+  },
+  {
+    "text": "database in a single placement group and a single AZ you really can't claim it's",
+    "start": "115170",
+    "end": "120630"
+  },
+  {
+    "text": "survivable doesn't matter how many nodes you're writing the data to that AZ could go down or that top-of-rack switch on",
+    "start": "120630",
+    "end": "126840"
+  },
+  {
+    "text": "the placement group could go down and your service will be down the second thing you have to know how to do is you have to know how to recover so",
+    "start": "126840",
+    "end": "134080"
+  },
+  {
+    "text": "we can plan for the different kinds of failures we're gonna have but then there's got to be a way to get out of it",
+    "start": "134080",
+    "end": "139330"
+  },
+  {
+    "text": "and then the third and probably the most important thing is to know what kind of failure you can how much risk you can",
+    "start": "139330",
+    "end": "146290"
+  },
+  {
+    "text": "accept so things are gonna fail in a lot of cases there is gonna be some kind of",
+    "start": "146290",
+    "end": "151840"
+  },
+  {
+    "text": "outage there's gonna be some kind of noticeable outside event that happens we",
+    "start": "151840",
+    "end": "158230"
+  },
+  {
+    "text": "can go through extreme lengths to make that as small as possible and as not noticeable as possible",
+    "start": "158230",
+    "end": "163870"
+  },
+  {
+    "text": "or we can say we can tolerate a little bit of failure and we can have a an",
+    "start": "163870",
+    "end": "169000"
+  },
+  {
+    "text": "easier deployment and a more useful system okay so when we built the test to",
+    "start": "169000",
+    "end": "175660"
+  },
+  {
+    "text": "handle failures what do we do the first thing that we do is we separated the components so in a normal database",
+    "start": "175660",
+    "end": "180970"
+  },
+  {
+    "text": "system you have a single node that single node has an endpoint if it's my sequel it's 3306 you listen to 3300 on",
+    "start": "180970",
+    "end": "188800"
+  },
+  {
+    "text": "3306 and when somebody connects you serve that data you go all the way down",
+    "start": "188800",
+    "end": "193900"
+  },
+  {
+    "text": "to disk or to remote disc to get the data and send it out in the test we actually have three-tier architecture",
+    "start": "193900",
+    "end": "199660"
+  },
+  {
+    "text": "and since this is a deep dive we're not going into it because I hope everybody here knows what it looks like you can",
+    "start": "199660",
+    "end": "205930"
+  },
+  {
+    "text": "see me afterwards I'll show you the architecture diagram but there is a gateway process there is a handler for",
+    "start": "205930",
+    "end": "212470"
+  },
+  {
+    "text": "the database and then there's a database itself by separating out these components we can handle the failure at",
+    "start": "212470",
+    "end": "217570"
+  },
+  {
+    "text": "any single tier and be able to prop handle that failure at the next tier",
+    "start": "217570",
+    "end": "223840"
+  },
+  {
+    "text": "without people knowing about it in fact if you are using the G RPC drivers to connect to VT gate you actually can",
+    "start": "223840",
+    "end": "230980"
+  },
+  {
+    "text": "propagate handling that failure all the way out to your client application and you can even survive a VT gate going",
+    "start": "230980",
+    "end": "237910"
+  },
+  {
+    "text": "down that's what I mean when I say push state to the edges so we push it out to",
+    "start": "237910",
+    "end": "243250"
+  },
+  {
+    "text": "the edge with VT gate we push it out to the other edge with multiple mice equals all right so to really show this I've",
+    "start": "243250",
+    "end": "250660"
+  },
+  {
+    "text": "created a sample cluster for you this sample cluster is running in two Cooper",
+    "start": "250660",
+    "end": "256180"
+  },
+  {
+    "text": "Nettie's kubernetes clusters it is running on Google Cloud one of them is",
+    "start": "256180",
+    "end": "262150"
+  },
+  {
+    "text": "located in u.s. West one one of them is located in u.s. East one which is not what that slide says but",
+    "start": "262150",
+    "end": "268350"
+  },
+  {
+    "text": "that's where it's at in these two Cooper naty's clusters I have two key spaces",
+    "start": "268350",
+    "end": "274350"
+  },
+  {
+    "text": "one of them is a lookup key space which the only thing in there is two sequences the other is the actual database for my",
+    "start": "274350",
+    "end": "282030"
+  },
+  {
+    "text": "application the application that we're gonna demo is something that I call goodest doggo or goodest poppers so this",
+    "start": "282030",
+    "end": "290640"
+  },
+  {
+    "text": "is what it looks like here's the goodest augo if you go to popper that planet-scale labs.com",
+    "start": "290640",
+    "end": "296990"
+  },
+  {
+    "text": "you'll be able to play along and rate the dogs right now it's not on because we're gonna turn it on together this is",
+    "start": "296990",
+    "end": "305250"
+  },
+  {
+    "text": "the application and what we're gonna show is we can lose any point we can lose nodes we can lose pods and we can",
+    "start": "305250",
+    "end": "312420"
+  },
+  {
+    "text": "lose an entire data center and still have this application work a little bit about what's on the periphery there we",
+    "start": "312420",
+    "end": "318840"
+  },
+  {
+    "text": "also have VTC TLD which is our control plane and VT Gate which was our gateway running in both of these pods and that",
+    "start": "318840",
+    "end": "326460"
+  },
+  {
+    "text": "URL that I told you puppers dot planet-scale labs com that's actually a DNS load-balanced lookup between these",
+    "start": "326460",
+    "end": "333570"
+  },
+  {
+    "text": "two regions so if you go there theoretically half of you will get us east and half of you will get us west",
+    "start": "333570",
+    "end": "339330"
+  },
+  {
+    "text": "okay so let's talk about failure and recovery here are the different things",
+    "start": "339330",
+    "end": "344670"
+  },
+  {
+    "text": "that can fail and the impact it has on your system vtc TLD can fail and",
+    "start": "344670",
+    "end": "350000"
+  },
+  {
+    "text": "absolutely nothing no one cares right VT c TLD is not in the serving path so that guy can go down and come back as much as",
+    "start": "350000",
+    "end": "356580"
+  },
+  {
+    "text": "he wants the only thing that can't happen is you can't make cluster changes when VT c TLD goes down so from an",
+    "start": "356580",
+    "end": "362880"
+  },
+  {
+    "text": "operational standpoint not the best but it's not gonna stop you from serving traffic the second thing that can go",
+    "start": "362880",
+    "end": "369420"
+  },
+  {
+    "text": "down is VT gates VT gates are the gateway processes that is what your application servers connect to for this",
+    "start": "369420",
+    "end": "377520"
+  },
+  {
+    "text": "demo I am connecting the VT gate behind to load balancers in each region so each",
+    "start": "377520",
+    "end": "384510"
+  },
+  {
+    "text": "region has its own VT gate instances and they are behind a load balancer and my applications connect to that if VT gate",
+    "start": "384510",
+    "end": "392250"
+  },
+  {
+    "text": "goes down and I'm using the my sequel protocol clients will drop the connection it's actually not that big of a problem",
+    "start": "392250",
+    "end": "398650"
+  },
+  {
+    "text": "cuz clients will reconnect they'll come up with a different VT gate and then they will start going but that is the",
+    "start": "398650",
+    "end": "403690"
+  },
+  {
+    "text": "impact on losing a VT gate next is VT tablets VT tablets are the Wranglers for",
+    "start": "403690",
+    "end": "410080"
+  },
+  {
+    "text": "my sequel if VT tablet goes down the database probably should that shard is",
+    "start": "410080",
+    "end": "416050"
+  },
+  {
+    "text": "not going to report as being active and you're not gonna be able to use it so VT tablet and my sequel are roughly the",
+    "start": "416050",
+    "end": "423760"
+  },
+  {
+    "text": "same it's a little bit different how we recover from them but with VT tablet transactions will fail with my sequel",
+    "start": "423760",
+    "end": "429250"
+  },
+  {
+    "text": "you'll have to recover okay so let's go take a look at where we're at right now",
+    "start": "429250",
+    "end": "435039"
+  },
+  {
+    "text": "we have the system that I just described this is the live VT c TLD tablet",
+    "start": "435039",
+    "end": "443580"
+  },
+  {
+    "text": "interface I have my lookup shard which is not charted as you can see there are",
+    "start": "443580",
+    "end": "449320"
+  },
+  {
+    "text": "some nodes and uswest some nodes in u.s. East and we have the double shard dago's",
+    "start": "449320",
+    "end": "456910"
+  },
+  {
+    "text": "are also in u.s. West and US East two of these shards are actually have masters in u.s. West and two of them have",
+    "start": "456910",
+    "end": "465490"
+  },
+  {
+    "text": "masters in u.s. East okay if at any",
+    "start": "465490",
+    "end": "470560"
+  },
+  {
+    "text": "point someone has questions feel free to ask however we can see for various",
+    "start": "470560",
+    "end": "477849"
+  },
+  {
+    "text": "reasons some of them are not happy so in VT gate this is the VT gate interface",
+    "start": "477849",
+    "end": "485830"
+  },
+  {
+    "text": "for those of you who haven't seen before this is our view into the Vitesse world it shows us how things are going we can",
+    "start": "485830",
+    "end": "491260"
+  },
+  {
+    "text": "see that a couple of these replicas have high replicas lag so the way that we",
+    "start": "491260",
+    "end": "496539"
+  },
+  {
+    "text": "recover from replicas lag the reason is because just before I walked in this door I actually killed a bunch of pots",
+    "start": "496539",
+    "end": "502539"
+  },
+  {
+    "text": "so you can see all of those pots now have replicas lag what I'm gonna do is I'm going to go back to VT gate or VT",
+    "start": "502539",
+    "end": "509500"
+  },
+  {
+    "text": "see TLD and I'm going to pick my shards that have replicas lag and I can do two",
+    "start": "509500",
+    "end": "515650"
+  },
+  {
+    "text": "things if you're in VT c TLD so this is gonna go through a lot of the manual process of recovering clusters by the",
+    "start": "515650",
+    "end": "521740"
+  },
+  {
+    "text": "way so if you set up a of a test cluster this is what you'll get a couple of",
+    "start": "521740",
+    "end": "527410"
+  },
+  {
+    "text": "words I'm gonna say is I'm gonna say hamburger a lot these three two lines they're the hamburgers so if",
+    "start": "527410",
+    "end": "533080"
+  },
+  {
+    "text": "you go to VT CTL D and click on the top hamburger here you will get the pop-up that shows you all the actions you can",
+    "start": "533080",
+    "end": "539470"
+  },
+  {
+    "text": "do to recover V ccTLD the ones that I am most concerned with are always planned",
+    "start": "539470",
+    "end": "545950"
+  },
+  {
+    "text": "reparent emergency of your parent and externally rhe parented unfortunately",
+    "start": "545950",
+    "end": "550990"
+  },
+  {
+    "text": "we're not going to have time to cover all those what I am going to do is I'm gonna find one of these that has a lot of lag so in - 4011 wool 111,000 and one",
+    "start": "550990",
+    "end": "563440"
+  },
+  {
+    "text": "has high lag I'm gonna go to one thousand eleven hundred and one and I am",
+    "start": "563440",
+    "end": "572860"
+  },
+  {
+    "text": "going to reparent the tablet so every parent the tablet is gonna reset this mice equals replication so every parent",
+    "start": "572860",
+    "end": "581320"
+  },
+  {
+    "text": "and then I am gonna go ahead and start slave so what I've effectively done is",
+    "start": "581320",
+    "end": "588490"
+  },
+  {
+    "text": "I've used Vitesse to go into that my sequel instance and issue the same commands that you would run if you or a",
+    "start": "588490",
+    "end": "593830"
+  },
+  {
+    "text": "DBA and you were running into it so if i refresh this now we can see that the replication lag has gone to zero so",
+    "start": "593830",
+    "end": "600790"
+  },
+  {
+    "text": "let's go do it for the other ones - 1102 actually I'm lazy and I happen to have",
+    "start": "600790",
+    "end": "607270"
+  },
+  {
+    "text": "scripts so",
+    "start": "607270",
+    "end": "610800"
+  },
+  {
+    "text": "so everything that you just saw me do it the UI is also able to be done",
+    "start": "633310",
+    "end": "638540"
+  },
+  {
+    "text": "scriptable via VT CTL client so I have",
+    "start": "638540",
+    "end": "643550"
+  },
+  {
+    "text": "just I've just repented all the tablets that were not masters and now I'm gonna",
+    "start": "643550",
+    "end": "650089"
+  },
+  {
+    "text": "go ahead and start all the slaves it's a lot easier to do it this way than to go",
+    "start": "650089",
+    "end": "656540"
+  },
+  {
+    "text": "through than to go through and try to do it manually from the UI I did get an",
+    "start": "656540",
+    "end": "664130"
+  },
+  {
+    "text": "error one one three zero zero one we are gonna go ahead and not fix that because",
+    "start": "664130",
+    "end": "670730"
+  },
+  {
+    "text": "I'm not gonna have time to okay so now we can see that almost all of the errors have gone away with the exception of one",
+    "start": "670730",
+    "end": "677779"
+  },
+  {
+    "text": "three zero zero one I am just gonna keep soldiering along though the next thing",
+    "start": "677779",
+    "end": "683180"
+  },
+  {
+    "text": "that I want to do is I actually want to bring up the service or I would like to load the service so now that we have the",
+    "start": "683180",
+    "end": "689570"
+  },
+  {
+    "text": "cluster online in a healthy state let's go ahead and load some of the some of",
+    "start": "689570",
+    "end": "696470"
+  },
+  {
+    "text": "the sequel statements for it so hold on a second",
+    "start": "696470",
+    "end": "700660"
+  },
+  {
+    "text": "[Music]",
+    "start": "706880",
+    "end": "710039"
+  },
+  {
+    "text": "[Music]",
+    "start": "715230",
+    "end": "718298"
+  },
+  {
+    "text": "and I'm gonna apply the schema for know if that still lookup table and this is the the other table or the other key",
+    "start": "745839",
+    "end": "755110"
+  },
+  {
+    "text": "space",
+    "start": "755110",
+    "end": "757350"
+  },
+  {
+    "text": "okay these schema has been applied schema let me just walk you through it",
+    "start": "761050",
+    "end": "767500"
+  },
+  {
+    "text": "you have the V scheme which tells you how we're gonna shard our tables we're",
+    "start": "767500",
+    "end": "772690"
+  },
+  {
+    "text": "gonna char them by name and popper name there are the same value so they will shard equally and then I have two",
+    "start": "772690",
+    "end": "779560"
+  },
+  {
+    "text": "sequences and my lookup table that way I can have sequential primary keys for my own ODB tables at this point I have a",
+    "start": "779560",
+    "end": "785710"
+  },
+  {
+    "text": "fully working my sequel the test cluster",
+    "start": "785710",
+    "end": "791620"
+  },
+  {
+    "text": "I can go ahead I can log into it with the my sequel command-line client",
+    "start": "791620",
+    "end": "796500"
+  },
+  {
+    "text": "[Music]",
+    "start": "809950",
+    "end": "813159"
+  },
+  {
+    "text": "[Music]",
+    "start": "817260",
+    "end": "820590"
+  },
+  {
+    "text": "now I'm going to create my Sharda tables and just like that we have Sharda tables",
+    "start": "827960",
+    "end": "834010"
+  },
+  {
+    "text": "okay so you can see the envy ccTLD if you",
+    "start": "837360",
+    "end": "846010"
+  },
+  {
+    "start": "840000",
+    "end": "1135000"
+  },
+  {
+    "text": "come to schema you can now see a little bit of information about your tables and",
+    "start": "846010",
+    "end": "852720"
+  },
+  {
+    "text": "what is inside of them all right so we",
+    "start": "852720",
+    "end": "861339"
+  },
+  {
+    "text": "have a database we have the database up and running what can we do to start to harass the database so what I'm gonna do",
+    "start": "861339",
+    "end": "868630"
+  },
+  {
+    "text": "is start killing a few things again this is running in kubernetes and what's gonna happen is when I kill these pods",
+    "start": "868630",
+    "end": "875110"
+  },
+  {
+    "text": "we're running in a persistent fashion they have jeast they have the Google persistent disks behind them so after we",
+    "start": "875110",
+    "end": "881589"
+  },
+  {
+    "text": "kill them they will come back up and I can then show you how to recover from it so",
+    "start": "881589",
+    "end": "886950"
+  },
+  {
+    "text": "all right so here is the results of keep",
+    "start": "894589",
+    "end": "900270"
+  },
+  {
+    "text": "CTL get all you can see that I have pods running for each of my component",
+    "start": "900270",
+    "end": "905940"
+  },
+  {
+    "text": "services if I go and I'm on US West hold",
+    "start": "905940",
+    "end": "912200"
+  },
+  {
+    "text": "ok so if I go ahead I can actually kill these pods and they're gonna come back up at first I want to show you a little",
+    "start": "913700",
+    "end": "919230"
+  },
+  {
+    "text": "bit about how they're running for survivability",
+    "start": "919230",
+    "end": "922730"
+  },
+  {
+    "text": "okay so what we have is we have persistent volumes that are backing our databases and these persistent volumes",
+    "start": "936790",
+    "end": "944240"
+  },
+  {
+    "text": "are tied to each of the pods so if I get the pods",
+    "start": "944240",
+    "end": "949750"
+  },
+  {
+    "text": "if I get one of the pods we can see that the the persistent volume is mounted",
+    "start": "962779",
+    "end": "974399"
+  },
+  {
+    "text": "under interesting the persistent volume",
+    "start": "974399",
+    "end": "980070"
+  },
+  {
+    "text": "is mounted under VT VT data route VT VT data route is where my sequel stores all of its information this lets me kill",
+    "start": "980070",
+    "end": "986490"
+  },
+  {
+    "text": "these pods without really worrying about them coming back up I'm gonna go ahead and switch to my other cluster same",
+    "start": "986490",
+    "end": "1002600"
+  },
+  {
+    "text": "thing here if I get my persistent",
+    "start": "1002600",
+    "end": "1010880"
+  },
+  {
+    "text": "volumes we have all of our persistent volumes so let's go ahead and be rash and I am gonna try to kill all the pods",
+    "start": "1010880",
+    "end": "1017420"
+  },
+  {
+    "text": "and deleting all these pods they are",
+    "start": "1017420",
+    "end": "1025220"
+  },
+  {
+    "text": "gonna come back online so it's gonna take a second to delete and what we'll",
+    "start": "1025220",
+    "end": "1033020"
+  },
+  {
+    "text": "see in VT e gate here VT gate is always your best state place to look for live",
+    "start": "1033020",
+    "end": "1039920"
+  },
+  {
+    "text": "operational data of your cluster in a",
+    "start": "1039920",
+    "end": "1045980"
+  },
+  {
+    "text": "second what we should see is all those pods that I have deleted starts report",
+    "start": "1045980",
+    "end": "1051380"
+  },
+  {
+    "text": "as not active so they are still going down takes few seconds",
+    "start": "1051380",
+    "end": "1058960"
+  },
+  {
+    "text": "alright pods are down okay when pods go down this is what we expect to see VTE",
+    "start": "1070480",
+    "end": "1077139"
+  },
+  {
+    "text": "gate is gonna start reporting back that pods are offline and that it can't connect to them if I go to VT CT LD I",
+    "start": "1077139",
+    "end": "1087120"
+  },
+  {
+    "text": "may have taken down VT ccTLD while I was at it like I said it doesn't impact",
+    "start": "1092580",
+    "end": "1098559"
+  },
+  {
+    "text": "serving but it gets kind of bad when you're in the middle of a demo okay",
+    "start": "1098559",
+    "end": "1104860"
+  },
+  {
+    "text": "the demo gods are angry all right so we",
+    "start": "1104860",
+    "end": "1112539"
+  },
+  {
+    "text": "can see these pods are now coming back online if we go back into VT gate I was gonna show you how they disappear out of",
+    "start": "1112539",
+    "end": "1118649"
+  },
+  {
+    "text": "VT c TLD as we go back into VT gate they are gonna Roger back up and they're",
+    "start": "1118649",
+    "end": "1124059"
+  },
+  {
+    "text": "gonna report back into the cluster is healthy okay so again failure of given",
+    "start": "1124059",
+    "end": "1138669"
+  },
+  {
+    "start": "1135000",
+    "end": "1598000"
+  },
+  {
+    "text": "nodes when you fail a specific node out of your cluster especially in fronting in kubernetes the results are going to",
+    "start": "1138669",
+    "end": "1145809"
+  },
+  {
+    "text": "vary I just deleted all the pods but I haven't deleted any of the nodes deleting a node is gonna determine which",
+    "start": "1145809",
+    "end": "1152279"
+  },
+  {
+    "text": "services go down when you lose a replica in the test there are replicas and there",
+    "start": "1152279",
+    "end": "1158799"
+  },
+  {
+    "text": "are masters when you lose a replica the response is to do something called a plan debris parent or an emergency",
+    "start": "1158799",
+    "end": "1165010"
+  },
+  {
+    "text": "reparent if it's an unknown loss and that will shift your traffic from one",
+    "start": "1165010",
+    "end": "1171279"
+  },
+  {
+    "text": "master to another master so if a node goes down and it's a replica node you don't have to do anything because",
+    "start": "1171279",
+    "end": "1176470"
+  },
+  {
+    "text": "replicas aren't in unless it's a semi sync state with only one replicas you're not gonna be in a place where you have",
+    "start": "1176470",
+    "end": "1182080"
+  },
+  {
+    "text": "cluster unavailability if the node goes down that is holding the master you need to then do a planned reparent or an",
+    "start": "1182080",
+    "end": "1188320"
+  },
+  {
+    "text": "emergency repair it depending on if you know the node is going down or if you don't the other thing that can go down",
+    "start": "1188320",
+    "end": "1196149"
+  },
+  {
+    "text": "is the entire data center can go down so if a test we have the concept of cells you can think broadly of a cell as a",
+    "start": "1196149",
+    "end": "1203080"
+  },
+  {
+    "text": "failure domaine cells can be anything from a single a single rack that's isolated by",
+    "start": "1203080",
+    "end": "1210010"
+  },
+  {
+    "text": "a top-of-rack switch all the way up to a multi data center region in this case I",
+    "start": "1210010",
+    "end": "1215050"
+  },
+  {
+    "text": "have the cluster set up as two cells they're set up with each one of them is",
+    "start": "1215050",
+    "end": "1220750"
+  },
+  {
+    "text": "spanning three regions or three availability zones in Google's cloud so",
+    "start": "1220750",
+    "end": "1225760"
+  },
+  {
+    "text": "even though there's three different failure domains I've set it up so that",
+    "start": "1225760",
+    "end": "1231010"
+  },
+  {
+    "text": "the cell concept in Vitesse is all three of them to accommodate for that when we",
+    "start": "1231010",
+    "end": "1240820"
+  },
+  {
+    "text": "make our pods and I will go ahead and show you so we use you can use the",
+    "start": "1240820",
+    "end": "1256570"
+  },
+  {
+    "text": "kubernetes built-in of affinity and anti affinity so if I see here this is the",
+    "start": "1256570",
+    "end": "1262090"
+  },
+  {
+    "text": "affinity and anti affinity for this specific pod and what its gonna do is",
+    "start": "1262090",
+    "end": "1267670"
+  },
+  {
+    "text": "it's gonna ask that it is not on the same chart it is not in the same host as somebody with the same shard and that",
+    "start": "1267670",
+    "end": "1275200"
+  },
+  {
+    "text": "it's not in the same host as somebody with the same index that prevents things",
+    "start": "1275200",
+    "end": "1280809"
+  },
+  {
+    "text": "like if you always set the first instance of a shard to be master that prevents you from co-locating your",
+    "start": "1280809",
+    "end": "1286300"
+  },
+  {
+    "text": "master on hosts in this case I've set it to hostname because again I have a multi",
+    "start": "1286300",
+    "end": "1291610"
+  },
+  {
+    "text": "cell distribution so if one of my availability zones go down I can actually failover all of my traffic to",
+    "start": "1291610",
+    "end": "1298750"
+  },
+  {
+    "text": "the other data center and not have any outages so I can set this to hostname",
+    "start": "1298750",
+    "end": "1304150"
+  },
+  {
+    "text": "and get a little bit more flexibility in scheduling this takes you know full kubernetes annotation support so if you",
+    "start": "1304150",
+    "end": "1311470"
+  },
+  {
+    "text": "wanted to set that to availability zone you can go ahead and do that and it will go low it will locate your pods and",
+    "start": "1311470",
+    "end": "1318429"
+  },
+  {
+    "text": "different availability zones for a very survivable set up that's really one of",
+    "start": "1318429",
+    "end": "1323800"
+  },
+  {
+    "text": "the things when I said you have to decide how much how much disruption you can tolerate as you're running Vitesse",
+    "start": "1323800",
+    "end": "1330429"
+  },
+  {
+    "text": "running things in the same AZ leads to a better performing cluster info test we",
+    "start": "1330429",
+    "end": "1336490"
+  },
+  {
+    "text": "by default run with something called semi sink semi sink for my sequel means your transactions won't be committed until at",
+    "start": "1336490",
+    "end": "1343509"
+  },
+  {
+    "text": "least one replica has received the rights so I mean think about that if you have a multi multi replicas set up in a",
+    "start": "1343509",
+    "end": "1350799"
+  },
+  {
+    "text": "shard that replica when the master gets a right it is not gonna commit it until",
+    "start": "1350799",
+    "end": "1356950"
+  },
+  {
+    "text": "at least one of its replicas has received it if you have those across availability zones that means every",
+    "start": "1356950",
+    "end": "1363730"
+  },
+  {
+    "text": "single right transaction that you have is going to incur that latency across availability zones before it will",
+    "start": "1363730",
+    "end": "1370659"
+  },
+  {
+    "text": "acknowledge that can substantially decrease performance but it does mean that if a availability zone goes down",
+    "start": "1370659",
+    "end": "1377470"
+  },
+  {
+    "text": "you're guaranteed not to lose any rights if you put everything in the same availability zone you get a little bit",
+    "start": "1377470",
+    "end": "1383799"
+  },
+  {
+    "text": "more performance off of that shard but if one a Z goes down then that shard the",
+    "start": "1383799",
+    "end": "1389139"
+  },
+  {
+    "text": "data at that shard is at risk in this case we get around that because we're using Google's persistent disks so even",
+    "start": "1389139",
+    "end": "1395739"
+  },
+  {
+    "text": "if the shard goes down where the data will be there when that shard comes back",
+    "start": "1395739",
+    "end": "1400809"
+  },
+  {
+    "text": "online the other thing about data centers is failing over a data center is",
+    "start": "1400809",
+    "end": "1408970"
+  },
+  {
+    "text": "actually easier than just failing over a single node in the event of a data center failure we just repaired all of",
+    "start": "1408970",
+    "end": "1415179"
+  },
+  {
+    "text": "the notes all of the shards away from that data center if we're stealing with",
+    "start": "1415179",
+    "end": "1420549"
+  },
+  {
+    "text": "a single node outage then we have to worry about what we're gonna do with the individual shards that may or may not be",
+    "start": "1420549",
+    "end": "1426909"
+  },
+  {
+    "text": "located on that node so we have to have a lot more operational knowledge and",
+    "start": "1426909",
+    "end": "1432249"
+  },
+  {
+    "text": "again it's it's easier than a single node until it isn't and the part that it isn't is network partitions so in all of",
+    "start": "1432249",
+    "end": "1440739"
+  },
+  {
+    "text": "this one of the things I wanted to show you that I was actually just working on couldn't get set up was Orchestrator if",
+    "start": "1440739",
+    "end": "1446109"
+  },
+  {
+    "text": "you are running a production Vitesse today you should run Orchestrator on top of it Orchestrator takes everything that I",
+    "start": "1446109",
+    "end": "1452379"
+  },
+  {
+    "text": "have done and automates it so you don't have to go through any command line utilities or any web interfaces",
+    "start": "1452379",
+    "end": "1458759"
+  },
+  {
+    "text": "Orchestrator will just go ahead and fix your my sequel deployment when it breaks",
+    "start": "1458759",
+    "end": "1465090"
+  },
+  {
+    "text": "except in this case network partitions tend to be tough if you are all familiar",
+    "start": "1465090",
+    "end": "1470690"
+  },
+  {
+    "text": "with the great github outage of 2018 it ended up that it happened because of a",
+    "start": "1470690",
+    "end": "1476470"
+  },
+  {
+    "text": "15-minute ish Network partition so these are always the worst kinds of failures",
+    "start": "1476470",
+    "end": "1483109"
+  },
+  {
+    "text": "and unfortunately there's not much we can do to guarantee that nothing bad happens",
+    "start": "1483109",
+    "end": "1489169"
+  },
+  {
+    "text": "but network partitions can look like single nodes or they can look like entire data centers so when we are",
+    "start": "1489169",
+    "end": "1495739"
+  },
+  {
+    "text": "setting recovery time periods on Orchestrator you have to take into account the fact that a momentary loss",
+    "start": "1495739",
+    "end": "1503059"
+  },
+  {
+    "text": "of connectivity to your tablets may not actually be a failure it may in fact be",
+    "start": "1503059",
+    "end": "1509119"
+  },
+  {
+    "text": "a network partition and it's gonna recover itself the network is in fact not reliable and you have to deal with",
+    "start": "1509119",
+    "end": "1515989"
+  },
+  {
+    "text": "that so a lot of times what you'll see is we actually have to set the failover time for our orchestrated deployments to",
+    "start": "1515989",
+    "end": "1522619"
+  },
+  {
+    "text": "be a lot higher than you might then a person would like for their applications so something like a five minute or 10",
+    "start": "1522619",
+    "end": "1528470"
+  },
+  {
+    "text": "minute delay of waiting and making sure something actually failed is often better than being a little bit too",
+    "start": "1528470",
+    "end": "1533749"
+  },
+  {
+    "text": "aggressive and failing over when you shouldn't because a lot of times these things aren't failures it's things like",
+    "start": "1533749",
+    "end": "1540109"
+  },
+  {
+    "text": "network security policy is being applied that break connectivity or it may just",
+    "start": "1540109",
+    "end": "1549109"
+  },
+  {
+    "text": "be an actual failure where somebody decides that they are going to cut fiber and you're gonna be down for a week so",
+    "start": "1549109",
+    "end": "1557389"
+  },
+  {
+    "text": "again these tend to be the hardest outages to deal with ok so back in",
+    "start": "1557389",
+    "end": "1567229"
+  },
+  {
+    "text": "business here all of our vertical components came back",
+    "start": "1567229",
+    "end": "1573290"
+  },
+  {
+    "text": "up let's see if they have rogered up with VT gate so VT gate is now back",
+    "start": "1573290",
+    "end": "1580520"
+  },
+  {
+    "text": "online and this is where we can see what is going on so does anyone have any",
+    "start": "1580520",
+    "end": "1590150"
+  },
+  {
+    "text": "questions about this about multi cell deployments any part of the test failure",
+    "start": "1590150",
+    "end": "1598100"
+  },
+  {
+    "start": "1598000",
+    "end": "1996000"
+  },
+  {
+    "text": "and Vitesse recovery I think there's one",
+    "start": "1598100",
+    "end": "1603670"
+  },
+  {
+    "text": "one obvious question which people may have is how are people running with",
+    "start": "1603670",
+    "end": "1610490"
+  },
+  {
+    "text": "tests in production and how they've set it up there are a few few different ways",
+    "start": "1610490",
+    "end": "1616760"
+  },
+  {
+    "text": "in which they've configured theirs stitch labs for example they rely more",
+    "start": "1616760",
+    "end": "1623120"
+  },
+  {
+    "text": "on the persistent disk of kubernetes so they rely on the disk providing the",
+    "start": "1623120",
+    "end": "1631610"
+  },
+  {
+    "text": "necessary resilience so which means that when a node goes down they actually bring back the part under that and type",
+    "start": "1631610",
+    "end": "1639920"
+  },
+  {
+    "text": "act the same persistent volume the other scheme that is used by YouTube for",
+    "start": "1639920",
+    "end": "1649820"
+  },
+  {
+    "text": "example is to use is to actually never ever recover my sequel if you if a node",
+    "start": "1649820",
+    "end": "1656480"
+  },
+  {
+    "text": "goes down just throw it away and build it from scratch and how YouTube manages",
+    "start": "1656480",
+    "end": "1662740"
+  },
+  {
+    "text": "resilience is through the semi sink feature that Dan talked about is that a",
+    "start": "1662740",
+    "end": "1668480"
+  },
+  {
+    "text": "commit is not complete until at least one of the replicas has the data so",
+    "start": "1668480",
+    "end": "1675230"
+  },
+  {
+    "text": "which means that if you lose a node you are guaranteed that another replica has the data so you instantly make that the",
+    "start": "1675230",
+    "end": "1681800"
+  },
+  {
+    "text": "master and then completely throw away the node and then restore from backup",
+    "start": "1681800",
+    "end": "1688190"
+  },
+  {
+    "text": "and once it is restored pointed back at the master and let it catch up that",
+    "start": "1688190",
+    "end": "1693380"
+  },
+  {
+    "text": "actually has been the most popular of the configurations",
+    "start": "1693380",
+    "end": "1699820"
+  },
+  {
+    "text": "slack for example does use semi sink but they use it with a twist what they do is",
+    "start": "1700420",
+    "end": "1706630"
+  },
+  {
+    "text": "they have multiple AZ's but any if there is a master and a replica on the same",
+    "start": "1706630",
+    "end": "1714280"
+  },
+  {
+    "text": "availability zone then the replica within that availability zone does not",
+    "start": "1714280",
+    "end": "1719570"
+  },
+  {
+    "text": "give you a semi sink AK which means that when you commit on the master the data has to at least be received by a replica",
+    "start": "1719570",
+    "end": "1726830"
+  },
+  {
+    "text": "that is not in the same availability zone so that is another common way by",
+    "start": "1726830",
+    "end": "1733760"
+  },
+  {
+    "text": "which people have configured and there are people who just play it safe they rely both on the mounted volume and the",
+    "start": "1733760",
+    "end": "1741950"
+  },
+  {
+    "text": "semi sink because they just want the other these because if your network is",
+    "start": "1741950",
+    "end": "1748130"
+  },
+  {
+    "text": "good the cost of adding a semi sink replica is actually not much so might as",
+    "start": "1748130",
+    "end": "1753500"
+  },
+  {
+    "text": "well pay the price the trade-off for using persistent volume versus local",
+    "start": "1753500",
+    "end": "1759020"
+  },
+  {
+    "text": "disk is local disk is more performant because there is absolutely no latency",
+    "start": "1759020",
+    "end": "1764060"
+  },
+  {
+    "text": "so if your application is latency sensitive people prefer to do the local disk rout and then not worry about data",
+    "start": "1764060",
+    "end": "1772790"
+  },
+  {
+    "text": "loss if a part goes don't because you can always restore from a backup and then bring the data up any questions now",
+    "start": "1772790",
+    "end": "1783610"
+  },
+  {
+    "text": "3:15 yes",
+    "start": "1784210",
+    "end": "1792159"
+  },
+  {
+    "text": "group replication is I'm not a bag a",
+    "start": "1800159",
+    "end": "1806460"
+  },
+  {
+    "text": "very big fan of group replication I know I know it works but I don't think it is",
+    "start": "1806460",
+    "end": "1812370"
+  },
+  {
+    "text": "really necessary because I mean there are so many deployments that have worked",
+    "start": "1812370",
+    "end": "1817620"
+  },
+  {
+    "text": "well with semi sync replication that and it is so much simpler and easier to manage that I know",
+    "start": "1817620",
+    "end": "1825899"
+  },
+  {
+    "text": "it works I know there are some people that are using it but I haven't felt the",
+    "start": "1825899",
+    "end": "1831690"
+  },
+  {
+    "text": "place where it is actually needed I would prefer a I actually proposed an",
+    "start": "1831690",
+    "end": "1838019"
+  },
+  {
+    "text": "alternate way of achieving the same thing that group replication does which we'll talk about when when the project",
+    "start": "1838019",
+    "end": "1847259"
+  },
+  {
+    "text": "moves along yes",
+    "start": "1847259",
+    "end": "1851990"
+  },
+  {
+    "text": "that's a good question like what do customers prefer to run their instances on right now there are deployments of",
+    "start": "1876150",
+    "end": "1883409"
+  },
+  {
+    "text": "with us both on kubernetes and on on Prem and some are running on clouds but",
+    "start": "1883409",
+    "end": "1890100"
+  },
+  {
+    "text": "without kubernetes like AWS or GCP the writing seems to be on the wall that",
+    "start": "1890100",
+    "end": "1896370"
+  },
+  {
+    "text": "everybody is moving to kubernetes so it's just a question of how long people are going to there are some people who",
+    "start": "1896370",
+    "end": "1901919"
+  },
+  {
+    "text": "are saying that it's not going to happen some people are saying we know it's eventually going to happen so and we are",
+    "start": "1901919",
+    "end": "1907980"
+  },
+  {
+    "text": "preparing for it but the good news is that if you are on with tests then moving to kubernetes is pretty easy it's",
+    "start": "1907980",
+    "end": "1914700"
+  },
+  {
+    "text": "pretty easy to move into that",
+    "start": "1914700",
+    "end": "1917990"
+  },
+  {
+    "text": "the question is what version of my sequel do we support Vitas supports most",
+    "start": "1925330",
+    "end": "1930669"
+  },
+  {
+    "text": "modern versions of my sequel my sequel five six and up Maria DB 10 doc X and up and percona",
+    "start": "1930669",
+    "end": "1938409"
+  },
+  {
+    "text": "five six and up we tes also can run on RDS or even Aurora if that's what you",
+    "start": "1938409",
+    "end": "1945129"
+  },
+  {
+    "text": "like yes",
+    "start": "1945129",
+    "end": "1950970"
+  },
+  {
+    "text": "I didn't get the question can you repeat it",
+    "start": "1957430",
+    "end": "1961860"
+  },
+  {
+    "text": "oh that's a very good question so the question is how do you configure sink",
+    "start": "1967220",
+    "end": "1972440"
+  },
+  {
+    "text": "pin lock and in ODB the like basically how consistent do you want your my",
+    "start": "1972440",
+    "end": "1978680"
+  },
+  {
+    "text": "sequel to be so the what we did at YouTube is we turned off I don't know",
+    "start": "1978680",
+    "end": "1986420"
+  },
+  {
+    "text": "what the exact value is off we basically made those values extremely unsafe",
+    "start": "1986420",
+    "end": "1992110"
+  },
+  {
+    "text": "because by making those values extremely unsafe you get a huge throughput your my",
+    "start": "1992740",
+    "end": "2000310"
+  },
+  {
+    "start": "1996000",
+    "end": "2147000"
+  },
+  {
+    "text": "sequel can perform really well and the reason why we can do it is because we can throw away the node if it fails we",
+    "start": "2000310",
+    "end": "2007240"
+  },
+  {
+    "text": "never recover so for this deployment that I have I you can set config files",
+    "start": "2007240",
+    "end": "2013810"
+  },
+  {
+    "text": "if you look in the helm charts that we have on Vitesse tayo or here in mine you can inject arbitrary my sequel configs",
+    "start": "2013810",
+    "end": "2020500"
+  },
+  {
+    "text": "into your Vitesse deployment so in this case i'm running with a second sink big long bin log equals zero",
+    "start": "2020500",
+    "end": "2027090"
+  },
+  {
+    "text": "but again that's you can take how you would like to run that so for example if",
+    "start": "2027090",
+    "end": "2032740"
+  },
+  {
+    "text": "you're running against a mounted drive and you plan to recover then you should not be setting these values this way",
+    "start": "2032740",
+    "end": "2038170"
+  },
+  {
+    "text": "it's only when you you are made a decision that you will never recover a database once it has crashed yes",
+    "start": "2038170",
+    "end": "2048300"
+  },
+  {
+    "text": "do we have any customers of it as not using our castrator well technically YouTube does not use",
+    "start": "2050880",
+    "end": "2056730"
+  },
+  {
+    "text": "Orchestrator but they have their own Orchestrator I'm trying to remember",
+    "start": "2056730",
+    "end": "2064129"
+  },
+  {
+    "text": "HubSpot uses orchestrators like uses Orchestrator Oh square does not use",
+    "start": "2064770",
+    "end": "2070409"
+  },
+  {
+    "text": "Orchestrator but again they have their own version of Orchestrator so most of",
+    "start": "2070410",
+    "end": "2075899"
+  },
+  {
+    "text": "these companies that have adopted youtube they are like real hardcore let's say they want like five nines of availability and you cannot do five",
+    "start": "2075900",
+    "end": "2084450"
+  },
+  {
+    "text": "nines of availability without some kind of automated reparent yes",
+    "start": "2084450",
+    "end": "2092090"
+  },
+  {
+    "text": "yeah",
+    "start": "2098210",
+    "end": "2100838"
+  },
+  {
+    "text": "he",
+    "start": "2104440",
+    "end": "2107010"
+  },
+  {
+    "text": "the the the semi sink configuration is actually a my sequel setting and you",
+    "start": "2109780",
+    "end": "2115360"
+  },
+  {
+    "text": "acted actually have to set it at the database level which means that you can",
+    "start": "2115360",
+    "end": "2120760"
+  },
+  {
+    "text": "you config you configure a master saying that I require at least one AK and you",
+    "start": "2120760",
+    "end": "2125980"
+  },
+  {
+    "text": "configure a replica saying that you are allowed to send an ACK so that is how so",
+    "start": "2125980",
+    "end": "2131770"
+  },
+  {
+    "text": "it is global it is at a high level yes okay gone so the the correct answer to",
+    "start": "2131770",
+    "end": "2148630"
+  },
+  {
+    "text": "that is you have to group your data such",
+    "start": "2148630",
+    "end": "2155290"
+  },
+  {
+    "text": "that most of your queries fall within one shard but if you cannot do that",
+    "start": "2155290",
+    "end": "2160330"
+  },
+  {
+    "text": "there will always be some queries that are left out that have to go across charts in those cases we test will do",
+    "start": "2160330",
+    "end": "2166120"
+  },
+  {
+    "text": "best effort to do a cross shard join there is a brand new feature that we are",
+    "start": "2166120",
+    "end": "2174310"
+  },
+  {
+    "text": "we have actually got a proof of concept for which is one of the best things that I'm super excited about which is what if",
+    "start": "2174310",
+    "end": "2182740"
+  },
+  {
+    "text": "you have an M M by n relay what if you have a many-to-many relationship it is impossible to represent that in a shard",
+    "start": "2182740",
+    "end": "2189610"
+  },
+  {
+    "text": "system so what we are doing is we are going to do on-the-fly replication from",
+    "start": "2189610",
+    "end": "2196360"
+  },
+  {
+    "text": "one shard one shotting scheme into another sharding scheme which means that",
+    "start": "2196360",
+    "end": "2202270"
+  },
+  {
+    "text": "no matter which way you join the join will always be a local joint so I have",
+    "start": "2202270",
+    "end": "2209290"
+  },
+  {
+    "text": "present I presented this demo in queue con SF but we had very little time to be",
+    "start": "2209290",
+    "end": "2214690"
+  },
+  {
+    "text": "able to cover that here and most people are interested in what how to get started with the test but this feature",
+    "start": "2214690",
+    "end": "2220560"
+  },
+  {
+    "text": "will go into beta in about two months and it's a B it's essentially an",
+    "start": "2220560",
+    "end": "2227320"
+  },
+  {
+    "text": "unsolved problem in the sharded world because the data I can only be in one place but now we are materializing it in",
+    "start": "2227320",
+    "end": "2234520"
+  },
+  {
+    "text": "different places so that your read is efficient",
+    "start": "2234520",
+    "end": "2240480"
+  },
+  {
+    "text": "so I was been aggressive with trying to get a high availability demo to show off",
+    "start": "2240540",
+    "end": "2246700"
+  },
+  {
+    "text": "in 45 minutes and cover all the survivability aspects but it will go up on our github on the Vitesse community",
+    "start": "2246700",
+    "end": "2254830"
+  },
+  {
+    "text": "github so please check that out also if you are interested in Vitesse and would",
+    "start": "2254830",
+    "end": "2260620"
+  },
+  {
+    "text": "like to learn more our slack community is the best place to reach us you can go to Vitesse slack comm and sign up we",
+    "start": "2260620",
+    "end": "2269020"
+  },
+  {
+    "text": "would be glad to go into detail about any questions you have like I said look on github I'm gonna put",
+    "start": "2269020",
+    "end": "2275620"
+  },
+  {
+    "text": "all of the files that I have for the cross data center cross kubernetes cluster highly survivable cluster up on",
+    "start": "2275620",
+    "end": "2283090"
+  },
+  {
+    "text": "there and I may even record a video of me actually going through it it's probably gonna take a few hours but it's",
+    "start": "2283090",
+    "end": "2289720"
+  },
+  {
+    "text": "definitely gonna be a good watch also if you really like of the tests planet-scale is hiring and you can come",
+    "start": "2289720",
+    "end": "2297250"
+  },
+  {
+    "text": "work on the test full-time so thanks everyone for your time Oh final shout out tomorrow our friends",
+    "start": "2297250",
+    "end": "2307540"
+  },
+  {
+    "text": "from HubSpot are gonna be giving a presentation on how they use of a test to serve their production data I also",
+    "start": "2307540",
+    "end": "2314710"
+  },
+  {
+    "text": "have it on good authority they're gonna talk about the time that they lost 17 masters and didn't have to do anything",
+    "start": "2314710",
+    "end": "2319930"
+  },
+  {
+    "text": "so show up",
+    "start": "2319930",
+    "end": "2323970"
+  }
+]

@@ -1,0 +1,1747 @@
+[
+  {
+    "text": "okay hi my name is David Oppenheimer I'm a software engineer at Google and I'm",
+    "start": "0",
+    "end": "7020"
+  },
+  {
+    "text": "also a co-lead of the multi-tenancy working group in kubernetes and I'm",
+    "start": "7020",
+    "end": "14009"
+  },
+  {
+    "text": "going to be talking about multi-tenancy in kubernetes so probably a good place",
+    "start": "14009",
+    "end": "20010"
+  },
+  {
+    "text": "to start is to define what we're talking about when we say multi-tenancy and everybody has kind of a slightly",
+    "start": "20010",
+    "end": "25470"
+  },
+  {
+    "text": "different different definition but the one we're going to use in this talk is",
+    "start": "25470",
+    "end": "30830"
+  },
+  {
+    "text": "providing isolation between tenants within a cluster now I'm not sure that",
+    "start": "30830",
+    "end": "35850"
+  },
+  {
+    "text": "how much that actually helped because I haven't really defined what we mean by isolation and what we mean by tenant and",
+    "start": "35850",
+    "end": "41700"
+  },
+  {
+    "text": "I haven't even explained why we were talking about multi-tenancy within a cluster instead of for example across",
+    "start": "41700",
+    "end": "47520"
+  },
+  {
+    "text": "clusters so we'll answer those first two questions in detail in a minute by",
+    "start": "47520",
+    "end": "52829"
+  },
+  {
+    "text": "walking through some examples but first I wanted to quickly address the third",
+    "start": "52829",
+    "end": "58199"
+  },
+  {
+    "text": "question why multi-tenancy within a cluster and for now until I define what",
+    "start": "58199",
+    "end": "63989"
+  },
+  {
+    "text": "a tenant is more formally let's just say a tenant is a user or application that you want to keep isolated from other",
+    "start": "63989",
+    "end": "70080"
+  },
+  {
+    "text": "users or applications in your cluster so the best way to answer this question of",
+    "start": "70080",
+    "end": "75720"
+  },
+  {
+    "text": "why we want intra cluster multi-tenancy is to look at the alternative which is",
+    "start": "75720",
+    "end": "81030"
+  },
+  {
+    "text": "to rely on the isolation that you can get for free by running your tenants in",
+    "start": "81030",
+    "end": "87000"
+  },
+  {
+    "text": "separate clusters so this is appealing because at first because you know the",
+    "start": "87000",
+    "end": "92130"
+  },
+  {
+    "text": "isolation doesn't require any kind of special multi-tenancy features within kubernetes but it has some drawbacks so",
+    "start": "92130",
+    "end": "98280"
+  },
+  {
+    "text": "for example if you have a lot of tenants and for a very large system you might",
+    "start": "98280",
+    "end": "103770"
+  },
+  {
+    "text": "have thousands or tens of thousands of tenants for example if you're running a software as a service or something like",
+    "start": "103770",
+    "end": "109560"
+  },
+  {
+    "text": "that you're going to end up needing tools to manage those thousands or tens of thousands of clusters and at some",
+    "start": "109560",
+    "end": "115380"
+  },
+  {
+    "text": "point you have so many clusters that even with good tooling it becomes unmanageable a second reason is that",
+    "start": "115380",
+    "end": "121049"
+  },
+  {
+    "text": "there's a resource efficiency issue with having so many clusters because you have to pay the control plane cost of the",
+    "start": "121049",
+    "end": "127320"
+  },
+  {
+    "text": "kubernetes master plus add-ons for every tenant in this and in fact the control plane could",
+    "start": "127320",
+    "end": "133190"
+  },
+  {
+    "text": "easily consume more resources than one tenants application instance if you're running a small application for each",
+    "start": "133190",
+    "end": "140270"
+  },
+  {
+    "text": "tenant and so that's obviously an efficiency issue and another resource",
+    "start": "140270",
+    "end": "145310"
+  },
+  {
+    "text": "efficiency issue is fragmentation a pod can only use the free resources in the",
+    "start": "145310",
+    "end": "151160"
+  },
+  {
+    "text": "cluster that you submit it to and so if each of your running lots of very very small clusters then you can't share any",
+    "start": "151160",
+    "end": "158450"
+  },
+  {
+    "text": "of the kind of unused space that the that the application isn't using you",
+    "start": "158450",
+    "end": "164330"
+  },
+  {
+    "text": "can't aggregate that in the way you can in a large cluster and then lastly you need to create a new cluster each time",
+    "start": "164330",
+    "end": "170750"
+  },
+  {
+    "text": "you add a tenant and this can be slow and it may be difficult to do that on Prem and so as a result I believe that",
+    "start": "170750",
+    "end": "179690"
+  },
+  {
+    "text": "the cluster per tenant model isn't practical for a large number of",
+    "start": "179690",
+    "end": "184760"
+  },
+  {
+    "text": "multi-tenancy use cases and that's why we have a lot of interest and work",
+    "start": "184760",
+    "end": "190880"
+  },
+  {
+    "text": "that's gone into intra cluster multi-tenancy in kubernetes and that's what the subject of this talk is so now let's",
+    "start": "190880",
+    "end": "198950"
+  },
+  {
+    "text": "talk about those first two questions what are tenants and what kind of isolation do they require and we'll do",
+    "start": "198950",
+    "end": "204890"
+  },
+  {
+    "text": "this by looking at three concrete use cases and for each of them I'll have one slide talking about control plane or API",
+    "start": "204890",
+    "end": "211670"
+  },
+  {
+    "text": "server isolation and then one slide talking about container or network isolation because those are kind of two",
+    "start": "211670",
+    "end": "217190"
+  },
+  {
+    "text": "somewhat separable pieces of the isolation picture for different use cases and then the pictures you'll see",
+    "start": "217190",
+    "end": "222950"
+  },
+  {
+    "text": "in this part of the talk the rounded rectangles this is kind of an example of one you'll see them coming up later are",
+    "start": "222950",
+    "end": "228769"
+  },
+  {
+    "text": "representing a shared cluster divided into namespaces by call indicated by colors and then those little icons are",
+    "start": "228769",
+    "end": "235010"
+  },
+  {
+    "text": "just supposed to represent different API objects running in those namespaces and then we'll also show various users that",
+    "start": "235010",
+    "end": "241370"
+  },
+  {
+    "text": "map to tenants the map to namespaces of the corresponding color and I'll talk a little later about why each namespace",
+    "start": "241370",
+    "end": "248209"
+  },
+  {
+    "text": "has exactly one tenant but the basic reason is that the kubernetes multi-tenancy policies are generally set",
+    "start": "248209",
+    "end": "254630"
+  },
+  {
+    "text": "on a per namespace basis that's the granularity that most of those policies use and that's why people usually map",
+    "start": "254630",
+    "end": "261739"
+  },
+  {
+    "text": "one tenant into one or more namespaces but a single namespace generally does",
+    "start": "261739",
+    "end": "266810"
+  },
+  {
+    "text": "not host more than one tenant and lastly as we go through these examples kind of keep in mind that these are just kind of",
+    "start": "266810",
+    "end": "272810"
+  },
+  {
+    "text": "archetypes there are very high-level examples nobody's exact use cases probably in a map exactly to one of",
+    "start": "272810",
+    "end": "279500"
+  },
+  {
+    "text": "these but these are some that we've seen in our experience that kind of representative of what people are doing",
+    "start": "279500",
+    "end": "286120"
+  },
+  {
+    "text": "so the first use case is enterprise and in the enterprise use case we have users",
+    "start": "286120",
+    "end": "294380"
+  },
+  {
+    "text": "who are all coming from the same organization and so there's what we'd call semi trusted because you know you",
+    "start": "294380",
+    "end": "300259"
+  },
+  {
+    "text": "can you can't necessarily mandate exactly what they will do they may do",
+    "start": "300259",
+    "end": "305650"
+  },
+  {
+    "text": "accidentally bad things but if they do something truly malicious you can fire them you kind of have some control over",
+    "start": "305650",
+    "end": "311449"
+  },
+  {
+    "text": "the users and in this enterprise use case often a tenant will map to a single",
+    "start": "311449",
+    "end": "317680"
+  },
+  {
+    "text": "department or team in the organization so something that follows the",
+    "start": "317680",
+    "end": "322849"
+  },
+  {
+    "text": "organizational hierarchy and often we'll see three different personas in these",
+    "start": "322849",
+    "end": "329389"
+  },
+  {
+    "text": "kinds of enterprise clusters so one will be the cluster admin who can for example create read update and delete any of the",
+    "start": "329389",
+    "end": "336889"
+  },
+  {
+    "text": "objects in the cluster including creating namespaces they can also manage policies for example setting per",
+    "start": "336889",
+    "end": "343759"
+  },
+  {
+    "text": "namespace resource quota based on some kind of internal budgeting that the organization uses and also sometimes",
+    "start": "343759",
+    "end": "350960"
+  },
+  {
+    "text": "there's sort of delegated authorization model where the cluster admin can assign",
+    "start": "350960",
+    "end": "358550"
+  },
+  {
+    "text": "namespace admins who get to decide who has access to the namespaces so the namespace admin may not be able to",
+    "start": "358550",
+    "end": "363949"
+  },
+  {
+    "text": "control things like the quota or the network policy which we'll talk about",
+    "start": "363949",
+    "end": "369650"
+  },
+  {
+    "text": "later but they can decide who is a member of their team or department that they're responsible for the namespaces",
+    "start": "369650",
+    "end": "374900"
+  },
+  {
+    "text": "for and then lastly we have the regular users who can create read update and",
+    "start": "374900",
+    "end": "380479"
+  },
+  {
+    "text": "delete objects in their namespaces except for policy objects that are the domain of the cluster admin so that's",
+    "start": "380479",
+    "end": "388370"
+  },
+  {
+    "text": "kind of a typical isolation scenario for the control plane or API server so what",
+    "start": "388370",
+    "end": "395300"
+  },
+  {
+    "text": "about the node and network for that we need to think about what kinds of applications are running in the cluster and so in",
+    "start": "395300",
+    "end": "402770"
+  },
+  {
+    "text": "this enter hypothetical enterprise cluster we say we have many different applications and just like the users",
+    "start": "402770",
+    "end": "409340"
+  },
+  {
+    "text": "will say that the applications are semi trusted because the organization in theory kind of knows all the",
+    "start": "409340",
+    "end": "415850"
+  },
+  {
+    "text": "applications that are running they either wrote them themselves or they at least have the opportunity to vet the",
+    "start": "415850",
+    "end": "422090"
+  },
+  {
+    "text": "code but it may be open source code and you know they obviously didn't check every line of code so there could be something malicious hidden in there but",
+    "start": "422090",
+    "end": "428360"
+  },
+  {
+    "text": "there aren't external users on the Internet sending code in that's being kind of blindly executed and so and this in this",
+    "start": "428360",
+    "end": "436100"
+  },
+  {
+    "text": "case the organization might be okay with the normal container isolation just the",
+    "start": "436100",
+    "end": "441710"
+  },
+  {
+    "text": "features you get out of the box with a docker for example container or they might want to add additional",
+    "start": "441710",
+    "end": "447080"
+  },
+  {
+    "text": "restrictions like not allowing containers to run its route or use hosts networking or run its privileged and",
+    "start": "447080",
+    "end": "452840"
+  },
+  {
+    "text": "we'll talk a little bit later about some of the kubernetes features that allow you to place those kinds of restrictions on containers and then at the network",
+    "start": "452840",
+    "end": "460970"
+  },
+  {
+    "text": "level they what kind of communication they want to allow between pods in this",
+    "start": "460970",
+    "end": "467000"
+  },
+  {
+    "text": "enterprise scenario depends on the application topology so some applications are structured many are",
+    "start": "467000",
+    "end": "473570"
+  },
+  {
+    "text": "structured so that all of the pods of the application run in a single namespace and so in that case you'd",
+    "start": "473570",
+    "end": "479330"
+  },
+  {
+    "text": "likely want to allow communication between pods in a single name space but prohibit communication between",
+    "start": "479330",
+    "end": "485539"
+  },
+  {
+    "text": "namespaces on the other hand sometimes people structured applications where they'll have one application tier per",
+    "start": "485539",
+    "end": "492289"
+  },
+  {
+    "text": "namespace for example you might have your front ends running in one namespace and your backends running in a different",
+    "start": "492289",
+    "end": "497600"
+  },
+  {
+    "text": "namespace and in that case you kind of want the opposite you want to allow communication between pods in your",
+    "start": "497600",
+    "end": "504470"
+  },
+  {
+    "text": "front-end namespace in your back-end namespace but you don't want to allow communication between pods within a tier",
+    "start": "504470",
+    "end": "510110"
+  },
+  {
+    "text": "for example there's no reason that your web servers should have to talk to one another that your front-end web servers",
+    "start": "510110",
+    "end": "515570"
+  },
+  {
+    "text": "should have to talk to one another and in fact allowing them to do so could allow some kind of you know privilege",
+    "start": "515570",
+    "end": "523690"
+  },
+  {
+    "text": "escalation but allow someone's day to attack one node and then from there escalate the tech to",
+    "start": "523690",
+    "end": "530060"
+  },
+  {
+    "text": "another node so that's something that you actually would want to prohibit and then depending on whether the",
+    "start": "530060",
+    "end": "535160"
+  },
+  {
+    "text": "application is serving purely internal users or also serving users on the Internet you might want to allow or",
+    "start": "535160",
+    "end": "541459"
+  },
+  {
+    "text": "prohibit communication with the outside world so that's the enterprise use case",
+    "start": "541459",
+    "end": "548449"
+  },
+  {
+    "text": "the second use case we'll look at to illustrate the concepts of tenants and isolation is what we call a kubernetes a",
+    "start": "548449",
+    "end": "555350"
+  },
+  {
+    "text": "service or platform as a service and the idea here is that we're talking about",
+    "start": "555350",
+    "end": "560510"
+  },
+  {
+    "text": "software as a service where the application is hosted kubernetes possibly in addition to extensions like",
+    "start": "560510",
+    "end": "567769"
+  },
+  {
+    "text": "producer supplied CR DS and controllers so for example many of the platforms of",
+    "start": "567769",
+    "end": "573230"
+  },
+  {
+    "text": "service that are built on top of kubernetes they allow the users to interact directly with the API server and then the kind of value-add that they",
+    "start": "573230",
+    "end": "580190"
+  },
+  {
+    "text": "run on top of bare kubernetes is CR DS for example and a CI CD says it might be",
+    "start": "580190",
+    "end": "586190"
+  },
+  {
+    "text": "CR DS that represent like builds and and deployments and testing pipelines and things like that",
+    "start": "586190",
+    "end": "591230"
+  },
+  {
+    "text": "so that's the kind of application specific logic that runs on top of the cluster and so the kubernetes as a",
+    "start": "591230",
+    "end": "599089"
+  },
+  {
+    "text": "service model is similar to enterprise in that users are directly interacting with the kubernetes api server but",
+    "start": "599089",
+    "end": "606350"
+  },
+  {
+    "text": "there's the big difference is that you have untrusted users running untrusted codes so this has very stringent",
+    "start": "606350",
+    "end": "612440"
+  },
+  {
+    "text": "requirements for control playing isolation and for node and network isolation so here you would want to",
+    "start": "612440",
+    "end": "621170"
+  },
+  {
+    "text": "allow users to create and create read update and delete non policy objects",
+    "start": "621170",
+    "end": "627620"
+  },
+  {
+    "text": "just like in the enterprise use case in addition you might want to allow users to create namespaces so in the",
+    "start": "627620",
+    "end": "633319"
+  },
+  {
+    "text": "enterprise use case we kind of are assuming the centralized IT function where some cluster admin is creating the",
+    "start": "633319",
+    "end": "640279"
+  },
+  {
+    "text": "namespaces based on the organizational hierarchy whereas here it's kind of a it's a software-as-a-service with",
+    "start": "640279",
+    "end": "646250"
+  },
+  {
+    "text": "kubernetes as the application and you might want users to be able to walk up to the system create a namespace and",
+    "start": "646250",
+    "end": "651680"
+  },
+  {
+    "text": "then start running their applications in that namespace so it's more of a self-service namespace creation model",
+    "start": "651680",
+    "end": "657170"
+  },
+  {
+    "text": "than the more centralized enterprise a provisioning model and then you might",
+    "start": "657170",
+    "end": "662920"
+  },
+  {
+    "text": "use resource quota here based on how much the user paid maybe they can buy more memory or CPU and then in terms of",
+    "start": "662920",
+    "end": "670690"
+  },
+  {
+    "text": "the code that's running in the cluster as I mentioned it's untrusted code so instead of relying just on the regular",
+    "start": "670690",
+    "end": "677560"
+  },
+  {
+    "text": "container isolation mechanisms you might want sandbox pods a concept that was",
+    "start": "677560",
+    "end": "683259"
+  },
+  {
+    "text": "discussed in a couple of the talks earlier today but that basically boils down to running something like Kotik",
+    "start": "683259",
+    "end": "689259"
+  },
+  {
+    "text": "containers orgy visor or you could use possibly sole tenant nodes and we'll talk a little bit later in this talk",
+    "start": "689259",
+    "end": "695470"
+  },
+  {
+    "text": "about how you can do sole tenant nodes but the idea there is that you would only allow a single tenant per node so",
+    "start": "695470",
+    "end": "702160"
+  },
+  {
+    "text": "that if there was some kind of container escape they couldn't affect other tenants because there wouldn't be other tenants running on that node and then",
+    "start": "702160",
+    "end": "709660"
+  },
+  {
+    "text": "network wise you would have strong network isolation between namespaces belonging to different tenants and then",
+    "start": "709660",
+    "end": "718750"
+  },
+  {
+    "text": "the third type of application I'm going to talk about is kind of another software-as-a-service model but here",
+    "start": "718750",
+    "end": "723940"
+  },
+  {
+    "text": "instead of kubernetes being the service you just have a regular application that's the service and so the user does",
+    "start": "723940",
+    "end": "731829"
+  },
+  {
+    "text": "not access the API server directly they go instead just directly to the application so there's actually two kind",
+    "start": "731829",
+    "end": "739779"
+  },
+  {
+    "text": "to sort of subtypes of this model one of them is illustrated on this slide and that's where you have a true multi",
+    "start": "739779",
+    "end": "745540"
+  },
+  {
+    "text": "tenant application whether it's just a single instance of the application that's shared by all users and this",
+    "start": "745540",
+    "end": "751690"
+  },
+  {
+    "text": "actually isn't very interesting from a kubernetes multi-tenancy perspective because the tenant concept is purely",
+    "start": "751690",
+    "end": "757269"
+  },
+  {
+    "text": "internal to the application and opaque to kubernetes so the cluster in kubernetes api are kind of",
+    "start": "757269",
+    "end": "763209"
+  },
+  {
+    "text": "implementation details that are hidden from the user and so you can see that the cluster or application admin",
+    "start": "763209",
+    "end": "769959"
+  },
+  {
+    "text": "interacts with the API server but the users don't they just talk to that's supposed to be a icon representing a",
+    "start": "769959",
+    "end": "775720"
+  },
+  {
+    "text": "load balancer so like you know the load balancer in front of the application and then those are all the pods that",
+    "start": "775720",
+    "end": "781620"
+  },
+  {
+    "text": "implement this multi tenant application so the more interesting kind of",
+    "start": "781620",
+    "end": "787420"
+  },
+  {
+    "text": "software-as-a-service model from a kubernetes multi-tenancy perspective is where your hosting mold",
+    "start": "787420",
+    "end": "793540"
+  },
+  {
+    "text": "instances of a single tenant application and each user or consumer gets their own",
+    "start": "793540",
+    "end": "799330"
+  },
+  {
+    "text": "instance of the application and so this is illustrated on the slide by having",
+    "start": "799330",
+    "end": "806140"
+  },
+  {
+    "text": "the users go through proxy in order to deploy an instance of the application so",
+    "start": "806140",
+    "end": "812680"
+  },
+  {
+    "text": "the user asks the proxy please give me an instance the application I'd like to",
+    "start": "812680",
+    "end": "818320"
+  },
+  {
+    "text": "start using your service and then the proxy talks to the API server it's the API and tells it to create a",
+    "start": "818320",
+    "end": "825490"
+  },
+  {
+    "text": "new namespace populate it with the objects corresponding to the application and return and and create a load",
+    "start": "825490",
+    "end": "832120"
+  },
+  {
+    "text": "balancer and return the IP address of the load balancer back to the user and then the user from then on just",
+    "start": "832120",
+    "end": "838090"
+  },
+  {
+    "text": "interacts directly with the application through that load balancer and doesn't talk to the proxy or to the API server",
+    "start": "838090",
+    "end": "844870"
+  },
+  {
+    "text": "and then when they're done using the application they would tell the proxy to delete the application instance and it",
+    "start": "844870",
+    "end": "850930"
+  },
+  {
+    "text": "would do the reverse of what I described for the provisioning step and so I think",
+    "start": "850930",
+    "end": "856630"
+  },
+  {
+    "text": "I covered everything on that's like so",
+    "start": "856630",
+    "end": "862260"
+  },
+  {
+    "text": "oh yeah and so then the code in this software as a service model is semi",
+    "start": "862260",
+    "end": "867580"
+  },
+  {
+    "text": "trusted insert which is similar to the enterprise use case because the service",
+    "start": "867580",
+    "end": "873100"
+  },
+  {
+    "text": "provider sort of knows what code they're running they they should have some understanding of the application but",
+    "start": "873100",
+    "end": "880230"
+  },
+  {
+    "text": "sometimes in this software as a service model the service provider will allow application plugins so for example one",
+    "start": "880230",
+    "end": "888190"
+  },
+  {
+    "text": "popular hosted application is WordPress WordPress has a plug-in model and so if you were to run a WordPress says and",
+    "start": "888190",
+    "end": "894070"
+  },
+  {
+    "text": "allow users to supply their own plugins then that would be untrusted code and so",
+    "start": "894070",
+    "end": "899470"
+  },
+  {
+    "text": "then you would need those stronger our container isolation mechanisms I talked",
+    "start": "899470",
+    "end": "904780"
+  },
+  {
+    "text": "about earlier like sandbox pods or sold tenant nodes and then under the",
+    "start": "904780",
+    "end": "910270"
+  },
+  {
+    "text": "assumption that each application is confined to a single namespace you'd want to allow pods to communicate within",
+    "start": "910270",
+    "end": "915910"
+  },
+  {
+    "text": "a namespace but not with other namespaces however i've illustrated here also something that sometimes you would",
+    "start": "915910",
+    "end": "922600"
+  },
+  {
+    "text": "do in any of these examples but i just chose to illustrate it for this example which is that balloon a face which you'll notice looks like it",
+    "start": "922600",
+    "end": "929000"
+  },
+  {
+    "text": "looks different from all of the other namespaces so the green yellow and red namespaces are identical to represent",
+    "start": "929000",
+    "end": "935810"
+  },
+  {
+    "text": "the fact that they're all running identical instances of the same application but then the blue namespace",
+    "start": "935810",
+    "end": "941720"
+  },
+  {
+    "text": "is running some kind of shared infrastructure that's accessed by all of the application instances and so in that",
+    "start": "941720",
+    "end": "947930"
+  },
+  {
+    "text": "case you'd want to allow communication between all of the namespaces and that shared infrastructure and like I said",
+    "start": "947930",
+    "end": "953899"
+  },
+  {
+    "text": "that is a pattern that you can see in any of these use cases where you might",
+    "start": "953899",
+    "end": "959089"
+  },
+  {
+    "text": "be confining the application and users to a single namespace except for their ability to access some kind of shared",
+    "start": "959089",
+    "end": "966470"
+  },
+  {
+    "text": "infrastructure so to recap the the the",
+    "start": "966470",
+    "end": "971899"
+  },
+  {
+    "text": "first part of this talk the discussion about tenants and isolation we talked about isolation the control plane who",
+    "start": "971899",
+    "end": "978019"
+  },
+  {
+    "text": "can access the API server what they can do I talked about resource consumption quota and then for container and network",
+    "start": "978019",
+    "end": "984620"
+  },
+  {
+    "text": "isolation we talked about how you could put restrictions on what code executing in container in a container can do which",
+    "start": "984620",
+    "end": "990980"
+  },
+  {
+    "text": "pods can share nodes with one another that was the sole tenancy idea and the idea that you might need to restrict",
+    "start": "990980",
+    "end": "996980"
+  },
+  {
+    "text": "communication between containers in different namespaces and with the outside world so the second part of the",
+    "start": "996980",
+    "end": "1005139"
+  },
+  {
+    "text": "talk now that I've sort of discussed the isolation requirements of these three different use cases the second part of",
+    "start": "1005139",
+    "end": "1011529"
+  },
+  {
+    "text": "the talk is about the mechanisms and kubernetes that allow you to set the kinds of policies and restrictions that",
+    "start": "1011529",
+    "end": "1018160"
+  },
+  {
+    "text": "we've been talking about and this isn't intended to be a deep dive into multi-tenancy policies it's a very deep",
+    "start": "1018160",
+    "end": "1024790"
+  },
+  {
+    "text": "topic and there isn't enough time to cover all of that but I just kind of want to give you an idea of what words",
+    "start": "1024790",
+    "end": "1029829"
+  },
+  {
+    "text": "to go look up for the documentation to - if your use case could benefit from some",
+    "start": "1029829",
+    "end": "1037150"
+  },
+  {
+    "text": "of the kinds of policies that I'll be talking about and to make it a little easier to reason about these policies",
+    "start": "1037150",
+    "end": "1043390"
+  },
+  {
+    "text": "I've divided them into two categories off the related and scheduling related it's actually a little bit hard to come",
+    "start": "1043390",
+    "end": "1049990"
+  },
+  {
+    "text": "up with good categorizations but these kind of are roughly a reasonable way to divide them and so I'll start with the",
+    "start": "1049990",
+    "end": "1056890"
+  },
+  {
+    "text": "author related policies so this slide shows the",
+    "start": "1056890",
+    "end": "1062610"
+  },
+  {
+    "text": "authentication authorization and admission control flow and kubernetes and I've grayed out everything except",
+    "start": "1062610",
+    "end": "1069360"
+  },
+  {
+    "text": "authentication which is the first piece that we'll talk about and for authentication the request that's coming",
+    "start": "1069360",
+    "end": "1075999"
+  },
+  {
+    "text": "into the kubernetes api server can come from a human that's like the picture the smiley face at the top or from an",
+    "start": "1075999",
+    "end": "1082360"
+  },
+  {
+    "text": "application that's running in the cluster in a pod that's like the gear icon on the bottom and the requests when",
+    "start": "1082360",
+    "end": "1088869"
+  },
+  {
+    "text": "it comes in will include some credentials and the idea is that the Authenticator takes the credentials and",
+    "start": "1088869",
+    "end": "1094629"
+  },
+  {
+    "text": "maps them to a user or service account and possibly a group or set of groups",
+    "start": "1094629",
+    "end": "1100119"
+  },
+  {
+    "text": "and kubernetes has a variety of pluggable authenticators including a web",
+    "start": "1100119",
+    "end": "1105129"
+  },
+  {
+    "text": "hook Authenticator that allows to you to write your own custom Authenticator and so then the information that's returned",
+    "start": "1105129",
+    "end": "1112570"
+  },
+  {
+    "text": "by the Authenticator is used as input for applying the rback authorization policies which specify which group users",
+    "start": "1112570",
+    "end": "1120039"
+  },
+  {
+    "text": "groups and/or service accounts can do which operations on which API resources",
+    "start": "1120039",
+    "end": "1125350"
+  },
+  {
+    "text": "and in which namespaces so for example to tie this back to the use case we",
+    "start": "1125350",
+    "end": "1130869"
+  },
+  {
+    "text": "talked about earlier our back is what lets you say that only that a regular",
+    "start": "1130869",
+    "end": "1137350"
+  },
+  {
+    "text": "user can only create read update and delete objects in their own namespace and can't manipulate policy objects so",
+    "start": "1137350",
+    "end": "1144429"
+  },
+  {
+    "text": "those kinds of rules from those earlier examples are the kinds of control plane",
+    "start": "1144429",
+    "end": "1149950"
+  },
+  {
+    "text": "isolation rules that that are back and authorization lets you specify and",
+    "start": "1149950",
+    "end": "1155909"
+  },
+  {
+    "text": "kubernetes has other authorizers besides are back including the option of writing",
+    "start": "1155909",
+    "end": "1161200"
+  },
+  {
+    "text": "your own as a web hook just like for authentication but today our back is pretty universally used in kubernetes",
+    "start": "1161200",
+    "end": "1167740"
+  },
+  {
+    "text": "clusters so that's kind of the the main one that that is interesting to learn about so the authorizer",
+    "start": "1167740",
+    "end": "1175690"
+  },
+  {
+    "text": "decides whether the request is accepted or rejected based on the our back policy and if the request is accepted then it",
+    "start": "1175690",
+    "end": "1183039"
+  },
+  {
+    "text": "goes through admission control which can reject the request or it can accept it possibly modifying it along the way",
+    "start": "1183039",
+    "end": "1189970"
+  },
+  {
+    "text": "and then persisting it in etsy d so to give you an example of a policy that's",
+    "start": "1189970",
+    "end": "1195669"
+  },
+  {
+    "text": "enforced in the admission control phase we'll talk about Todd security policy and pod security policy is an example of",
+    "start": "1195669",
+    "end": "1203549"
+  },
+  {
+    "text": "like I said a policy that's that's implemented at the admission control level it lets you control what a pod and",
+    "start": "1203549",
+    "end": "1211240"
+  },
+  {
+    "text": "container is allowed to do on the node by controlling security sensitive aspects of the pod spec so for example",
+    "start": "1211240",
+    "end": "1218200"
+  },
+  {
+    "text": "pod security policy lets you say that a container can't run as root or can't run as privileged can't used host paths",
+    "start": "1218200",
+    "end": "1225700"
+  },
+  {
+    "text": "things like that it's also where you can specify a parmer and set comm profiles",
+    "start": "1225700",
+    "end": "1233220"
+  },
+  {
+    "text": "and so the illustration here is this china showing that you have a pod spec",
+    "start": "1233220",
+    "end": "1239140"
+  },
+  {
+    "text": "that comes in to the admission controller the pod security policy decides whether it's rejected or if it's",
+    "start": "1239140",
+    "end": "1245350"
+  },
+  {
+    "text": "accepted it might be mutated and then written to SCT the reason it might be mutated is that the pod security policy",
+    "start": "1245350",
+    "end": "1252490"
+  },
+  {
+    "text": "also can do defaulting in addition to deciding whether the privileges that the pod is trying to use according to the",
+    "start": "1252490",
+    "end": "1261130"
+  },
+  {
+    "text": "spec are allowed or are not allowed so",
+    "start": "1261130",
+    "end": "1266380"
+  },
+  {
+    "text": "lastly you'll recall in our sample use case that we wanted to place restrictions on which pods can talk to",
+    "start": "1266380",
+    "end": "1272320"
+  },
+  {
+    "text": "which other pods across namespaces and network policy is what lets you do that it allows you to control the",
+    "start": "1272320",
+    "end": "1279630"
+  },
+  {
+    "text": "communication between pods actually even finer grained than namespaces of lets you control them based on label",
+    "start": "1279630",
+    "end": "1285460"
+  },
+  {
+    "text": "selectors and it also allows you to specify address ranges that pods are or",
+    "start": "1285460",
+    "end": "1291669"
+  },
+  {
+    "text": "are not allowed to send traffic to or receive traffic from and network policy",
+    "start": "1291669",
+    "end": "1298450"
+  },
+  {
+    "text": "is a little special because it near acquires support at the at the network provider level and there's a bunch of",
+    "start": "1298450",
+    "end": "1304750"
+  },
+  {
+    "text": "different network implementations that can enforce network policy for you so",
+    "start": "1304750",
+    "end": "1312539"
+  },
+  {
+    "text": "now we'll move on to the scheduling related multi-tenancy policies the kind",
+    "start": "1312539",
+    "end": "1318010"
+  },
+  {
+    "text": "of goal or high-level goal of scheduling is to share the compute storage and working resources of a cluster and of",
+    "start": "1318010",
+    "end": "1325940"
+  },
+  {
+    "text": "individual nodes among pods and containers from different tenants while providing resource isolation between",
+    "start": "1325940",
+    "end": "1332330"
+  },
+  {
+    "text": "them and I mentioned networking in there I'm not actually gonna be talking about networking because kubernetes is not yet",
+    "start": "1332330",
+    "end": "1338119"
+  },
+  {
+    "text": "support network as a scheduled resource but in principle network scheduling is part of scheduling isolation between",
+    "start": "1338119",
+    "end": "1345559"
+  },
+  {
+    "text": "containers so and to help explain the scheduling related multi-tenancy",
+    "start": "1345559",
+    "end": "1351529"
+  },
+  {
+    "text": "features I'll show them divided into each one and divided into two layers a policy specification layer",
+    "start": "1351529",
+    "end": "1358429"
+  },
+  {
+    "text": "and a policy enforcement layer so you'll recall we talked about resource quota in",
+    "start": "1358429",
+    "end": "1364190"
+  },
+  {
+    "text": "our use cases at the beginning of the talk for example in enterprise use case we said you might allocate quotas per",
+    "start": "1364190",
+    "end": "1370820"
+  },
+  {
+    "text": "namespace based on organization's internal budgets or in the software as a service may be based on how much the",
+    "start": "1370820",
+    "end": "1377330"
+  },
+  {
+    "text": "consumer paid so resource quota lets you set the maximum CPU memory and storage",
+    "start": "1377330",
+    "end": "1382549"
+  },
+  {
+    "text": "consumption across all pods in a namespace and also lets you limit the total number of objects of any type",
+    "start": "1382549",
+    "end": "1389450"
+  },
+  {
+    "text": "within a namespace so it could be pods or volumes or or anything like that and it's enforced by the resource quota",
+    "start": "1389450",
+    "end": "1395570"
+  },
+  {
+    "text": "admission controller the next scheduling",
+    "start": "1395570",
+    "end": "1400729"
+  },
+  {
+    "text": "related multi-tenancy features that I'll talk about our request and limit and so resource request is the amount of",
+    "start": "1400729",
+    "end": "1407840"
+  },
+  {
+    "text": "resources that the scheduler is going to reserve for a pod on the node and the",
+    "start": "1407840",
+    "end": "1413239"
+  },
+  {
+    "text": "guarantee that the scheduler gives you is that it will only place the pot on a node where the amount of free resources",
+    "start": "1413239",
+    "end": "1419840"
+  },
+  {
+    "text": "is greater than or equal to the sum of the requests of the containers in the",
+    "start": "1419840",
+    "end": "1426349"
+  },
+  {
+    "text": "pod this is a little bit tricky because requests are actually specified at the",
+    "start": "1426349",
+    "end": "1431419"
+  },
+  {
+    "text": "container level not the pod level but scheduling is done at the pod level but it's actually not that complicated the",
+    "start": "1431419",
+    "end": "1437779"
+  },
+  {
+    "text": "way that the request for the pod is calculated is just by adding up the requests for the individual containers",
+    "start": "1437779",
+    "end": "1444019"
+  },
+  {
+    "text": "within the pot and actually the same thing is true for a limit which we'll talk about in a second and the main",
+    "start": "1444019",
+    "end": "1449869"
+  },
+  {
+    "text": "takeaway for a request that you should keep in mind is that it's very important to specify resource requests if",
+    "start": "1449869",
+    "end": "1456190"
+  },
+  {
+    "text": "you want to avoid performance interference between containers because the scheduler packed too many pods on a",
+    "start": "1456190",
+    "end": "1462129"
+  },
+  {
+    "text": "node so this allows you to prevent the scheduler from packing too many pods on a node the second important resource",
+    "start": "1462129",
+    "end": "1471190"
+  },
+  {
+    "text": "scheduling concept is limit and limit is the maximum amount of resources the container can use and if a container",
+    "start": "1471190",
+    "end": "1477580"
+  },
+  {
+    "text": "exceeds its limit it'll be throttled in the case of CPU or it'll be killed in the case of memory and the thing that is interesting about",
+    "start": "1477580",
+    "end": "1485019"
+  },
+  {
+    "text": "limit is that you can set the limit greater than the request and when you if you do this it allows scenario where the",
+    "start": "1485019",
+    "end": "1491740"
+  },
+  {
+    "text": "total limit of the pods on the node exceeds the nodes capacity and when that happens we say that the node is over",
+    "start": "1491740",
+    "end": "1497590"
+  },
+  {
+    "text": "committed because the containers an aggregate can use more resources than the scheduler is reserving for them on",
+    "start": "1497590",
+    "end": "1503649"
+  },
+  {
+    "text": "the node and an over committed node is perfectly fine until the sum of the",
+    "start": "1503649",
+    "end": "1510100"
+  },
+  {
+    "text": "usages tries to exceed the capacity of the node because it's actually the usage that's the what what is going to decide",
+    "start": "1510100",
+    "end": "1516669"
+  },
+  {
+    "text": "whether everybody although containers can coexist safely",
+    "start": "1516669",
+    "end": "1522730"
+  },
+  {
+    "text": "on the node and so if the containers somebody say tries to allocate more memory on the node but there's no more",
+    "start": "1522730",
+    "end": "1528820"
+  },
+  {
+    "text": "memory available then kubernetes will kill one of the pods on the node in",
+    "start": "1528820",
+    "end": "1534580"
+  },
+  {
+    "text": "order to allow the pod that was allocating memory to succeed or it might choose to kill the pod that was trying",
+    "start": "1534580",
+    "end": "1541509"
+  },
+  {
+    "text": "to allocate the memory and I don't have time to go into details about how kubernetes chooses which pod to kill",
+    "start": "1541509",
+    "end": "1547120"
+  },
+  {
+    "text": "when it runs out of memory but there's a policy around that and for CPU it'll",
+    "start": "1547120",
+    "end": "1553419"
+  },
+  {
+    "text": "throttle containers if they try to use",
+    "start": "1553419",
+    "end": "1558850"
+  },
+  {
+    "text": "more than the node has CPU resources available and the reason limit is",
+    "start": "1558850",
+    "end": "1565330"
+  },
+  {
+    "text": "relevant to multi-tenancy is that over-committing nodes is useful in a shared cluster to maximize resource",
+    "start": "1565330",
+    "end": "1572110"
+  },
+  {
+    "text": "utilization because it allows containers to opportunistically use the free resources in the cluster so for the next",
+    "start": "1572110",
+    "end": "1582580"
+  },
+  {
+    "text": "two scheduling policies instead of talking in great detail about the underlying mechanisms I'm going to talk",
+    "start": "1582580",
+    "end": "1588399"
+  },
+  {
+    "text": "about them in the use cases I've kind of called this meta policy layer or meta policy spec",
+    "start": "1588399",
+    "end": "1595740"
+  },
+  {
+    "text": "that isn't really a concept that exists in kubernetes today maybe it would in the future but mainly I'm just using",
+    "start": "1595740",
+    "end": "1602190"
+  },
+  {
+    "text": "that as a way to illustrate the use cases that are driving the specific features that I'm going to talk about on",
+    "start": "1602190",
+    "end": "1608730"
+  },
+  {
+    "text": "this slide so the first feature is taints and toleration x' and this allows",
+    "start": "1608730",
+    "end": "1614460"
+  },
+  {
+    "text": "you to mark specific nodes as dedicated to particular users or groups of users",
+    "start": "1614460",
+    "end": "1619890"
+  },
+  {
+    "text": "or dedicated to really any arbitrary set of pods and this is useful for example",
+    "start": "1619890",
+    "end": "1626400"
+  },
+  {
+    "text": "if you want to reserve machines with special hardware for a particular team in your organization that paid for those",
+    "start": "1626400",
+    "end": "1632340"
+  },
+  {
+    "text": "machines so you get the benefit of being able to have a single shared cluster",
+    "start": "1632340",
+    "end": "1637710"
+  },
+  {
+    "text": "where some of the nodes are dedicated and some are available to anyone and you",
+    "start": "1637710",
+    "end": "1642930"
+  },
+  {
+    "text": "don't need the administrative overhead of having to manage two separate clusters one that has these special nodes with a special hardware in a",
+    "start": "1642930",
+    "end": "1649740"
+  },
+  {
+    "text": "separate cluster with the the general shared nodes that are available to everyone you can run them all in a",
+    "start": "1649740",
+    "end": "1654960"
+  },
+  {
+    "text": "single cluster but dedicate arbitrary partitions of the nodes to arbitrary sets of users and the machines here can",
+    "start": "1654960",
+    "end": "1663360"
+  },
+  {
+    "text": "be physical machines or virtual machines and when I was using that term machines",
+    "start": "1663360",
+    "end": "1668780"
+  },
+  {
+    "text": "so the second feature that is kind of related to to this is starting to fall",
+    "start": "1668780",
+    "end": "1676500"
+  },
+  {
+    "text": "off detains and toleration x' is anti affinity and this allows a pod to say which other pods it cannot share a node",
+    "start": "1676500",
+    "end": "1684090"
+  },
+  {
+    "text": "with and actually it can be any topology domain it can be zone it can be region",
+    "start": "1684090",
+    "end": "1689340"
+  },
+  {
+    "text": "it can be anything but sharing a node is usually the most common use case for",
+    "start": "1689340",
+    "end": "1694770"
+  },
+  {
+    "text": "this and so for example you can use anti affinity to enforce sole tenant nodes which is saying that a pod should only",
+    "start": "1694770",
+    "end": "1702330"
+  },
+  {
+    "text": "be able to share the node with other pods from the same user and not with or over tenant and not with pods from other",
+    "start": "1702330",
+    "end": "1709260"
+  },
+  {
+    "text": "tenants or you can use it for what we call exclusive pods which means a pod",
+    "start": "1709260",
+    "end": "1715380"
+  },
+  {
+    "text": "cannot share a node with any other pods at all regardless of whether they're from the same tenant or a different",
+    "start": "1715380",
+    "end": "1721110"
+  },
+  {
+    "text": "tenant and so as you can probably imagine this is useful for security sensitive pods if",
+    "start": "1721110",
+    "end": "1726730"
+  },
+  {
+    "text": "you don't trust container the container isolation boundary it allows you to ensure that a security sensitive pod",
+    "start": "1726730",
+    "end": "1733059"
+  },
+  {
+    "text": "will never share a node with possibly untrusted code so all of the features",
+    "start": "1733059",
+    "end": "1742120"
+  },
+  {
+    "text": "that I've talked about so far have been in kubernetes for a while I wanted to talk about one new multi-tenancy feature",
+    "start": "1742120",
+    "end": "1747759"
+  },
+  {
+    "text": "that's currently an alpha called priority and preemption and the best way to explain this feature is by analogy",
+    "start": "1747759",
+    "end": "1754059"
+  },
+  {
+    "text": "and analogy I'll make is that I talked earlier about how you can set limit greater than request in order to over",
+    "start": "1754059",
+    "end": "1760240"
+  },
+  {
+    "text": "commit a node well you can also over commit a cluster by handing out more quota than there are resources on the",
+    "start": "1760240",
+    "end": "1767830"
+  },
+  {
+    "text": "nodes in the cluster or just by not using quota at all which is actually something a lot of people do and when",
+    "start": "1767830",
+    "end": "1773559"
+  },
+  {
+    "text": "you get into that situation when you're when you're in that situation where you're either have no quota or you the",
+    "start": "1773559",
+    "end": "1779710"
+  },
+  {
+    "text": "some of the quotas that you've handed out are greater than the size of the cluster you can end up with a situation",
+    "start": "1779710",
+    "end": "1785049"
+  },
+  {
+    "text": "where there our pods are trying to use more resources than there are total resources in the cluster and that's the",
+    "start": "1785049",
+    "end": "1791620"
+  },
+  {
+    "text": "situation that priority and preemption is intended to to help with so I'll illustrate this with a with a quick",
+    "start": "1791620",
+    "end": "1799769"
+  },
+  {
+    "text": "run-through of how this feature works so here we have a cluster it consists of three nodes the nodes are running two",
+    "start": "1799769",
+    "end": "1807370"
+  },
+  {
+    "text": "types of pods the size of the pods is proportional to the amount of resources that it's using the two types of pods",
+    "start": "1807370",
+    "end": "1813700"
+  },
+  {
+    "text": "are high-priority or important pods those are in red those might be say your web servers or your storage backends",
+    "start": "1813700",
+    "end": "1821289"
+  },
+  {
+    "text": "things that are kind of critical to say serving the serving pipeline the user-visible kind of a pipeline for",
+    "start": "1821289",
+    "end": "1827350"
+  },
+  {
+    "text": "serving requests and then we'll have the green low priority or less important pods and those might be say batch jobs",
+    "start": "1827350",
+    "end": "1834370"
+  },
+  {
+    "text": "or experiments that your developers are running and so the way this works and",
+    "start": "1834370",
+    "end": "1839740"
+  },
+  {
+    "text": "I'll start with how it works today and then explain what party and preemption does so today there's no way you can really distinguish these green and red",
+    "start": "1839740",
+    "end": "1845889"
+  },
+  {
+    "text": "pods but we'll see how that comes up in a second so you have a deployment that's the red plus it's hooked up to a",
+    "start": "1845889",
+    "end": "1852490"
+  },
+  {
+    "text": "horizontal pot autoscaler your cluster chugging along happily the but then the horizontal pot autoscale are notices",
+    "start": "1852490",
+    "end": "1858940"
+  },
+  {
+    "text": "that there's a load spike for your red-pawed service and so it tells the",
+    "start": "1858940",
+    "end": "1865210"
+  },
+  {
+    "text": "deployment to scale up that creates a new pod and it goes into the scheduling",
+    "start": "1865210",
+    "end": "1871150"
+  },
+  {
+    "text": "queue and this pod can't run because all the nodes are full and so the thing you",
+    "start": "1871150",
+    "end": "1877840"
+  },
+  {
+    "text": "would like to happen is that the green some of the green pods would be killed in order to make room for the red pods",
+    "start": "1877840",
+    "end": "1883690"
+  },
+  {
+    "text": "because the green pods were the most important than the red pods and so that's what priority and preemption lets you do you can set explicit priorities",
+    "start": "1883690",
+    "end": "1890680"
+  },
+  {
+    "text": "on the pods and say that the green pods are less important than the red pods and so in this scenario the system would",
+    "start": "1890680",
+    "end": "1896590"
+  },
+  {
+    "text": "kill the green pods to allow the red pod to schedule and then if the green pods were being managed by a controller they",
+    "start": "1896590",
+    "end": "1903550"
+  },
+  {
+    "text": "would be recreated and go back into the scheduling queue and wait to run later so this feature is an alpha right now",
+    "start": "1903550",
+    "end": "1910480"
+  },
+  {
+    "text": "and by the way you might be wondering well in a multi-tenant system won't everyone just use the highest priority",
+    "start": "1910480",
+    "end": "1915850"
+  },
+  {
+    "text": "and the answer is well we've thought about that and so the way that that we avoid that situation is that resource",
+    "start": "1915850",
+    "end": "1922630"
+  },
+  {
+    "text": "quota is subdivided by priority and so instead of just saying instead of having quota just say namespace X gets Y amount",
+    "start": "1922630",
+    "end": "1930940"
+  },
+  {
+    "text": "of RAM for example which is the way resource quota works today you can say namespace X gets Y amount of RAM at",
+    "start": "1930940",
+    "end": "1936520"
+  },
+  {
+    "text": "priority Z and so that allows you to limit how much high-priority resources a namespace can use so we just have a",
+    "start": "1936520",
+    "end": "1944050"
+  },
+  {
+    "text": "couple of minutes and so to close I just want to give you a quick peek into some of the ideas that are under discussion in the area of kubernetes multi-tenancy",
+    "start": "1944050",
+    "end": "1951730"
+  },
+  {
+    "text": "and i just want to add the caveat that these might or might not make it into kubernetes they're just at the proposal",
+    "start": "1951730",
+    "end": "1957280"
+  },
+  {
+    "text": "phase right now but I just wanted to talk about them briefly and I divide them into two categories policy related",
+    "start": "1957280",
+    "end": "1964120"
+  },
+  {
+    "text": "and non policy related so we'll stop we'll start with the policy related ones so one recent policy related effort is",
+    "start": "1964120",
+    "end": "1971920"
+  },
+  {
+    "text": "scheduling policy and scheduling policy is like pod security policy but for",
+    "start": "1971920",
+    "end": "1977140"
+  },
+  {
+    "text": "scheduling features it allows you to specify which scheduling features a pod is allowed to use for example the",
+    "start": "1977140",
+    "end": "1983560"
+  },
+  {
+    "text": "features we've been talking about here like anti affinity priority toleration things like that and what values those",
+    "start": "1983560",
+    "end": "1990750"
+  },
+  {
+    "text": "features can take on so for example what toleration Zapp odd is allowed to use",
+    "start": "1990750",
+    "end": "1996919"
+  },
+  {
+    "text": "the second policy-related feature that has been proposed is something called",
+    "start": "1998900",
+    "end": "2006260"
+  },
+  {
+    "text": "security profile and the goal here is to improve the usability of kubernetes security and multi-tenancy features so",
+    "start": "2006260",
+    "end": "2012950"
+  },
+  {
+    "text": "the observation that this is based on and this is a feature that we've been working on at Google is that today to",
+    "start": "2012950",
+    "end": "2019760"
+  },
+  {
+    "text": "operate a secure multi tenant cluster you need a cluster admin who has a pretty deep understanding of",
+    "start": "2019760",
+    "end": "2025630"
+  },
+  {
+    "text": "multi-tenancy and security and how the kubernetes policies that are used to enforce multi-tenancy and security rules",
+    "start": "2025630",
+    "end": "2033050"
+  },
+  {
+    "text": "work and even if you do have that understanding as a cluster admin policy",
+    "start": "2033050",
+    "end": "2038570"
+  },
+  {
+    "text": "configuration is error-prone and you need to build up tooling to apply those policies reproducibly and even if you",
+    "start": "2038570",
+    "end": "2045710"
+  },
+  {
+    "text": "build that tooling and and and have the right configurations the policy configurations need to be updated as new",
+    "start": "2045710",
+    "end": "2051730"
+  },
+  {
+    "text": "kubernetes features are added and so the idea of security profiles is kind of to",
+    "start": "2051730",
+    "end": "2057500"
+  },
+  {
+    "text": "democratize security policy configuration the idea is to create and",
+    "start": "2057500",
+    "end": "2062780"
+  },
+  {
+    "text": "this is a kind of wordy but it kind of captures all of the aspects of it where to create a small menu of versioned",
+    "start": "2062780",
+    "end": "2068780"
+  },
+  {
+    "text": "community curated policy profiles to enable turnkey cluster creation with",
+    "start": "2068780",
+    "end": "2073790"
+  },
+  {
+    "text": "desired security and tenant isolation and the Everywhere part means that this will work should work anywhere so on any",
+    "start": "2073790",
+    "end": "2079760"
+  },
+  {
+    "text": "of the cloud providers should work using cube atom any any of the deployment",
+    "start": "2079760",
+    "end": "2084980"
+  },
+  {
+    "text": "tools and so the idea is that you would run a command like cube atom in it and you would specify a particular security",
+    "start": "2084980",
+    "end": "2091250"
+  },
+  {
+    "text": "profile that corresponds to your use case so default might be kind of like a secure by default cluster you can",
+    "start": "2091250",
+    "end": "2097460"
+  },
+  {
+    "text": "imagine or saz multi-tenancy might create the policies that give you what I",
+    "start": "2097460",
+    "end": "2103040"
+  },
+  {
+    "text": "described earlier in the talk in that example and likewise you could upgrade the cluster and the policies would work",
+    "start": "2103040",
+    "end": "2109220"
+  },
+  {
+    "text": "across clusters and also you could upgrade the policies themselves the",
+    "start": "2109220",
+    "end": "2115190"
+  },
+  {
+    "text": "profiles themselves I don't have time to talk in detail about how",
+    "start": "2115190",
+    "end": "2120829"
+  },
+  {
+    "text": "policies our profiles are structured but basically they map down to command line",
+    "start": "2120829",
+    "end": "2125930"
+  },
+  {
+    "text": "flags cluster scope policy objects name escapes and name space scope policy objects and we are hoping to include",
+    "start": "2125930",
+    "end": "2133369"
+  },
+  {
+    "text": "this concept in kubernetes conformance so you can be sure that the security profiles work the same way wherever you",
+    "start": "2133369",
+    "end": "2139339"
+  },
+  {
+    "text": "run wherever you try to use them so I",
+    "start": "2139339",
+    "end": "2144499"
+  },
+  {
+    "text": "don't have time to talk about OPA there were a couple of sessions on that and I don't have time to talk about the non",
+    "start": "2144499",
+    "end": "2150559"
+  },
+  {
+    "text": "policy work either unfortunately but you can look at the slides later and and see",
+    "start": "2150559",
+    "end": "2157009"
+  },
+  {
+    "text": "see what's going on there so to wrap up we talked about various multi-tenancy",
+    "start": "2157009",
+    "end": "2163519"
+  },
+  {
+    "text": "scenarios that kubernetes supports today and why inter-cluster multi-tenancy is",
+    "start": "2163519",
+    "end": "2169910"
+  },
+  {
+    "text": "important and some of the ongoing work both related to policies and unrelated",
+    "start": "2169910",
+    "end": "2175009"
+  },
+  {
+    "text": "to policies more related to scheduling and if you're interested in getting involved we would welcome your",
+    "start": "2175009",
+    "end": "2180940"
+  },
+  {
+    "text": "involvement there's a bunch of groups sig off is the main sig that's working",
+    "start": "2180940",
+    "end": "2186170"
+  },
+  {
+    "text": "on multi-tenancy at least the policy parts the scheduling parts I should have listed up here now I realize is six",
+    "start": "2186170",
+    "end": "2191690"
+  },
+  {
+    "text": "scheduling and then there are working groups from all the tenancy policies container identity and that's the",
+    "start": "2191690",
+    "end": "2197930"
+  },
+  {
+    "text": "information for participating in those groups so thanks we I don't know there's",
+    "start": "2197930",
+    "end": "2203690"
+  },
+  {
+    "text": "no talk after this so I guess I can take questions but if they're not gonna let us take questions because you ran over I'm happy to take them off the stage",
+    "start": "2203690",
+    "end": "2210559"
+  },
+  {
+    "text": "afterwards Thanks [Applause]",
+    "start": "2210559",
+    "end": "2217089"
+  }
+]

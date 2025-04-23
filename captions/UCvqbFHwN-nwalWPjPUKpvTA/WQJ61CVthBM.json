@@ -1,0 +1,1733 @@
+[
+  {
+    "start": "0",
+    "end": "33000"
+  },
+  {
+    "text": "so my name is Greg Lyons I am a software engineer at box where I work on our internal platform for deploying services",
+    "start": "240",
+    "end": "6600"
+  },
+  {
+    "text": "with kubernetes and today I'm going to talk about our continuous delivery model on that platform so for those of you who aren't",
+    "start": "6600",
+    "end": "12900"
+  },
+  {
+    "text": "familiar with box we are a cloud content management platform which means that we make it easy for companies and",
+    "start": "12900",
+    "end": "18420"
+  },
+  {
+    "text": "organizations to store all of their content securely in the cloud access it from anywhere share and collaborate so",
+    "start": "18420",
+    "end": "25199"
+  },
+  {
+    "text": "that our customers can you know work together and do their work as effectively as possible so to take a",
+    "start": "25199",
+    "end": "31109"
+  },
+  {
+    "text": "quick look at what kubernetes looks like it box we're currently running four clusters three of which are in",
+    "start": "31109",
+    "end": "36750"
+  },
+  {
+    "start": "33000",
+    "end": "94000"
+  },
+  {
+    "text": "production those clusters are running on bare metal in our own data centers provisioned with puppet but we're in the",
+    "start": "36750",
+    "end": "43050"
+  },
+  {
+    "text": "process of rolling out AWS and as your production clusters as well to give a sense of some of the tooling",
+    "start": "43050",
+    "end": "48360"
+  },
+  {
+    "text": "that we're using to support our clusters we're using tigers project calico for networking we're using smart stack by",
+    "start": "48360",
+    "end": "55199"
+  },
+  {
+    "text": "Airbnb for service discovery and we're using hash corpse vault for secrets management this point we have about 80",
+    "start": "55199",
+    "end": "62039"
+  },
+  {
+    "text": "services running in production which really represents a pretty significant chunk of our core mission critical code the powers box so at this point we are",
+    "start": "62039",
+    "end": "69840"
+  },
+  {
+    "text": "pretty heavily reliant on kubernetes and our services running on kubernetes to power our product for the over 80,000",
+    "start": "69840",
+    "end": "75659"
+  },
+  {
+    "text": "organizations around the world that depend on us so given that context when",
+    "start": "75659",
+    "end": "80850"
+  },
+  {
+    "text": "we need to make changes to our services that are running in kubernetes we want to do so in a way that's safe we're very",
+    "start": "80850",
+    "end": "85950"
+  },
+  {
+    "text": "much in the business of not breaking things for our customers I'd imagine many were in that same business as well",
+    "start": "85950",
+    "end": "91320"
+  },
+  {
+    "text": "so that's what I'm here to talk about today the problem of how can we make changes to our services running on",
+    "start": "91320",
+    "end": "97290"
+  },
+  {
+    "start": "94000",
+    "end": "171000"
+  },
+  {
+    "text": "kubernetes in a way that's safe and easy so when I say changes to a service running on kubernetes I could be talking",
+    "start": "97290",
+    "end": "103259"
+  },
+  {
+    "text": "about a bunch of different things you might be talking about a change to a source code if you have an app written and say go or Java you're adding a new",
+    "start": "103259",
+    "end": "110070"
+  },
+  {
+    "text": "feature this might be a change some sort of third-party package that you're pulling in you might upgrade a version of some rpm that you're pulling down",
+    "start": "110070",
+    "end": "116009"
+  },
+  {
+    "text": "from the internet this might be some config parameters like an environment variable or a command line flag I'm",
+    "start": "116009",
+    "end": "122549"
+  },
+  {
+    "text": "gonna stop there but really the list could keep going on it's not even close to an exhaustive list point is there are",
+    "start": "122549",
+    "end": "127710"
+  },
+  {
+    "text": "many different types of changes we might need to make to our service at any point and we really do care about all of them because the reality is that any of these",
+    "start": "127710",
+    "end": "134020"
+  },
+  {
+    "text": "changes if not rolled out properly have the possibility to cause a lot of damage so historically at box we've had some",
+    "start": "134020",
+    "end": "141490"
+  },
+  {
+    "text": "poor change control processes within certain systems that have led some real serious problems someone's making a",
+    "start": "141490",
+    "end": "147190"
+  },
+  {
+    "text": "change that they think is pretty innocuous that ends up either not doing exactly what they intended it to do or",
+    "start": "147190",
+    "end": "152320"
+  },
+  {
+    "text": "it ends up affecting a lot more of the system than they expect it at the time suddenly the whole site is down so that",
+    "start": "152320",
+    "end": "158440"
+  },
+  {
+    "text": "may sound familiar to some of you you're not alone but there is hope and there are some things we can do better to",
+    "start": "158440",
+    "end": "163450"
+  },
+  {
+    "text": "avoid that so with our services that we're running now in kubernetes are really trying to do things the right way so when I talk about the right way what",
+    "start": "163450",
+    "end": "170920"
+  },
+  {
+    "text": "do I mean there are a couple key principles I want to highlight first that are guiding our whole change",
+    "start": "170920",
+    "end": "176650"
+  },
+  {
+    "start": "171000",
+    "end": "230000"
+  },
+  {
+    "text": "control process first one is that we want our change rollouts to be incremental so that means that we roll out our changes a little bit at a time",
+    "start": "176650",
+    "end": "182800"
+  },
+  {
+    "text": "so that if something is going to break we only break it for a small subset of our system instead of crippling our",
+    "start": "182800",
+    "end": "188230"
+  },
+  {
+    "text": "whole system at once so what does that look like for us in practice well most",
+    "start": "188230",
+    "end": "194020"
+  },
+  {
+    "text": "you are probably familiar with you know we have a production environment that handles our live traffic and before we make our changes all the way to a",
+    "start": "194020",
+    "end": "199630"
+  },
+  {
+    "text": "production environment were going to roll it out through some intermediate environments so we're first gonna roll out to a dev environment a staging",
+    "start": "199630",
+    "end": "205000"
+  },
+  {
+    "text": "environment and a production environment but that's not even the whole story within each of those environments we",
+    "start": "205000",
+    "end": "210040"
+  },
+  {
+    "text": "also roll out incrementally so we do a canary deployment rolling out to a small subset of the instances in that",
+    "start": "210040",
+    "end": "215380"
+  },
+  {
+    "text": "environment if things look good then we'll do our main deployment that rolls out to the rest so this whole incremental change control process",
+    "start": "215380",
+    "end": "221740"
+  },
+  {
+    "text": "really mitigates a lot of risk for us and reduces the chance that our bad changes are going to make it all the way out to our whole deployment in",
+    "start": "221740",
+    "end": "227590"
+  },
+  {
+    "text": "production the next sprint so I want to talk about is automation so that whole incremental workflow",
+    "start": "227590",
+    "end": "234250"
+  },
+  {
+    "start": "230000",
+    "end": "306000"
+  },
+  {
+    "text": "sounds great for risk mitigation but it sounds pretty terrible if you're gonna have to do all that yourself no wants to sit there and you know click a button",
+    "start": "234250",
+    "end": "241150"
+  },
+  {
+    "text": "deploy to dev canary sit there and babysit it make sure everything's okay okay ready to deploy click a button to",
+    "start": "241150",
+    "end": "246970"
+  },
+  {
+    "text": "deploy do your main deployment in dev everything looks good click a button to deploy a staging click a button to",
+    "start": "246970",
+    "end": "252970"
+  },
+  {
+    "text": "deploy a prod you're gonna have to sit there and babysit your whole rollout process that's probably your whole",
+    "start": "252970",
+    "end": "257980"
+  },
+  {
+    "text": "afternoon maybe your whole day but we want to be software engineers not monkeys pushing buttons so we want as",
+    "start": "257980",
+    "end": "263500"
+  },
+  {
+    "text": "much that to be automated as possible so we can focus on real more important work so what that looks like for us is between our start of our",
+    "start": "263500",
+    "end": "271780"
+  },
+  {
+    "text": "rollout process and our finish we want to have as much of that in the middle automated as possible we're gonna have to have some sort of probably manual intervention in the beginning and we",
+    "start": "271780",
+    "end": "278770"
+  },
+  {
+    "text": "really don't want to be have to sitting and watching that whole process we want as much of it to take care of itself as possible another benefit that automation",
+    "start": "278770",
+    "end": "286000"
+  },
+  {
+    "text": "gets us is if we're minimizing the interface for our engineers to have manual interaction with the system we're",
+    "start": "286000",
+    "end": "292090"
+  },
+  {
+    "text": "minimizing the risk of one of our engineers accidentally making mistake fact is there are some things that",
+    "start": "292090",
+    "end": "297280"
+  },
+  {
+    "text": "computers are better than us at one of those is you know simple repeated processes a computer is much more likely",
+    "start": "297280",
+    "end": "303100"
+  },
+  {
+    "text": "to accidentally forget a step in the rollout process than you our last principle I want to highlight is that we",
+    "start": "303100",
+    "end": "309310"
+  },
+  {
+    "start": "306000",
+    "end": "389000"
+  },
+  {
+    "text": "want our change rollout process to be declarative first so for those of you who aren't familiar with declarative versus imperative models in a",
+    "start": "309310",
+    "end": "315610"
+  },
+  {
+    "text": "declarative model you make a change to a system by specifying a desired end state of the system we're in an imperative",
+    "start": "315610",
+    "end": "321190"
+  },
+  {
+    "text": "model you make a change by specifying a set of steps that you expect to achieve that desired state and one of the",
+    "start": "321190",
+    "end": "327160"
+  },
+  {
+    "text": "benefits we get from a declarative model is that when we write out our desired system configuration we can actually",
+    "start": "327160",
+    "end": "332620"
+  },
+  {
+    "text": "write that out as code and check it into version control so that means we can have a version history of the system of",
+    "start": "332620",
+    "end": "338380"
+  },
+  {
+    "text": "the state of our system at any point and the configuration we wrote to get to that state so what that looks like for",
+    "start": "338380",
+    "end": "343510"
+  },
+  {
+    "text": "us in kubernetes means that if we're running our rolling on our app to kubernetes we're gonna need some",
+    "start": "343510",
+    "end": "349360"
+  },
+  {
+    "text": "kubernetes api objects to make that work so we might need a deployment to manage pods we might need a service object to",
+    "start": "349360",
+    "end": "354610"
+  },
+  {
+    "text": "load balance across those pods we may need a namespace to run our app in we want all of those kubernetes api objects",
+    "start": "354610",
+    "end": "360280"
+  },
+  {
+    "text": "to be defined declaratively some you've probably all seen JSON and yellow files that describe your apps config so what",
+    "start": "360280",
+    "end": "367360"
+  },
+  {
+    "text": "we actually do is we write all those objects in one file that we call our app manifest and we want this app manifest",
+    "start": "367360",
+    "end": "373630"
+  },
+  {
+    "text": "to be the source of truth for whatever our app looks like on the cluster at any given time we're gonna check that out",
+    "start": "373630",
+    "end": "379750"
+  },
+  {
+    "text": "manifest into version control so that again we have a version state of our cluster at any given time so in order to",
+    "start": "379750",
+    "end": "386590"
+  },
+  {
+    "text": "make things a little bit more concrete I'd like to introduce Kevin so Kevin is a box engineer this is a real picture of",
+    "start": "386590",
+    "end": "394000"
+  },
+  {
+    "start": "389000",
+    "end": "432000"
+  },
+  {
+    "text": "him he's actually here at cube con he looks a little different now than he does in this picture kevin is a box engineer on our storage team",
+    "start": "394000",
+    "end": "400240"
+  },
+  {
+    "text": "so in that role kevin has written an app called storage service that basically",
+    "start": "400240",
+    "end": "405639"
+  },
+  {
+    "text": "serves to interface with our content layer Kevin deploys that app on our kubernetes clusters and in this example kevin's",
+    "start": "405639",
+    "end": "412330"
+  },
+  {
+    "text": "going to want to roll out a change all the way to production so to get a quick look at what our whole change lifecycle",
+    "start": "412330",
+    "end": "418840"
+  },
+  {
+    "text": "looks like i'm gonna give this big diagram think it's gonna be a little confusing at first so i'm going to kind",
+    "start": "418840",
+    "end": "423880"
+  },
+  {
+    "text": "of breeze through it but then i'm going to go through each of the different components in-depth and we'll revisit it later so if this whole first part",
+    "start": "423880",
+    "end": "429220"
+  },
+  {
+    "text": "doesn't make sense hopefully it'll make sense by the end so as you can see we have a bunch of different clusters that",
+    "start": "429220",
+    "end": "434740"
+  },
+  {
+    "text": "we're running we have a dev cluster a staging cluster and to production clusters east and west this isn't",
+    "start": "434740",
+    "end": "440139"
+  },
+  {
+    "text": "exactly what our setup looks like but it serves the purpose so as we said we want",
+    "start": "440139",
+    "end": "445240"
+  },
+  {
+    "text": "there to be one minimal manual entry point for kevin to roll out his changes that entry point is going to be as app",
+    "start": "445240",
+    "end": "451210"
+  },
+  {
+    "text": "repo so this is where a source code lives or as docker file live some other config as well we want really that to be",
+    "start": "451210",
+    "end": "456970"
+  },
+  {
+    "text": "the point where Kevin's gonna make his change and we're gonna start the rest of the rollout process so when Kevin makes",
+    "start": "456970",
+    "end": "462009"
+  },
+  {
+    "text": "a commit to that app repo and pushes it it's gonna kick off a git hook that will trigger the start of a Jenkins pipeline",
+    "start": "462009",
+    "end": "468520"
+  },
+  {
+    "text": "so if those of you aren't familiar with Jenkins it's an open source automation tool it makes it really easy to do things like build testing and deploying",
+    "start": "468520",
+    "end": "475680"
+  },
+  {
+    "text": "Jenkins is really going to be the driver of the whole rest of our automated rollout process we're gonna kind of hand over the reins at this point so as we",
+    "start": "475680",
+    "end": "483219"
+  },
+  {
+    "text": "said we want our changes to be declarative which means that if we want to affect our storage service as it's running on our kubernetes clusters we're",
+    "start": "483219",
+    "end": "488500"
+  },
+  {
+    "text": "gonna need to modify the actual manifests that describe what those apps look like or what that app looks like so",
+    "start": "488500",
+    "end": "494770"
+  },
+  {
+    "text": "in our system we don't actually directly have our Jenkins pipeline modify that app those app manifests we actually have",
+    "start": "494770",
+    "end": "501159"
+  },
+  {
+    "text": "a layer of indirection here we have a templating system in the way that our templating system works is that our Jenkins pipeline is going to inject",
+    "start": "501159",
+    "end": "507550"
+  },
+  {
+    "text": "certain parameters into our templates that's going to generate what the actual final manifest look like it'll make more",
+    "start": "507550",
+    "end": "513399"
+  },
+  {
+    "text": "sense in a sec when we look at it more in depth but suffice to say for now that our Jenkins pipeline modifies some",
+    "start": "513399",
+    "end": "519279"
+  },
+  {
+    "text": "parameters in our templating system there and then our templates are written in JSON it which is a JSON templating",
+    "start": "519279",
+    "end": "525339"
+  },
+  {
+    "text": "language we find super useful we're then going to run the JSON a command-line tool to regenerate our actual app",
+    "start": "525339",
+    "end": "531130"
+  },
+  {
+    "text": "manifest so great we've made our change all the way to our final declarative spec we say this is what we want our app to or what",
+    "start": "531130",
+    "end": "537740"
+  },
+  {
+    "text": "this is what we want our app to look like on the cluster the last gap that we have to bridge is how do we actually",
+    "start": "537740",
+    "end": "542810"
+  },
+  {
+    "text": "reflect those changes in the cluster so we've actually built a service to handle this for us",
+    "start": "542810",
+    "end": "548180"
+  },
+  {
+    "text": "we call it cube applier and we've opened sources as well and I'll talk a little bit more about how cube applier works",
+    "start": "548180",
+    "end": "553339"
+  },
+  {
+    "text": "later but for now just know that cube applier serves the purpose of keeping that app manifest repo in sync with the",
+    "start": "553339",
+    "end": "559880"
+  },
+  {
+    "text": "actual state on the clusters so to look",
+    "start": "559880",
+    "end": "564920"
+  },
+  {
+    "start": "563000",
+    "end": "653000"
+  },
+  {
+    "text": "at the app repo a little more in-depth as the first component we have our storage service as the root name we have",
+    "start": "564920",
+    "end": "572510"
+  },
+  {
+    "text": "our source code Kevin's gonna have a docker file as well it describes how to package this app into a container image",
+    "start": "572510",
+    "end": "578269"
+  },
+  {
+    "text": "and we have a Jenkins file so Jenkins file is actually a really cool way to specify the steps that make up your",
+    "start": "578269",
+    "end": "584540"
+  },
+  {
+    "text": "Jenkins pipeline and you can check that in alongside the rest of your code so as we said there are a lot of different",
+    "start": "584540",
+    "end": "590269"
+  },
+  {
+    "text": "types of changes that Kevin cares about not just source code changes not just changes to his docker file you may want to change from his kubernetes",
+    "start": "590269",
+    "end": "595700"
+  },
+  {
+    "text": "configuration as well maybe like he's running different amounts of replicas and different environments and as we",
+    "start": "595700",
+    "end": "600800"
+  },
+  {
+    "text": "said we want this app repo to be sort of a single point for that and our manifests live elsewhere so how can",
+    "start": "600800",
+    "end": "606199"
+  },
+  {
+    "text": "Kevin modify those manifest changes well we started rolling out a set of parameters that Kevin's able to modify",
+    "start": "606199",
+    "end": "612709"
+  },
+  {
+    "text": "from within his actual app repo what that's going to look like is they're gonna be based on our environment and",
+    "start": "612709",
+    "end": "618500"
+  },
+  {
+    "text": "the track either Manor canary so in this example little truncated version of our file you can see within the dev",
+    "start": "618500",
+    "end": "625010"
+  },
+  {
+    "text": "environment and the canary deployment we may only be wondering running one replica that only needs four CPUs but in",
+    "start": "625010",
+    "end": "631399"
+  },
+  {
+    "text": "one of our main production deployments we may be running 20 20 replicas that require more CPUs so we want Kevin again",
+    "start": "631399",
+    "end": "637610"
+  },
+  {
+    "text": "to be able to make those changes to his app within the app repo and not really have to worry about the rest of the automated system so as we said when",
+    "start": "637610",
+    "end": "644810"
+  },
+  {
+    "text": "Kevin makes the change this app let's say in this example he's making a source code change he gets it reviewed by his team he's",
+    "start": "644810",
+    "end": "651050"
+  },
+  {
+    "text": "gonna make a commit push it to his master branch that's gonna kick off our Jenkins pipeline so the first part of",
+    "start": "651050",
+    "end": "657320"
+  },
+  {
+    "start": "653000",
+    "end": "823000"
+  },
+  {
+    "text": "our Jenkins pipeline is a bunch of steps that I've bundled under pre kubernetes this is less interesting stuff for this",
+    "start": "657320",
+    "end": "662660"
+  },
+  {
+    "text": "talk but I'll go through a quick we're going to run some tests an analysis for things like code quality",
+    "start": "662660",
+    "end": "668050"
+  },
+  {
+    "text": "code coverage run some unit tests make sure it does what we expect it to do we",
+    "start": "668050",
+    "end": "674209"
+  },
+  {
+    "text": "have some security checks as well we're gonna build Kevin a new docker image so he's made a change to his source code",
+    "start": "674209",
+    "end": "679850"
+  },
+  {
+    "text": "we're gonna need to roll out a new actual image of his app we use docker then we're gonna push that image up to",
+    "start": "679850",
+    "end": "685009"
+  },
+  {
+    "text": "artifactory which will be used for our container registry blur they could use anything here and then as I said we're",
+    "start": "685009",
+    "end": "690019"
+  },
+  {
+    "text": "gonna start rolling out to our environments so we now need to start pushing this image change out or actual clusters as I said we're gonna roll out",
+    "start": "690019",
+    "end": "696019"
+  },
+  {
+    "text": "first to a dev environment and within that dev environment we're gonna do a canary deployment first we're gonna have",
+    "start": "696019",
+    "end": "701180"
+  },
+  {
+    "text": "some automated testing and monitoring of that canary things look good we're then gonna roll out to the rest of our",
+    "start": "701180",
+    "end": "706579"
+  },
+  {
+    "text": "instances on dev do some testing and monitoring make sure everything looks good if everything is okay in dev",
+    "start": "706579",
+    "end": "712399"
+  },
+  {
+    "text": "Jenkins is then gonna start rolling out to staging and our staging rollout process is going to be pretty much the",
+    "start": "712399",
+    "end": "718009"
+  },
+  {
+    "text": "same as our dev environment we're gonna deploy to canary before we deploy to Maine finally if everything looks good",
+    "start": "718009",
+    "end": "723920"
+  },
+  {
+    "text": "in staging we're ready to roll out to production but some of you astute audience members may have noticed that",
+    "start": "723920",
+    "end": "728990"
+  },
+  {
+    "text": "the title of this talk is continuous delivery not continuous deployment so different people have different",
+    "start": "728990",
+    "end": "734180"
+  },
+  {
+    "text": "definitions but for us what that means in a continuous deployment system all changes are automatically rolled all the",
+    "start": "734180",
+    "end": "740480"
+  },
+  {
+    "text": "way out to production we're in a continuous delivery system which is what we're using all changes are candidates",
+    "start": "740480",
+    "end": "746120"
+  },
+  {
+    "text": "to be rolled out to production but aren't necessarily rolled out they require some sort of manual approval so",
+    "start": "746120",
+    "end": "752480"
+  },
+  {
+    "text": "continuous deployment requires you to have a guarantee with your with your service owners that their code is ready",
+    "start": "752480",
+    "end": "758569"
+  },
+  {
+    "text": "to be rolled all the way up to production at any point we don't currently have that back guarantee with our service owners but we'd like to get",
+    "start": "758569",
+    "end": "763730"
+  },
+  {
+    "text": "there but for now we require some manual approval to roll out to production right now the main way that we have that",
+    "start": "763730",
+    "end": "769309"
+  },
+  {
+    "text": "implemented for engineers is they'll get a slack notification that says that their deployment is ready to roll out to production and they then they can just",
+    "start": "769309",
+    "end": "777920"
+  },
+  {
+    "text": "click approve and then go back to whatever they were doing and Jenkins is going to handle rolling out to prod and again our prodigal up process looks very",
+    "start": "777920",
+    "end": "784610"
+  },
+  {
+    "text": "similar to our Devon staging as well so this whole process that makes up the Jenkins pipeline as we said is defined",
+    "start": "784610",
+    "end": "790430"
+  },
+  {
+    "text": "in a Jenkins file that lives in Kevin's app repo a lot of our pipelines for our different apps tend to look very similar",
+    "start": "790430",
+    "end": "795679"
+  },
+  {
+    "text": "because we want them to follow this whole incremental process so in order to have everyone duplicating the same exact Jenkins file we've",
+    "start": "795679",
+    "end": "801709"
+  },
+  {
+    "text": "actually written a Jenkins pipeline library internally that basically allows people to reuse some of these common steps like deploying to a certain",
+    "start": "801709",
+    "end": "807890"
+  },
+  {
+    "text": "environment as building blocks so they can get up and running pretty quickly so",
+    "start": "807890",
+    "end": "813080"
+  },
+  {
+    "text": "I very much glossed over the actual deployment mechanism thus far I've pretty much just said okay we deployed a",
+    "start": "813080",
+    "end": "818779"
+  },
+  {
+    "text": "canary and deploy to Maine so now we're gonna look at what that deployment mechanism actually looks like as I hinted at it as something to do with",
+    "start": "818779",
+    "end": "825079"
+  },
+  {
+    "start": "823000",
+    "end": "964000"
+  },
+  {
+    "text": "templates and manifests so I'm gonna try to make that a little more clear so if we work backwards",
+    "start": "825079",
+    "end": "830870"
+  },
+  {
+    "text": "we have Kevin's app deployed in a bunch of different environments dev staging production and there's going to be some",
+    "start": "830870",
+    "end": "837350"
+  },
+  {
+    "text": "configuration that differs across those different environments so for example I get as I showed in that example we might",
+    "start": "837350",
+    "end": "843260"
+  },
+  {
+    "text": "have different replica counts in our different environments so that means we're gonna need different app manifests",
+    "start": "843260",
+    "end": "849320"
+  },
+  {
+    "text": "for each of those environments we're gonna Devlin staging one broad one these are all written in JSON but a lot of",
+    "start": "849320",
+    "end": "855800"
+  },
+  {
+    "text": "that config is going to be shared and duplicated and we don't want to have to have Kevin write that same config every time so what he's gonna do is instead",
+    "start": "855800",
+    "end": "863209"
+  },
+  {
+    "text": "we're gonna write a template that's able to kind of centralize a lot of that shared config and we're able to actually",
+    "start": "863209",
+    "end": "868880"
+  },
+  {
+    "text": "inject parameters into that config or into that template so as you saw earlier",
+    "start": "868880",
+    "end": "874730"
+  },
+  {
+    "text": "I had that set of parameters like the replicas CPUs so these parameters here are going to be a superset of those ones",
+    "start": "874730",
+    "end": "880820"
+  },
+  {
+    "text": "that exist in Kevin's own repo so these are going to be pretty much everything that differs across environments because there may be some things that he can't",
+    "start": "880820",
+    "end": "886850"
+  },
+  {
+    "text": "even control from his repo that we want Jenkins to be able to modify so as it I'll explain in a sec when I get back to",
+    "start": "886850",
+    "end": "893810"
+  },
+  {
+    "text": "Jenkins but for now we write our app template and we inject some parameters that generate the actual state that",
+    "start": "893810",
+    "end": "899600"
+  },
+  {
+    "text": "results in the manifests we also have a lot of config that's shared not only across environments within an app we",
+    "start": "899600",
+    "end": "905899"
+  },
+  {
+    "text": "also have a lot of config that's shared across our different apps so many of our apps run a smart stack as a sidecar for",
+    "start": "905899",
+    "end": "912410"
+  },
+  {
+    "text": "service discovery and that sidecar config looks very similar for a lot of our apps so we've actually moved that",
+    "start": "912410",
+    "end": "917570"
+  },
+  {
+    "text": "out into a shared library so our templates are able to reference those shared libraries and our service",
+    "start": "917570",
+    "end": "922850"
+  },
+  {
+    "text": "engineers don't have to write that same code every time so that whole template system kind of makes up the left half of",
+    "start": "922850",
+    "end": "930199"
+  },
+  {
+    "text": "of this set up what our Jenkins pipeline is going to do say for example we're rolling out a new",
+    "start": "930199",
+    "end": "935690"
+  },
+  {
+    "text": "image tag and we're rolling it out to the dev Canary environment and track Jenkins pipeline is going to write the",
+    "start": "935690",
+    "end": "942650"
+  },
+  {
+    "text": "new image tag into our parameters for that environment and then Jenkins is",
+    "start": "942650",
+    "end": "948050"
+  },
+  {
+    "text": "going to run our JSON it commands taking the template and the parameters as input and is going to regenerate all of our",
+    "start": "948050",
+    "end": "954350"
+  },
+  {
+    "text": "actual manifest files so now that the parameter has been changed that's being injected our dev app JSON manifest will",
+    "start": "954350",
+    "end": "960800"
+  },
+  {
+    "text": "now have the new image tag so to make all this work",
+    "start": "960800",
+    "end": "966080"
+  },
+  {
+    "start": "964000",
+    "end": "1074000"
+  },
+  {
+    "text": "we actually put all of this under one big repo we have one big repo called deployment config you can see is divided",
+    "start": "966080",
+    "end": "972770"
+  },
+  {
+    "text": "into three main subsections we have an Apps section this is going to be where our templates live so pretty much the",
+    "start": "972770",
+    "end": "978770"
+  },
+  {
+    "text": "left side of this we have under our storage service section we have our app J sonnet which is our template and then",
+    "start": "978770",
+    "end": "985760"
+  },
+  {
+    "text": "we have the parameters that are injected we have a library section that's gonna have things like the shared sidecar code",
+    "start": "985760",
+    "end": "991970"
+  },
+  {
+    "text": "so we have as you can see we have a smart stack libs on a template live sonnet is just a convention within json",
+    "start": "991970",
+    "end": "999890"
+  },
+  {
+    "text": "it that for shared library code that's only imported you want to have that with a lip sonnet extension doesn't really",
+    "start": "999890",
+    "end": "1006250"
+  },
+  {
+    "text": "make much of a difference and then finally we have our release subdirectory and this release subdirectory is what's",
+    "start": "1006250",
+    "end": "1012280"
+  },
+  {
+    "text": "going to have all the actual app manifests that are generated so we don't want to modify those manually we just want them to be regenerated based on",
+    "start": "1012280",
+    "end": "1018760"
+  },
+  {
+    "text": "whatever is specified in the templates and the parameter is injected into those templates so this release directory",
+    "start": "1018760",
+    "end": "1024310"
+  },
+  {
+    "text": "really serves as the whole state of our system and we want that to reflect what's on the cluster at any given time",
+    "start": "1024310",
+    "end": "1030780"
+  },
+  {
+    "text": "so one thing we get from having these all in one repo is that when we make a change that change we can see both the",
+    "start": "1030780",
+    "end": "1038199"
+  },
+  {
+    "text": "change that was made to the parameters that were injected on the templating side and we can see what it actually resulted in the change to the cluster",
+    "start": "1038199",
+    "end": "1044470"
+  },
+  {
+    "text": "State so if you look at the bottom the files that were modified here I hope people can kind of see that but we've",
+    "start": "1044470",
+    "end": "1050050"
+  },
+  {
+    "text": "modified both the parameters file under the storage service section of app so we've modified a parameter that was injected and that's also resulted in our",
+    "start": "1050050",
+    "end": "1058120"
+  },
+  {
+    "text": "app manifest being modified under release so our commit history and this repo is going to have the changes that",
+    "start": "1058120",
+    "end": "1063190"
+  },
+  {
+    "text": "were actually written by Jenkins and how it actually affected the cluster and we also have some links to source code change the",
+    "start": "1063190",
+    "end": "1070870"
+  },
+  {
+    "text": "Jenkins build associated with this change so now that we've modified our",
+    "start": "1070870",
+    "end": "1076480"
+  },
+  {
+    "start": "1074000",
+    "end": "1251000"
+  },
+  {
+    "text": "manifests again we want those to reflect the actual state on the cluster how does that work well as I said we've written a service",
+    "start": "1076480",
+    "end": "1082570"
+  },
+  {
+    "text": "called Cuba plier to help us do that so a Cuba plier works is it runs on the AR",
+    "start": "1082570",
+    "end": "1087700"
+  },
+  {
+    "text": "cluster just like any other service so as you can see here we have an API server we have Cuba plier we have our storage service and I've also thrown in",
+    "start": "1087700",
+    "end": "1094240"
+  },
+  {
+    "text": "a couple other example services that we run upload proxy and download proxy so each of these services we want to have",
+    "start": "1094240",
+    "end": "1100510"
+  },
+  {
+    "text": "defined by a declarative app manifest that lives under deployment config and",
+    "start": "1100510",
+    "end": "1106210"
+  },
+  {
+    "text": "the way the Cuba plier works is Cuba plier is going to continuously pull that repo for changes and if Cuba plier sees",
+    "start": "1106210",
+    "end": "1115060"
+  },
+  {
+    "text": "that there has been a change to one of the files for example storage service now has a new image tag Cuba plier is",
+    "start": "1115060",
+    "end": "1121360"
+  },
+  {
+    "text": "going to run a cube CTL apply command to the API server so those of you who aren't familiar with cube CTL apply it's",
+    "start": "1121360",
+    "end": "1126790"
+  },
+  {
+    "text": "basically the single declared declarative operator that says here's what I want my object to look like in",
+    "start": "1126790",
+    "end": "1131980"
+  },
+  {
+    "text": "this file and the API server will handle handle making it a reality so if we've update our image tag API server will",
+    "start": "1131980",
+    "end": "1138190"
+  },
+  {
+    "text": "handle rolling out the actual new version of storage service with a new image tag so I mentioned that cube",
+    "start": "1138190",
+    "end": "1143710"
+  },
+  {
+    "text": "applier is continuously pulling for changes but we also have it running on a loop so that even if nothing changes",
+    "start": "1143710",
+    "end": "1149350"
+  },
+  {
+    "text": "there's been no commits to deployment config we have cube apply or run do a full run through all of the app",
+    "start": "1149350",
+    "end": "1155200"
+  },
+  {
+    "text": "manifests under the repo every X number of minutes we do something like 10 or 20",
+    "start": "1155200",
+    "end": "1160720"
+  },
+  {
+    "text": "depending on our environment but essentially what that gives us is a guarantee that whatever is actually in",
+    "start": "1160720",
+    "end": "1165940"
+  },
+  {
+    "text": "the repo is whatever is the state of the cluster at a given time so if someone goes in and for example manually",
+    "start": "1165940",
+    "end": "1171790"
+  },
+  {
+    "text": "modifies one of their deployments in the cluster they might use the cube CTL scale command change the number of",
+    "start": "1171790",
+    "end": "1177100"
+  },
+  {
+    "text": "replicas to be different from what's defined in their app manifest we always want the app manifest to be the source of truth so cube applier even though no",
+    "start": "1177100",
+    "end": "1184360"
+  },
+  {
+    "text": "changes have been made it'll periodically run through that whole thing and it'll override the manual change that was made and",
+    "start": "1184360",
+    "end": "1190420"
+  },
+  {
+    "text": "resynchronized the state of the system with the actual with the repo so again this gives us a better guarantee that",
+    "start": "1190420",
+    "end": "1197770"
+  },
+  {
+    "text": "whatever's in the repo is versioned history of whatever the state of our system is again Cuba pliers also",
+    "start": "1197770",
+    "end": "1203770"
+  },
+  {
+    "text": "an open-source project it's available on github so I'll have some links at the end to that and if other people might",
+    "start": "1203770",
+    "end": "1208900"
+  },
+  {
+    "text": "find it useful as well it really allows us to kind of abstract away this process and we get to use sort of the repo as a",
+    "start": "1208900",
+    "end": "1214600"
+  },
+  {
+    "text": "real interface for interacting with the cluster and not have to worry about actually manually running those cubes ETL apply commands themselves some of",
+    "start": "1214600",
+    "end": "1221740"
+  },
+  {
+    "text": "you might be i'll get your questions at the end I'm happy to talk more after some of you might be for more familiar",
+    "start": "1221740",
+    "end": "1227380"
+  },
+  {
+    "text": "with like push sorta models where like you know you may when you make a change your CI is just gonna run the cube CTL apply command itself as I said one of",
+    "start": "1227380",
+    "end": "1234640"
+  },
+  {
+    "text": "the things we like about this model is that it gives us kind of a stronger guarantee that whatever's actually in the repo is whatever's actually in the",
+    "start": "1234640",
+    "end": "1241300"
+  },
+  {
+    "text": "cluster to given time because we're continuously looping through and ensuring it's synchronized even if no changes have been made all right so to",
+    "start": "1241300",
+    "end": "1252580"
+  },
+  {
+    "text": "zoom out for a little bit we have each of our clusters is going to be running its own instance of Cuba plier each of",
+    "start": "1252580",
+    "end": "1258730"
+  },
+  {
+    "text": "those instances is going to be looking at a specific subdirectory within our release that within our release directory that has again all of the app",
+    "start": "1258730",
+    "end": "1265660"
+  },
+  {
+    "text": "manifest for that specific environment so one of the really cool things that this gets us is that if for example we",
+    "start": "1265660",
+    "end": "1272980"
+  },
+  {
+    "text": "have a outage in one of our whole clusters so one of our production clusters goes down we have a version",
+    "start": "1272980",
+    "end": "1278440"
+  },
+  {
+    "text": "history of the entire state of the system at any point so we can easily spin up another cluster to replace it",
+    "start": "1278440",
+    "end": "1284140"
+  },
+  {
+    "text": "run a new instance of Cuba plier and pointed at the same directory we're using before and we can spin up all of",
+    "start": "1284140",
+    "end": "1289270"
+  },
+  {
+    "text": "our apps exactly as they existed before so when you don't really have a centralized a centralized store of your",
+    "start": "1289270",
+    "end": "1295210"
+  },
+  {
+    "text": "state at any time say each of their apps only rollout with their own pipeline and apply their own manifests your cluster",
+    "start": "1295210",
+    "end": "1301270"
+  },
+  {
+    "text": "goes down it can be hard to make sure you kick off all of the pipelines to bring up their instances exactly as they",
+    "start": "1301270",
+    "end": "1306700"
+  },
+  {
+    "text": "were so again this was gives us a pretty good disaster recovery model for that sort of thing so to zoom back you get",
+    "start": "1306700",
+    "end": "1314800"
+  },
+  {
+    "text": "back to our what our change life cycle looks like hopefully it'll make a little more sense now we have our app repo",
+    "start": "1314800",
+    "end": "1321010"
+  },
+  {
+    "text": "where we want to make our changes it's going to kick off a Jenkins pipeline that's going to handle rolling out to our different environments we're gonna",
+    "start": "1321010",
+    "end": "1327160"
+  },
+  {
+    "text": "roll out to those different environments by modifying parameters injected into our templates they're going to use our",
+    "start": "1327160",
+    "end": "1332290"
+  },
+  {
+    "text": "templates we generate the actual app manifests that described but we want our cluster to look like and then Cuba plier is",
+    "start": "1332290",
+    "end": "1337900"
+  },
+  {
+    "text": "going to handle making sure that those app manifests are a reality in the cluster so as a challenge to this model",
+    "start": "1337900",
+    "end": "1343930"
+  },
+  {
+    "start": "1342000",
+    "end": "1457000"
+  },
+  {
+    "text": "I want to introduce Joe Joe is also here at cube con Joe is a box engineer on our service discovery team so Joe as I",
+    "start": "1343930",
+    "end": "1352420"
+  },
+  {
+    "text": "mentioned a lot of our apps run smart stack as a sidecar so Joe actually deploys that sidecar shared library and supposed Joe has to",
+    "start": "1352420",
+    "end": "1361120"
+  },
+  {
+    "text": "make a change to all of our apps running in production say you know there's a vulnerability in some version of H a",
+    "start": "1361120",
+    "end": "1366340"
+  },
+  {
+    "text": "proxy or something and he needs to roll that out within our smart stack shared library everywhere at once so if each of",
+    "start": "1366340",
+    "end": "1372100"
+  },
+  {
+    "text": "our apps have their own pipeline that they're using to deploy to these different environments how can Joe make sure that he can roll out a sidecar",
+    "start": "1372100",
+    "end": "1377770"
+  },
+  {
+    "text": "change in the shared library to all of those changes at once so in our current",
+    "start": "1377770",
+    "end": "1383710"
+  },
+  {
+    "text": "system as I said we have everything centralized under that deployment config repo so we still do have an entry point",
+    "start": "1383710",
+    "end": "1389800"
+  },
+  {
+    "text": "for Joe to essentially make his change in that centralized shared library that everyone pulls from and then Joe can",
+    "start": "1389800",
+    "end": "1396250"
+  },
+  {
+    "text": "have his own pipeline that actually regenerates everyone else's JSON files regenerates their app manifest to pick",
+    "start": "1396250",
+    "end": "1402490"
+  },
+  {
+    "text": "up his change and he can roll out all their apps for them we don't really love that system because it kind of takes",
+    "start": "1402490",
+    "end": "1409720"
+  },
+  {
+    "text": "away the control from the service owner themselves if they're expecting that all their changes are being rolled out through their pipeline and they're",
+    "start": "1409720",
+    "end": "1414970"
+  },
+  {
+    "text": "modifying that suddenly we're deploying their service without their knowledge they might not have any record that the",
+    "start": "1414970",
+    "end": "1420100"
+  },
+  {
+    "text": "fact that their last time their service was deployed is different from whatever they have in their pipeline history so",
+    "start": "1420100",
+    "end": "1425110"
+  },
+  {
+    "text": "we'd really like to do is have our app owner is actually able to kick off all of their pipelines when we need to make a change and roll that change out",
+    "start": "1425110",
+    "end": "1431020"
+  },
+  {
+    "text": "through their pipeline that's gonna require us to be doing continuous deployment so we want Joe to make a",
+    "start": "1431020",
+    "end": "1436600"
+  },
+  {
+    "text": "change to that shared library and then have a big red button where he can kick off everyone's pipelines all at once so",
+    "start": "1436600",
+    "end": "1442060"
+  },
+  {
+    "text": "that they pick up the change they have their own history of that deployment in their own pipeline so that's one reason",
+    "start": "1442060",
+    "end": "1448720"
+  },
+  {
+    "text": "we'd like to get to get to newest deployment is so that we can roll out changes to all the apps all the way to",
+    "start": "1448720",
+    "end": "1454120"
+  },
+  {
+    "text": "production at once so to sum up some of the benefits we've seen from this change",
+    "start": "1454120",
+    "end": "1460120"
+  },
+  {
+    "start": "1457000",
+    "end": "1523000"
+  },
+  {
+    "text": "control process we have a greatly reduced risk of production outages so because we're",
+    "start": "1460120",
+    "end": "1467249"
+  },
+  {
+    "text": "rolling out things incremental II it's a lot lot decreased risk that something that's bad is gonna make its way all the",
+    "start": "1467249",
+    "end": "1472470"
+  },
+  {
+    "text": "way out to our main production deployment and cause some real problems because we have a version history of the",
+    "start": "1472470",
+    "end": "1477840"
+  },
+  {
+    "text": "state of our system at any point we have a really good audit trail for when we need to debug things or rollback or someone makes a change lends up",
+    "start": "1477840",
+    "end": "1483779"
+  },
+  {
+    "text": "affecting the whole system we can kind of roll back our entire state to whatever it was before then we've",
+    "start": "1483779",
+    "end": "1490350"
+  },
+  {
+    "text": "increased our engineering productivity because our engineers can focus on more important problems than just sitting in",
+    "start": "1490350",
+    "end": "1495480"
+  },
+  {
+    "text": "babysitting their deployments waiting for it to roll out all day if we do require manual intervention we have to",
+    "start": "1495480",
+    "end": "1501119"
+  },
+  {
+    "text": "come up in a easy way that where you can get back to doing whatever you were doing lastly our engineers have greater",
+    "start": "1501119",
+    "end": "1508320"
+  },
+  {
+    "text": "confidence in making changes so changes can be scary but if we give them a",
+    "start": "1508320",
+    "end": "1514230"
+  },
+  {
+    "text": "process that makes them feel confident deploying their code we want our engineers to feel innovative and feel like they're able to make some changes",
+    "start": "1514230",
+    "end": "1520590"
+  },
+  {
+    "text": "and build some cool things so that's all I've got I've got a couple links here if",
+    "start": "1520590",
+    "end": "1525720"
+  },
+  {
+    "start": "1523000",
+    "end": "1570000"
+  },
+  {
+    "text": "you want to read some more about some of the blog post we've written on this topic and we're also going to be working",
+    "start": "1525720",
+    "end": "1531899"
+  },
+  {
+    "text": "on some more content blog post and an open-source repo as well to kind of make",
+    "start": "1531899",
+    "end": "1537389"
+  },
+  {
+    "text": "a more practical example of what this looks like outside of box so that happy to open it",
+    "start": "1537389",
+    "end": "1543659"
+  },
+  {
+    "text": "up to any questions that people have",
+    "start": "1543659",
+    "end": "1546799"
+  },
+  {
+    "text": "so the question was about services that have state and running in kubernetes",
+    "start": "1561139",
+    "end": "1568730"
+  },
+  {
+    "text": "mm-hmm we haven't come across something like that we aren't running our databases in",
+    "start": "1569149",
+    "end": "1575429"
+  },
+  {
+    "text": "kubernetes yet hopefully will not it so",
+    "start": "1575429",
+    "end": "1591330"
+  },
+  {
+    "text": "you're saying a change to your schema somewhere else ends up affecting your kubernetes yeah I don't have a great",
+    "start": "1591330",
+    "end": "1602850"
+  },
+  {
+    "start": "1601000",
+    "end": "1712000"
+  },
+  {
+    "text": "example for that specific case but there are some similar cases that we have tried to solve so for example say you're",
+    "start": "1602850",
+    "end": "1609929"
+  },
+  {
+    "text": "changing an environment variable that's used by your service in your source code you're going to make that change both in",
+    "start": "1609929",
+    "end": "1615840"
+  },
+  {
+    "text": "your source code and you're also going to need to change the environment variable that's passed in and the kubernetes config that's one of the",
+    "start": "1615840",
+    "end": "1620909"
+  },
+  {
+    "text": "reasons we're trying to bring those parameters into the app repo so that we can actually do an atomic commit that changes both the source code and the",
+    "start": "1620909",
+    "end": "1626519"
+  },
+  {
+    "text": "environment variable that's passed in as far as a change to a database schema that we don't really have any insight",
+    "start": "1626519",
+    "end": "1632700"
+  },
+  {
+    "text": "into in our kubernetes config that one's pretty tough I don't think we have a group I have a great answer for that in our current framework but happy to talk",
+    "start": "1632700",
+    "end": "1639389"
+  },
+  {
+    "text": "more after about it you had your hand up earlier so so when so if someone makes a",
+    "start": "1639389",
+    "end": "1654330"
+  },
+  {
+    "text": "manual change to one of our service running in our cluster so we do have some access controlled so that we can",
+    "start": "1654330",
+    "end": "1660029"
+  },
+  {
+    "text": "limit what people can change but if someone does make a change to something they do have access to we do have some",
+    "start": "1660029",
+    "end": "1665190"
+  },
+  {
+    "text": "auditing in place as far as like cube cuddle commands that are being run on the cluster we have logs of that available again for",
+    "start": "1665190",
+    "end": "1673289"
+  },
+  {
+    "text": "the most part we'd like things to be rolled out through our declarative process but we have tried to we do have",
+    "start": "1673289",
+    "end": "1678509"
+  },
+  {
+    "text": "some auditing in place you know you can't catch everything you can't stop everything best you can do sometimes just have a record of what was done yep",
+    "start": "1678509",
+    "end": "1688100"
+  },
+  {
+    "text": "[Music]",
+    "start": "1691230",
+    "end": "1694369"
+  },
+  {
+    "text": "for the smart stack sidecar specifically we do use yep we do we do have config",
+    "start": "1697870",
+    "end": "1713809"
+  },
+  {
+    "start": "1712000",
+    "end": "1876000"
+  },
+  {
+    "text": "Maps we do have secrets secrets are kind of a tough one to roll out with this process and that you don't really want",
+    "start": "1713809",
+    "end": "1719360"
+  },
+  {
+    "text": "to specify your you know secrets declaratively in a file as they're exactly expected to look we were doing",
+    "start": "1719360",
+    "end": "1726080"
+  },
+  {
+    "text": "some work on an encrypted secrets project that we kind of lost track on but hopefully can get back on board and",
+    "start": "1726080",
+    "end": "1731629"
+  },
+  {
+    "text": "maybe open source essentially we want you to be able to declaratively specify your secrets in a way that's safe for",
+    "start": "1731629",
+    "end": "1737059"
+  },
+  {
+    "text": "now our secrets are largely configured manually but we do have config maps as well that we're using so yeah so I don't",
+    "start": "1737059",
+    "end": "1743690"
+  },
+  {
+    "text": "supposed to so smart stack we use as our",
+    "start": "1743690",
+    "end": "1750409"
+  },
+  {
+    "text": "sort of service discovery mechanism of like which services need to talk to which other services smart stack we use",
+    "start": "1750409",
+    "end": "1755869"
+  },
+  {
+    "text": "some config maps to pass in the information that it needs but our smart stack config is also as I said there's",
+    "start": "1755869",
+    "end": "1764299"
+  },
+  {
+    "text": "some code that's shared but each of the apps are going to have some things that differ among their source our smart stack shared library isn't just like a",
+    "start": "1764299",
+    "end": "1770840"
+  },
+  {
+    "text": "drop in function that does everything for you you're going to pass in some information about which other services",
+    "start": "1770840",
+    "end": "1776119"
+  },
+  {
+    "text": "you need to talk to it just kind of abstracts away some of the shared code I don't know if that answers your question",
+    "start": "1776119",
+    "end": "1782240"
+  },
+  {
+    "text": "I'm happy to talk more afterwards about it yep so the question was can Kevin or",
+    "start": "1782240",
+    "end": "1793850"
+  },
+  {
+    "text": "Joe modify their Jenkins files that they can deploy directly to production so we do have some restrictions on our actual",
+    "start": "1793850",
+    "end": "1801679"
+  },
+  {
+    "text": "Jenkins machines as far as like which all right we do have some restrictions within our Jenkins infrastructure as far",
+    "start": "1801679",
+    "end": "1808759"
+  },
+  {
+    "text": "as like what you're doing and like you can't just have what we don't want you to have a Jenkins file that can just arbitrarily do whatever steps it wants",
+    "start": "1808759",
+    "end": "1815659"
+  },
+  {
+    "text": "that's one of the reasons why we really focus on having that pipeline library that kind of gives people building blocks that they can use if I don't know if",
+    "start": "1815659",
+    "end": "1822830"
+  },
+  {
+    "text": "you're talking about like a malicious case or like an accidental case again we want to try to limit the accidental cases where people are doing something",
+    "start": "1822830",
+    "end": "1829070"
+  },
+  {
+    "text": "that they shouldn't be doing we want to make it easy for them to just kind of follow process we've laid out so as far",
+    "start": "1829070",
+    "end": "1852410"
+  },
+  {
+    "text": "as like what's what's the alternative model that you're thinking of there's",
+    "start": "1852410",
+    "end": "1877040"
+  },
+  {
+    "start": "1876000",
+    "end": "1925000"
+  },
+  {
+    "text": "not really I don't really have a great answer for that I don't think there's a way that we've leaned strongly one way",
+    "start": "1877040",
+    "end": "1882950"
+  },
+  {
+    "text": "or the other yeah I don't have a great answer for that I can try to find out more if",
+    "start": "1882950",
+    "end": "1888770"
+  },
+  {
+    "text": "you're curious yep yeah sorry so the question there was why",
+    "start": "1888770",
+    "end": "1897020"
+  },
+  {
+    "text": "do we have our multiple environments specified within sorry just distinct within a file system like as",
+    "start": "1897020",
+    "end": "1904040"
+  },
+  {
+    "text": "subdirectories I think versus having different branches like a branching model where we have a dev branch and a staging branch I don't have a great",
+    "start": "1904040",
+    "end": "1911299"
+  },
+  {
+    "text": "answer for that I was not part of that historical choice yep",
+    "start": "1911299",
+    "end": "1918190"
+  },
+  {
+    "start": "1925000",
+    "end": "2086000"
+  },
+  {
+    "text": "so our access model I did very much gloss over essentially the way we implemented it a while back when there",
+    "start": "1926240",
+    "end": "1931700"
+  },
+  {
+    "text": "wasn't a lot of you know we've been running kubernetes for about three years now since like 0.11 so some of these changes are historical changes based on",
+    "start": "1931700",
+    "end": "1938419"
+  },
+  {
+    "text": "the way kubernetes was in early States and we haven't totally caught up in some ways so our access model right now is we",
+    "start": "1938419",
+    "end": "1945110"
+  },
+  {
+    "text": "essentially are deploying all of our apps to their own namespace and when we were able to control the access of which which groups have access to which",
+    "start": "1945110",
+    "end": "1951410"
+  },
+  {
+    "text": "namespaces so as far as clients we try to match those the groups",
+    "start": "1951410",
+    "end": "1959150"
+  },
+  {
+    "text": "that have access to certain namespaces with an LDAP system that we have and so we want to ensure that you know we have",
+    "start": "1959150",
+    "end": "1965059"
+  },
+  {
+    "text": "some sort of you know production auditing system for who has access to what and again we also - in order to",
+    "start": "1965059",
+    "end": "1971990"
+  },
+  {
+    "text": "make those changes to make changes to access control we need to bounce the API server so that is going to some that's",
+    "start": "1971990",
+    "end": "1977270"
+  },
+  {
+    "text": "something that's going to require the attention of our admins our admins are aware of every sort of permission change",
+    "start": "1977270",
+    "end": "1982850"
+  },
+  {
+    "text": "that has to flow through yep so the",
+    "start": "1982850",
+    "end": "1993530"
+  },
+  {
+    "text": "question was are we seeing the need to move our app manifests into our the service repos this has been a going",
+    "start": "1993530",
+    "end": "1999860"
+  },
+  {
+    "text": "battle for us we do like the idea of having our service owners able to manage their configuration alongside the rest",
+    "start": "1999860",
+    "end": "2006549"
+  },
+  {
+    "text": "of their code it does get a little dicey for some of the shared libraries and the things that we want to be able to",
+    "start": "2006549",
+    "end": "2013179"
+  },
+  {
+    "text": "generate from a centralized place so we want our smart stack developers to have some kind of centralized entry point",
+    "start": "2013179",
+    "end": "2018760"
+  },
+  {
+    "text": "that everyone pulls from so that's why we've started to pull out some of those parameters into the app repo without",
+    "start": "2018760",
+    "end": "2025150"
+  },
+  {
+    "text": "pulling the whole canonical source of truth manifest another thing we get from having all of",
+    "start": "2025150",
+    "end": "2030220"
+  },
+  {
+    "text": "those app manifests in one place is that's like our single source of truth of what the cluster looks like if we have those kind of dispersed through all",
+    "start": "2030220",
+    "end": "2036610"
+  },
+  {
+    "text": "our different app repos across our system again we don't really have a clear picture of like what each app is",
+    "start": "2036610",
+    "end": "2042159"
+  },
+  {
+    "text": "running at any point so it's possible we might be able to just move the whole app manifest out to someone's repo we'd",
+    "start": "2042159",
+    "end": "2048429"
+  },
+  {
+    "text": "still probably have a copy of it somewhere that has everything centralized and have that kind of be the canonical source of truth it's it's an",
+    "start": "2048429",
+    "end": "2054638"
+  },
+  {
+    "text": "ongoing debate for us that's pretty interesting I didn't get to talk too much about here but yeah again we want",
+    "start": "2054639",
+    "end": "2060669"
+  },
+  {
+    "text": "to make we want to give our service owners control over those config changes but for now we kind of also like having",
+    "start": "2060669",
+    "end": "2065770"
+  },
+  {
+    "text": "that config all in one centralized place",
+    "start": "2065770",
+    "end": "2069210"
+  },
+  {
+    "text": "yep yeah I'm just wondering how you address potential differences between the state",
+    "start": "2070859",
+    "end": "2078500"
+  },
+  {
+    "text": "Cuba pirc's and other components that can change properties yes so we so auto-scaling is",
+    "start": "2078500",
+    "end": "2088339"
+  },
+  {
+    "text": "good one that we haven't had to deal too much with and again for the most part we want things to be declarative when we",
+    "start": "2088339",
+    "end": "2094280"
+  },
+  {
+    "text": "can and we haven't really solved the auto-scaling problem yet so that's gonna",
+    "start": "2094280",
+    "end": "2099589"
+  },
+  {
+    "text": "be a tough one for the most part we want to avoid people making manual changes when they can but there are some things that we're gonna have to solve and there",
+    "start": "2099589",
+    "end": "2104839"
+  },
+  {
+    "text": "may even be some deficiencies kind of in the cube api to support both this declarative workflow and things with the",
+    "start": "2104839",
+    "end": "2111730"
+  },
+  {
+    "text": "support changes to the declarative workflow and changes with things like auto scaling so we're gonna kind of keep following the community efforts on that",
+    "start": "2111730",
+    "end": "2117770"
+  },
+  {
+    "text": "sort of thing and hopefully come up with a really good solution when we come across that problem so I sorry out of",
+    "start": "2117770",
+    "end": "2123260"
+  },
+  {
+    "text": "time for more questions but I'll be right outside if anyone wants to talk more thanks again everyone for coming I",
+    "start": "2123260",
+    "end": "2128960"
+  },
+  {
+    "text": "hope you learned something and have a great rest of the conference [Applause]",
+    "start": "2128960",
+    "end": "2135359"
+  }
+]

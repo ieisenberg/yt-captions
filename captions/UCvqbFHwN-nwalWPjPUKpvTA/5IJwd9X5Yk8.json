@@ -1,0 +1,1747 @@
+[
+  {
+    "text": "all right hello everyone thanks for coming uh I'm John Howard I'm a senior architect at solid. uh and I've been a",
+    "start": "440",
+    "end": "7520"
+  },
+  {
+    "text": "contributor eastco for I don't know about six years now maybe uh really excited to talk to you guys about life",
+    "start": "7520",
+    "end": "13559"
+  },
+  {
+    "text": "of a packet ambient Edition we're going to walk you through uh how traffic flows",
+    "start": "13559",
+    "end": "18600"
+  },
+  {
+    "text": "through the entire system when you're using ambient service mesh uh and we kind of aim this talk at both beginners",
+    "start": "18600",
+    "end": "25279"
+  },
+  {
+    "text": "who have never heard of ambient mesh um get a little introduction to ambient mesh as well as people who maybe are",
+    "start": "25279",
+    "end": "31240"
+  },
+  {
+    "text": "familiar who have tried it out or have used EO in the past in the sidecar mode to kind of compare the differences and",
+    "start": "31240",
+    "end": "36520"
+  },
+  {
+    "text": "hopefully learn something new about how the system works and I'm Keith I'm a senior engineering lead at Microsoft",
+    "start": "36520",
+    "end": "42000"
+  },
+  {
+    "text": "I've been working on SEO for about two two and a half years and I'm going to kick us off uh with the with the talk so",
+    "start": "42000",
+    "end": "49320"
+  },
+  {
+    "text": "this is the overview we're going to talk about today we're to start with the high level architecture just so you can figure out where everything sits",
+    "start": "49320",
+    "end": "55359"
+  },
+  {
+    "text": "topologically in a uh an ambient mesh uh we're going then we're going to talk through how the outbound traffic is",
+    "start": "55359",
+    "end": "60719"
+  },
+  {
+    "text": "going to get to the zono proxy uh break down all the different pieces that are required in order to make that happen",
+    "start": "60719",
+    "end": "66280"
+  },
+  {
+    "text": "we're going to do some load balancing stuff we're going to talk through uh how zal picks a destination um and how all",
+    "start": "66280",
+    "end": "72080"
+  },
+  {
+    "text": "of that works uh we're going to talk about the protocol uh we call it H bone um that's going to give us a the ability",
+    "start": "72080",
+    "end": "77960"
+  },
+  {
+    "text": "to do a lot of the things that we're able to do in ambient we're going to break down for you exactly how that works and then finally we going to talk",
+    "start": "77960",
+    "end": "84000"
+  },
+  {
+    "text": "about uh plane text traffic uh and how that can coincide with h phone and",
+    "start": "84000",
+    "end": "89320"
+  },
+  {
+    "text": "finally Waypoint proxies for layer 7even bits uh you're doing HTTP related things",
+    "start": "89320",
+    "end": "94720"
+  },
+  {
+    "text": "you're going to need to be able to deploy that so we're going to walk through all of this it's a lot to get through uh if we have time at the end",
+    "start": "94720",
+    "end": "100680"
+  },
+  {
+    "text": "we've got a mic there in the center for questions uh or you can stop us in the hallway track if you have something specific you have to",
+    "start": "100680",
+    "end": "107200"
+  },
+  {
+    "text": "discuss okay so let's start with like I said a high level architecture uh to help you understand where everything",
+    "start": "107200",
+    "end": "113600"
+  },
+  {
+    "text": "sits so here you've got a diagram of a client and a server who are trying to talk to each other and in ambient mesh",
+    "start": "113600",
+    "end": "119960"
+  },
+  {
+    "text": "what we've got is a two proxy model uh the first of which being a z tunnel Z",
+    "start": "119960",
+    "end": "125039"
+  },
+  {
+    "text": "tunnel is a um an open source it's a rust node proxy that will transparently upgrade your traffic to mtls so you see",
+    "start": "125039",
+    "end": "132480"
+  },
+  {
+    "text": "here the client is uh going to have traffic Weir it to the Z tunnel and then",
+    "start": "132480",
+    "end": "137959"
+  },
+  {
+    "text": "the Z tunnel is going to send traffic to a destination pod or a destination service that traffic is also going to",
+    "start": "137959",
+    "end": "144280"
+  },
+  {
+    "text": "get um redirected to a z tunnel which and then forwarded onto a server so this is kind of like a packet level view of",
+    "start": "144280",
+    "end": "150840"
+  },
+  {
+    "text": "where the traffic flows from the client to the first Z tunnel then to the second Z tunnel then to the",
+    "start": "150840",
+    "end": "158360"
+  },
+  {
+    "text": "server we also have Waypoint proxies for when you have uh any layer seven capabilities that you need maybe you",
+    "start": "158360",
+    "end": "164800"
+  },
+  {
+    "text": "need to have uh JWT integration with alzero maybe you are needing to uh do",
+    "start": "164800",
+    "end": "170800"
+  },
+  {
+    "text": "routing based on headers or things of that nature for those sorts of things in the two proxy uh ambient architecture",
+    "start": "170800",
+    "end": "176840"
+  },
+  {
+    "text": "you're going to deploy a waypoint proxy Waypoint proxies serve basically as cluster internal gateways so when you",
+    "start": "176840",
+    "end": "183319"
+  },
+  {
+    "text": "call a service the Waypoint sits in front of that service and handles that layer s policy or traffic manipulation",
+    "start": "183319",
+    "end": "190080"
+  },
+  {
+    "text": "as you see here in the diagram the Z tunnels live on the Node while the Waypoint proxy lives in the name space",
+    "start": "190080",
+    "end": "196000"
+  },
+  {
+    "text": "and those Waypoint proxies can be autoscaled they can be uh deployed in whatever way that you that you would",
+    "start": "196000",
+    "end": "202200"
+  },
+  {
+    "text": "like and so in this example the client sends traffic to the Z tunnel and then",
+    "start": "202200",
+    "end": "207560"
+  },
+  {
+    "text": "that Z tunnel is going to send traffic to the wayo Point uh which then will for traffic at the end to the",
+    "start": "207560",
+    "end": "215040"
+  },
+  {
+    "text": "server so this is sort of a full picture of what a kind of production level uh",
+    "start": "215040",
+    "end": "220959"
+  },
+  {
+    "text": "deployment of an amms is going to look like running in kubernetes you're going to have a Gateway at the very beginning",
+    "start": "220959",
+    "end": "226200"
+  },
+  {
+    "text": "where traffic ingresses into your cluster uh this is all by the way Theo logo there that's representing uh sod",
+    "start": "226200",
+    "end": "233760"
+  },
+  {
+    "text": "the sto control plane that's doing all the programming all these proxies so that stod and Theo system space you see",
+    "start": "233760",
+    "end": "240959"
+  },
+  {
+    "text": "we've got actually name spaces listed out here that is going to be programming that Gateway as well as the way points",
+    "start": "240959",
+    "end": "246599"
+  },
+  {
+    "text": "and Z tunnels so like I said you've got traffic coming in from that Gateway uh that traffic is going to be forwarded to",
+    "start": "246599",
+    "end": "252400"
+  },
+  {
+    "text": "either Z tunnels or waypoints um as uh the packet flows through the system and again this is all being managed by SEO",
+    "start": "252400",
+    "end": "259400"
+  },
+  {
+    "text": "and SEO can take care of the uh encryption the security durability and the traffic policy that you know and",
+    "start": "259400",
+    "end": "265320"
+  },
+  {
+    "text": "love um all from a central system",
+    "start": "265320",
+    "end": "270639"
+  },
+  {
+    "text": "so now that we've got kind of this very very high level overview we're going to actually take a kind of life of a packet",
+    "start": "270639",
+    "end": "276759"
+  },
+  {
+    "text": "through just a single request from a client application to a server and explain how things function throughout",
+    "start": "276759",
+    "end": "283360"
+  },
+  {
+    "text": "the system um so our journey starts really just with a simple client pod running in a cluster and maybe this",
+    "start": "283360",
+    "end": "290199"
+  },
+  {
+    "text": "sends a cal request to another application here I used Hello World Service right now if we're just using",
+    "start": "290199",
+    "end": "296080"
+  },
+  {
+    "text": "standard kubernetes networking we would expect that to leave the Pod and and go through some system of kubernetes",
+    "start": "296080",
+    "end": "301639"
+  },
+  {
+    "text": "networking and eventually end up on a hello world pod we're not going to get into the the details of how kubernetes",
+    "start": "301639",
+    "end": "307400"
+  },
+  {
+    "text": "networking Works we're going to talk about what we do differently uh but there's a lot of talks on other places",
+    "start": "307400",
+    "end": "312759"
+  },
+  {
+    "text": "about how that works now what we expect based on what Keith said uh to happen",
+    "start": "312759",
+    "end": "318960"
+  },
+  {
+    "text": "with East involved is now instead of directly leaving the Pod this is going to go through the Z Tunnel right and so",
+    "start": "318960",
+    "end": "324960"
+  },
+  {
+    "text": "we want something more like this uh now you'll notice that there's something weird here we said Z tunnel was this one",
+    "start": "324960",
+    "end": "331199"
+  },
+  {
+    "text": "per node Damon set running uh on the node right but here I've shown Z tunnel inside of the application pod I will get",
+    "start": "331199",
+    "end": "338440"
+  },
+  {
+    "text": "into that a bit later uh for now just accept it um so how do we get the",
+    "start": "338440",
+    "end": "344120"
+  },
+  {
+    "text": "traffic there right um depending on your familiar with ejo or IP tables it's",
+    "start": "344120",
+    "end": "349240"
+  },
+  {
+    "text": "somewhere between dark magic and very basic IP tables commands But ultimately",
+    "start": "349240",
+    "end": "354400"
+  },
+  {
+    "text": "what we have is just a few simplish rules uh if you don't speak IP tables this basically says for all traffic",
+    "start": "354400",
+    "end": "361520"
+  },
+  {
+    "text": "leaving the Pod uh ignore part of it redirect it to Port 15,000 And1 and so",
+    "start": "361520",
+    "end": "368240"
+  },
+  {
+    "text": "we open up on Z tunnel a port 15,1 that's going to accept that traffic and then IP tables is able to just redirect",
+    "start": "368240",
+    "end": "375080"
+  },
+  {
+    "text": "that traffic to us we accept it uh very very similar to the sidearm model if you're familiar with",
+    "start": "375080",
+    "end": "381919"
+  },
+  {
+    "text": "that now you make wonder how how does that happen how do we actually get those IP tables set up in the Pod for this to",
+    "start": "381919",
+    "end": "388599"
+  },
+  {
+    "text": "even happen in the first place like we skipped a few steps here uh to look at that we need to understand how a pod is",
+    "start": "388599",
+    "end": "393880"
+  },
+  {
+    "text": "actually created in kubernetes so a super simple view of a pod creation is we create a pod and then we create the",
+    "start": "393880",
+    "end": "400199"
+  },
+  {
+    "text": "containers and then it's Off to the Races and running application stuff right but fortunately kubernetes has",
+    "start": "400199",
+    "end": "405759"
+  },
+  {
+    "text": "this thing called the cni container network interface which lets us inject logic in between these two steps so that",
+    "start": "405759",
+    "end": "412639"
+  },
+  {
+    "text": "we can set up the Pod to do networking things um and they have kind of the series of plugins which you often run",
+    "start": "412639",
+    "end": "418240"
+  },
+  {
+    "text": "many different plugins in parallel to fully set up the Pod um so this can be things like setting up the IP address",
+    "start": "418240",
+    "end": "424080"
+  },
+  {
+    "text": "actually allocating an IP address to the Pod setting up devices in the pods routes to them like actually setting up",
+    "start": "424080",
+    "end": "429919"
+  },
+  {
+    "text": "the virtual ethernet devices Etc uh more custom stuff like a bandwidth control",
+    "start": "429919",
+    "end": "435240"
+  },
+  {
+    "text": "type things uh and an EO plugin is what we have which allows us to get invoked and set up the Pod before the user's",
+    "start": "435240",
+    "end": "442280"
+  },
+  {
+    "text": "applications are actually started so what this looks like is we have kind of on a node uh you know we",
+    "start": "442280",
+    "end": "449400"
+  },
+  {
+    "text": "have the easto cni plugin uh the application pod and then the Z tunnel so the first step is the container runtime",
+    "start": "449400",
+    "end": "456000"
+  },
+  {
+    "text": "is actually going to invoke our plugin for us when the Pod needs to be created and give us some information about you",
+    "start": "456000",
+    "end": "461360"
+  },
+  {
+    "text": "know the the name of the Pod things like that and we're able to actually enter into the Pod Network namespace and set",
+    "start": "461360",
+    "end": "468280"
+  },
+  {
+    "text": "up these ipb table rules uh if you're wondering like how can you just enter a pod and configure the Pod that seems",
+    "start": "468280",
+    "end": "475400"
+  },
+  {
+    "text": "crazy uh I do have a talk on Friday where I go a lot more into these name spaces uh called testing kubernetes",
+    "start": "475400",
+    "end": "482280"
+  },
+  {
+    "text": "without kubernetes if you want to learn more um for now just take my word for it that there is a command that lets you",
+    "start": "482280",
+    "end": "487720"
+  },
+  {
+    "text": "enter into a pod and uh configure the network um so after we set up the IP",
+    "start": "487720",
+    "end": "493319"
+  },
+  {
+    "text": "tables rules we notify the local Z tunnel and say hey there's a new pod and",
+    "start": "493319",
+    "end": "498440"
+  },
+  {
+    "text": "that allows it to also enter the namespace and set up sockets now this is really like the single key uh point to",
+    "start": "498440",
+    "end": "506280"
+  },
+  {
+    "text": "how ambient mode works in general and it's often very very surprising to people uh when we explain this um so",
+    "start": "506280",
+    "end": "513800"
+  },
+  {
+    "text": "like if we look at The Logical view like from pods or from like the actual compute or biner running amate mesh",
+    "start": "513800",
+    "end": "519719"
+  },
+  {
+    "text": "looks like this right there's one Z tunnel per node like we said and a bunch of applications but if we look at the",
+    "start": "519719",
+    "end": "525800"
+  },
+  {
+    "text": "networking view it really looks something more like this just like the sidecar model each application kind of",
+    "start": "525800",
+    "end": "532080"
+  },
+  {
+    "text": "has logically its own Z tunnel running right there's latal sockets on each pod",
+    "start": "532080",
+    "end": "537880"
+  },
+  {
+    "text": "inside of the Pod Network namespace that are unique to those that specific pod and while those happen to be backed by a",
+    "start": "537880",
+    "end": "544040"
+  },
+  {
+    "text": "single Z tunnel pod uh really if you didn't know what was going on it looks exactly the same from a networking point",
+    "start": "544040",
+    "end": "550160"
+  },
+  {
+    "text": "of view as a sidecar um and so there's kind of this difference between what the kind of logical view is the networking",
+    "start": "550160",
+    "end": "556959"
+  },
+  {
+    "text": "View and the computer view right um so one cool thing about this as well is that while uh we get some of the same",
+    "start": "556959",
+    "end": "564079"
+  },
+  {
+    "text": "behaviors that we went out of side cars that like everything's happening inside the Pod by the time it leaves the pod",
+    "start": "564079",
+    "end": "569640"
+  },
+  {
+    "text": "it's fully encrypted and ready to go uh we're not so tied to the life cycle of the Pod so one of the issues we saw with",
+    "start": "569640",
+    "end": "576320"
+  },
+  {
+    "text": "side cars in the past is that if you want to upgrade the side car you have to restart it if you want to add a side car",
+    "start": "576320",
+    "end": "581519"
+  },
+  {
+    "text": "you have to restart your workload if you want to remove it you have to restart it with this model things are a lot more Dynamic so we can actually add or remove",
+    "start": "581519",
+    "end": "588320"
+  },
+  {
+    "text": "or upgrade Z tunnel from a running pod uh totally dynamically which has been a huge uh benefit for operations we've",
+    "start": "588320",
+    "end": "595640"
+  },
+  {
+    "text": "seen um I'll hand it over to Keith now to to show us what happens once the",
+    "start": "595640",
+    "end": "600880"
+  },
+  {
+    "text": "packet actually gets to Z tunnel how it decides what to do next yeah absolutely so once Z tunnel gets requests and",
+    "start": "600880",
+    "end": "606519"
+  },
+  {
+    "text": "remember like John said on that previous slide each pod actually sort of has a z tonnel instance in the network running",
+    "start": "606519",
+    "end": "614040"
+  },
+  {
+    "text": "uh running inside of it so when that instance gets a request we already know where the traffic is coming from right",
+    "start": "614040",
+    "end": "620600"
+  },
+  {
+    "text": "any proxy has to figure out one where the traffic come from and where where where is it going and that first part of",
+    "start": "620600",
+    "end": "626320"
+  },
+  {
+    "text": "that's already done for us because of the architecture of Z tunnel um the original destination as far as",
+    "start": "626320",
+    "end": "632040"
+  },
+  {
+    "text": "the uh service IP address that you originally were sving traffic to you can get that with classic Linux original",
+    "start": "632040",
+    "end": "638200"
+  },
+  {
+    "text": "destination socket options we able to cover that and use that for our routing",
+    "start": "638200",
+    "end": "643320"
+  },
+  {
+    "text": "um one thing that we want to emphasize here is that Z tunnel is a layer for proxy only so the only thing that it has",
+    "start": "643320",
+    "end": "650639"
+  },
+  {
+    "text": "access to is the uh five toule pretty much um it can't part HTTP host names TS",
+    "start": "650639",
+    "end": "658160"
+  },
+  {
+    "text": "server names or anything like that um and so while a lot of what goes on in D tunnel seems like magic we're just you",
+    "start": "658160",
+    "end": "666000"
+  },
+  {
+    "text": "using classic Linux uh TCP uh functionality um basically once all that",
+    "start": "666000",
+    "end": "673680"
+  },
+  {
+    "text": "is is done what comes out of the tunnel is uh the destination that we know that we want to route",
+    "start": "673680",
+    "end": "680720"
+  },
+  {
+    "text": "to and when we say magic it's not really magic right like I said this is all classic Linux networking things and",
+    "start": "680720",
+    "end": "687399"
+  },
+  {
+    "text": "classic proxy architecture and so there just configuration that the seod sends",
+    "start": "687399",
+    "end": "692560"
+  },
+  {
+    "text": "to the zonal pods that helps it understand where it's Route traffic to this is a view of what Z tunnel sees uh",
+    "start": "692560",
+    "end": "700079"
+  },
+  {
+    "text": "when it comes to all the services um that are eligible to be routed to and then here's another um example of",
+    "start": "700079",
+    "end": "707360"
+  },
+  {
+    "text": "configuration for all the workloads um you can do these yourself these commands aren't some Dart magic only maintainers",
+    "start": "707360",
+    "end": "714320"
+  },
+  {
+    "text": "have access to this is built into the sctl CLI that you can go and download today and be able to observe what Z",
+    "start": "714320",
+    "end": "721360"
+  },
+  {
+    "text": "tunnel sees um so when Z tunnel gets a request and goes through the process that John just described and getting the",
+    "start": "721360",
+    "end": "727639"
+  },
+  {
+    "text": "traffic redirected to it it does a simple matching process against all of the services and workloads and it's",
+    "start": "727639",
+    "end": "734000"
+  },
+  {
+    "text": "config registry um if the request uh gets match to a particular pod we send",
+    "start": "734000",
+    "end": "739800"
+  },
+  {
+    "text": "to a specific workload and that's going to be kind of on that right side right uh workloads correspond to specific pods",
+    "start": "739800",
+    "end": "745440"
+  },
+  {
+    "text": "you see the full pod name uh there all the random stuff at the end that is what we call a workload in Z",
+    "start": "745440",
+    "end": "751680"
+  },
+  {
+    "text": "tunnel if the request is to a service which is the more common use case you typically send to a service cluster IP",
+    "start": "751680",
+    "end": "758760"
+  },
+  {
+    "text": "um then we'll find all the end points of that service and S to one that's key based off of the service virtual IP",
+    "start": "758760",
+    "end": "764399"
+  },
+  {
+    "text": "address there in that first picture the default right now is sort of basically random selection uh but there are",
+    "start": "764399",
+    "end": "771920"
+  },
+  {
+    "text": "options for more advanced load balancing techniques uh for example you can use uh the service topology uh routing feature",
+    "start": "771920",
+    "end": "779360"
+  },
+  {
+    "text": "to be able to say prefer endpoints that are close to me for some value of close it could be the same uh AZ same region",
+    "start": "779360",
+    "end": "786519"
+  },
+  {
+    "text": "Etc uh if we don't rout if we don't match anything as we talk about workload talk about Services if we look through",
+    "start": "786519",
+    "end": "793079"
+  },
+  {
+    "text": "all those and we see nothing then we'll just pass the request through directly once that client Z tunnel has",
+    "start": "793079",
+    "end": "799800"
+  },
+  {
+    "text": "picked a destination we then use that information as far as what destination we're sitting to for a variety of things",
+    "start": "799800",
+    "end": "805720"
+  },
+  {
+    "text": "um Telemetry uh that is emitted in that client Z tunnel um report uh for all that reporting we uh use that",
+    "start": "805720",
+    "end": "813160"
+  },
+  {
+    "text": "information to know what sort of mutual TLS to expect from uh the sender um that's a place for reinforce policy",
+    "start": "813160",
+    "end": "819360"
+  },
+  {
+    "text": "where we say uh I expect that the service that I'm talking to Via this",
+    "start": "819360",
+    "end": "824760"
+  },
+  {
+    "text": "virtual IP has this certificate and that's how we prevent man INE middle attacks uh and that brings us to our",
+    "start": "824760",
+    "end": "830120"
+  },
+  {
+    "text": "next topic Mutual TLS right so when we send the requests we don't actually open like",
+    "start": "830120",
+    "end": "836639"
+  },
+  {
+    "text": "proxy the request through directly most Pro take request look at it reassemble",
+    "start": "836639",
+    "end": "841720"
+  },
+  {
+    "text": "it and then send it back out but we don't do that in Z tunnel what we do is we open a tunnel uh using HTTP connect",
+    "start": "841720",
+    "end": "850279"
+  },
+  {
+    "text": "uh who in here has had to deal with websockets in the past raise your hand yeah good bit of you right HTP connect",
+    "start": "850279",
+    "end": "856399"
+  },
+  {
+    "text": "is what powers the websocket protocol but it's so much more than just websockets right connect is a way for",
+    "start": "856399",
+    "end": "861519"
+  },
+  {
+    "text": "establishing a tunnel and then sending really arbitrary traffic through that tunnel and so the interconnection that",
+    "start": "861519",
+    "end": "868199"
+  },
+  {
+    "text": "you see here you the destination pod with port 8080 that's within that's the original connection that we're sending",
+    "start": "868199",
+    "end": "874560"
+  },
+  {
+    "text": "within HTTP connect and on the outside what we're sending is a HTTP uh 2 tunnel",
+    "start": "874560",
+    "end": "881279"
+  },
+  {
+    "text": "with mtls enabled so that tunnel uh is where the certificates going to live this what's going to take care of like",
+    "start": "881279",
+    "end": "887480"
+  },
+  {
+    "text": "verifying the server uh it's going to be on the outside of that tunnel uh one of the neat tricks about this because",
+    "start": "887480",
+    "end": "893680"
+  },
+  {
+    "text": "you're using HTTP to connect is you're able to put multiple connections into a single Mt",
+    "start": "893680",
+    "end": "899800"
+  },
+  {
+    "text": "uh single mtls htb2 um stream for a better term uh and so this helps us to",
+    "start": "899800",
+    "end": "907320"
+  },
+  {
+    "text": "reduce the number of mtls handshakes if I am sending mtls five times to five",
+    "start": "907320",
+    "end": "913360"
+  },
+  {
+    "text": "different um just five times then I've got to do TLS handshakes five different times and that can get expensive with",
+    "start": "913360",
+    "end": "920279"
+  },
+  {
+    "text": "connect we do that once we're able to do http2 multiplexing in order to uh sort",
+    "start": "920279",
+    "end": "925480"
+  },
+  {
+    "text": "of amortize the cost of those handshakes nice um this gives us a lot of important",
+    "start": "925480",
+    "end": "931079"
+  },
+  {
+    "text": "flexibility um that are going to come up later when we talk about Waypoint proxies how you're able to amortise the cost",
+    "start": "931079",
+    "end": "937360"
+  },
+  {
+    "text": "there uh yeah so going back to the flow of traffic one thing you might be wondering is we had a rule that said all",
+    "start": "937360",
+    "end": "944319"
+  },
+  {
+    "text": "the traffic goes to Z tunnel but Z tunnel is inside of the Pod so how do we make sure that we don't end up with this",
+    "start": "944319",
+    "end": "950240"
+  },
+  {
+    "text": "terrible scenario where Z tunnel sends the traffic and it goes right back to itself over and over again infinitely",
+    "start": "950240",
+    "end": "956079"
+  },
+  {
+    "text": "right that would be quite bad um so this comes is where the this is where that",
+    "start": "956079",
+    "end": "961600"
+  },
+  {
+    "text": "Mark comes in that I told you to ignore earlier what this basically says is that if there's a mark on the connection then",
+    "start": "961600",
+    "end": "968279"
+  },
+  {
+    "text": "ignore this rule um and so a mark is something that we're able to add on a connection this is like a Linux",
+    "start": "968279",
+    "end": "974319"
+  },
+  {
+    "text": "networking thing uh where you can just say this packet has this Mark and then you can do whatever you want with that",
+    "start": "974319",
+    "end": "980160"
+  },
+  {
+    "text": "this [Music] case in this case we use that to exclude",
+    "start": "980160",
+    "end": "988360"
+  },
+  {
+    "text": "uh to not have a loop um so you may be wondering as well like ah that sounds",
+    "start": "988360",
+    "end": "994480"
+  },
+  {
+    "text": "great I'm gonna now bypass Z tunnel because I no to set this magic mark and you showed me right here it's uh X",
+    "start": "994480",
+    "end": "1000000"
+  },
+  {
+    "text": "539 uh fortunately setting this Mark requires elevated privileges net admin",
+    "start": "1000000",
+    "end": "1006279"
+  },
+  {
+    "text": "um and so typically an application wouldn't be allowed that privilege um Z tunnel itself does have this privilege",
+    "start": "1006279",
+    "end": "1011839"
+  },
+  {
+    "text": "so that's how it's able to do things like enter these network name spaces configure the networking all these different things and so it's kind of has",
+    "start": "1011839",
+    "end": "1018600"
+  },
+  {
+    "text": "this special access that application typically would not have the ability to",
+    "start": "1018600",
+    "end": "1023880"
+  },
+  {
+    "text": "set so now I I was previously showing the kind of client side view of the application now we're on the service",
+    "start": "1023880",
+    "end": "1030400"
+  },
+  {
+    "text": "side our request went through the client Z tunnel and now was made all the way to the server application where there's another Z tunnel what happens next um",
+    "start": "1030400",
+    "end": "1038480"
+  },
+  {
+    "text": "there's kind of two possibilities here we can accept traffic that is from another thing in the mesh which is then",
+    "start": "1038480",
+    "end": "1043760"
+  },
+  {
+    "text": "in that m2s tunnel that Keith talked about or we can accept traffic that's not from the mesh maybe it's from some",
+    "start": "1043760",
+    "end": "1050000"
+  },
+  {
+    "text": "application outside of the cluster or they're just in some name space where they've disabled EO um so I'll first go",
+    "start": "1050000",
+    "end": "1055160"
+  },
+  {
+    "text": "over the mess traffic so because we're on a in a tunnel we actually are able to",
+    "start": "1055160",
+    "end": "1060720"
+  },
+  {
+    "text": "use a dedicated port for all of this traffic so even though our application is listening on port 8080 all the",
+    "start": "1060720",
+    "end": "1066880"
+  },
+  {
+    "text": "tunneled mesh traffic is going to this port we have reserved 15,000 and8 and so we don't actually need any special",
+    "start": "1066880",
+    "end": "1073200"
+  },
+  {
+    "text": "routing rules IP tables magic to get traffic there like it's just a normal listener in the the network name space",
+    "start": "1073200",
+    "end": "1079159"
+  },
+  {
+    "text": "uh in the Pod um and so once it accepts the traffic it's just able to terminate the mtls apply policies and then forward",
+    "start": "1079159",
+    "end": "1086559"
+  },
+  {
+    "text": "it to the application uh in the local pod now the alternative flow is that we get traffic that is uh not from the mesh",
+    "start": "1086559",
+    "end": "1094159"
+  },
+  {
+    "text": "right and typically it just go directly to the the port that the application is listening on and not through the Z",
+    "start": "1094159",
+    "end": "1099880"
+  },
+  {
+    "text": "tunnel but we might want to apply Telemetry on this we might even want to block this traffic or apply more complex",
+    "start": "1099880",
+    "end": "1106120"
+  },
+  {
+    "text": "rules like this is allowed only to Port 80 but not 90 things like that so we",
+    "start": "1106120",
+    "end": "1111159"
+  },
+  {
+    "text": "actually want all the traffic to flow through Z tunnel even if it's not from Tunnel traffic um so we do this by",
+    "start": "1111159",
+    "end": "1118080"
+  },
+  {
+    "text": "having another dedicated port and a very similar IP tables rules to the outbound",
+    "start": "1118080",
+    "end": "1123400"
+  },
+  {
+    "text": "uh this just says basically anything coming into the Pod we're going to redirect to this other Port again we",
+    "start": "1123400",
+    "end": "1128520"
+  },
+  {
+    "text": "have that Mark to avoid loops and this time we also say exclude anything that is the tunnel traffic so that we don't",
+    "start": "1128520",
+    "end": "1134039"
+  },
+  {
+    "text": "accidentally treat that as as plain text um",
+    "start": "1134039",
+    "end": "1139480"
+  },
+  {
+    "text": "one pretty neat thing that we're able to do with ambient mesh that we were unable to do with side cars is this Source IP",
+    "start": "1139480",
+    "end": "1145400"
+  },
+  {
+    "text": "preservation so in the sidecar model when you got a request it came from the envoy that's running in the Pod right",
+    "start": "1145400",
+    "end": "1152120"
+  },
+  {
+    "text": "and if you look at the source IP of that connection you'd see Local Host IP um that's not super useful potentially",
+    "start": "1152120",
+    "end": "1159280"
+  },
+  {
+    "text": "right often times applications are looking at the source IP for logging to understand what's going on in the system",
+    "start": "1159280",
+    "end": "1164600"
+  },
+  {
+    "text": "or sometimes even doing authorization decisions based on allow listed IP address addresses right uh but we lose",
+    "start": "1164600",
+    "end": "1170520"
+  },
+  {
+    "text": "that with the side car um with Z tunnel we're able to uh avoid that by basically",
+    "start": "1170520",
+    "end": "1176240"
+  },
+  {
+    "text": "lying about what the source is um so when we open up a connection to the application we just say hey I actually",
+    "start": "1176240",
+    "end": "1182960"
+  },
+  {
+    "text": "am on Local Host but my source IP was 1 two 3 4 or whatever the client IP was",
+    "start": "1182960",
+    "end": "1188440"
+  },
+  {
+    "text": "and typically uh Linux would just look at this packet and be like no that's not okay that's a lie that's rejected uh but",
+    "start": "1188440",
+    "end": "1195960"
+  },
+  {
+    "text": "like I said because the aton's privilege we have some neat tricks separate sleeves um so there are a few socket",
+    "start": "1195960",
+    "end": "1201240"
+  },
+  {
+    "text": "options uh IP transparent IP free bind that basically allow this to happen and then there's some fairly complex routing",
+    "start": "1201240",
+    "end": "1207880"
+  },
+  {
+    "text": "rules to make it so once uh we do allow this packet to go out it doesn't just get routed out of the Pod and like",
+    "start": "1207880",
+    "end": "1214679"
+  },
+  {
+    "text": "confuse the system as where did this packet come from I don't know anything about 1 2 3 4 I won't go into those",
+    "start": "1214679",
+    "end": "1219840"
+  },
+  {
+    "text": "rules because they're they're very complicated and this is a fairly short talk uh but just rest assured that you",
+    "start": "1219840",
+    "end": "1225200"
+  },
+  {
+    "text": "will get the original Source IP here um again why we're able to do this with Z tunnel and not with side cars is only a",
+    "start": "1225200",
+    "end": "1231480"
+  },
+  {
+    "text": "matter of the privilege that we have uh technically this would work with side cars but it would require to give every",
+    "start": "1231480",
+    "end": "1236559"
+  },
+  {
+    "text": "application privilege which is something that no one really wants to do so kind of a recap we've briefly",
+    "start": "1236559",
+    "end": "1243159"
+  },
+  {
+    "text": "mentioned this but I want to give a a bit of a deep dive into where things are actually located in terms of the client and the server side uh so typically",
+    "start": "1243159",
+    "end": "1250159"
+  },
+  {
+    "text": "you'd have like z0 on both sides but they're actually doing different things depending on what part of the traffic they're handling so on the outbound side",
+    "start": "1250159",
+    "end": "1257159"
+  },
+  {
+    "text": "we do of course routing uh as Keith talked about we do load balancing if we're going talking to a service and we",
+    "start": "1257159",
+    "end": "1262400"
+  },
+  {
+    "text": "need to decide what pod to connect to and we collect Telemetry about all the traffic flowing through the system on",
+    "start": "1262400",
+    "end": "1268320"
+  },
+  {
+    "text": "the server side we also collect Telemetry which is really useful to correlate uh who I'm talking to and who",
+    "start": "1268320",
+    "end": "1274480"
+  },
+  {
+    "text": "is talking to me those are very two very different things so both are quite useful to have uh and we also apply",
+    "start": "1274480",
+    "end": "1280039"
+  },
+  {
+    "text": "authorization policy which I mentioned earlier but allows us to say things like I only accept encrypted traffic or I",
+    "start": "1280039",
+    "end": "1286240"
+  },
+  {
+    "text": "only allow uh this specific application to talk to this application or more complex things like",
+    "start": "1286240",
+    "end": "1293600"
+  },
+  {
+    "text": "that y so earlier we talked about Z tunnel and how it looks at services and",
+    "start": "1293799",
+    "end": "1299279"
+  },
+  {
+    "text": "pots determine we're interested in traffic too we we kind of skipped something there and that's way points",
+    "start": "1299279",
+    "end": "1305440"
+  },
+  {
+    "text": "you did to simplify things but now we're ready to come around and P pull this whole picture together so if you look at",
+    "start": "1305440",
+    "end": "1312799"
+  },
+  {
+    "text": "this same ISL uton config uh you config Services um this is very similar to what",
+    "start": "1312799",
+    "end": "1318120"
+  },
+  {
+    "text": "you saw four with the very important extra column added which is way points",
+    "start": "1318120",
+    "end": "1323320"
+  },
+  {
+    "text": "um both services and way points um excuse me both services and workloads",
+    "start": "1323320",
+    "end": "1328400"
+  },
+  {
+    "text": "can have way points associated with them and what this will do on a client side Z tunnel is uh the Z tunnel will know to",
+    "start": "1328400",
+    "end": "1334960"
+  },
+  {
+    "text": "send traffic to the Waypoint first if it exists for particular service or workload um this is important again",
+    "start": "1334960",
+    "end": "1342000"
+  },
+  {
+    "text": "because if you want to do uh layer 7 authorization policy um where only",
+    "start": "1342000",
+    "end": "1347279"
+  },
+  {
+    "text": "traffic that has a certain header can be able to make it to this destination service You' got to go through a waypoint that's going to be able to",
+    "start": "1347279",
+    "end": "1352559"
+  },
+  {
+    "text": "parse HTTP H HTTP excuse me read the headers and be able to deny or allow the",
+    "start": "1352559",
+    "end": "1359520"
+  },
+  {
+    "text": "traffic based on the policy that you set and so in the configuration that scod s",
+    "start": "1359520",
+    "end": "1364600"
+  },
+  {
+    "text": "to Z tunnel um whether or not a service or workload has a waypoint is a part of",
+    "start": "1364600",
+    "end": "1369919"
+  },
+  {
+    "text": "that configuration and like I mentioned again like I mentioned before uh the tunneling",
+    "start": "1369919",
+    "end": "1375400"
+  },
+  {
+    "text": "mechanism that we're using for uh for uh H bone and HTP connect is also important",
+    "start": "1375400",
+    "end": "1381760"
+  },
+  {
+    "text": "for waypoints um so here we see a TCP connection from a z tunnel to a waypoint",
+    "start": "1381760",
+    "end": "1387919"
+  },
+  {
+    "text": "um it's the destination there is going to be the Waypoint pod IP on Port 158 like John said that sort of aort the SEO",
+    "start": "1387919",
+    "end": "1394600"
+  },
+  {
+    "text": "reserves um things going there going to be using this HTTP connect protocol um",
+    "start": "1394600",
+    "end": "1399720"
+  },
+  {
+    "text": "but even though the TCP connection is going to part 15,8 the Waypoint needs to be able to understand what kind of",
+    "start": "1399720",
+    "end": "1406080"
+  },
+  {
+    "text": "traffic is it handling right one Waypoint could be sending to multiple different Services um you could be uh",
+    "start": "1406080",
+    "end": "1412720"
+  },
+  {
+    "text": "sending you know traffic to either a service or to a workload um and being",
+    "start": "1412720",
+    "end": "1418840"
+  },
+  {
+    "text": "able to use HTP HTTP connect this way we're able to do efficient uh connection pooling uh between Z tunnels and way",
+    "start": "1418840",
+    "end": "1425440"
+  },
+  {
+    "text": "points um fortunately uh because we're doing classic networking encapsulation",
+    "start": "1425440",
+    "end": "1431919"
+  },
+  {
+    "text": "we can put whatever we want into the headers of this outer HTP request and in",
+    "start": "1431919",
+    "end": "1437279"
+  },
+  {
+    "text": "the Waypoint case uh we use the authority header to able to indicate what the backend service is supposed to",
+    "start": "1437279",
+    "end": "1443799"
+  },
+  {
+    "text": "be um we can also put things ability there as well such as um think about",
+    "start": "1443799",
+    "end": "1450120"
+  },
+  {
+    "text": "your uh tracing whether you're using Jagger open Telemetry Etc we can put those headers inside the um inside the",
+    "start": "1450120",
+    "end": "1458080"
+  },
+  {
+    "text": "headers uh for the actp connect tunnel uh without modifying the original request um we can do this by the way for",
+    "start": "1458080",
+    "end": "1465600"
+  },
+  {
+    "text": "traffic that isn't even TCP um because you may wonder you know why can't the Waypoint just read the host header that",
+    "start": "1465600",
+    "end": "1472480"
+  },
+  {
+    "text": "is in the original request right assuming you're using HTTP traffic you might be able to open crack open that",
+    "start": "1472480",
+    "end": "1478200"
+  },
+  {
+    "text": "request see what header is there and then Waypoint forward based on that and indeed like that's how original sideart",
+    "start": "1478200",
+    "end": "1484120"
+  },
+  {
+    "text": "SEO worked um but you know that may work in some cases but keep in mind that we",
+    "start": "1484120",
+    "end": "1489159"
+  },
+  {
+    "text": "want way points to work for track that's not even HTTP want to be able to work for TCP traffic um we don't support UDP",
+    "start": "1489159",
+    "end": "1496360"
+  },
+  {
+    "text": "yet but we'd like to get there one day where we can tunnel anything generally via http2 and connect um so being able",
+    "start": "1496360",
+    "end": "1504840"
+  },
+  {
+    "text": "to use uh this connect encapsulation gives us a lot of flexibility um to add even more things later any kind of",
+    "start": "1504840",
+    "end": "1510559"
+  },
+  {
+    "text": "metadata that we like um based on the use cases that that",
+    "start": "1510559",
+    "end": "1515880"
+  },
+  {
+    "text": "arise and really that's pretty much it uh there are more details as we said",
+    "start": "1515880",
+    "end": "1520919"
+  },
+  {
+    "text": "that we could go into but that's left for packet uh in ambient mesh um hopefully that was that really helpful",
+    "start": "1520919",
+    "end": "1527919"
+  },
+  {
+    "text": "and I think we've got a little bit of time so if folks have questions we've got a mic there in the center uh feel",
+    "start": "1527919",
+    "end": "1533240"
+  },
+  {
+    "text": "free to step there and uh ask what's on your mind yeah and feel free to scan this QR code I don't know where it goes",
+    "start": "1533240",
+    "end": "1539399"
+  },
+  {
+    "text": "but it goes to the uh yes thank you uh for reminding me yeah we've got this QR code here that will um take you to a a",
+    "start": "1539399",
+    "end": "1545559"
+  },
+  {
+    "text": "feedback survey about how you like this talk please let us know how we did good or bad we'd love to hear from you let's",
+    "start": "1545559",
+    "end": "1552080"
+  },
+  {
+    "text": "have one question over there go ahead uh thanks for the talk uh so my question is around the provisioning of certific",
+    "start": "1552080",
+    "end": "1559440"
+  },
+  {
+    "text": "specifically when you're not using SDS and using file mounted certificates on the application Port so like how does it",
+    "start": "1559440",
+    "end": "1566520"
+  },
+  {
+    "text": "work with uh Z tunnel yeah so Z tunnel would not support that model in the Z",
+    "start": "1566520",
+    "end": "1573279"
+  },
+  {
+    "text": "tunnel model the application is kind of uninvolved from the certificate provisioning flow like in the old model",
+    "start": "1573279",
+    "end": "1579080"
+  },
+  {
+    "text": "uh you know you could read the files there because it's the side cars there you would use the actual applications credentials to authenticate to get a",
+    "start": "1579080",
+    "end": "1585880"
+  },
+  {
+    "text": "certificate normally in the non-file flow uh with ambient it's totally different and the Z tunnel is the thing that's",
+    "start": "1585880",
+    "end": "1591799"
+  },
+  {
+    "text": "actually authenticating to the ca to get certificates on behalf of all the workloads that it's serving um so it's",
+    "start": "1591799",
+    "end": "1597679"
+  },
+  {
+    "text": "quite a different model in some cases it's it's more secure because your actual applications don't necessarily",
+    "start": "1597679",
+    "end": "1602799"
+  },
+  {
+    "text": "have privileges to even get certificates um so like if an application was compromised or something",
+    "start": "1602799",
+    "end": "1608200"
+  },
+  {
+    "text": "like that they actually wouldn't be able to even get their own certificate um but in the case of like files that's a quite",
+    "start": "1608200",
+    "end": "1614480"
+  },
+  {
+    "text": "a different story um that doesn't have support today so we'd have to kind of explore some options there for",
+    "start": "1614480",
+    "end": "1619520"
+  },
+  {
+    "text": "alternative uh certificate provisioning schemes got it thanks uh the second",
+    "start": "1619520",
+    "end": "1625399"
+  },
+  {
+    "text": "question I has I have was uh around strategies around you know how do we minimize the impact uh when the Z tunnel",
+    "start": "1625399",
+    "end": "1632240"
+  },
+  {
+    "text": "on the Node goes down yeah that's a great question so keep in mind that um in kubernetes there",
+    "start": "1632240",
+    "end": "1638559"
+  },
+  {
+    "text": "are lots of um you know note level things that have a high blast",
+    "start": "1638559",
+    "end": "1643640"
+  },
+  {
+    "text": "radius couet Etc if those go down then they're going to impact your entire node",
+    "start": "1643640",
+    "end": "1649159"
+  },
+  {
+    "text": "um but the we built zonel from the ground up knowing that it was going to be used",
+    "start": "1649159",
+    "end": "1654960"
+  },
+  {
+    "text": "uh for Nole uh not level proxying uh and so we took you know very good uh took a",
+    "start": "1654960",
+    "end": "1661559"
+  },
+  {
+    "text": "lot of put a lot of effort into making sure that we were trying to be resilient in those scenarios so so like what John",
+    "start": "1661559",
+    "end": "1666880"
+  },
+  {
+    "text": "was saying earlier each application put sort of has a um a distinct uh Z tunnel",
+    "start": "1666880",
+    "end": "1672600"
+  },
+  {
+    "text": "so from a security perspective we feel like you're more secure in that way um we're also built in Rust which is a",
+    "start": "1672600",
+    "end": "1677760"
+  },
+  {
+    "text": "memory sa language uh for the Z tunnel so um as far as cves or memory types of",
+    "start": "1677760",
+    "end": "1683240"
+  },
+  {
+    "text": "issues we don't have uh quite as many of those um other ways to make sure that",
+    "start": "1683240",
+    "end": "1688840"
+  },
+  {
+    "text": "they don't uh go down I mean reduce access to it I don't if you have any other things yeah I would say I would",
+    "start": "1688840",
+    "end": "1695080"
+  },
+  {
+    "text": "treat it generally how I treat how do I handle a kernel panic which is that I I generally don't and accept that a node",
+    "start": "1695080",
+    "end": "1701440"
+  },
+  {
+    "text": "is not perfect and that it may scale down it may crash and then kubernetes can help me uh spin up pods and on",
+    "start": "1701440",
+    "end": "1707559"
+  },
+  {
+    "text": "different nodes can help me have high availability multiple replicas things like that um there's lots of things that",
+    "start": "1707559",
+    "end": "1713519"
+  },
+  {
+    "text": "can cause a node to go down and we spent a huge amount of effort to make sure that we're never the cause but if we are",
+    "start": "1713519",
+    "end": "1720000"
+  },
+  {
+    "text": "then uh you know there are mitigations around that so great thanks a lot yep thanks next",
+    "start": "1720000",
+    "end": "1727399"
+  },
+  {
+    "text": "question so you've uh called out IP tables quite a bit in this talk is there",
+    "start": "1727399",
+    "end": "1732799"
+  },
+  {
+    "text": "any plans to support NF tables directly without going through a shim like IP tables Legacy um yeah I'll answer a",
+    "start": "1732799",
+    "end": "1740080"
+  },
+  {
+    "text": "different question because I meant to say it and then I'll answer that question uh one thing we get a lot is like the similar question but oh why",
+    "start": "1740080",
+    "end": "1746360"
+  },
+  {
+    "text": "don't you use ebpf it's so much faster than IP tables and the reason people say that is because IP tables gets a really",
+    "start": "1746360",
+    "end": "1752399"
+  },
+  {
+    "text": "bad WAP from its use in Cube proxy whereas this very long list of IP tables rules that are constantly changing as I",
+    "start": "1752399",
+    "end": "1759320"
+  },
+  {
+    "text": "showed here we only have like a couple rules and they're static so there's not really any performance issues from IP",
+    "start": "1759320",
+    "end": "1764679"
+  },
+  {
+    "text": "tables um that can be solved with like ebpf for example uh which is why we we're using it it's",
+    "start": "1764679",
+    "end": "1770640"
+  },
+  {
+    "text": "not like we're haters of other technology we it just hasn't shown value um for NF tables on the other hand that",
+    "start": "1770640",
+    "end": "1776640"
+  },
+  {
+    "text": "is something we definitely want to do we just haven't really had the bandwidth to do it and IP tables has kind of worked and it's uh quite a tricky thing to set",
+    "start": "1776640",
+    "end": "1783399"
+  },
+  {
+    "text": "up to be honest uh so taking on even more is is scary but there's definitely some people express interest I think",
+    "start": "1783399",
+    "end": "1788919"
+  },
+  {
+    "text": "it's something we'll likely see uh in 2025 yeah uh yep okay thanks",
+    "start": "1788919",
+    "end": "1794679"
+  },
+  {
+    "text": "yep hi uh great talk by the way uh so I'm still trying to wrap my head around",
+    "start": "1794679",
+    "end": "1799760"
+  },
+  {
+    "text": "with the ambient and mtls because I know the side car know each side car get their own search with their SPID but how",
+    "start": "1799760",
+    "end": "1806559"
+  },
+  {
+    "text": "does it work with a z tunnel so is the mtls between Z tunnel Z tunnel and what",
+    "start": "1806559",
+    "end": "1811600"
+  },
+  {
+    "text": "is the identity that it's passed on the yeah so the Z tunnel is going to get",
+    "start": "1811600",
+    "end": "1816760"
+  },
+  {
+    "text": "let's say a z tunnel is running on a node with five pods that Z tunnel has five different certificates one for each",
+    "start": "1816760",
+    "end": "1822559"
+  },
+  {
+    "text": "pod and when it's proxying on behalf of a sered pod it knows I'm okay now this is traffic from pod a I'm going to use",
+    "start": "1822559",
+    "end": "1828840"
+  },
+  {
+    "text": "pod a certificate and the traffic will actually leave that pod's network name space encrypted uh because of the magic",
+    "start": "1828840",
+    "end": "1835000"
+  },
+  {
+    "text": "we showed about how we enter the the network names space and run in there uh and then it actually communicates using",
+    "start": "1835000",
+    "end": "1840399"
+  },
+  {
+    "text": "the applications identity so you'll never see like as the source or destination identity like Z tunnel",
+    "start": "1840399",
+    "end": "1845559"
+  },
+  {
+    "text": "anywhere it's always the application's identity okay um yeah so we still got spad is the exact same type of",
+    "start": "1845559",
+    "end": "1851640"
+  },
+  {
+    "text": "certificate on the side car model exactly yes it's still everything really like there's quite a few changes but a",
+    "start": "1851640",
+    "end": "1858320"
+  },
+  {
+    "text": "lot of things look very very similar to how they work inside cars at the end of the day just a different approach to getting there okay thank you very much",
+    "start": "1858320",
+    "end": "1865279"
+  },
+  {
+    "text": "yep just keep it coming um hi thanks for the talk so my question is around how do",
+    "start": "1865279",
+    "end": "1871679"
+  },
+  {
+    "text": "you um do resource allocation for Z tunnel so like for side cars today you",
+    "start": "1871679",
+    "end": "1877960"
+  },
+  {
+    "text": "can go very granular for applications right certain application applications require more resources on network and",
+    "start": "1877960",
+    "end": "1884440"
+  },
+  {
+    "text": "you can have per application side car resources right with Z tunnel do I have",
+    "start": "1884440",
+    "end": "1889880"
+  },
+  {
+    "text": "to then allocate the maximum resources uh for the pod which which will then in",
+    "start": "1889880",
+    "end": "1895639"
+  },
+  {
+    "text": "turn you know yep right so we architected Z tunnel again because we knew it was going to be multi-tenant um",
+    "start": "1895639",
+    "end": "1903320"
+  },
+  {
+    "text": "and so uh you don't act we built it to be very um very performant and so what",
+    "start": "1903320",
+    "end": "1909320"
+  },
+  {
+    "text": "are those scale numbers 200,000 pods yes like we we did some tests with like 200,000 pod cluster and Z tunnels using",
+    "start": "1909320",
+    "end": "1916600"
+  },
+  {
+    "text": "under 500 megabytes of which obviously that's an fairly High number still but 200,000 pods is",
+    "start": "1916600",
+    "end": "1921919"
+  },
+  {
+    "text": "probably 10x uh even fairly large cluster these days uh whereas like side",
+    "start": "1921919",
+    "end": "1927320"
+  },
+  {
+    "text": "cars in that case is using on the order of like 5 gabt of ram as comparison um",
+    "start": "1927320",
+    "end": "1932440"
+  },
+  {
+    "text": "so that's part of why we we didn't talk so much about the motivations for these but that's really why we have that split",
+    "start": "1932440",
+    "end": "1937679"
+  },
+  {
+    "text": "between the Z tunnel and the Waypoint yes uh we're not just saying oh we've we've made it like faster because we're",
+    "start": "1937679",
+    "end": "1943000"
+  },
+  {
+    "text": "better programmers no we made it faster because we made it a lot Dumber it has a lot fewer responsibilities and it's able",
+    "start": "1943000",
+    "end": "1948440"
+  },
+  {
+    "text": "to do those really really well and for the full functionality we have that out in the Waypoint which is really easy to",
+    "start": "1948440",
+    "end": "1953880"
+  },
+  {
+    "text": "scale up and down because it's just a normal deployment you can throw an HPA on there to Auto scale it even I have",
+    "start": "1953880",
+    "end": "1959159"
+  },
+  {
+    "text": "multiple replicas upgraded in place without touching the application um so it's really that we've made the",
+    "start": "1959159",
+    "end": "1964679"
+  },
+  {
+    "text": "responsibilities very very small uh because we know that scaling Damon sets is like a constant headache for things",
+    "start": "1964679",
+    "end": "1970840"
+  },
+  {
+    "text": "that uh have high traffic right so we want to make sure it's as light as possible and that you don't really have to worry about that that being said at",
+    "start": "1970840",
+    "end": "1977639"
+  },
+  {
+    "text": "like super high scales or like really really high throughput rates like you know serving 10 gigabits per second",
+    "start": "1977639",
+    "end": "1983360"
+  },
+  {
+    "text": "video streams things like that you may still run into cases where you need to start looking at scaling uh which we have a few approaches of rather just",
+    "start": "1983360",
+    "end": "1990000"
+  },
+  {
+    "text": "scaling it up or having dedicated n pools that have large Z tunnels Associated Etc but for most users we",
+    "start": "1990000",
+    "end": "1996320"
+  },
+  {
+    "text": "actually haven't seen that needed at all yeah cool thank you",
+    "start": "1996320",
+    "end": "2001440"
+  },
+  {
+    "text": "yep great talk and I would love to know if people want to get involved if they",
+    "start": "2001440",
+    "end": "2007320"
+  },
+  {
+    "text": "want to participate in the project where do you recommend they start yeah I think",
+    "start": "2007320",
+    "end": "2012639"
+  },
+  {
+    "text": "that uh we've got a very active slack Channel um S.S slack.com and we have a",
+    "start": "2012639",
+    "end": "2018840"
+  },
+  {
+    "text": "lot of community members who are very passionate about helping folks um both get their problems fixed but also",
+    "start": "2018840",
+    "end": "2024120"
+  },
+  {
+    "text": "getting involved with uh with the project and contributing um you can uh you've got a lot of issues and and P",
+    "start": "2024120",
+    "end": "2030600"
+  },
+  {
+    "text": "requests on GitHub honestly one of the things that I found useful in getting involved in STO um I've been involved a",
+    "start": "2030600",
+    "end": "2036480"
+  },
+  {
+    "text": "lot you know short period of time than John has and one of the things that I did early on was just read a few PRS um",
+    "start": "2036480",
+    "end": "2042120"
+  },
+  {
+    "text": "that's a great way to get um used to the code base to learn how things work I'll also do a plug for later this week I",
+    "start": "2042120",
+    "end": "2048638"
+  },
+  {
+    "text": "believe on Friday there's going to be a contri Fest um to help you write your first PR to the STL project and we'd",
+    "start": "2048639",
+    "end": "2054960"
+  },
+  {
+    "text": "absolutely love for folks to get involved with that and find how they can contribute and help make it even better",
+    "start": "2054960",
+    "end": "2060878"
+  },
+  {
+    "text": "anything you want to add no you said it perfectly all right uh any last questions you got like a minute somebody",
+    "start": "2060879",
+    "end": "2066839"
+  },
+  {
+    "text": "wants to make a Mad Dash for the mic we'll also we'll probably hang out",
+    "start": "2066839",
+    "end": "2072679"
+  },
+  {
+    "text": "we'll be here in the hallway track as well so uh feel free to ask the questions then so how do you update I",
+    "start": "2072679",
+    "end": "2078240"
+  },
+  {
+    "text": "now have a a um a sidecar model MH how do I go to a",
+    "start": "2078240",
+    "end": "2085240"
+  },
+  {
+    "text": "an am an ambient mode without outage great question and unfortunately",
+    "start": "2085240",
+    "end": "2091280"
+  },
+  {
+    "text": "it's not as easy as it should be um but that's something that's really on our on our road map to do um I could talk",
+    "start": "2091280",
+    "end": "2097359"
+  },
+  {
+    "text": "through I can walk through the process uh later of what you need to do in order to make that work um smoothly uh but the",
+    "start": "2097359",
+    "end": "2105079"
+  },
+  {
+    "text": "better answer is probably uh check with us in about 3 to 6 months and we'll have some more documentation comprehensively",
+    "start": "2105079",
+    "end": "2111040"
+  },
+  {
+    "text": "worked out could be 3 to six weeks could be 3 to six now that we've launched like the core we really like am E2 is a",
+    "start": "2111040",
+    "end": "2117040"
+  },
+  {
+    "text": "gigantic project so trying to make every single thing applied to ambient as well as like impossible so we really focus on",
+    "start": "2117040",
+    "end": "2123040"
+  },
+  {
+    "text": "getting the core to fully stable which we announced last week and now that we've got that now we're starting like",
+    "start": "2123040",
+    "end": "2128200"
+  },
+  {
+    "text": "okay now we need to migrate people now that's stable let's go work on that uh so we have most of stuff there it's mostly just matter testing documentation",
+    "start": "2128200",
+    "end": "2134640"
+  },
+  {
+    "text": "that sort of thing so expect that in the the near future it's definitely a top priority to us we hear that often yep I",
+    "start": "2134640",
+    "end": "2140560"
+  },
+  {
+    "text": "think we're out of time but uh we'll meet anyone outside that wants to chat and thank you all for coming and like John said ambient is GA so please check",
+    "start": "2140560",
+    "end": "2147480"
+  },
+  {
+    "text": "it out thank you [Applause]",
+    "start": "2147480",
+    "end": "2153409"
+  }
+]

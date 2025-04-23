@@ -1,0 +1,1427 @@
+[
+  {
+    "text": "uh hi uh the stock is about Auto scaling elastic kubernetes infrastructure in the",
+    "start": "120",
+    "end": "6779"
+  },
+  {
+    "text": "presence of stateful applications that use proxilious grpc and istio",
+    "start": "6779",
+    "end": "12840"
+  },
+  {
+    "text": "my name is Sanjay pujari and I am an engineer in Google Cloud",
+    "start": "12840",
+    "end": "18000"
+  },
+  {
+    "text": "question also at Google",
+    "start": "18000",
+    "end": "23119"
+  },
+  {
+    "text": "so how many of you attended the grpc maintenance talk yesterday a show offense",
+    "start": "23580",
+    "end": "28920"
+  },
+  {
+    "text": "okay um",
+    "start": "28920",
+    "end": "34040"
+  },
+  {
+    "text": "so we'll start off with a description of kubernetes elastic and auto scalable",
+    "start": "34380",
+    "end": "40379"
+  },
+  {
+    "text": "infrastructure I'll then talk about the problems faced by stateful applications in such an",
+    "start": "40379",
+    "end": "47579"
+  },
+  {
+    "text": "environment we'll look at implementing a stateful session Affinity that's needed for",
+    "start": "47579",
+    "end": "53820"
+  },
+  {
+    "text": "stateful applications I'll discuss an approach that's based on",
+    "start": "53820",
+    "end": "58920"
+  },
+  {
+    "text": "cookies infinity and how it is implemented in",
+    "start": "58920",
+    "end": "65280"
+  },
+  {
+    "text": "the proxilious grpc library uh session training and Canary",
+    "start": "65280",
+    "end": "71100"
+  },
+  {
+    "text": "deployment are important aspects of this discussion because they affect a",
+    "start": "71100",
+    "end": "76200"
+  },
+  {
+    "text": "stateful session Affinity uh so we'll touch upon those we will then move on to a real-life use",
+    "start": "76200",
+    "end": "83040"
+  },
+  {
+    "text": "case from broadcom who are going to be using this feature in their WSS software",
+    "start": "83040",
+    "end": "89939"
+  },
+  {
+    "text": "costin will talk about how to use this feature using the new Gateway API and",
+    "start": "89939",
+    "end": "94979"
+  },
+  {
+    "text": "the status of our implementation and hopefully we'll have a few minutes towards the end for uh q a",
+    "start": "94979",
+    "end": "104479"
+  },
+  {
+    "text": "okay um it's Friday I suspect you already heard about kubernetes Auto scaling and",
+    "start": "105720",
+    "end": "111600"
+  },
+  {
+    "text": "you know how awesome it is um Auto scaling allows kubernetes to",
+    "start": "111600",
+    "end": "118140"
+  },
+  {
+    "text": "scale up your boards to start New Ports when traffic increases it reduces number of PODS when traffic goes down it's",
+    "start": "118140",
+    "end": "127619"
+  },
+  {
+    "text": "wonderful but it has some some dark Corners there are some some small issues",
+    "start": "127619",
+    "end": "132660"
+  },
+  {
+    "text": "for example you know probably that when support starts up you need to wait for um for it to warm up before Readiness",
+    "start": "132660",
+    "end": "139260"
+  },
+  {
+    "text": "probe is passing so you don't have high latency or errors at startup similarly",
+    "start": "139260",
+    "end": "144599"
+  },
+  {
+    "text": "when when the Pod goes down there are some some things you need to be careful about and and we'll talk about this in a",
+    "start": "144599",
+    "end": "151379"
+  },
+  {
+    "text": "bit in in more details um in in this example we are showing that",
+    "start": "151379",
+    "end": "156720"
+  },
+  {
+    "text": "uh you know when when we were focusing on the scale down and we are showing that",
+    "start": "156720",
+    "end": "162300"
+  },
+  {
+    "text": "um boards will eventually be killed and then nodes will be freed up and your",
+    "start": "162300",
+    "end": "167519"
+  },
+  {
+    "text": "application can can um you know optimize the costs and and um and and support better characteristics",
+    "start": "167519",
+    "end": "175560"
+  },
+  {
+    "text": "uh let's go into the details here okay",
+    "start": "175560",
+    "end": "181200"
+  },
+  {
+    "text": "so when doubt scaling happens there are two things happening uh traffic to existing back-ends can get",
+    "start": "181200",
+    "end": "189000"
+  },
+  {
+    "text": "shifted uh even when ring hash load balancing is used and backends with assigned sessions",
+    "start": "189000",
+    "end": "195420"
+  },
+  {
+    "text": "might be removed as part of downscaling uh in this diagram the load balancer",
+    "start": "195420",
+    "end": "200760"
+  },
+  {
+    "text": "which is shown in the yellow rectangles uh is load balancing traffic to back ends running in kubernetes when the HPA",
+    "start": "200760",
+    "end": "209220"
+  },
+  {
+    "text": "kicks in which is the horizontal Part auto scalar the Pod n in node 2 is shut",
+    "start": "209220",
+    "end": "216659"
+  },
+  {
+    "text": "down which can result in two things uh there is a change in the number of",
+    "start": "216659",
+    "end": "221940"
+  },
+  {
+    "text": "backends so the load balancer will shift traffic to other backends which is what typically happens you know when ring",
+    "start": "221940",
+    "end": "229379"
+  },
+  {
+    "text": "hash load balancer is used and another issue is that for the back end that was removed all of the traffic That was",
+    "start": "229379",
+    "end": "236580"
+  },
+  {
+    "text": "supposed to go to it uh we'll now need to go to another backend and maybe to maintain stateful",
+    "start": "236580",
+    "end": "243180"
+  },
+  {
+    "text": "Affinity of session Affinity the back end should not have been removed or maybe it was removed too soon uh so how",
+    "start": "243180",
+    "end": "251159"
+  },
+  {
+    "text": "do we fix it uh so I mentioned the ring hash load",
+    "start": "251159",
+    "end": "257340"
+  },
+  {
+    "text": "balancer which is quite common and I assume most of you know how it works let",
+    "start": "257340",
+    "end": "262500"
+  },
+  {
+    "text": "me explain its limitations so on the left hand side we have five backends uh",
+    "start": "262500",
+    "end": "268139"
+  },
+  {
+    "text": "on the ring when a request with the hash value of 111 comes in the load balancer sends the",
+    "start": "268139",
+    "end": "275820"
+  },
+  {
+    "text": "request to the server with hash value 139 because that is closest on the ring",
+    "start": "275820",
+    "end": "282300"
+  },
+  {
+    "text": "uh so far so good now a new server gets added and is Hash value is 115.",
+    "start": "282300",
+    "end": "290040"
+  },
+  {
+    "text": "you can see it sits between the servers 74 and 139. now a request with the same",
+    "start": "290040",
+    "end": "297419"
+  },
+  {
+    "text": "hash value that is the request in the same session comes in the ring hash load",
+    "start": "297419",
+    "end": "303240"
+  },
+  {
+    "text": "balancer is going to send it to this new server 115 because it is closer to 111.",
+    "start": "303240",
+    "end": "310440"
+  },
+  {
+    "text": "and session Affinity is broken uh this happens because uh session Affinity here is stateless we",
+    "start": "310440",
+    "end": "318360"
+  },
+  {
+    "text": "need something stateful something that remembers of where we sent a previous",
+    "start": "318360",
+    "end": "324000"
+  },
+  {
+    "text": "request in that session uh so ring hash doesn't work we need a",
+    "start": "324000",
+    "end": "331139"
+  },
+  {
+    "text": "stateful load balancing for our stateful application uh in this diagram",
+    "start": "331139",
+    "end": "336360"
+  },
+  {
+    "text": "we have a hash table in our load balancer which Maps each client session",
+    "start": "336360",
+    "end": "341639"
+  },
+  {
+    "text": "to a backend uh you can say the session is assigned to a backend imagine an",
+    "start": "341639",
+    "end": "347580"
+  },
+  {
+    "text": "actual proxy load balancer doing this it will have memory memory requirement proportional to active client sessions",
+    "start": "347580",
+    "end": "355020"
+  },
+  {
+    "text": "and there is no easy way to remove entries because the load balancer may not be",
+    "start": "355020",
+    "end": "362280"
+  },
+  {
+    "text": "application aware and does not know when sessions end also",
+    "start": "362280",
+    "end": "368460"
+  },
+  {
+    "text": "a multiple load balancer proxy instances may need to synchronize their data",
+    "start": "368460",
+    "end": "374340"
+  },
+  {
+    "text": "so this is hard to scale and is expensive",
+    "start": "374340",
+    "end": "379460"
+  },
+  {
+    "text": "so we use a cookie to maintain that state the load balancer issues a cookie",
+    "start": "380039",
+    "end": "386039"
+  },
+  {
+    "text": "after routing the first RPC in a session and the cookie is returned by the client",
+    "start": "386039",
+    "end": "391860"
+  },
+  {
+    "text": "in all these subsequent rpcs in that session the cookie basically encodes the backend",
+    "start": "391860",
+    "end": "398220"
+  },
+  {
+    "text": "address which is the IP Plus Port and all these subsequent rpcs the load balancer just",
+    "start": "398220",
+    "end": "405419"
+  },
+  {
+    "text": "decodes the cookie and gets the backend address and routes the RPC to that address",
+    "start": "405419",
+    "end": "411060"
+  },
+  {
+    "text": "uh it's that simple uh we get declined to maintain the state for us",
+    "start": "411060",
+    "end": "417560"
+  },
+  {
+    "text": "uh so here is a uh a picture a diagrammatic",
+    "start": "418319",
+    "end": "424860"
+  },
+  {
+    "text": "explanation of the feature the first request is sent by the load",
+    "start": "424860",
+    "end": "430199"
+  },
+  {
+    "text": "balancer to server 2 which is picked by the load balancer based on some load",
+    "start": "430199",
+    "end": "435600"
+  },
+  {
+    "text": "balancing algorithm once the response to that request shown here as our RSP one",
+    "start": "435600",
+    "end": "442500"
+  },
+  {
+    "text": "is received by the load balancer it adds a cookie to that response the cookie",
+    "start": "442500",
+    "end": "448319"
+  },
+  {
+    "text": "value is nothing but the server to IP Plus board that is which is base64",
+    "start": "448319",
+    "end": "455699"
+  },
+  {
+    "text": "encoded so RSP one is received by the client and",
+    "start": "455699",
+    "end": "461039"
+  },
+  {
+    "text": "the embedded cookie is used by the client in all the subsequent requests in the session",
+    "start": "461039",
+    "end": "466500"
+  },
+  {
+    "text": "here as req2 through reqn",
+    "start": "466500",
+    "end": "472800"
+  },
+  {
+    "text": "uh the load balancer just decodes the cookie value and uses that value which is the backend IP Plus Port",
+    "start": "472800",
+    "end": "479520"
+  },
+  {
+    "text": "and sends those requests to server 2 thereby maintaining session affinity",
+    "start": "479520",
+    "end": "486319"
+  },
+  {
+    "text": "uh with proxel fgrpc the load balancing functionality is implemented inside the",
+    "start": "486740",
+    "end": "494039"
+  },
+  {
+    "text": "grpc Library which is inside the client application process",
+    "start": "494039",
+    "end": "499340"
+  },
+  {
+    "text": "grpc performs load balancing of the fourth RPC and adds cookie to the First Response received client application",
+    "start": "499340",
+    "end": "506699"
+  },
+  {
+    "text": "copies the cookie from the First Response into all these subsequent rpcs",
+    "start": "506699",
+    "end": "511760"
+  },
+  {
+    "text": "and grpc uses the cookie to Route the RPC to the appropriate backend which is",
+    "start": "511760",
+    "end": "518219"
+  },
+  {
+    "text": "server 2 in this diagram istio uses XDS to provide the necessary",
+    "start": "518219",
+    "end": "525240"
+  },
+  {
+    "text": "configuration to grpc which typically consists of",
+    "start": "525240",
+    "end": "530519"
+  },
+  {
+    "text": "the service and Route level information and the cookie name a cookie time to",
+    "start": "530519",
+    "end": "535680"
+  },
+  {
+    "text": "live and all those things istio also collects all the back end uh",
+    "start": "535680",
+    "end": "542220"
+  },
+  {
+    "text": "information like list of backends including the Clusters they belong to and sends it to grpc which grpc uses to",
+    "start": "542220",
+    "end": "551339"
+  },
+  {
+    "text": "perform load balancing and maintain cookie based session affinity",
+    "start": "551339",
+    "end": "556620"
+  },
+  {
+    "text": "uh but what about the second problem we mentioned earlier as part of downscaling",
+    "start": "556620",
+    "end": "563160"
+  },
+  {
+    "text": "so that part of the diagram is shown here",
+    "start": "563160",
+    "end": "568440"
+  },
+  {
+    "text": "the problem is that pods or backends are removed whether or",
+    "start": "568440",
+    "end": "574200"
+  },
+  {
+    "text": "not they have assigned sessions after removal the rpcs will be routed to",
+    "start": "574200",
+    "end": "580260"
+  },
+  {
+    "text": "a different back-end part two in this example and session Affinity is broken",
+    "start": "580260",
+    "end": "587220"
+  },
+  {
+    "text": "um to Source this we create a new state for",
+    "start": "587220",
+    "end": "592260"
+  },
+  {
+    "text": "a pod let's call it draining a a draining State pod is scheduled for",
+    "start": "592260",
+    "end": "599160"
+  },
+  {
+    "text": "removal but not removed immediately uh instead that part is kept around for",
+    "start": "599160",
+    "end": "605160"
+  },
+  {
+    "text": "it to drain its sessions uh once all its sessions uh are gone the part will be shut down",
+    "start": "605160",
+    "end": "612839"
+  },
+  {
+    "text": "and removed uh during the draining state it will continue to receive rpcs",
+    "start": "612839",
+    "end": "619140"
+  },
+  {
+    "text": "of its assigned sessions uh so let's see how this is implemented",
+    "start": "619140",
+    "end": "625560"
+  },
+  {
+    "text": "okay okay so in kubernetes we have put",
+    "start": "625560",
+    "end": "630600"
+  },
+  {
+    "text": "termination which is generally in has three phases first when the auto scalar",
+    "start": "630600",
+    "end": "637680"
+  },
+  {
+    "text": "or or the user decides to terminate a pod um",
+    "start": "637680",
+    "end": "643399"
+  },
+  {
+    "text": "is called which is some custom codes that you you control and the Crystal hook May coordinate the",
+    "start": "643700",
+    "end": "651120"
+  },
+  {
+    "text": "application uh with application itself to verify if you have pending sessions it may do all kind of fancy you know",
+    "start": "651120",
+    "end": "659040"
+  },
+  {
+    "text": "safe states to to migrate to a different pod or you just can sleep and and wait",
+    "start": "659040",
+    "end": "665339"
+  },
+  {
+    "text": "until you expect your sessions to expire container",
+    "start": "665339",
+    "end": "671399"
+  },
+  {
+    "text": "um kubernetes also has a terminating race period that that allows you to control",
+    "start": "681480",
+    "end": "686519"
+  },
+  {
+    "text": "the entire entire duration of the of the termination to give time to to the application to drain supports and to",
+    "start": "686519",
+    "end": "694200"
+  },
+  {
+    "text": "control the shutdown process let's see how istio implements this and",
+    "start": "694200",
+    "end": "700019"
+  },
+  {
+    "text": "and how it it takes advantage of of this feature each istio is is watching kubernetes endpoint slices",
+    "start": "700019",
+    "end": "707100"
+  },
+  {
+    "text": "and in the endpoint slices kubernetes will Mark supports that are terminating and tell is just that that we need to do",
+    "start": "707100",
+    "end": "714180"
+  },
+  {
+    "text": "to to notify all the clients grpc or invoice about the port being in this",
+    "start": "714180",
+    "end": "719279"
+  },
+  {
+    "text": "drain state um istio will will uh include will updates IP address of the support that",
+    "start": "719279",
+    "end": "726240"
+  },
+  {
+    "text": "is terminating Market as draining and Envoy and proxyl sgrpc are going to take",
+    "start": "726240",
+    "end": "732540"
+  },
+  {
+    "text": "this stage and switch the behavior of the load balancer so that all new",
+    "start": "732540",
+    "end": "738360"
+  },
+  {
+    "text": "requests will skip this IP is this this back end and if you have a cookie it",
+    "start": "738360",
+    "end": "744420"
+  },
+  {
+    "text": "will still go to this um to the to the product Express store to receive the session",
+    "start": "744420",
+    "end": "750660"
+  },
+  {
+    "text": "um so that's that takes care of the",
+    "start": "750660",
+    "end": "756000"
+  },
+  {
+    "text": "draining but there is another problem which affects uh affects um Sensations",
+    "start": "756000",
+    "end": "761279"
+  },
+  {
+    "text": "which is uh the canary deployment or traffic shifting this example is using",
+    "start": "761279",
+    "end": "766800"
+  },
+  {
+    "text": "uh it's a history example but we are using the new Gateway API uh that you",
+    "start": "766800",
+    "end": "772680"
+  },
+  {
+    "text": "probably have heard in a few sessions before uh we are using the HTTP route we create",
+    "start": "772680",
+    "end": "779040"
+  },
+  {
+    "text": "two Services let's say version one and version two you are rolling out version two",
+    "start": "779040",
+    "end": "784320"
+  },
+  {
+    "text": "you want to send only 10 percent of the traffic to to the new version to verify",
+    "start": "784320",
+    "end": "789420"
+  },
+  {
+    "text": "that it works and in case of promise to roll back um how does it impact uh persistent",
+    "start": "789420",
+    "end": "796079"
+  },
+  {
+    "text": "sessions um since uh we are",
+    "start": "796079",
+    "end": "802500"
+  },
+  {
+    "text": "shifting traffic if you have a cookie even if if the request would normally be",
+    "start": "802500",
+    "end": "808740"
+  },
+  {
+    "text": "affected by the 90 percent 10 shift the session will bypass this this",
+    "start": "808740",
+    "end": "814399"
+  },
+  {
+    "text": "configuration and it will still go to the original uh backends that where the",
+    "start": "814399",
+    "end": "819480"
+  },
+  {
+    "text": "decision is expected to go um yeah",
+    "start": "819480",
+    "end": "826740"
+  },
+  {
+    "text": "uh as you can see in this diagram the first RPC of the session is sent to",
+    "start": "826740",
+    "end": "831839"
+  },
+  {
+    "text": "Cluster V1 and the response from the backend V1 S1 is annotated by the load",
+    "start": "831839",
+    "end": "838860"
+  },
+  {
+    "text": "balancer with a cookie indicating the backend address however for the next RPC array Q2 and",
+    "start": "838860",
+    "end": "846300"
+  },
+  {
+    "text": "possibly others in the session the load balancer picks clustered Z2",
+    "start": "846300",
+    "end": "851519"
+  },
+  {
+    "text": "based on the cluster weights and if those rpcs are sent to Cluster V2 uh",
+    "start": "851519",
+    "end": "858839"
+  },
+  {
+    "text": "session Affinity is broken because the backend V1 S1 obviously does not exist",
+    "start": "858839",
+    "end": "863940"
+  },
+  {
+    "text": "in that cluster so how do we fix this",
+    "start": "863940",
+    "end": "869160"
+  },
+  {
+    "text": "uh we solve the problem by including the cluster name in the cookie we show here",
+    "start": "869160",
+    "end": "875040"
+  },
+  {
+    "text": "a sample cookie value which shows cluster V1 as part of the value the",
+    "start": "875040",
+    "end": "882060"
+  },
+  {
+    "text": "first RPC is processed by back-end V1 S1 that is part of cluster V1",
+    "start": "882060",
+    "end": "890360"
+  },
+  {
+    "text": "uh the load balancer includes the cluster name in the cookie that is added to RSP one and the response that is sent",
+    "start": "890360",
+    "end": "897720"
+  },
+  {
+    "text": "back to the client the client includes the cookie in all",
+    "start": "897720",
+    "end": "902820"
+  },
+  {
+    "text": "the subsequent rpcs and the load balancer extracts the cluster name from the cookie and selects that cluster",
+    "start": "902820",
+    "end": "910019"
+  },
+  {
+    "text": "instead of using the weight-based cluster selection algorithm",
+    "start": "910019",
+    "end": "915779"
+  },
+  {
+    "text": "and within that cluster it selects the back end included in the cookie and session Affinity is maintained of course",
+    "start": "915779",
+    "end": "922800"
+  },
+  {
+    "text": "provided the cluster and the back end within that cluster are still part of",
+    "start": "922800",
+    "end": "928320"
+  },
+  {
+    "text": "the configuration and are healthy uh so after having gone through the",
+    "start": "928320",
+    "end": "937740"
+  },
+  {
+    "text": "technical details of the implementation let me talk about the use case to provide some context for why we are",
+    "start": "937740",
+    "end": "945240"
+  },
+  {
+    "text": "doing this um I mentioned broadcom earlier so semantic",
+    "start": "945240",
+    "end": "951480"
+  },
+  {
+    "text": "Enterprise revision is part of a broadcom software and this Division I mean the software is",
+    "start": "951480",
+    "end": "959519"
+  },
+  {
+    "text": "used to secure customers internet access globally providing a",
+    "start": "959519",
+    "end": "964800"
+  },
+  {
+    "text": "smooth service to millions of users some of the larger uh",
+    "start": "964800",
+    "end": "970760"
+  },
+  {
+    "text": "customers have over 300 000 deployed users",
+    "start": "970760",
+    "end": "976019"
+  },
+  {
+    "text": "uh so their solution called wfs which is a web security solution is deployed on",
+    "start": "976019",
+    "end": "984540"
+  },
+  {
+    "text": "Google Cloud platform in all of the available regions around the world",
+    "start": "984540",
+    "end": "990660"
+  },
+  {
+    "text": "customers uh internet facing traffic is securely routed to WSS services",
+    "start": "990660",
+    "end": "998480"
+  },
+  {
+    "text": "the policy evaluation microservice is a core component of the WSS",
+    "start": "998480",
+    "end": "1006680"
+  },
+  {
+    "text": "solution data path the service as a whole must handle tens",
+    "start": "1006680",
+    "end": "1012620"
+  },
+  {
+    "text": "of thousands of requests per second from various enforcement agents on the data",
+    "start": "1012620",
+    "end": "1018440"
+  },
+  {
+    "text": "path these agents submit series of requests on a per customer transaction basis and",
+    "start": "1018440",
+    "end": "1025520"
+  },
+  {
+    "text": "the state of those a related request must be efficiently correlated when evaluating customer",
+    "start": "1025520",
+    "end": "1032480"
+  },
+  {
+    "text": "configured security policies uh with such high RPS requirements and",
+    "start": "1032480",
+    "end": "1040040"
+  },
+  {
+    "text": "the need to maintain a state across rpcs the impact of storing the state external",
+    "start": "1040040",
+    "end": "1048140"
+  },
+  {
+    "text": "to the service instance becomes a bottleneck moreover keeping a coherent uh shared",
+    "start": "1048140",
+    "end": "1056059"
+  },
+  {
+    "text": "State across instances is impractical most rpcs actually mutate the state uh",
+    "start": "1056059",
+    "end": "1065000"
+  },
+  {
+    "text": "maintained per a customer transaction so the classic Model of sharding or",
+    "start": "1065000",
+    "end": "1072020"
+  },
+  {
+    "text": "consistent hashing algorithms would require a partial State resync anytime",
+    "start": "1072020",
+    "end": "1077360"
+  },
+  {
+    "text": "the number of serving parts changes uh if it can efficiently maintain part",
+    "start": "1077360",
+    "end": "1085580"
+  },
+  {
+    "text": "local state while preserving correct and consistent request routing we can",
+    "start": "1085580",
+    "end": "1091280"
+  },
+  {
+    "text": "simplify the State Management a strong session Affinity also known as",
+    "start": "1091280",
+    "end": "1096860"
+  },
+  {
+    "text": "stateful session Affinity enables such consistent requests routing to Parts",
+    "start": "1096860",
+    "end": "1102320"
+  },
+  {
+    "text": "without much complexity on the load balancer and the service side this also allows",
+    "start": "1102320",
+    "end": "1110360"
+  },
+  {
+    "text": "the clients to collaboratively provide hints to the routing logic such that we",
+    "start": "1110360",
+    "end": "1115700"
+  },
+  {
+    "text": "can achieve greater internal service caching",
+    "start": "1115700",
+    "end": "1121419"
+  },
+  {
+    "text": "stateful Services introduce additional requirements when using some of the",
+    "start": "1121660",
+    "end": "1127160"
+  },
+  {
+    "text": "common paradigms such as Canary and HPA based scaling or rolling upgrades",
+    "start": "1127160",
+    "end": "1134660"
+  },
+  {
+    "text": "since the serving pods have stayed the design needs to be cognizant of that and",
+    "start": "1134660",
+    "end": "1140419"
+  },
+  {
+    "text": "accommodate a routing existing sessions correctly and draining the state",
+    "start": "1140419",
+    "end": "1145700"
+  },
+  {
+    "text": "properly so",
+    "start": "1145700",
+    "end": "1150220"
+  },
+  {
+    "text": "it provides a lot of features for load balancing and a good framework for advanced use cases like this one and it",
+    "start": "1151700",
+    "end": "1158960"
+  },
+  {
+    "text": "now it's include the state recession it always had traffic shifting training and load balancing support",
+    "start": "1158960",
+    "end": "1165260"
+  },
+  {
+    "text": "and voice a very powerful proxy and and it's it's great for most use cases but",
+    "start": "1165260",
+    "end": "1172280"
+  },
+  {
+    "text": "it does add a bit of performance overhead that impedes adoption of proxy based service",
+    "start": "1172280",
+    "end": "1179360"
+  },
+  {
+    "text": "mesh in such use cases where ultra low latency or higher request per second are",
+    "start": "1179360",
+    "end": "1185240"
+  },
+  {
+    "text": "required uh broken has been working with uh with Google and with istio to enhance and",
+    "start": "1185240",
+    "end": "1192020"
+  },
+  {
+    "text": "formalize the support in history of our state recession affinity and also with the grpc team to add support for",
+    "start": "1192020",
+    "end": "1198559"
+  },
+  {
+    "text": "stateful sessions and and istio to the grpc framework",
+    "start": "1198559",
+    "end": "1203780"
+  },
+  {
+    "text": "um this slide shows some of the performance evaluations that they did for for this uh like World benchmarks",
+    "start": "1203780",
+    "end": "1211700"
+  },
+  {
+    "text": "you need some context um this is obviously using their super",
+    "start": "1211700",
+    "end": "1216860"
+  },
+  {
+    "text": "specialized applications that that is you know optimized it's C plus plus it's uh using uh in memory only",
+    "start": "1216860",
+    "end": "1225080"
+  },
+  {
+    "text": "and on the East your side we are using a kind of untuned you know we we don't",
+    "start": "1225080",
+    "end": "1232220"
+  },
+  {
+    "text": "increase the CPU CPU we don't turn off features but as you can see the 30 000",
+    "start": "1232220",
+    "end": "1239780"
+  },
+  {
+    "text": "QPS are usually not achievable with uh which is the out of box in in this scenario and the latency is is slightly",
+    "start": "1239780",
+    "end": "1248539"
+  },
+  {
+    "text": "better with grpc and emits their their needs this is not a typical use case I",
+    "start": "1248539",
+    "end": "1255200"
+  },
+  {
+    "text": "mean it's only four applications that that have those kind of strict requirements but when you have to that's",
+    "start": "1255200",
+    "end": "1261620"
+  },
+  {
+    "text": "that's probably that's one of the best options you have uh let's meet let me talk about the",
+    "start": "1261620",
+    "end": "1268280"
+  },
+  {
+    "text": "status of this feature um and and all the related sub features we covered here we added this feature to",
+    "start": "1268280",
+    "end": "1275780"
+  },
+  {
+    "text": "the grpc and um there is a design that is this that is linked here uh on the",
+    "start": "1275780",
+    "end": "1281960"
+  },
+  {
+    "text": "grpc side and we had persistent sessions already and and draining",
+    "start": "1281960",
+    "end": "1288620"
+  },
+  {
+    "text": "um and that was used in grpc so we shared the same uh the same Concepts and same in same",
+    "start": "1288620",
+    "end": "1294860"
+  },
+  {
+    "text": "configuration um we had to provide some API to enable",
+    "start": "1294860",
+    "end": "1301460"
+  },
+  {
+    "text": "this this um this feature in istio after long discussions we we added a label but",
+    "start": "1301460",
+    "end": "1308419"
+  },
+  {
+    "text": "there's not going to be the final API we are waiting for the Gateway working group to formalize a common apis that",
+    "start": "1308419",
+    "end": "1316460"
+  },
+  {
+    "text": "other vendors will hope use to implement best transitions um",
+    "start": "1316460",
+    "end": "1323120"
+  },
+  {
+    "text": "is your as you as as I mentioned is just is one of the many implementations that",
+    "start": "1323120",
+    "end": "1328700"
+  },
+  {
+    "text": "supports the Gateway API and um we are working working with the working",
+    "start": "1328700",
+    "end": "1335720"
+  },
+  {
+    "text": "group to to to formalize this uh this feature uh we",
+    "start": "1335720",
+    "end": "1341840"
+  },
+  {
+    "text": "also have Google also has another implementation of Gateway API called traffic director",
+    "start": "1341840",
+    "end": "1346940"
+  },
+  {
+    "text": "and they also support session Affinity but in a slightly different way and and",
+    "start": "1346940",
+    "end": "1352760"
+  },
+  {
+    "text": "I'll provide an example a bit later uh by now I suspect I don't need to ask",
+    "start": "1352760",
+    "end": "1359659"
+  },
+  {
+    "text": "uh if you know what Gateway API is or quite a few talks about it",
+    "start": "1359659",
+    "end": "1365539"
+  },
+  {
+    "text": "um we are using it in istio to to model L7",
+    "start": "1365539",
+    "end": "1370880"
+  },
+  {
+    "text": "traffic and we are using the Gateway HTTP route there is a grpc route as well",
+    "start": "1370880",
+    "end": "1379100"
+  },
+  {
+    "text": "um we implemented this probably a few releases back",
+    "start": "1379100",
+    "end": "1384260"
+  },
+  {
+    "text": "um and and it has been available and we are planning to make it the",
+    "start": "1384260",
+    "end": "1389720"
+  },
+  {
+    "text": "default and recommended way at least for grpc because it's it's a very good fit",
+    "start": "1389720",
+    "end": "1394820"
+  },
+  {
+    "text": "with with the grpc feature set um we are also using the exact same API",
+    "start": "1394820",
+    "end": "1401000"
+  },
+  {
+    "text": "in um in the gke Gateway controller traffic director and as I mentioned many",
+    "start": "1401000",
+    "end": "1407360"
+  },
+  {
+    "text": "other vendors are adopting it",
+    "start": "1407360",
+    "end": "1411700"
+  },
+  {
+    "text": "um in Gateway API there is a concept called the vendor extension which allow",
+    "start": "1413659",
+    "end": "1419900"
+  },
+  {
+    "text": "each vendor to Define its own specific features before they are standardized or maybe for long term",
+    "start": "1419900",
+    "end": "1427640"
+  },
+  {
+    "text": "um this example here is is how personalization is implemented with with Google",
+    "start": "1427640",
+    "end": "1433520"
+  },
+  {
+    "text": "um JK and and traffic director you will notice that all all vendor",
+    "start": "1433520",
+    "end": "1439700"
+  },
+  {
+    "text": "extensions are are have a Target ref which is which is a service where they apply and you can Define different",
+    "start": "1439700",
+    "end": "1448179"
+  },
+  {
+    "text": "configuration for that that particular service um once the the working group will",
+    "start": "1448240",
+    "end": "1455840"
+  },
+  {
+    "text": "Define the proper API will will also support the new API and both istio and traffic director and JK get a controller",
+    "start": "1455840",
+    "end": "1463159"
+  },
+  {
+    "text": "and everyone will switch to the new API",
+    "start": "1463159",
+    "end": "1468320"
+  },
+  {
+    "text": "um questions I think we managed to say five minutes okay",
+    "start": "1468320",
+    "end": "1473720"
+  },
+  {
+    "text": "any questions",
+    "start": "1473720",
+    "end": "1476320"
+  },
+  {
+    "text": "yeah okay looks like no questions",
+    "start": "1478880",
+    "end": "1485419"
+  },
+  {
+    "text": "all right okay uh I already approached you yesterday I don't know if you recall",
+    "start": "1485419",
+    "end": "1490700"
+  },
+  {
+    "text": "me uh we kind of have the opposite problem where we have uh HPA Auto scaling up and we have the connections",
+    "start": "1490700",
+    "end": "1498080"
+  },
+  {
+    "text": "Affinity to like the few existing parts that were before do you know of any approaches to kind of spread the load",
+    "start": "1498080",
+    "end": "1504260"
+  },
+  {
+    "text": "um on these persistent connections and like we would prefer killing the connections rather than keeping them right okay it's kind of orthogonal yeah",
+    "start": "1504260",
+    "end": "1511700"
+  },
+  {
+    "text": "I know I think you posted that question on slacker as well right okay uh oh yes that's something that we are",
+    "start": "1511700",
+    "end": "1520340"
+  },
+  {
+    "text": "okay maybe you want to answer uh yes uh that's something that is a bit complicated because uh normally with",
+    "start": "1520340",
+    "end": "1527299"
+  },
+  {
+    "text": "presentations the definition of the feature is that if you have a personal session it needs to keeps going there but you can delete the cookie and if you",
+    "start": "1527299",
+    "end": "1534320"
+  },
+  {
+    "text": "delete the cookie then you will go to the normal load balancer but that's something that your application needs to",
+    "start": "1534320",
+    "end": "1539720"
+  },
+  {
+    "text": "do it's not it's going to be automated because we cannot guess other questions",
+    "start": "1539720",
+    "end": "1545720"
+  },
+  {
+    "text": "yes you can use them",
+    "start": "1545720",
+    "end": "1550600"
+  },
+  {
+    "text": "hi um I had a question that so if the user session it might be one hour 24",
+    "start": "1551059",
+    "end": "1558679"
+  },
+  {
+    "text": "hours the support will be stuck for 24 hours right you cannot be terminate during that time uh that's the feature",
+    "start": "1558679",
+    "end": "1564980"
+  },
+  {
+    "text": "not about I mean we want if you if you want your session to last for 24 hours you you will keep it for 24 hours",
+    "start": "1564980",
+    "end": "1571220"
+  },
+  {
+    "text": "because what that was the Houston Community now is very problematic for the cluster and application because this",
+    "start": "1571220",
+    "end": "1577220"
+  },
+  {
+    "text": "you cannot schedule immediately or in the short term it's not really responsive one thing you can do I mean",
+    "start": "1577220",
+    "end": "1582740"
+  },
+  {
+    "text": "you can try to move the state to a different I mean to to to transfer state",
+    "start": "1582740",
+    "end": "1588140"
+  },
+  {
+    "text": "so if it is like a work around for a very chases you know stateful applications it's not very long very bad",
+    "start": "1588140",
+    "end": "1594679"
+  },
+  {
+    "text": "night designs or what do you think okay if uh if uh there is something called",
+    "start": "1594679",
+    "end": "1600140"
+  },
+  {
+    "text": "terminating grace period so once kubernetes or the user wants to reclaim",
+    "start": "1600140",
+    "end": "1605840"
+  },
+  {
+    "text": "the Pod or shut down the Pod it goes into this terminating uh State and there is a timeout for that let's say one hour",
+    "start": "1605840",
+    "end": "1613100"
+  },
+  {
+    "text": "so after one hour regardless of the states the sessions or anything it will kill it and so that's that way I mean of",
+    "start": "1613100",
+    "end": "1620480"
+  },
+  {
+    "text": "course the application will get impacted because the you know you kind of you're killing the sessions without",
+    "start": "1620480",
+    "end": "1627919"
+  },
+  {
+    "text": "taking care of them properly but that addresses your problem at least it means",
+    "start": "1627919",
+    "end": "1633320"
+  },
+  {
+    "text": "that when from the user point of view you I log in and then if I my support",
+    "start": "1633320",
+    "end": "1639260"
+  },
+  {
+    "text": "was many of my session was intimidating what an hour I have to login again",
+    "start": "1639260",
+    "end": "1645860"
+  },
+  {
+    "text": "Let's uh if you can stop by if you put we can discuss in more details uh so yeah",
+    "start": "1645860",
+    "end": "1652658"
+  },
+  {
+    "text": "thank you for the session I would like to ask about this proxy less model is it",
+    "start": "1652900",
+    "end": "1658039"
+  },
+  {
+    "text": "something that will be developed for grpc so there will be no need for like Envoy or what what does it mean yeah",
+    "start": "1658039",
+    "end": "1665720"
+  },
+  {
+    "text": "okay that's a good question because so we have actually implemented proximal grpc almost three years ago and it has",
+    "start": "1665720",
+    "end": "1673220"
+  },
+  {
+    "text": "been working in Google cloud with the traffic director that he mentioned uh it has been it is a supported GA feature",
+    "start": "1673220",
+    "end": "1680720"
+  },
+  {
+    "text": "for the last two and a half years at least if not three years so recently we I mean even with istio it has been",
+    "start": "1680720",
+    "end": "1687200"
+  },
+  {
+    "text": "working for the last one or two years informally and we are in the process of doing a ga of that feature so yes to",
+    "start": "1687200",
+    "end": "1695240"
+  },
+  {
+    "text": "answer your questions proxy a grpc with istio without online proxy is a thing",
+    "start": "1695240",
+    "end": "1700580"
+  },
+  {
+    "text": "and it will be a proper re-released feature in maybe it was the end of this",
+    "start": "1700580",
+    "end": "1705679"
+  },
+  {
+    "text": "year so it's like it works with go and C plus plus and also Java sorry okay thank",
+    "start": "1705679",
+    "end": "1712340"
+  },
+  {
+    "text": "you okay yeah just one one comment uh it is it",
+    "start": "1712340",
+    "end": "1717380"
+  },
+  {
+    "text": "doesn't support all the istio features and it's intended for advanced users that have this kind of uh latency",
+    "start": "1717380",
+    "end": "1723500"
+  },
+  {
+    "text": "requirements so it's still probably if you want to take advantage of a list your features probably still good to use the Sidecar",
+    "start": "1723500",
+    "end": "1729740"
+  },
+  {
+    "text": "but if you are in these scenarios and then proxy less it's a very good choice okay thank you on the grpc uh GitHub",
+    "start": "1729740",
+    "end": "1737659"
+  },
+  {
+    "text": "report there is a a file a page that talks about XDS feature supported by",
+    "start": "1737659",
+    "end": "1743120"
+  },
+  {
+    "text": "grpc and that is we try to keep it up to date so you can you can see there which",
+    "start": "1743120",
+    "end": "1748279"
+  },
+  {
+    "text": "features that Envoy supports are also supported by grpc and based on that you can okay",
+    "start": "1748279",
+    "end": "1754580"
+  },
+  {
+    "text": "thank you hello yeah I have a similar question to",
+    "start": "1754580",
+    "end": "1760700"
+  },
+  {
+    "text": "what other people have asked uh it's related to that it will become kind of a sticky session right uh when we",
+    "start": "1760700",
+    "end": "1767299"
+  },
+  {
+    "text": "Implement that and what I was thinking if someone wants and they know that it's kind of a sticky session they will try",
+    "start": "1767299",
+    "end": "1773840"
+  },
+  {
+    "text": "to flood them uh with more requests because as a session is still there so",
+    "start": "1773840",
+    "end": "1779779"
+  },
+  {
+    "text": "how do we deal with that it will always go to Just One server and it can take it down so",
+    "start": "1779779",
+    "end": "1785980"
+  },
+  {
+    "text": "but that is a feature I mean you so typically at in the use case that we",
+    "start": "1786980",
+    "end": "1792440"
+  },
+  {
+    "text": "talked about the client will actually end the session so the client knows when the session is ended so it will send",
+    "start": "1792440",
+    "end": "1798020"
+  },
+  {
+    "text": "something like a end session RPC okay and at that point the back end will",
+    "start": "1798020",
+    "end": "1803059"
+  },
+  {
+    "text": "actually know that it doesn't have to maintain that session anymore so ultimately over a period of time let's",
+    "start": "1803059",
+    "end": "1809179"
+  },
+  {
+    "text": "say two hours or whatever the back end will get rid of all the sessions and it",
+    "start": "1809179",
+    "end": "1814520"
+  },
+  {
+    "text": "can then be uh shut down as part of scale down yeah but it's really something the application and the",
+    "start": "1814520",
+    "end": "1821419"
+  },
+  {
+    "text": "infrastructure need to work together right correct but uh in the meanwhile uh if someone needs to exploit it is it not",
+    "start": "1821419",
+    "end": "1828679"
+  },
+  {
+    "text": "dangerous oh yeah that's true in terms of exploitation and all is possible let's discuss with a lot of time here I",
+    "start": "1828679",
+    "end": "1835279"
+  },
+  {
+    "text": "think and and let's discuss it that is your boot on the other side okay okay [Applause]",
+    "start": "1835279",
+    "end": "1844069"
+  }
+]

@@ -1,0 +1,2567 @@
+[
+  {
+    "start": "0",
+    "end": "144000"
+  },
+  {
+    "text": "okay so so this talk is technical deep dive into how we actually implemented",
+    "start": "1360",
+    "end": "8950"
+  },
+  {
+    "text": "the feature of adding lambdas to Java so this is not a sort of language overview",
+    "start": "8950",
+    "end": "16510"
+  },
+  {
+    "text": "this you know this is much much more of a exploration of what we're are",
+    "start": "16510",
+    "end": "22580"
+  },
+  {
+    "text": "implement or implementation choices what choices did we evaluate and reject what choices did we ultimately take to give",
+    "start": "22580",
+    "end": "29779"
+  },
+  {
+    "text": "you a sense of how these things are actually built so in some sense this talk is mostly useless because as",
+    "start": "29779",
+    "end": "37700"
+  },
+  {
+    "text": "programmers we're just gonna use these features where we're you know very few of us or actually gonna implement them but I always like to know how things",
+    "start": "37700",
+    "end": "44450"
+  },
+  {
+    "text": "work and I think a lot of us do so this is mostly to give you a sense of what's",
+    "start": "44450",
+    "end": "49520"
+  },
+  {
+    "text": "going on at the layers you know one or two layers below the the code that you're writing okay so I work for Oracle",
+    "start": "49520",
+    "end": "55460"
+  },
+  {
+    "text": "so I'm obligated to show you this legal disclaimer slide and moving on okay so",
+    "start": "55460",
+    "end": "61160"
+  },
+  {
+    "text": "highly technical talk hopefully some of you have some familiarity with JVM and",
+    "start": "61160",
+    "end": "66710"
+  },
+  {
+    "text": "and Java byte code how many people here have used the Java pee tool to dump out",
+    "start": "66710",
+    "end": "72140"
+  },
+  {
+    "text": "byte code okay about third maybe okay so if you haven't and you have a laptop",
+    "start": "72140",
+    "end": "79280"
+  },
+  {
+    "text": "right now you might want to try it so Java P is a bytecode dumper so the the java c compiler takes java",
+    "start": "79280",
+    "end": "85850"
+  },
+  {
+    "text": "source code in writes Java class files out the Java class files use a architecture neutral intermediate",
+    "start": "85850",
+    "end": "92540"
+  },
+  {
+    "text": "representation called Java bytecode which then the VM translates to native code at runtime so if you want to know",
+    "start": "92540",
+    "end": "101119"
+  },
+  {
+    "text": "what bytecode you know given source constructs you know correspond to or what's in a Java class file java p is a",
+    "start": "101119",
+    "end": "107990"
+  },
+  {
+    "text": "good tool for learning that so i'm going to show you some byte code i'm also going to talk about some of the",
+    "start": "107990",
+    "end": "114710"
+  },
+  {
+    "text": "facilities that were added in in Java 7 specifically method handles and",
+    "start": "114710",
+    "end": "120049"
+  },
+  {
+    "text": "invokedynamic which again not something that anybody who is not implementing languages is",
+    "start": "120049",
+    "end": "125570"
+  },
+  {
+    "text": "going to use but again good to know about just to understand what's going on all right so I'm gonna do a ultra quick",
+    "start": "125570",
+    "end": "133220"
+  },
+  {
+    "text": "overview of the features that we added to Java seven just so you can see what the source code looks like I'm assuming",
+    "start": "133220",
+    "end": "139670"
+  },
+  {
+    "text": "everybody in this room has a pretty good idea of what a lambda expression is from their favorite language so I don't have",
+    "start": "139670",
+    "end": "146450"
+  },
+  {
+    "start": "144000",
+    "end": "242000"
+  },
+  {
+    "text": "to be labor belabor this lambda expression is in the context of Java is",
+    "start": "146450",
+    "end": "151640"
+  },
+  {
+    "text": "an anonymous method it has everything a method has it has an argument list it has a body it has a return type it has a",
+    "start": "151640",
+    "end": "158120"
+  },
+  {
+    "text": "set of thrown exceptions but we've compressed away most of the syntactic boilerplate it's you know to get it into",
+    "start": "158120",
+    "end": "166400"
+  },
+  {
+    "text": "something you know a lot smaller so here's some examples of lamin expressions in the first one we have an",
+    "start": "166400",
+    "end": "174470"
+  },
+  {
+    "text": "argument takes one argument it's a person the body takes that person gets their name adds them to some list of",
+    "start": "174470",
+    "end": "181459"
+  },
+  {
+    "text": "names the manifest type on the or on the the arguments can be left out if the",
+    "start": "181459",
+    "end": "189680"
+  },
+  {
+    "text": "compiler is able to infer it so in the context of a statement like people dot for each and you're passing in something",
+    "start": "189680",
+    "end": "198170"
+  },
+  {
+    "text": "that takes a person and returns void the compile is able to say oh well I know he is a person because what else could it",
+    "start": "198170",
+    "end": "203720"
+  },
+  {
+    "text": "be and I have the compiler can't infer it for you you'll get a compile time error message so it might look a little",
+    "start": "203720",
+    "end": "209810"
+  },
+  {
+    "text": "bit like dynamic typing it's actually the same static typing Java has always had just with less less boilerplate and",
+    "start": "209810",
+    "end": "217690"
+  },
+  {
+    "text": "lambda expressions can capture values from the enclosing context so in this",
+    "start": "217690",
+    "end": "223639"
+  },
+  {
+    "text": "last expression min age is defined outside of the lambda and so that's",
+    "start": "223639",
+    "end": "228680"
+  },
+  {
+    "text": "considered a captured value okay not all lambdas are capturing but you know",
+    "start": "228680",
+    "end": "234019"
+  },
+  {
+    "text": "capturing fits largely in the translation scheme so I'll have a couple of examples of that so a little bit of",
+    "start": "234019",
+    "end": "243319"
+  },
+  {
+    "start": "242000",
+    "end": "344000"
+  },
+  {
+    "text": "background of you know why it is that we're doing this in the first place you know why bother adding lambdas to Java I",
+    "start": "243319",
+    "end": "249319"
+  },
+  {
+    "text": "talked a little bit about that in my talk this morning a couple of a couple of major reasons the most important of",
+    "start": "249319",
+    "end": "256549"
+  },
+  {
+    "text": "which is providing a path to building multi-core friendly libraries so if you",
+    "start": "256549",
+    "end": "262460"
+  },
+  {
+    "text": "want to build parallel friendly libraries you have to have a way of expressing code as data so",
+    "start": "262460",
+    "end": "267740"
+  },
+  {
+    "text": "that you can say here do this for every element of the collection and you work out the details of the parallelism",
+    "start": "267740",
+    "end": "272770"
+  },
+  {
+    "text": "decomposition its etc a lot of other reasons we want to empower library",
+    "start": "272770",
+    "end": "280550"
+  },
+  {
+    "text": "developers to write better libraries we want to keep up or catch up with the competition and you know we've had a",
+    "start": "280550",
+    "end": "288169"
+  },
+  {
+    "text": "tool for this in the form of inter classes for a long time but it's just too clunky and you know not not suitable",
+    "start": "288169",
+    "end": "295069"
+  },
+  {
+    "text": "so what we're gonna focus on in this talk is the the question of runtime",
+    "start": "295069",
+    "end": "300169"
+  },
+  {
+    "text": "representation how we represent lambda expressions at runtime what it looks like in the bytecode what it looks like",
+    "start": "300169",
+    "end": "305300"
+  },
+  {
+    "text": "during execution and you know as much as runtime representation is an",
+    "start": "305300",
+    "end": "311750"
+  },
+  {
+    "text": "implementation detail it also is important you know on the one hand yes",
+    "start": "311750",
+    "end": "317449"
+  },
+  {
+    "text": "we should design the language to stand on its own but you want it to run efficiently on the JVM as well and if",
+    "start": "317449",
+    "end": "323240"
+  },
+  {
+    "text": "there's a mismatch between how things are represented at the language level and have the representative the VM level this is going to be ongoing pain for",
+    "start": "323240",
+    "end": "330919"
+  },
+  {
+    "text": "your users so we want to keep the language view of the world and the runtime view of the world has aligned as",
+    "start": "330919",
+    "end": "337400"
+  },
+  {
+    "text": "practical and that's something that pays dividends okay so big question number",
+    "start": "337400",
+    "end": "343340"
+  },
+  {
+    "text": "one when you're adding a new kind of expression to a language is if you've got a statically typed language like",
+    "start": "343340",
+    "end": "348560"
+  },
+  {
+    "start": "344000",
+    "end": "550000"
+  },
+  {
+    "text": "Java what's its type what so what's the type of a language of a lambda expression",
+    "start": "348560",
+    "end": "354070"
+  },
+  {
+    "text": "most languages that have lambdas have a notion of function type function from",
+    "start": "354070",
+    "end": "359090"
+  },
+  {
+    "text": "int along so early proposals for adding lambdas java said well let's just add",
+    "start": "359090",
+    "end": "365960"
+  },
+  {
+    "text": "function types of Java and this seems like an obvious idea but when you start digging you end up with a lot of nasty",
+    "start": "365960",
+    "end": "372949"
+  },
+  {
+    "text": "questions or surrounding representation so what's it going to look like in the bytecode what's it going to look like in",
+    "start": "372949",
+    "end": "378919"
+  },
+  {
+    "text": "a method signature in the bytecode so Java is dynamically linked when you",
+    "start": "378919",
+    "end": "384889"
+  },
+  {
+    "text": "invoke method it selects among the",
+    "start": "384889",
+    "end": "390110"
+  },
+  {
+    "text": "overloads and actually takes the signature of that method the method called foo that has arguments int and",
+    "start": "390110",
+    "end": "396589"
+  },
+  {
+    "text": "long and sticks that in the class file so if if we're going to",
+    "start": "396589",
+    "end": "401600"
+  },
+  {
+    "text": "you know so we have to find a way to represent the lambda in a VM type signature similarly how do we invoke a",
+    "start": "401600",
+    "end": "409640"
+  },
+  {
+    "text": "lambda do we have to have special byte code you know for for invoking it how do we create instances of them do we do",
+    "start": "409640",
+    "end": "416690"
+  },
+  {
+    "text": "that with a new bike code or with a new bike code spiked code called new that's",
+    "start": "416690",
+    "end": "422900"
+  },
+  {
+    "text": "the old way do we have to invent a new way to new I didn't think this a very carefully okay",
+    "start": "422900",
+    "end": "428660"
+  },
+  {
+    "text": "moving on the Java language type system",
+    "start": "428660",
+    "end": "433760"
+  },
+  {
+    "text": "has variants the runtime type system doesn't is that going to intrude in the runtime representation so all of these",
+    "start": "433760",
+    "end": "439940"
+  },
+  {
+    "text": "questions come up when you know once you get past the Oh we'll just add function",
+    "start": "439940",
+    "end": "445010"
+  },
+  {
+    "text": "types to Java so as as most of you some of you have",
+    "start": "445010",
+    "end": "452300"
+  },
+  {
+    "text": "probably heard I like this trick of taking an unreasonable question and",
+    "start": "452300",
+    "end": "457730"
+  },
+  {
+    "text": "making it sound reasonable by saying why not just in front of it so you know",
+    "start": "457730",
+    "end": "463130"
+  },
+  {
+    "text": "people asked well why not just add function types well cuz it's harder than",
+    "start": "463130",
+    "end": "468320"
+  },
+  {
+    "text": "it looks the JVM has no native representation of a function type so we would have to invent one or we'd have to",
+    "start": "468320",
+    "end": "474410"
+  },
+  {
+    "text": "teach the JVM about something new the closest tool that we have that could",
+    "start": "474410",
+    "end": "479570"
+  },
+  {
+    "text": "represent function types you know function from tdu fairly easily is generics but that would bring with it a",
+    "start": "479570",
+    "end": "487580"
+  },
+  {
+    "text": "lot of the pain of generics like boxing and erasure and boxed function types or",
+    "start": "487580",
+    "end": "493820"
+  },
+  {
+    "text": "erase function types would really stink so for example if we had a generic type",
+    "start": "493820",
+    "end": "500300"
+  },
+  {
+    "text": "function function from TD you you wouldn't be able to overload two methods that took functions even if their types",
+    "start": "500300",
+    "end": "506000"
+  },
+  {
+    "text": "are completely different so you might write an overload of function from string to end and function from long to",
+    "start": "506000",
+    "end": "511070"
+  },
+  {
+    "text": "double and then the compiler would say you can't do that these have the same eraser and you'll say what doesn't look",
+    "start": "511070",
+    "end": "517580"
+  },
+  {
+    "text": "at all like the same erasure so we thought that would be a mean thing to do to people and we didn't want to do that and so this is one of those places where",
+    "start": "517580",
+    "end": "524510"
+  },
+  {
+    "text": "there would be a gap between the language representation and there and the VM representation and that's always the pain point so we could teach the VM",
+    "start": "524510",
+    "end": "531620"
+  },
+  {
+    "text": "about real function types but this would be a huge effort it would affect signatures it would affect bike codes it",
+    "start": "531620",
+    "end": "536750"
+  },
+  {
+    "text": "would affect verification rules so this you know would be a pretty big deal so",
+    "start": "536750",
+    "end": "542630"
+  },
+  {
+    "text": "we kind of cast around looking for alternatives because this was a lot of work and we're lazy so historically in",
+    "start": "542630",
+    "end": "550339"
+  },
+  {
+    "start": "550000",
+    "end": "725000"
+  },
+  {
+    "text": "Java code with model functions using one method interfaces things like runnable or comparator and you know we thought",
+    "start": "550339",
+    "end": "557930"
+  },
+  {
+    "text": "well alright rather than add a new kind of type to the type system how about we just formalized this notion of a",
+    "start": "557930",
+    "end": "564500"
+  },
+  {
+    "text": "function is represented by a one method interface so we took this pattern and",
+    "start": "564500",
+    "end": "570170"
+  },
+  {
+    "text": "gave it a name functional interface and boom we're done that's that's our",
+    "start": "570170",
+    "end": "575779"
+  },
+  {
+    "text": "function type so the way the way the language works is a functional interface",
+    "start": "575779",
+    "end": "581750"
+  },
+  {
+    "text": "like predicate here is isomorphic to a function that takes a t returns a boolean so the compiler looks at",
+    "start": "581750",
+    "end": "588440"
+  },
+  {
+    "text": "predicates and says alright that's an interface but it also could be a function if it were a function it would be from t tubulin and then when you see",
+    "start": "588440",
+    "end": "595790"
+  },
+  {
+    "text": "a method like you know remove if whose argument is a predicate of t it and",
+    "start": "595790",
+    "end": "602139"
+  },
+  {
+    "text": "someone provides a lambda expression as the arguments that method it says all right well I'm willing to convert this",
+    "start": "602139",
+    "end": "608209"
+  },
+  {
+    "text": "lambda expression to one of these nominal functions let's see if the if the shapes match up do they have the",
+    "start": "608209",
+    "end": "614389"
+  },
+  {
+    "text": "same number of arguments or their argument types compatible are the return types compatible are there exceptions compatible and if they are then the",
+    "start": "614389",
+    "end": "621860"
+  },
+  {
+    "text": "compiler says okay I'm gonna take this lambda expression that takes a person and returns a boolean and I'm gonna",
+    "start": "621860",
+    "end": "628190"
+  },
+  {
+    "text": "convert that to a predicate a person done and now if we do this the",
+    "start": "628190",
+    "end": "635060"
+  },
+  {
+    "text": "signatures look like Java signatures that we've always had they have these nominal types in them invocation",
+    "start": "635060",
+    "end": "640850"
+  },
+  {
+    "text": "looks like the invocation we've always had so that seems like kind of a simpler way to do it so sort of the you know",
+    "start": "640850",
+    "end": "649610"
+  },
+  {
+    "text": "there's a lot more detail to this story than that I'm you know expressing on two slides but the the takeaway point is",
+    "start": "649610",
+    "end": "655370"
+  },
+  {
+    "text": "just add function types was obvious and wrong it would have been complex it would have",
+    "start": "655370",
+    "end": "661430"
+  },
+  {
+    "text": "introduced corner cases it would have exposed users to more of the pain of",
+    "start": "661430",
+    "end": "667130"
+  },
+  {
+    "text": "erasure which is nice it also would have had the effect of completely bifurcating the",
+    "start": "667130",
+    "end": "673310"
+  },
+  {
+    "text": "world of Java libraries because now we'd have old libraries and new libraries and like do you remember the pain we went",
+    "start": "673310",
+    "end": "679010"
+  },
+  {
+    "text": "through when we had generic libraries and non-generic libraries even though they were interoperable right and there",
+    "start": "679010",
+    "end": "684860"
+  },
+  {
+    "text": "was this like five year period where there was all this churn about genera fiying libraries well we don't want to",
+    "start": "684860",
+    "end": "690440"
+  },
+  {
+    "text": "do that again and so we don't want to create this split between old and new libraries so by using an old mechanism",
+    "start": "690440",
+    "end": "697450"
+  },
+  {
+    "text": "we avoid that problem and as a bonus existing libraries that were designed",
+    "start": "697450",
+    "end": "703130"
+  },
+  {
+    "text": "years before lambda all of a sudden compatible with lambda as long as they're using this pattern that a lot of",
+    "start": "703130",
+    "end": "708230"
+  },
+  {
+    "text": "libraries already use so fewer new concepts maintains investment in",
+    "start": "708230",
+    "end": "713270"
+  },
+  {
+    "text": "existing libraries you know sometimes a stodgy old approach is better than a",
+    "start": "713270",
+    "end": "718520"
+  },
+  {
+    "text": "shiny new one okay so let's look at",
+    "start": "718520",
+    "end": "723710"
+  },
+  {
+    "text": "another question that we sort of rappelled with as we design this feature how does a lambda instance get created",
+    "start": "723710",
+    "end": "731570"
+  },
+  {
+    "start": "725000",
+    "end": "962000"
+  },
+  {
+    "text": "what is this runtime representation so like I had you know it had a in this",
+    "start": "731570",
+    "end": "737270"
+  },
+  {
+    "text": "example here we have a lambda expression on the right is a function from person to boolean we have on the left hand side",
+    "start": "737270",
+    "end": "743450"
+  },
+  {
+    "text": "we're assigning it to a predicate of person which is morally a function from person to boolean so the compiler sees",
+    "start": "743450",
+    "end": "750500"
+  },
+  {
+    "text": "this code needs to produce some byte code so what bright code should it produce so there's another obvious",
+    "start": "750500",
+    "end": "755660"
+  },
+  {
+    "text": "solution here just spin an inner class right so inner classes have done this",
+    "start": "755660",
+    "end": "762620"
+  },
+  {
+    "text": "for a while we could just say a lambda is an inner class instance and the compiler would generate an inner class",
+    "start": "762620",
+    "end": "767810"
+  },
+  {
+    "text": "like this one which since it captures a variable it has to have a feel that has to have a constructor that initializes",
+    "start": "767810",
+    "end": "773360"
+  },
+  {
+    "text": "that field and then the body does the obvious thing totally simple compiler",
+    "start": "773360",
+    "end": "779240"
+  },
+  {
+    "text": "you know operation and we could have we could have been done in a week a lot of",
+    "start": "779240",
+    "end": "784280"
+  },
+  {
+    "text": "people thought we should be done in a week but you know the nice thing about",
+    "start": "784280",
+    "end": "789290"
+  },
+  {
+    "text": "this is lambda capture translates very straightforwardly into invoking the",
+    "start": "789290",
+    "end": "794690"
+  },
+  {
+    "text": "constructor of this inner class so the compiler you know generates this inner class it generates for the instantiation",
+    "start": "794690",
+    "end": "800000"
+  },
+  {
+    "text": "of lambda just an invocation to the food dollar one constructor and we're done and then",
+    "start": "800000",
+    "end": "807070"
+  },
+  {
+    "text": "invoking the you know the constructor translates to some very straightforward",
+    "start": "807070",
+    "end": "813650"
+  },
+  {
+    "text": "bytecode so what are we doing here we",
+    "start": "813650",
+    "end": "819820"
+  },
+  {
+    "text": "instantiate a and and an object of class foo dollar one we we push the captured",
+    "start": "819820",
+    "end": "827990"
+  },
+  {
+    "text": "variable on the stack we invoke the constructor and then with the reference",
+    "start": "827990",
+    "end": "833060"
+  },
+  {
+    "text": "to that new thing still on the stack we just passed that directly to remove F so very simple very unobtrusive in to the",
+    "start": "833060",
+    "end": "840290"
+  },
+  {
+    "text": "way the compiler generates bytecode today okay obviously I've got the scare",
+    "start": "840290",
+    "end": "845990"
+  },
+  {
+    "text": "quotes around just why didn't we do it this way well in a class does suck and",
+    "start": "845990",
+    "end": "851800"
+  },
+  {
+    "text": "translating to inner classes behind the scenes inherits a lot of their problems with the added bonus that you didn't",
+    "start": "851800",
+    "end": "859790"
+  },
+  {
+    "text": "even ask for an inner class so now you have the pain of inner classes without having asked for one and that's that's kind of lousy so what are some of the",
+    "start": "859790",
+    "end": "866150"
+  },
+  {
+    "text": "problems of inner classes well performance we are generating a class per lambda expression you have an",
+    "start": "866150",
+    "end": "872600"
+  },
+  {
+    "text": "awful lot of implementations of types like runnable which means you get megamorph or call sites that's a",
+    "start": "872600",
+    "end": "877610"
+  },
+  {
+    "text": "performance problem at runtime and you're always allocating a new instance even when instances are logically",
+    "start": "877610",
+    "end": "883940"
+  },
+  {
+    "text": "equivalent so even if a lambda captures nothing an inner class would still instantiate a new instance and like",
+    "start": "883940",
+    "end": "890810"
+  },
+  {
+    "text": "sometimes we sort of do this by hand at our code right if you have a comparator that's not capturing anything you know I",
+    "start": "890810",
+    "end": "895970"
+  },
+  {
+    "text": "move it to the top your your class you say you know private static final comparator C equals and you do it you",
+    "start": "895970",
+    "end": "902390"
+  },
+  {
+    "text": "know once and then you just pass that but that's kind of like mangling up your code for performance reasons we'd like",
+    "start": "902390",
+    "end": "907670"
+  },
+  {
+    "text": "to to not put people in that situation and also the the rule the rules about",
+    "start": "907670",
+    "end": "913430"
+  },
+  {
+    "text": "naming lookup in inner classes is really nasty and we wanted to avoid exposing people to that so the important thing to",
+    "start": "913430",
+    "end": "921410"
+  },
+  {
+    "text": "recognize is whatever byte code the compiler generates on the first day that",
+    "start": "921410",
+    "end": "926540"
+  },
+  {
+    "text": "Java has lambdas is the binary representation for lambdas until you know the heat death of the universe so",
+    "start": "926540",
+    "end": "933250"
+  },
+  {
+    "text": "you know we want to pick representation very carefully and ideally that binary representation with",
+    "start": "933250",
+    "end": "942260"
+  },
+  {
+    "text": "the implementation choice we happen to have made when we were writing the compiler because that that constrains us",
+    "start": "942260",
+    "end": "948800"
+  },
+  {
+    "text": "pretty terribly so I think this is another one of those obvious but wrong choices so let's look at some other",
+    "start": "948800",
+    "end": "955640"
+  },
+  {
+    "text": "options in Java 7 we added a feature",
+    "start": "955640",
+    "end": "961670"
+  },
+  {
+    "text": "called method handles to the VM now this is a low-level feature that's designed it's a really a tool kit for compiler",
+    "start": "961670",
+    "end": "967430"
+  },
+  {
+    "start": "962000",
+    "end": "1155000"
+  },
+  {
+    "text": "writers but the idea is it's like reflection but it's actually fast so you",
+    "start": "967430",
+    "end": "975140"
+  },
+  {
+    "text": "can store a reference to a method in a method handle you can put those method handles in the constant pool and load",
+    "start": "975140",
+    "end": "980630"
+  },
+  {
+    "text": "them as constants and the VM makes that really fast you can obtain a method handle for any method or any constructor",
+    "start": "980630",
+    "end": "986960"
+  },
+  {
+    "text": "or any field back sesor and the VM understands method handles so it happily in lines through them and it provides",
+    "start": "986960",
+    "end": "993620"
+  },
+  {
+    "text": "you an API for manipulating math and handles like adding arguments and removing arguments and adapting",
+    "start": "993620",
+    "end": "999500"
+  },
+  {
+    "text": "arguments with boxing or unboxing or casting or what-have-you so you know basically it's a compiler",
+    "start": "999500",
+    "end": "1005620"
+  },
+  {
+    "text": "writer Swiss Army knife so this seems like another one of those",
+    "start": "1005620",
+    "end": "1013120"
+  },
+  {
+    "text": "obvious choices lambdas are a language level method constant method handles a",
+    "start": "1013120",
+    "end": "1018700"
+  },
+  {
+    "text": "VM level method constant how could this not work so we could use method handles",
+    "start": "1018700",
+    "end": "1024970"
+  },
+  {
+    "text": "as our implementation technique that would involve we would have to defer the body of a lambda expression into a",
+    "start": "1024970",
+    "end": "1031480"
+  },
+  {
+    "text": "method that's easy to do and then represent the lambdas using method handles and bytecode signatures and",
+    "start": "1031480",
+    "end": "1036699"
+  },
+  {
+    "text": "that's where things start to fall apart ok so here's how the compiler would",
+    "start": "1036699",
+    "end": "1042250"
+  },
+  {
+    "text": "translate things if we have the exact same code as before so we would say take",
+    "start": "1042250",
+    "end": "1047770"
+  },
+  {
+    "text": "the body in this lambda D sugar it into a method here we've called it lambda dollar one we give it an extra argument",
+    "start": "1047770",
+    "end": "1055240"
+  },
+  {
+    "text": "which is the captured min age that's coming in from the outside context and of course the",
+    "start": "1055240",
+    "end": "1060550"
+  },
+  {
+    "text": "arguments the lambda expression the person and the body just evaluates it and then when we go to",
+    "start": "1060550",
+    "end": "1068600"
+  },
+  {
+    "text": "generate code for the the capture and the invocation all we do is say well",
+    "start": "1068600",
+    "end": "1073769"
+  },
+  {
+    "text": "give me a method handle for the discern method and then stash this extra",
+    "start": "1073769",
+    "end": "1079889"
+  },
+  {
+    "text": "argument on it mid age and then just pass that to remove if so the signature",
+    "start": "1079889",
+    "end": "1085169"
+  },
+  {
+    "text": "of remove if would be remove if method handle well that's kind of a problem",
+    "start": "1085169",
+    "end": "1092940"
+  },
+  {
+    "text": "because method handles are effectively erased right there's just one method handle type there's not method handle",
+    "start": "1092940",
+    "end": "1098940"
+  },
+  {
+    "text": "for function from int to long there's method handle so this is like super",
+    "start": "1098940",
+    "end": "1104279"
+  },
+  {
+    "text": "eraser is so for a sure sucks this is even worse we wouldn't be able to overload two methods that take even",
+    "start": "1104279",
+    "end": "1110190"
+  },
+  {
+    "text": "differently shaped lambdas or different arity lambdas and we'd still would need to encode the language level type",
+    "start": "1110190",
+    "end": "1116549"
+  },
+  {
+    "text": "information in the class file somewhere even if it's not encoded in the in the bytecode so this suffers from the same",
+    "start": "1116549",
+    "end": "1124559"
+  },
+  {
+    "text": "problem as the last obvious but wrong choice because it takes an implementation technique and it",
+    "start": "1124559",
+    "end": "1130889"
+  },
+  {
+    "text": "conflates our binary representation with that choice of implementation technique so again nice idea but doesn't quite do",
+    "start": "1130889",
+    "end": "1139200"
+  },
+  {
+    "text": "what we want so I know this is you know only taken like 20 minutes so far we've",
+    "start": "1139200",
+    "end": "1145529"
+  },
+  {
+    "text": "just described a period of like six months of beating our heads against various options okay so what have we",
+    "start": "1145529",
+    "end": "1154470"
+  },
+  {
+    "text": "learned here what we'd like is a binary representation that is not tied to the",
+    "start": "1154470",
+    "end": "1160590"
+  },
+  {
+    "start": "1155000",
+    "end": "1249000"
+  },
+  {
+    "text": "specific implementation certainly we don't want to carry with us the baggage of inter classes and we also don't want",
+    "start": "1160590",
+    "end": "1166830"
+  },
+  {
+    "text": "to carry with us the low-level Ness and erasure of method handles and we don't want to pick something that we're gonna",
+    "start": "1166830",
+    "end": "1172590"
+  },
+  {
+    "text": "want to change because we don't want to ever say to our users oh yeah there's a new version of Java out there and it's",
+    "start": "1172590",
+    "end": "1178320"
+  },
+  {
+    "text": "much faster but yeah you got to recompile all your code we don't do that we don't want to do that users wouldn't",
+    "start": "1178320",
+    "end": "1185580"
+  },
+  {
+    "text": "like that so we took that as a requirement we can't ask users to",
+    "start": "1185580",
+    "end": "1190830"
+  },
+  {
+    "text": "recompile just to get more per the additional performance that we might have in a future version of the JDK so",
+    "start": "1190830",
+    "end": "1196080"
+  },
+  {
+    "text": "of course the solution to all problems of computer science is more indirection and the challenge is how do we make it",
+    "start": "1196080",
+    "end": "1203490"
+  },
+  {
+    "text": "so that additional interaction in direction doesn't hurt us performance wise so the theory is the compiler could",
+    "start": "1203490",
+    "end": "1211710"
+  },
+  {
+    "text": "emit not code to construct the lambda but something more like a declarative recipe for how to make this lambda and",
+    "start": "1211710",
+    "end": "1218159"
+  },
+  {
+    "text": "the runtime would execute that recipe using whatever tools it decided at the",
+    "start": "1218159",
+    "end": "1223919"
+  },
+  {
+    "text": "time was best whether maybe on Tuesdays it would be in our classes and on Thursdays that we method handles but we",
+    "start": "1223919",
+    "end": "1228929"
+  },
+  {
+    "text": "don't care because that's now a pure implementation detail as long as it's fast it has to be fast so for this we",
+    "start": "1228929",
+    "end": "1237539"
+  },
+  {
+    "text": "turn to another VM feature that was added in Java 7 again not a feature for users but a feature for compiler writers",
+    "start": "1237539",
+    "end": "1243840"
+  },
+  {
+    "text": "called invokedynamic so let me talk a little bit about invokedynamic so prior Java 7 there were 4 invocation",
+    "start": "1243840",
+    "end": "1255330"
+  },
+  {
+    "start": "1249000",
+    "end": "1298000"
+  },
+  {
+    "text": "modes for different byte codes for invoking methods they were invoke static invoke interface invoke virtual and",
+    "start": "1255330",
+    "end": "1260730"
+  },
+  {
+    "text": "invoke special and they correspond pretty straightforwardly to Java",
+    "start": "1260730",
+    "end": "1265799"
+  },
+  {
+    "text": "language situations one is for static methods one is for interface methods one is for virtual methods and then one is",
+    "start": "1265799",
+    "end": "1271620"
+  },
+  {
+    "text": "for everything else so invoke special handles you know constructor calls and",
+    "start": "1271620",
+    "end": "1277260"
+  },
+  {
+    "text": "super calls and private methods and all the things that don't fit neatly into one of the other three buckets and we",
+    "start": "1277260",
+    "end": "1282350"
+  },
+  {
+    "text": "saw examples of two of these in the bytecode representation for the inner class we used invoke special to invoke",
+    "start": "1282350",
+    "end": "1289140"
+  },
+  {
+    "text": "the constructor of food dollar one and then we use to invoke interface to invoke the removeth method so Java 7",
+    "start": "1289140",
+    "end": "1296640"
+  },
+  {
+    "text": "added a new one invoke dynamic and we abbreviate this to indie and it's",
+    "start": "1296640",
+    "end": "1304559"
+  },
+  {
+    "start": "1298000",
+    "end": "1834000"
+  },
+  {
+    "text": "different from the other invocation modes the other invocation modes have very fixed and Java like invocation",
+    "start": "1304559",
+    "end": "1310530"
+  },
+  {
+    "text": "semantics but we recognize that not all languages are like Java and not all languages want JVM invocation to work",
+    "start": "1310530",
+    "end": "1317400"
+  },
+  {
+    "text": "the way invocation works in Java and so the basic idea behind invoke dynamic is it lets the language runtime and the VM",
+    "start": "1317400",
+    "end": "1323340"
+  },
+  {
+    "text": "be partners and linkage decisions but also provides you know so it provides a way for a language specific logic to",
+    "start": "1323340",
+    "end": "1331380"
+  },
+  {
+    "text": "help the VM resolve a method call and then get out of the way so you don't have to be calling into the language",
+    "start": "1331380",
+    "end": "1337370"
+  },
+  {
+    "text": "runtime on it's how we make it fast so you know you could have you know",
+    "start": "1337370",
+    "end": "1344600"
+  },
+  {
+    "text": "JRuby code that provides JRuby specific linkit logic - code provides you know Python specific linkage logic and",
+    "start": "1344600",
+    "end": "1351919"
+  },
+  {
+    "text": "ultimately that boils down to one of the old invocation modes that the VM already",
+    "start": "1351919",
+    "end": "1357620"
+  },
+  {
+    "text": "knows how to inline through once the the resolution is done so this started out",
+    "start": "1357620",
+    "end": "1364279"
+  },
+  {
+    "text": "as a tool for dynamic languages where the language didn't have all the type",
+    "start": "1364279",
+    "end": "1370100"
+  },
+  {
+    "text": "information available that Java JVM signatures needed in order to be able to do of a method invocation so as an",
+    "start": "1370100",
+    "end": "1377389"
+  },
+  {
+    "text": "example like here's some code in Ruby where you say I have an ADD method takes",
+    "start": "1377389",
+    "end": "1382610"
+  },
+  {
+    "text": "two arguments a and B and it's body is a plus B but since we don't know the types of a and B we don't know what that plus",
+    "start": "1382610",
+    "end": "1389360"
+  },
+  {
+    "text": "really means that could be two integers could be two floats could be two strings so we don't know the types of a and B at",
+    "start": "1389360",
+    "end": "1396950"
+  },
+  {
+    "text": "compile time we know them at runtime the types could change from call to call but",
+    "start": "1396950",
+    "end": "1404090"
+  },
+  {
+    "text": "the reality is they usually don't if I call this method and then I call it",
+    "start": "1404090",
+    "end": "1409429"
+  },
+  {
+    "text": "again there's a really good chance that I'm gonna have the same types in my arguments as I did the last time because",
+    "start": "1409429",
+    "end": "1415370"
+  },
+  {
+    "text": "we call things and loops right so you have some loop that's iterating through an array and you're calling this method",
+    "start": "1415370",
+    "end": "1421610"
+  },
+  {
+    "text": "you know multiple times I want to be able to reuse linkage decisions without",
+    "start": "1421610",
+    "end": "1428720"
+  },
+  {
+    "text": "having to go through the slow path of what's the type of a what's the type of B let me look up in my function table",
+    "start": "1428720",
+    "end": "1434990"
+  },
+  {
+    "text": "the plus method that corresponds to these two types so you could obviously",
+    "start": "1434990",
+    "end": "1442159"
+  },
+  {
+    "text": "do with this with a reflection but it's really slow and so you know the key here",
+    "start": "1442159",
+    "end": "1447860"
+  },
+  {
+    "text": "is we want to avoid be linking in the call site by embedding information about",
+    "start": "1447860",
+    "end": "1452919"
+  },
+  {
+    "text": "when it when it consults the language-specific linkage logic it says here's the thing to call and here are",
+    "start": "1452919",
+    "end": "1458779"
+  },
+  {
+    "text": "the conditions under which you can just reuse this decision without having to come back and recompute the linkage",
+    "start": "1458779",
+    "end": "1465320"
+  },
+  {
+    "text": "target and once the VM does that it's then able to inline through the you know the the",
+    "start": "1465320",
+    "end": "1471960"
+  },
+  {
+    "text": "invokedynamic call just like anything else X is the there are multiple phases for a",
+    "start": "1471960",
+    "end": "1481500"
+  },
+  {
+    "text": "given invoke dynamic call side the first time you invoke a given call site it has",
+    "start": "1481500",
+    "end": "1486510"
+  },
+  {
+    "text": "to do some expensive one-time linkage work so it consults this language logic",
+    "start": "1486510",
+    "end": "1491700"
+  },
+  {
+    "text": "which we call the bootstrap method and that's gonna do some work it's gonna do some lookups maybe it's gonna spend some",
+    "start": "1491700",
+    "end": "1497670"
+  },
+  {
+    "text": "classes it's gonna do whatever it's gonna do but it only gets done once and then it returns a link call site which",
+    "start": "1497670",
+    "end": "1504600"
+  },
+  {
+    "text": "embeds here's your linkages target and here are the conditions under which you might have to relink and thereafter if",
+    "start": "1504600",
+    "end": "1512460"
+  },
+  {
+    "text": "those conditions you know or aren't you know aren't presents the VM never has to consult the bootstrap method again so",
+    "start": "1512460",
+    "end": "1520110"
+  },
+  {
+    "text": "afterwards the VM can treat the call side as being fully linked and then inline it through just like any other call side so it's pretty pretty cool",
+    "start": "1520110",
+    "end": "1526980"
+  },
+  {
+    "text": "tool it allows you to do some one-time work and then reuse that decision and",
+    "start": "1526980",
+    "end": "1533070"
+  },
+  {
+    "text": "this is what we ended up using in in our translation of lambdas even though Java",
+    "start": "1533070",
+    "end": "1539340"
+  },
+  {
+    "text": "is a statically typed language this is theoretically a tool for dynamically typed languages but you know why should",
+    "start": "1539340",
+    "end": "1545340"
+  },
+  {
+    "text": "they have all the fun so if you look at what's in the bytecode add and invoke dynamic call site there's basically",
+    "start": "1545340",
+    "end": "1552060"
+  },
+  {
+    "text": "three groups of operands the first one is the the linkage bootstrap which contains your language specific linkage",
+    "start": "1552060",
+    "end": "1557820"
+  },
+  {
+    "text": "logic that's called once never called again there's also a dynamic argument",
+    "start": "1557820",
+    "end": "1564000"
+  },
+  {
+    "text": "list which is pushed on the stack just like any other invocation instruction and then there's another argument list",
+    "start": "1564000",
+    "end": "1570150"
+  },
+  {
+    "text": "the static argument list which is constants that come out of the constant pool and that is the argument list",
+    "start": "1570150",
+    "end": "1575850"
+  },
+  {
+    "text": "that's passed to the bootstrap method and it captures things about the call site such as the types of arguments and",
+    "start": "1575850",
+    "end": "1582000"
+  },
+  {
+    "text": "things that the compiler knows statically so like I said job is a statically typed",
+    "start": "1582000",
+    "end": "1591080"
+  },
+  {
+    "text": "language all the types involved are static so we're not using the dynamic",
+    "start": "1591080",
+    "end": "1596330"
+  },
+  {
+    "text": "real incas feature i'm invoke dynamic but what is dynamic here is our code generation strategy we outlined two code",
+    "start": "1596330",
+    "end": "1602960"
+  },
+  {
+    "text": "generation strategies before spin an inner class or use a method handle there are others too you know we could use",
+    "start": "1602960",
+    "end": "1609019"
+  },
+  {
+    "text": "dynamic proxies if we wanted our code to be really slow or maybe we're running on",
+    "start": "1609019",
+    "end": "1614210"
+  },
+  {
+    "text": "some VM that has some really low-level method for you know building objects out",
+    "start": "1614210",
+    "end": "1620029"
+  },
+  {
+    "text": "of you know pure bits and alchemy and such that we want to use that for making our lambdas instead of you know the",
+    "start": "1620029",
+    "end": "1627229"
+  },
+  {
+    "text": "other mechanism so we have these various implementation strategies and that's what's dynamic we want to dynamically",
+    "start": "1627229",
+    "end": "1632719"
+  },
+  {
+    "text": "choose between those translation strategies and invoke dynamic gives us the chance to turn this choice into a",
+    "start": "1632719",
+    "end": "1638839"
+  },
+  {
+    "text": "pure runtime implementation detail that's completely separate from the binary representation so that's a really",
+    "start": "1638839",
+    "end": "1643969"
+  },
+  {
+    "text": "cool trick and I'll you know show you more of how that looks so the concept is",
+    "start": "1643969",
+    "end": "1649969"
+  },
+  {
+    "text": "in in the bytecode we embed a recipe for constructing a lambda so what goes into",
+    "start": "1649969",
+    "end": "1655159"
+  },
+  {
+    "text": "that recipe well we need to know the body of that lambda so we're gonna do",
+    "start": "1655159",
+    "end": "1660919"
+  },
+  {
+    "text": "the same thing we did in the method handle translation case where we distribute to lambda body to a method and we use a method handle to represent",
+    "start": "1660919",
+    "end": "1667489"
+  },
+  {
+    "text": "that method we need to know the target type what type is this lambda being converted to in the examples we've shown",
+    "start": "1667489",
+    "end": "1673940"
+  },
+  {
+    "text": "so far it's been predicates so that's one of the things that the that the",
+    "start": "1673940",
+    "end": "1679580"
+  },
+  {
+    "text": "bootstrap method needs to know and then there might be additional metadata about the call site such as like do I have to",
+    "start": "1679580",
+    "end": "1685700"
+  },
+  {
+    "text": "do special things for sterilization or water the variables that are captured",
+    "start": "1685700",
+    "end": "1691820"
+  },
+  {
+    "text": "from the lexical scope because those are going to be needed when constructing the lambda so this we represent this using",
+    "start": "1691820",
+    "end": "1698690"
+  },
+  {
+    "text": "an invoke dynamic call site we call this the lambda factory so the idea is you invoke this invoke dynamic call site and",
+    "start": "1698690",
+    "end": "1705649"
+  },
+  {
+    "text": "it returns you the lambda that you want some of the arguments to the call to the factory are static and they're encoded",
+    "start": "1705649",
+    "end": "1713269"
+  },
+  {
+    "text": "in the constant pool some of they're done dynamic they're pushed on the stack and then the VM",
+    "start": "1713269",
+    "end": "1718429"
+  },
+  {
+    "text": "makes it the case that subsequent indications of the same factory site in other words",
+    "start": "1718429",
+    "end": "1724670"
+  },
+  {
+    "text": "subsequent captures the same lambda you bypass the slow linkage path so okay",
+    "start": "1724670",
+    "end": "1730460"
+  },
+  {
+    "text": "let's look at what the compiler does so first step is D sugar the lambda body to",
+    "start": "1730460",
+    "end": "1736490"
+  },
+  {
+    "text": "a method like before so here we have this method lambda dollar one it has the argument person P it has the captured",
+    "start": "1736490",
+    "end": "1742760"
+  },
+  {
+    "text": "argument min age so that's easy very straightforward transformation and",
+    "start": "1742760",
+    "end": "1749920"
+  },
+  {
+    "text": "generally we can translate this to a static method if it's a method that captures the receiver because it touches",
+    "start": "1749920",
+    "end": "1756440"
+  },
+  {
+    "text": "a method or another class member invokes one of the class methods then we disagree on instance method and then at",
+    "start": "1756440",
+    "end": "1765770"
+  },
+  {
+    "text": "the site where we want to capture the lambda we invoke and invoke that we emit invoke dynamic instruction where we say",
+    "start": "1765770",
+    "end": "1772790"
+  },
+  {
+    "text": "the bootstrap is this special Java language runtime language logic method",
+    "start": "1772790",
+    "end": "1779720"
+  },
+  {
+    "text": "called the lambda meta Factory the static arguments are waters my",
+    "start": "1779720",
+    "end": "1784910"
+  },
+  {
+    "text": "conversion type my conversion target here predicate and where's my implementation here lambda dollar one and the dynamic arguments are the min",
+    "start": "1784910",
+    "end": "1793040"
+  },
+  {
+    "text": "age that I've captured from the context so I invoke this call sight it hands me back the lambda I want it's of type",
+    "start": "1793040",
+    "end": "1799250"
+  },
+  {
+    "text": "predicate and then I just passed that to remove F okay so the nice thing is the",
+    "start": "1799250",
+    "end": "1804640"
+  },
+  {
+    "text": "we're using this nominal representation of functions the signature of room of F",
+    "start": "1804640",
+    "end": "1810200"
+  },
+  {
+    "text": "is just predicate the lambda capture creates a predicate we just passed that",
+    "start": "1810200",
+    "end": "1816590"
+  },
+  {
+    "text": "along okay so the the generated code is actually pretty straightforward if you",
+    "start": "1816590",
+    "end": "1821750"
+  },
+  {
+    "text": "use Java P you can see all of the invokedynamic stuff in the constant pool and you know we didn't have to distort",
+    "start": "1821750",
+    "end": "1829340"
+  },
+  {
+    "text": "the translation very much so that's that's pretty good so now we have this you know this thing",
+    "start": "1829340",
+    "end": "1835760"
+  },
+  {
+    "start": "1834000",
+    "end": "1900000"
+  },
+  {
+    "text": "we call meta Factory the the the bootstrap method for these lambda capture sites it could do anything it",
+    "start": "1835760",
+    "end": "1843050"
+  },
+  {
+    "text": "wants it could generate it in her class dynamically spend the class at runtime using Azzam oh and then it would just",
+    "start": "1843050",
+    "end": "1849350"
+  },
+  {
+    "text": "link the call site to the constructor but that generated class that's actually the initial strategy",
+    "start": "1849350",
+    "end": "1856860"
+  },
+  {
+    "text": "that we implemented but that's just the version one strategy so you know in the",
+    "start": "1856860",
+    "end": "1862770"
+  },
+  {
+    "text": "future we could do something like instead of spinning one class per lambda we could spin one class per functional",
+    "start": "1862770",
+    "end": "1869610"
+  },
+  {
+    "text": "interface type one wrapper class for runnable one wrapper class for comparator etc and just pass a method",
+    "start": "1869610",
+    "end": "1875220"
+  },
+  {
+    "text": "handle to its to its constructor and we'll do that as soon as we're sure that",
+    "start": "1875220",
+    "end": "1880290"
+  },
+  {
+    "text": "the performance of that is better and that's something that we don't have to do in a major update of Java we could do",
+    "start": "1880290",
+    "end": "1885840"
+  },
+  {
+    "text": "that and you know eight dot zero dot one because it's just an implementation detail we could also use other",
+    "start": "1885840",
+    "end": "1891210"
+  },
+  {
+    "text": "techniques like dynamic proxy is or method handle proxies or VM private api's or whenever we can do to make this",
+    "start": "1891210",
+    "end": "1897330"
+  },
+  {
+    "text": "translation as fast as possible so what using invoke dynamic gave us",
+    "start": "1897330",
+    "end": "1903240"
+  },
+  {
+    "start": "1900000",
+    "end": "1960000"
+  },
+  {
+    "text": "here is the the option to defer the choice of code generation strategy to runtime and therefore it becomes a pure",
+    "start": "1903240",
+    "end": "1910830"
+  },
+  {
+    "text": "implementation detail something that we can change from version to version from day to day we settle on our binary",
+    "start": "1910830",
+    "end": "1916860"
+  },
+  {
+    "text": "protocol now which is here is the API for this invokedynamic bootstrap but we",
+    "start": "1916860",
+    "end": "1924660"
+  },
+  {
+    "text": "haven't burned the choice of implementation strategy into the bytecode so this is a classic Java trick",
+    "start": "1924660",
+    "end": "1931440"
+  },
+  {
+    "text": "of move more of the work from static compilation time to dynamic runtime when",
+    "start": "1931440",
+    "end": "1936870"
+  },
+  {
+    "text": "you have more information right if you have more information you can make better decisions the reason dynamic compilation always",
+    "start": "1936870",
+    "end": "1943440"
+  },
+  {
+    "text": "blows away static compilation is you have more information at runtime than you do statically and this gives us the",
+    "start": "1943440",
+    "end": "1949680"
+  },
+  {
+    "text": "flexibility to change our code generation strategy whenever we come up with a better one but wait there's more",
+    "start": "1949680",
+    "end": "1957350"
+  },
+  {
+    "text": "this behavior that invoke dynamic has where the first time through you link the call site and then future times",
+    "start": "1957350",
+    "end": "1963480"
+  },
+  {
+    "start": "1960000",
+    "end": "2048000"
+  },
+  {
+    "text": "through it bypasses that let's gives us basically for free that trick I was just",
+    "start": "1963480",
+    "end": "1969780"
+  },
+  {
+    "text": "describing where you take inter class and you stash it in a static field you know public static final comparator C",
+    "start": "1969780",
+    "end": "1977070"
+  },
+  {
+    "text": "equals you know new blah blah blah that trick that we used to do by hand to reduce the number of allocations our",
+    "start": "1977070",
+    "end": "1983160"
+  },
+  {
+    "text": "code now the runtime just does for you for free so if you have a lambda that doesn't",
+    "start": "1983160",
+    "end": "1988180"
+  },
+  {
+    "text": "capture anything and a lot of lambdas are like that you know X arrow X plus 2 or something like that the compiler is",
+    "start": "1988180",
+    "end": "1994180"
+  },
+  {
+    "text": "gonna say this is a stateless lambda one instance is as good as another they have no identity specific",
+    "start": "1994180",
+    "end": "2000210"
+  },
+  {
+    "text": "characteristics so the first time I capture one I'm gonna stash at the call",
+    "start": "2000210",
+    "end": "2005700"
+  },
+  {
+    "text": "site and then thereafter I'm just gonna return that same one and the VM is gonna recognize this this pattern and turn",
+    "start": "2005700",
+    "end": "2012420"
+  },
+  {
+    "text": "lambda Capture into a constant load so this makes in the fairly common case of",
+    "start": "2012420",
+    "end": "2018210"
+  },
+  {
+    "text": "stateless lambdas lambda capture much much faster than her classes because you're not allocating you're not going",
+    "start": "2018210",
+    "end": "2024360"
+  },
+  {
+    "text": "to the heap etc so in this case you can think of invokedynamic as being a lazily initialized cache it",
+    "start": "2024360",
+    "end": "2030810"
+  },
+  {
+    "text": "delays initialization to the first use so the overhead is zero if it's never used you don't need an extra field and",
+    "start": "2030810",
+    "end": "2038400"
+  },
+  {
+    "text": "then all stateless lambdas get the benefit of this lazy initialization and caching that comes for free so remember",
+    "start": "2038400",
+    "end": "2047640"
+  },
+  {
+    "text": "I said we need another level of indirection but we don't want to pay for it so let's let's look at the",
+    "start": "2047640",
+    "end": "2054179"
+  },
+  {
+    "start": "2048000",
+    "end": "2099000"
+  },
+  {
+    "text": "performance cost here the what we're calling the lambda manufactory is only",
+    "start": "2054179",
+    "end": "2060540"
+  },
+  {
+    "text": "invoked once per lambda in the case of non capturing lambdas which is pretty",
+    "start": "2060540",
+    "end": "2065879"
+  },
+  {
+    "text": "common subsequent captures are free I mean totally free and you know for the",
+    "start": "2065880",
+    "end": "2072810"
+  },
+  {
+    "text": "capturing case subsequent capture cost is on the order of a constructor call",
+    "start": "2072810",
+    "end": "2079110"
+  },
+  {
+    "text": "which is basically the same as inter-class so we have a performance",
+    "start": "2079110",
+    "end": "2085530"
+  },
+  {
+    "text": "characteristic which is worst case just like inter classes best case better so that's pretty good",
+    "start": "2085530",
+    "end": "2092810"
+  },
+  {
+    "text": "so let's break this down a little bit if we look at the different layers of cost involved in translation of from lambda",
+    "start": "2092810",
+    "end": "2101820"
+  },
+  {
+    "start": "2099000",
+    "end": "2176000"
+  },
+  {
+    "text": "to bytecode there's really three significant layers of cost there's linkage cost which is the",
+    "start": "2101820",
+    "end": "2107430"
+  },
+  {
+    "text": "one-time cost the first time you you capture that so in the case of inter",
+    "start": "2107430",
+    "end": "2112800"
+  },
+  {
+    "text": "classes linkage cost looks like class loading right the first time you instantiate a given inter class type",
+    "start": "2112800",
+    "end": "2119250"
+  },
+  {
+    "text": "you know which translates down to like new food dollar one it's got to go to the file system read those bytes off disk load",
+    "start": "2119250",
+    "end": "2125859"
+  },
+  {
+    "text": "the class the next time you capture that same kind of inter class you don't have to go back to the file system to read",
+    "start": "2125859",
+    "end": "2131770"
+  },
+  {
+    "text": "those bites off desk because you've already loaded the class so that's linkage cost capture cost is what you're",
+    "start": "2131770",
+    "end": "2138520"
+  },
+  {
+    "text": "doing each time you're capturing an instance so in the case of inter class's capture cost is invoking the constructor",
+    "start": "2138520",
+    "end": "2144579"
+  },
+  {
+    "text": "and then you have an invocation cost which is every time I actually invoke the you know the the lambda or the inter",
+    "start": "2144579",
+    "end": "2153339"
+  },
+  {
+    "text": "class method and that's just an ordinary old invoke interface bytecode okay so we",
+    "start": "2153339",
+    "end": "2159520"
+  },
+  {
+    "text": "have these three layers of cost the one-time cost the per lambda cost and the per invocation cost for inter",
+    "start": "2159520",
+    "end": "2164650"
+  },
+  {
+    "text": "classes this corresponds to class loading constructor invocation method invocation",
+    "start": "2164650",
+    "end": "2169720"
+  },
+  {
+    "text": "so let's stack up lambdas against that so we got some measurements from our performance team here this is showing us",
+    "start": "2169720",
+    "end": "2177400"
+  },
+  {
+    "start": "2176000",
+    "end": "2252000"
+  },
+  {
+    "text": "linkage costs so this measures total time in milliseconds for capturing",
+    "start": "2177400",
+    "end": "2183190"
+  },
+  {
+    "text": "32,000 distinct in inter classes or lambdas we've also to avoid biasing the",
+    "start": "2183190",
+    "end": "2190750"
+  },
+  {
+    "text": "results we loaded all the inner classes onto a ram desks - it's you know to take",
+    "start": "2190750",
+    "end": "2197410"
+  },
+  {
+    "text": "away the cost of actually going to the disk and and and pulling those bytes in to make it a fair comparison and there's",
+    "start": "2197410",
+    "end": "2205390"
+  },
+  {
+    "text": "sort of four experiments here one is for capturing one is for non capturing and",
+    "start": "2205390",
+    "end": "2210790"
+  },
+  {
+    "text": "the other access is is whether we're using tier compilation or non tiered compilation which turns out to have a big difference on the performance and",
+    "start": "2210790",
+    "end": "2218650"
+  },
+  {
+    "text": "what we see the important thing is this last column which is the percentage difference between lambda and anonymous",
+    "start": "2218650",
+    "end": "2223869"
+  },
+  {
+    "text": "class and in all the cases lambda captures faster than inter class capture capture for the you know so link linking",
+    "start": "2223869",
+    "end": "2234400"
+  },
+  {
+    "text": "a lambda involves invoking the bootstrap it's going to generate some bytecode on-the-fly you're gonna load that class",
+    "start": "2234400",
+    "end": "2239890"
+  },
+  {
+    "text": "on the fly sounds like a lot of work but it's still less work than an inter class okay so on",
+    "start": "2239890",
+    "end": "2246400"
+  },
+  {
+    "text": "the linkage side faster startup so that's pretty good all right so let's look at out of capture cost alright so",
+    "start": "2246400",
+    "end": "2253570"
+  },
+  {
+    "start": "2252000",
+    "end": "2447000"
+  },
+  {
+    "text": "these numbers are a little bit different there these are ops per microsecond so instead",
+    "start": "2253570",
+    "end": "2263020"
+  },
+  {
+    "text": "of total time it's um it's throughput and we we we measured six scenarios Oh",
+    "start": "2263020",
+    "end": "2269760"
+  },
+  {
+    "text": "on the x-axis we have the inner class the non capturing lambda and the",
+    "start": "2269760",
+    "end": "2275710"
+  },
+  {
+    "text": "capturing lambda and then we have two columns here one is for one thread one",
+    "start": "2275710",
+    "end": "2280750"
+  },
+  {
+    "text": "is for 80 threads on an 80 Way server you know banging as hard as they can and what we",
+    "start": "2280750",
+    "end": "2287290"
+  },
+  {
+    "text": "see is not surprisingly capturing lambdas are exactly as fast or slow as inter classes and non capturing lambdas",
+    "start": "2287290",
+    "end": "2296050"
+  },
+  {
+    "text": "are faster in the single threaded mode and when we go to the saturated mode non capturing lambdas are way faster than",
+    "start": "2296050",
+    "end": "2303100"
+  },
+  {
+    "text": "inter classes okay so going from single threaded to saturated we see a 5x",
+    "start": "2303100",
+    "end": "2309130"
+  },
+  {
+    "text": "improvement and throughput for the inter class case in the capturing case but in almost 70 X increase in throughput for",
+    "start": "2309130",
+    "end": "2316210"
+  },
+  {
+    "text": "you know the non capturing lambda and that that's where that trick of cashing the lambda at the call side and turning",
+    "start": "2316210",
+    "end": "2322480"
+  },
+  {
+    "text": "it into a constant load really pays off right you don't have to do any heat management overhead which has an impact",
+    "start": "2322480",
+    "end": "2328930"
+  },
+  {
+    "text": "on scalability even when you're allocating with read local allocation blocks eventually you have to go back to",
+    "start": "2328930",
+    "end": "2334240"
+  },
+  {
+    "text": "the heap to get a new thread local allocation block because you've run out of the one you have and that shows up as a scalability impediments so pretty good",
+    "start": "2334240",
+    "end": "2342610"
+  },
+  {
+    "text": "story here our worst-case numbers for lambda are exactly the same as inner",
+    "start": "2342610",
+    "end": "2347710"
+  },
+  {
+    "text": "classes and our best-case numbers are much better so this is you know what game theorists call a dominating",
+    "start": "2347710",
+    "end": "2354730"
+  },
+  {
+    "text": "strategy and note that this is just our like dumb strategy this is just the",
+    "start": "2354730",
+    "end": "2360160"
+  },
+  {
+    "text": "version one strategy we're going out with simplest dumbest thing we could possibly do so there's a deep pipeline",
+    "start": "2360160",
+    "end": "2367600"
+  },
+  {
+    "text": "of things we can do to make it faster but even if you don't believe us about that you know it's still faster even",
+    "start": "2367600",
+    "end": "2373840"
+  },
+  {
+    "text": "with the dumb strategy okay so one of",
+    "start": "2373840",
+    "end": "2380320"
+  },
+  {
+    "text": "the other cool things about this approach that we've taken is the lam",
+    "start": "2380320",
+    "end": "2385640"
+  },
+  {
+    "text": "conversion meta factories are part of the JDK so even though the semantics of them are tailored to what the Java",
+    "start": "2385640",
+    "end": "2391670"
+  },
+  {
+    "text": "language needs other languages might find this useful also because other languages that run on the JVM may want",
+    "start": "2391670",
+    "end": "2398240"
+  },
+  {
+    "text": "to invoke methods on collections and may want to convert their lambdas to the",
+    "start": "2398240",
+    "end": "2403579"
+  },
+  {
+    "text": "representation of lambda that the collections are expecting so Java API s are going to be full of these functional",
+    "start": "2403579",
+    "end": "2408829"
+  },
+  {
+    "text": "interfaces you know like collection dot for each or the remove if example we've been using",
+    "start": "2408829",
+    "end": "2414789"
+  },
+  {
+    "text": "and so other languages may want to call these API is and will get the benefit of all of the performance improvements that",
+    "start": "2414789",
+    "end": "2421579"
+  },
+  {
+    "text": "we add to them over time so you know obviously other languages can do what",
+    "start": "2421579",
+    "end": "2428269"
+  },
+  {
+    "text": "they want but it's one more tool in the toolbox for other language compilers to piggyback on the work of the performance",
+    "start": "2428269",
+    "end": "2434299"
+  },
+  {
+    "text": "work that we're doing for the Java language so not just for us you know anybody can use this now I mentioned",
+    "start": "2434299",
+    "end": "2441349"
+  },
+  {
+    "text": "this sort of a deep pipeline of VM optimizations that we really want to do here so with a little bit of help from",
+    "start": "2441349",
+    "end": "2446869"
+  },
+  {
+    "text": "the VM writing it right now we got no help from the VM we're just using invokedynamic out of the box it's just",
+    "start": "2446869",
+    "end": "2452119"
+  },
+  {
+    "start": "2447000",
+    "end": "2569000"
+  },
+  {
+    "text": "like any other compiler you know would let JRuby would but with a little bit of help we can do better so one of the",
+    "start": "2452119",
+    "end": "2460400"
+  },
+  {
+    "text": "optimizations that we've got in mind is the we've designed the API of the lambda",
+    "start": "2460400",
+    "end": "2465529"
+  },
+  {
+    "text": "meta Factory to have semantics that map perfectly to method handle algebra so",
+    "start": "2465529",
+    "end": "2472400"
+  },
+  {
+    "text": "the VM could look at a lambda capture site and say oh I know exactly what that",
+    "start": "2472400",
+    "end": "2477950"
+  },
+  {
+    "text": "does it has the exact same two-man semantics as this equivalent method handle you know Combinator and since the",
+    "start": "2477950",
+    "end": "2486500"
+  },
+  {
+    "text": "VM already understands method handle semantics it's an opportunity for the VM to then do things like apply other",
+    "start": "2486500",
+    "end": "2492640"
+  },
+  {
+    "text": "optimizations like code motion and box on box elimination so for example at the",
+    "start": "2492640",
+    "end": "2497900"
+  },
+  {
+    "text": "capture after operation is it's a pure operation has no side effects so if the",
+    "start": "2497900",
+    "end": "2503420"
+  },
+  {
+    "text": "VM can intensify the capture operate operation it can say alright I can freely move that capture operation",
+    "start": "2503420",
+    "end": "2510730"
+  },
+  {
+    "text": "through an inline call for example so I can defer actually doing it until I know",
+    "start": "2510730",
+    "end": "2518960"
+  },
+  {
+    "text": "I'm going to or if you think of lamb to capture is basically being a box operation you're",
+    "start": "2518960",
+    "end": "2524450"
+  },
+  {
+    "text": "taking a method you're boxing it into one of these nominal function types well the same techniques that let us do box",
+    "start": "2524450",
+    "end": "2530840"
+  },
+  {
+    "text": "unbox a limitation on on integers could apply to functions where you have this",
+    "start": "2530840",
+    "end": "2536000"
+  },
+  {
+    "text": "boxing operation you move it to where the unbox is which is the invocation and then just say oh well what do I need the",
+    "start": "2536000",
+    "end": "2542360"
+  },
+  {
+    "text": "box for let me just invoke the method handle directly so with a little bit of",
+    "start": "2542360",
+    "end": "2548630"
+  },
+  {
+    "text": "work in transportation we can lean on other other existing optimizations such",
+    "start": "2548630",
+    "end": "2557210"
+  },
+  {
+    "text": "as inlining and code motion and escape analysis to make lamb to capture even faster so that's pretty cool",
+    "start": "2557210",
+    "end": "2564490"
+  },
+  {
+    "text": "okay so I have to talk about serialization I hate serialization but",
+    "start": "2564490",
+    "end": "2572090"
+  },
+  {
+    "start": "2569000",
+    "end": "2694000"
+  },
+  {
+    "text": "no language feature is ever complete without some interaction with civilization so here's why we had to had",
+    "start": "2572090",
+    "end": "2579590"
+  },
+  {
+    "text": "had to tackle this we've made this decision to represent lambdas as nominal",
+    "start": "2579590",
+    "end": "2584720"
+  },
+  {
+    "text": "function types so if we have a nominal function type called foo and an extensor",
+    "start": "2584720",
+    "end": "2589730"
+  },
+  {
+    "text": "realisable and here this is a function from void to boolean and we assign a",
+    "start": "2589730",
+    "end": "2595610"
+  },
+  {
+    "text": "very simple lambda to this users are going to expect this to work and if we",
+    "start": "2595610",
+    "end": "2601070"
+  },
+  {
+    "text": "say this doesn't work it's just another edge case that users have to reason",
+    "start": "2601070",
+    "end": "2606260"
+  },
+  {
+    "text": "about of like oh this thing is serializable if it came from an ER class or name class but not from a lambda so I have to like reason about its provenance",
+    "start": "2606260",
+    "end": "2613130"
+  },
+  {
+    "text": "and ha we don't want to ask people to do that unfortunately because our translation",
+    "start": "2613130",
+    "end": "2619790"
+  },
+  {
+    "text": "strategy is dynamic we can't just serialize the lambda object because the class that represents it won't exist at",
+    "start": "2619790",
+    "end": "2624890"
+  },
+  {
+    "text": "these serialization time so we have to and and and even if it did it maybe it's",
+    "start": "2624890",
+    "end": "2630830"
+  },
+  {
+    "text": "using a different translation strategy and we'd like to deserialize it using the translation strategy of a target VM",
+    "start": "2630830",
+    "end": "2636220"
+  },
+  {
+    "text": "so we have this dynamic translation strategy we need a dynamic serialization strategy to and without introducing any",
+    "start": "2636220",
+    "end": "2642890"
+  },
+  {
+    "text": "security holes which is hard to do with serialization so the trick here is just",
+    "start": "2642890",
+    "end": "2649820"
+  },
+  {
+    "text": "like the lamb to capture site is a recipe for a lambda the serialized form needs to be a recipe for the lambda as well and we can use",
+    "start": "2649820",
+    "end": "2656569"
+  },
+  {
+    "text": "the existing hooks in serialization read resolved write replace to serialize to a",
+    "start": "2656569",
+    "end": "2661640"
+  },
+  {
+    "text": "recipe of here all the things that went into the call site and then at D",
+    "start": "2661640",
+    "end": "2667609"
+  },
+  {
+    "text": "serialization time we reconstitute that into you know into a new lamb to capture",
+    "start": "2667609",
+    "end": "2674859"
+  },
+  {
+    "text": "using whatever translation strategies current at the time so it all does work",
+    "start": "2674859",
+    "end": "2681470"
+  },
+  {
+    "text": "it's pretty nasty mope feliu will notice it it'll just work but you know I'd like",
+    "start": "2681470",
+    "end": "2687980"
+  },
+  {
+    "text": "those months of my life back okay so summing up the evolutionary path",
+    "start": "2687980",
+    "end": "2696020"
+  },
+  {
+    "start": "2694000",
+    "end": "3185000"
+  },
+  {
+    "text": "for evolving a language is full of ideas that are obvious but wrong and you",
+    "start": "2696020",
+    "end": "2703400"
+  },
+  {
+    "text": "really have to be on the lookout for these obvious but wrong ideas because they're so compelling it's like oh I",
+    "start": "2703400",
+    "end": "2708890"
+  },
+  {
+    "text": "have the perfect tool except it's not perfect and boy it's not perfect in this way either and so you have to be willing",
+    "start": "2708890",
+    "end": "2715490"
+  },
+  {
+    "text": "to keep looking and some of these like some of these approaches that I described took a number of aha moments",
+    "start": "2715490",
+    "end": "2722930"
+  },
+  {
+    "text": "to get from the obvious but wrong but you know to these are they actually",
+    "start": "2722930",
+    "end": "2728720"
+  },
+  {
+    "text": "right and when we hit the right ones it was really obvious they were right but it took us a long time you know to find",
+    "start": "2728720",
+    "end": "2737420"
+  },
+  {
+    "text": "them and so you have to be willing to keep looking even though you think you found something of this so invokedynamic",
+    "start": "2737420",
+    "end": "2744109"
+  },
+  {
+    "text": "turned out to be a great tool here so we use it you know to capture lambdas it gave us flexibility and it gives us",
+    "start": "2744109",
+    "end": "2750410"
+  },
+  {
+    "text": "performance and it gives us the opportunity to change our strategy at runtime and even using the dumb strategy",
+    "start": "2750410",
+    "end": "2756680"
+  },
+  {
+    "text": "that we're starting with still at least as good you know and and possibly better than inter classes and in common cases",
+    "start": "2756680",
+    "end": "2763660"
+  },
+  {
+    "text": "so you know hopefully like I said none of you will ever have to know any of",
+    "start": "2763660",
+    "end": "2768980"
+  },
+  {
+    "text": "this you'll just use lambdas and you'll get great performance and you'll be happy but you know if next time someone",
+    "start": "2768980",
+    "end": "2774559"
+  },
+  {
+    "text": "says oh lambdas are just syntactic sugar for inner classes now you can slap them around authoritative lee if you're",
+    "start": "2774559",
+    "end": "2782270"
+  },
+  {
+    "text": "interested in more information you can go to the lambda project page on open JDK",
+    "start": "2782270",
+    "end": "2787290"
+  },
+  {
+    "text": "you can download the spec you can download the binary you can download the overview documents and play with this",
+    "start": "2787290",
+    "end": "2794670"
+  },
+  {
+    "text": "today or wait until Java eight comes out first quarter next year and with that do",
+    "start": "2794670",
+    "end": "2802290"
+  },
+  {
+    "text": "we have any questions on the magic question machine alright so first question here is head of Java laminate",
+    "start": "2802290",
+    "end": "2807900"
+  },
+  {
+    "text": "performance compared to lambda performance of other languages so I don't have data for this but I am sure",
+    "start": "2807900",
+    "end": "2813510"
+  },
+  {
+    "text": "that we're gonna blow them all away because all of the others are using the same tools that we rejected as being too",
+    "start": "2813510",
+    "end": "2819930"
+  },
+  {
+    "text": "slow okay and now of course they're welcome to use the tools that we have and I expect some compilers will migrate",
+    "start": "2819930",
+    "end": "2825960"
+  },
+  {
+    "text": "to using them but I have a hard time imagining that they're gonna do much better but I'm always willing to be",
+    "start": "2825960",
+    "end": "2832050"
+  },
+  {
+    "text": "proven wrong okay let's see I'm not",
+    "start": "2832050",
+    "end": "2838619"
+  },
+  {
+    "text": "going to answer that what feature in",
+    "start": "2838619",
+    "end": "2843690"
+  },
+  {
+    "text": "regards to lambda which didn't make it in as your biggest regret that's that's",
+    "start": "2843690",
+    "end": "2848760"
+  },
+  {
+    "text": "that's a good one do I even have an answer for that so",
+    "start": "2848760",
+    "end": "2857280"
+  },
+  {
+    "text": "many little things didn't make it in that you know that that that you know",
+    "start": "2857280",
+    "end": "2862349"
+  },
+  {
+    "text": "think things that would be little little little rough edges but I actually can't think of anything big that we that we",
+    "start": "2862349",
+    "end": "2868080"
+  },
+  {
+    "text": "really that we really regret leaving out maybe that's just me convincing myself",
+    "start": "2868080",
+    "end": "2873119"
+  },
+  {
+    "text": "or something all right you have some other questions on the mic George so you've now told us",
+    "start": "2873119",
+    "end": "2881940"
+  },
+  {
+    "text": "about lambdas and this morning you also talked about value types so I just wanted to know if you're going to give",
+    "start": "2881940",
+    "end": "2888089"
+  },
+  {
+    "text": "us tail calls as well at some point so tail calls so that's good question and a",
+    "start": "2888089",
+    "end": "2893250"
+  },
+  {
+    "text": "common question one that we've received at every conference for the last 15 years so what is that now and how",
+    "start": "2893250",
+    "end": "2902970"
+  },
+  {
+    "text": "actually is the time and the reason for that is the reason we haven't been able to do tail calls despite the fact that",
+    "start": "2902970",
+    "end": "2909900"
+  },
+  {
+    "text": "it is so obvious how to do tail calls has been a subtle one and that is there",
+    "start": "2909900",
+    "end": "2915420"
+  },
+  {
+    "text": "was an interaction between how one might implement tail calls on the JVM and the security model of the",
+    "start": "2915420",
+    "end": "2920560"
+  },
+  {
+    "text": "JDK so there is code in the JDK that for whatever reason don't know I'm the",
+    "start": "2920560",
+    "end": "2926140"
+  },
+  {
+    "text": "messenger don't shoot me relies on how many stack frames are",
+    "start": "2926140",
+    "end": "2931240"
+  },
+  {
+    "text": "there between me and the last code domain okay so if you have the language",
+    "start": "2931240",
+    "end": "2936640"
+  },
+  {
+    "text": "runtime systematically munging the the stack you can't rely on being able to",
+    "start": "2936640",
+    "end": "2943360"
+  },
+  {
+    "text": "walk down the stack and and count the number of stack frames and there was code security sense of code that",
+    "start": "2943360",
+    "end": "2949480"
+  },
+  {
+    "text": "depended on I know that four frames down for me is the user code so I'm gonna execute it with the user permissions of",
+    "start": "2949480",
+    "end": "2955960"
+  },
+  {
+    "text": "that code this is of course brittle and and difficult but what it meant was we",
+    "start": "2955960",
+    "end": "2961780"
+  },
+  {
+    "text": "couldn't have we couldn't have tail calls messing up the the stack set so that was totally",
+    "start": "2961780",
+    "end": "2968890"
+  },
+  {
+    "text": "non-obvious accidental reason why implementing tail calls on the JVM was just harder than it looked",
+    "start": "2968890",
+    "end": "2974860"
+  },
+  {
+    "text": "fortunately we've just gone through a huge effort to rip out all of the stack",
+    "start": "2974860",
+    "end": "2980110"
+  },
+  {
+    "text": "depth sensitive code from the JDK and replace it with a more general mechanism about caller sensitive code where it",
+    "start": "2980110",
+    "end": "2986770"
+  },
+  {
+    "text": "walks down the stack and looks for the next you know protection domain as opposed to the specific number of stack",
+    "start": "2986770",
+    "end": "2993400"
+  },
+  {
+    "text": "frames which I think has removed the last really serious impediment to moving",
+    "start": "2993400",
+    "end": "2998980"
+  },
+  {
+    "text": "forward a tail call so you know we are much closer now than we were two or",
+    "start": "2998980",
+    "end": "3004770"
+  },
+  {
+    "text": "three years ago but I'm not gonna make any promises about when it's gonna be okay if you decide to change the",
+    "start": "3004770",
+    "end": "3010470"
+  },
+  {
+    "text": "strategy for gender glam 'das which components need to change the compiler the libraries the VM only only the V I'm",
+    "start": "3010470",
+    "end": "3017670"
+  },
+  {
+    "text": "actually not even the VM the only thing it needs to change is a little bit of code in the JDK runtime and this is the",
+    "start": "3017670",
+    "end": "3026010"
+  },
+  {
+    "text": "implementation of the lambda meta Factory this is something that we can freely change from version to version",
+    "start": "3026010",
+    "end": "3032700"
+  },
+  {
+    "text": "even in maintenance releases it's all pure Java code the changes it's just an",
+    "start": "3032700",
+    "end": "3038790"
+  },
+  {
+    "text": "implementation detail so no language changed no compiler changed no VM change no library API change just library",
+    "start": "3038790",
+    "end": "3046500"
+  },
+  {
+    "text": "implementation change so that's pretty cool mmm I was just wondering you talked about evil methods this morning",
+    "start": "3046500",
+    "end": "3052900"
+  },
+  {
+    "text": "if you have a default method in two interfaces doesn't that give you the same multiple inheritance problem that",
+    "start": "3052900",
+    "end": "3059920"
+  },
+  {
+    "text": "okay so the question is oh my god you added multiple inheritance in Java multiple inheritance is really complicated right that's your question",
+    "start": "3059920",
+    "end": "3066759"
+  },
+  {
+    "text": "okay Java has always say here's my kids my clever answer Java has always had",
+    "start": "3066759",
+    "end": "3072490"
+  },
+  {
+    "text": "multiple inheritance of types class a implements ijk that's multiple",
+    "start": "3072490",
+    "end": "3078249"
+  },
+  {
+    "text": "inheritance what we added in default methods was multiple inheritance of behavior where all the pain of multiple",
+    "start": "3078249",
+    "end": "3085660"
+  },
+  {
+    "text": "inheritance comes from in C++ is multiple inheritance of state we don't have multiple inheritance of state so",
+    "start": "3085660",
+    "end": "3091359"
+  },
+  {
+    "text": "the rules for resolving conflicts in default methods are actually really",
+    "start": "3091359",
+    "end": "3097630"
+  },
+  {
+    "text": "simple there's three rules the first rule superclass wins in other words if the superclass chain has an",
+    "start": "3097630",
+    "end": "3104710"
+  },
+  {
+    "text": "opinion on that method you're done don't even look at the interfaces looks just like it did in Java 7 rule two",
+    "start": "3104710",
+    "end": "3110289"
+  },
+  {
+    "text": "subclasses win over super classes so if lists and collection both offer you an",
+    "start": "3110289",
+    "end": "3115779"
+  },
+  {
+    "text": "implementation of some defaults you take the more specific one rule three no rule three if you don't get a unique answer",
+    "start": "3115779",
+    "end": "3123130"
+  },
+  {
+    "text": "from rules one and two you implemented yourself as if it was abstract very very simple diamonds are no problem you can",
+    "start": "3123130",
+    "end": "3129430"
+  },
+  {
+    "text": "have diamonds they work perfectly so all of the things that we are scared of about multiple inheritance from C++ are",
+    "start": "3129430",
+    "end": "3136349"
+  },
+  {
+    "text": "they all have to do with multiple Tarrance of state and we don't have that problem no it does not break backwards",
+    "start": "3136349",
+    "end": "3144430"
+  },
+  {
+    "text": "compatibility because if you're looking at compatibility for you know with you",
+    "start": "3144430",
+    "end": "3150339"
+  },
+  {
+    "text": "know pre Java eight code if it linked under Java 7 that means that there's an",
+    "start": "3150339",
+    "end": "3156579"
+  },
+  {
+    "text": "implementation in the superclass chain rule 1 which gives priority to the súplica superclass chain means it works exactly",
+    "start": "3156579",
+    "end": "3163210"
+  },
+  {
+    "text": "in Java 8 the way it worked in Java 7 it's way simpler than it looks I promise",
+    "start": "3163210",
+    "end": "3169839"
+  },
+  {
+    "text": "you ok thank you everyone for attending thank you Brian and have a good break",
+    "start": "3169839",
+    "end": "3176990"
+  },
+  {
+    "text": "you",
+    "start": "3176990",
+    "end": "3179050"
+  }
+]

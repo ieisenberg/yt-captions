@@ -1,0 +1,1713 @@
+[
+  {
+    "start": "0",
+    "end": "38000"
+  },
+  {
+    "text": "hello everyone uh Welcome to our talk um this is Lauren I'm Anan we're both",
+    "start": "560",
+    "end": "6000"
+  },
+  {
+    "text": "engineers at data dog and today we are going to talk about networking and service",
+    "start": "6000",
+    "end": "13240"
+  },
+  {
+    "text": "Discovery uh so I'll start with a few words about data dog for those that don't know us uh we are an observability",
+    "start": "13799",
+    "end": "19640"
+  },
+  {
+    "text": "product um with a bunch of Integrations uh we have quite a large customer base already and because of that um we have a",
+    "start": "19640",
+    "end": "27400"
+  },
+  {
+    "text": "pretty big infra in order to store and create all this data Lauren is going to start by introducing a bit more about",
+    "start": "27400",
+    "end": "33920"
+  },
+  {
+    "text": "our infra and that's going to be useful for the rest of the talk yes before we dive into the purpose",
+    "start": "33920",
+    "end": "42559"
+  },
+  {
+    "start": "38000",
+    "end": "190000"
+  },
+  {
+    "text": "of the talk which is service Discovery to give you context and the constraints we have uh we're going to present um a",
+    "start": "42559",
+    "end": "48199"
+  },
+  {
+    "text": "quick history of our infro so back in 2018 data dog was running in a single region on AWS and",
+    "start": "48199",
+    "end": "55000"
+  },
+  {
+    "text": "everything was managed with chef and Capistrano as we were reaching thousands of node they started to be a challenge",
+    "start": "55000",
+    "end": "61640"
+  },
+  {
+    "text": "in addition we had new customers in Europe we wanted us to send data to Europe and this got us the first one of",
+    "start": "61640",
+    "end": "67960"
+  },
+  {
+    "text": "the first big infra project we did which was creating a new region on a new provider and because we were seeing",
+    "start": "67960",
+    "end": "73680"
+  },
+  {
+    "text": "limits with Chef we started to deploy with kuber instead of uh Chef in Europe",
+    "start": "73680",
+    "end": "78840"
+  },
+  {
+    "text": "as you can see on this slide we also started to do this in in the initial region in the US but only a small part",
+    "start": "78840",
+    "end": "84759"
+  },
+  {
+    "text": "of it was running on kuties at the time fast forward to 2024 this is far",
+    "start": "84759",
+    "end": "90520"
+  },
+  {
+    "text": "more complex right we're running in six different regions on three different providers everything in running in",
+    "start": "90520",
+    "end": "96520"
+  },
+  {
+    "text": "kubernetes and and we run millions of containers what's important for this talk is we run thousand to tens of",
+    "start": "96520",
+    "end": "104560"
+  },
+  {
+    "text": "thousands of nodes in each region which means of course because of limits in kubernetes that we need to",
+    "start": "104560",
+    "end": "110360"
+  },
+  {
+    "text": "have multiple clusters in regions and in some regions we have dozens and what really matters for what",
+    "start": "110360",
+    "end": "115960"
+  },
+  {
+    "text": "we're going to discuss today are these three things the fact that we're 100% kubernetes that we run on three",
+    "start": "115960",
+    "end": "121560"
+  },
+  {
+    "text": "different providers and that regions can have up to dozens of clusters if we zoom in into a region",
+    "start": "121560",
+    "end": "128879"
+  },
+  {
+    "text": "because we have many clusters we need to assign workloads to clusters and in this very simple example here we can we can",
+    "start": "128879",
+    "end": "135360"
+  },
+  {
+    "text": "see three different clusters one that is dedicated to metrix application one that is dedicated to logs application and a",
+    "start": "135360",
+    "end": "141680"
+  },
+  {
+    "text": "third one that is dedicated to shared services such as Kafka or Cassandra this looks simple enough but",
+    "start": "141680",
+    "end": "147959"
+  },
+  {
+    "text": "for reliability in scalability reasons we tend to deploy stateless workloads in",
+    "start": "147959",
+    "end": "153680"
+  },
+  {
+    "text": "zonal clusters right so you can see here that instead of having a single metrix cluster in the region we actually have",
+    "start": "153680",
+    "end": "159480"
+  },
+  {
+    "text": "one in each Zone this give us increased reliability because if the cluster fail",
+    "start": "159480",
+    "end": "164680"
+  },
+  {
+    "text": "if a cluster fail it means we still have two clusters to run the workload and also it aligns failure domain right like",
+    "start": "164680",
+    "end": "170239"
+  },
+  {
+    "text": "the failure of the zone of the cloud provider tends to have a similar effect as losing a cluster of course this mostly works for",
+    "start": "170239",
+    "end": "177879"
+  },
+  {
+    "text": "stateless Services if you have stateful services that are coordinated such as Kafka or Cassandra it's much easier to",
+    "start": "177879",
+    "end": "184280"
+  },
+  {
+    "text": "run them in Regional cluster so we have a mix of zonal and Regional",
+    "start": "184280",
+    "end": "189680"
+  },
+  {
+    "start": "190000",
+    "end": "286000"
+  },
+  {
+    "text": "clusters now that we have an idea of how we run things of course because we have many applications they need to talk to",
+    "start": "190680",
+    "end": "196840"
+  },
+  {
+    "text": "one another and this means service Discovery and before diving into how we do things we're now going to give you a",
+    "start": "196840",
+    "end": "202879"
+  },
+  {
+    "text": "a quick uh overview of how it works in in KUB in general so when you start deploying a",
+    "start": "202879",
+    "end": "210280"
+  },
+  {
+    "text": "service in exposing application in kubernetes the first thing you're going probably to do is to create a service",
+    "start": "210280",
+    "end": "215959"
+  },
+  {
+    "text": "with the default configuration and it's going to be a cluster IP service and the way cluster IP Services work is as",
+    "start": "215959",
+    "end": "222360"
+  },
+  {
+    "text": "follows so first if we have an intake pod that wants to reach the storage pod of the storage application the intake",
+    "start": "222360",
+    "end": "229560"
+  },
+  {
+    "text": "pod is going to make a DNS query so here it's quering for storage and DNS is",
+    "start": "229560",
+    "end": "234920"
+  },
+  {
+    "text": "going is going to give an answer that is a cluster IP and what's important here is that the cluster IP is actually a",
+    "start": "234920",
+    "end": "241319"
+  },
+  {
+    "text": "virtual IP it's not the IP of one of the pods you can see here that pods have IPS in 10. something while the virtual IP is",
+    "start": "241319",
+    "end": "248680"
+  },
+  {
+    "text": "in 172 of course because the intake pod got this answer it's now sending the traffic",
+    "start": "248680",
+    "end": "254680"
+  },
+  {
+    "text": "to the virtual IP which has to be translated into the IP of a pod for the traffic to reach the storage pods and",
+    "start": "254680",
+    "end": "261680"
+  },
+  {
+    "text": "this is done with a procure so I use procure here because there are multiple ways to do this um it's usually IP",
+    "start": "261680",
+    "end": "268080"
+  },
+  {
+    "text": "tables or ipvs and and more and more ebpf and for this procure to be",
+    "start": "268080",
+    "end": "273560"
+  },
+  {
+    "text": "configured so the component that is transforming virtual IP into P IP you have multiple Solutions the the classic",
+    "start": "273560",
+    "end": "279720"
+  },
+  {
+    "text": "one was to use C proxy and more and more people use celium this is what what we",
+    "start": "279720",
+    "end": "285918"
+  },
+  {
+    "start": "286000",
+    "end": "479000"
+  },
+  {
+    "text": "do so cluster IP services are are great right than magic because clients always",
+    "start": "286240",
+    "end": "292720"
+  },
+  {
+    "text": "see a single IP that's extremely convenient because they don't have to care about the number of back ends the",
+    "start": "292720",
+    "end": "298199"
+  },
+  {
+    "text": "fact that this back end will scale up and down the fact that sometimes it will be unreachable everything is is totally",
+    "start": "298199",
+    "end": "303680"
+  },
+  {
+    "text": "masked to the application they just see the single IP however it's not perfect",
+    "start": "303680",
+    "end": "308960"
+  },
+  {
+    "text": "and here is an example of issues you can get with cluster IPS so in this example",
+    "start": "308960",
+    "end": "314039"
+  },
+  {
+    "text": "here we have 10 GPC servers and 100 JP clients sending 100 request per second",
+    "start": "314039",
+    "end": "319560"
+  },
+  {
+    "text": "to these servers and of course these graph are representing the number of request received by the servers and the",
+    "start": "319560",
+    "end": "325120"
+  },
+  {
+    "text": "CPU of the servers and you would expect this to be balanced right you would expect all the back end to get same",
+    "start": "325120",
+    "end": "330280"
+  },
+  {
+    "text": "number of queries turns out it's very different so it's pretty confusing and",
+    "start": "330280",
+    "end": "336319"
+  },
+  {
+    "text": "and the reason this happens actually is because of the way grpc works if G if a",
+    "start": "336319",
+    "end": "341600"
+  },
+  {
+    "text": "GPC client sees a single IP for a service it's going to consider that",
+    "start": "341600",
+    "end": "346720"
+  },
+  {
+    "text": "there is a single backand and it will establish a single connection on which it will send all the traffic so each",
+    "start": "346720",
+    "end": "352720"
+  },
+  {
+    "text": "client is connected to a single backend the problem is if you have 10",
+    "start": "352720",
+    "end": "357800"
+  },
+  {
+    "text": "backends and 10 clients in that example that H pick a backand it's pretty much",
+    "start": "357800",
+    "end": "362960"
+  },
+  {
+    "text": "running uh um a 10 a 10 dice um and you can see here that some backends will get",
+    "start": "362960",
+    "end": "370039"
+  },
+  {
+    "text": "uh three clients and some backend will get none of course it's only with 10 clients if you have more clients it's",
+    "start": "370039",
+    "end": "375800"
+  },
+  {
+    "text": "slightly better right this is a distribution of number of clients connected to each server if you have 100",
+    "start": "375800",
+    "end": "381800"
+  },
+  {
+    "text": "clients so it's better but you can still see a huge discrepancy between back and four with six client and back and six",
+    "start": "381800",
+    "end": "389039"
+  },
+  {
+    "text": "with 18 so as a summary cluster IP services are magic in many ways but the problem is",
+    "start": "389039",
+    "end": "396680"
+  },
+  {
+    "text": "clients have no control overload balancing and widely used application rely on this right in addition some",
+    "start": "396680",
+    "end": "403400"
+  },
+  {
+    "text": "applications even rely on the fact that they can see all the backends and this is true for Cassandra kfka for",
+    "start": "403400",
+    "end": "410440"
+  },
+  {
+    "text": "instance so cluster IP services are the default service in kuties but an option",
+    "start": "410440",
+    "end": "415599"
+  },
+  {
+    "text": "you can have is you can transform these Services into headless Services which are design to address this",
+    "start": "415599",
+    "end": "421199"
+  },
+  {
+    "text": "issue and the way they work is is very similar except you're going to see here that when you do the DNS query instead",
+    "start": "421199",
+    "end": "427639"
+  },
+  {
+    "text": "of getting a virtual IP as an answer we're getting the IP of all the backends right so the client gets all the IPS and",
+    "start": "427639",
+    "end": "434280"
+  },
+  {
+    "text": "then it's responsible for connecting to the different pods so it's much simpler you can see here that the intake pod is",
+    "start": "434280",
+    "end": "440879"
+  },
+  {
+    "text": "directly sending traffic to storage pod one and with no with no",
+    "start": "440879",
+    "end": "447319"
+  },
+  {
+    "text": "procure so it's better in our case right but of course it means the client has to",
+    "start": "447520",
+    "end": "452800"
+  },
+  {
+    "text": "let balance and the client has to handle everything the pro was handling before which is manage healthiness of uh of the",
+    "start": "452800",
+    "end": "460440"
+  },
+  {
+    "text": "back ends and stess of the of the end points when you're scaling up and down however it Tres the main challenge",
+    "start": "460440",
+    "end": "467879"
+  },
+  {
+    "text": "we we had with cluster IPS you can see here that we migrated a service from cluster IP to headless service around 1",
+    "start": "467879",
+    "end": "475199"
+  },
+  {
+    "text": "p.m. and suddenly the traffic is perfectly balanced",
+    "start": "475199",
+    "end": "480560"
+  },
+  {
+    "start": "479000",
+    "end": "978000"
+  },
+  {
+    "text": "so this solution is much better however it's still single cluster",
+    "start": "480560",
+    "end": "486400"
+  },
+  {
+    "text": "right so what happens if we want to send traffic across clusters so there are multiple ways to do this and we're going",
+    "start": "486400",
+    "end": "492879"
+  },
+  {
+    "text": "to talk about the two main ones in kubernetes which are load balancer Services first and and then we'll talk",
+    "start": "492879",
+    "end": "498479"
+  },
+  {
+    "text": "about another one I won't spoil you so load balancer Services allows you",
+    "start": "498479",
+    "end": "504120"
+  },
+  {
+    "text": "to expose Services across clusters so the only difference from the slide we",
+    "start": "504120",
+    "end": "509240"
+  },
+  {
+    "text": "had before from the step we had before in that in this case we have the intake workload running on one cluster and the",
+    "start": "509240",
+    "end": "515159"
+  },
+  {
+    "text": "storage workload working on another one so they can't rely on standard Services when you use load balancer",
+    "start": "515159",
+    "end": "522120"
+  },
+  {
+    "text": "Services what's going to happen is your client workload is going to do any GS query but instead of getting the IP of",
+    "start": "522120",
+    "end": "529040"
+  },
+  {
+    "text": "virtual IP in the cluster or the IP of the Pod is going to get the IP of a load balancer back and the traffic is going",
+    "start": "529040",
+    "end": "535360"
+  },
+  {
+    "text": "to be sent to this slad balancer which is usually managed by the cloud provider",
+    "start": "535360",
+    "end": "540880"
+  },
+  {
+    "text": "however this Lo balancer doesn't know how to reach pods right this so the SL balancer has to send traffic to to nodes",
+    "start": "540880",
+    "end": "547880"
+  },
+  {
+    "text": "so what happens is all the nodes in the cluster are registered with the load balancer and then the proter we were",
+    "start": "547880",
+    "end": "553240"
+  },
+  {
+    "text": "talking about before is going to be responsible for setting traffic to the actual pods so you can see the the data",
+    "start": "553240",
+    "end": "559000"
+  },
+  {
+    "text": "pass is a bit complex the intake pod as a client is connected to the Lo balancer which is sending traffic to any node and",
+    "start": "559000",
+    "end": "564720"
+  },
+  {
+    "text": "the prox is responsible to send traffic to the actual pod of course this the full mesh so you have connections all",
+    "start": "564720",
+    "end": "570880"
+  },
+  {
+    "text": "over the place and it's it's pretty complex it's pretty inefficient because you have multiple hubs and and also you",
+    "start": "570880",
+    "end": "577720"
+  },
+  {
+    "text": "can end up situation where you have noisy neighbors because of course if you have a hrut traffic um and you're uh you",
+    "start": "577720",
+    "end": "585000"
+  },
+  {
+    "text": "can hit node three there uh for traffic that is Destin that is that you want to send to pod one and of course you're",
+    "start": "585000",
+    "end": "590320"
+  },
+  {
+    "text": "sending traffic that is unneeded to to the to the third node so this can be slightly improved uh",
+    "start": "590320",
+    "end": "596519"
+  },
+  {
+    "text": "in kubernetes by using load balancer service with the external traffic policy local annotation right and this is",
+    "start": "596519",
+    "end": "603640"
+  },
+  {
+    "text": "designed so only nodes that actually run the back end you want to talk to are",
+    "start": "603640",
+    "end": "609240"
+  },
+  {
+    "text": "going to be healthy in the load balancer so you can see here that traffic is never Crossing nodes boundary traffic",
+    "start": "609240",
+    "end": "615680"
+  },
+  {
+    "text": "will reach will only reach nodes where storage pods are running and be L Balan by the",
+    "start": "615680",
+    "end": "620839"
+  },
+  {
+    "text": "prox so it's better but it's it's still not perfect right because nodes are still registered with the L balancer and",
+    "start": "620839",
+    "end": "627760"
+  },
+  {
+    "text": "the only reason some nod are not getting traffic is because they're not considered healthy which means we have",
+    "start": "627760",
+    "end": "632920"
+  },
+  {
+    "text": "an additional component which I call the health checker on the slide that is",
+    "start": "632920",
+    "end": "637959"
+  },
+  {
+    "text": "responsible for probbing all the nodes to see if they're running one storage",
+    "start": "637959",
+    "end": "643920"
+  },
+  {
+    "text": "pod so load balancer Services allow us to get traffic between clusters but they",
+    "start": "644639",
+    "end": "650320"
+  },
+  {
+    "text": "create a lot of unneeded traffic of course there's also additional cost because you have to pay for the load",
+    "start": "650320",
+    "end": "656560"
+  },
+  {
+    "text": "balances it still doesn't works for workloads where the plant has to see all the back ends because of course you only",
+    "start": "656560",
+    "end": "661760"
+  },
+  {
+    "text": "see the load balancer and and something I wanted to highlight which made it a complete noo at data do is there's a",
+    "start": "661760",
+    "end": "668480"
+  },
+  {
+    "text": "strong limit we discovered the hard way which is there's only so many nodes you can register with a load balancer like",
+    "start": "668480",
+    "end": "674720"
+  },
+  {
+    "text": "every provider will have its own limits which means if you if you get higher if you have more than x nodes in",
+    "start": "674720",
+    "end": "681519"
+  },
+  {
+    "text": "your cluster you won't be able to use them to avoid this it's actually one of the only feature completely disable in",
+    "start": "681519",
+    "end": "687920"
+  },
+  {
+    "text": "our commun clusters to make sure sure we don't have incidents so I mentioned that load",
+    "start": "687920",
+    "end": "693760"
+  },
+  {
+    "text": "balancer was one of the way you could get traffic between clusters another way to do it is to use",
+    "start": "693760",
+    "end": "699760"
+  },
+  {
+    "text": "ingresses so we're back to the same setup we had before and if you want to use an Ingress the way it's going to",
+    "start": "699760",
+    "end": "705440"
+  },
+  {
+    "text": "work is in addition to your workloads you're going to have load balances so in",
+    "start": "705440",
+    "end": "710800"
+  },
+  {
+    "text": "that example here uh I use engine X or H proxy but you have many other options",
+    "start": "710800",
+    "end": "716079"
+  },
+  {
+    "text": "and what Ingress allows is when they get HTTP traffic they can Route traffic to",
+    "start": "716079",
+    "end": "721959"
+  },
+  {
+    "text": "backend Services based on the HTTP host or based on the PA you use however you",
+    "start": "721959",
+    "end": "729200"
+  },
+  {
+    "text": "can you can see here that there's a bit of a challenge because these workflows are very clever within the cluster but",
+    "start": "729200",
+    "end": "734800"
+  },
+  {
+    "text": "we still need to get traffic to this proxies right to this Ingress and the way this is usually done",
+    "start": "734800",
+    "end": "740920"
+  },
+  {
+    "text": "is to use a load balance of service right and as I told before it's not great they they actually are alternative",
+    "start": "740920",
+    "end": "748320"
+  },
+  {
+    "text": "options so if you run on on on cloud providers they tend to provide native",
+    "start": "748320",
+    "end": "753560"
+  },
+  {
+    "text": "solutions to this problem and and for instance in that case what's going to happen is the load balancer instead of",
+    "start": "753560",
+    "end": "759360"
+  },
+  {
+    "text": "sending traffic to nodes is going to send traffic directly to the Pod IPS right and so you have options on on",
+    "start": "759360",
+    "end": "765959"
+  },
+  {
+    "text": "multiple providers the way it works you have a controller running in your cluster that is watching for services",
+    "start": "765959",
+    "end": "771199"
+  },
+  {
+    "text": "and pods and programming the load balancer so a quick summary and on on",
+    "start": "771199",
+    "end": "778680"
+  },
+  {
+    "text": "Ingress the first one is they're limited to http right so it's it's a bit of a",
+    "start": "778680",
+    "end": "784399"
+  },
+  {
+    "text": "challenge of course by default they use loot balance of services which is UNR and and there are cative options to",
+    "start": "784399",
+    "end": "791639"
+  },
+  {
+    "text": "road to Route directly to pods which is which are much better however and you",
+    "start": "791639",
+    "end": "796839"
+  },
+  {
+    "text": "remember that in the very first uh part of the presentation I was talking about multicloud the fact that you run a",
+    "start": "796839",
+    "end": "802360"
+  },
+  {
+    "text": "multiple providers means the native implementation is going to be different across providers and also this",
+    "start": "802360",
+    "end": "809079"
+  },
+  {
+    "text": "implementations will have will have limits right because you need to call the API to program the load balances every time uh pod CHS right if you have",
+    "start": "809079",
+    "end": "816720"
+  },
+  {
+    "text": "new pods if pods become an NLC you need to call the cloud provider and say oh program this IP add add this IP or",
+    "start": "816720",
+    "end": "823360"
+  },
+  {
+    "text": "remove this IP this can very easily trigger rate limits which means it will take time for changes to propagate back",
+    "start": "823360",
+    "end": "830000"
+  },
+  {
+    "text": "to to the Lan and the clients and what we have to acknowledge is cloud load",
+    "start": "830000",
+    "end": "835759"
+  },
+  {
+    "text": "balances are great but they are definitely not designed for highp when you reprogram them on a frequent",
+    "start": "835759",
+    "end": "842680"
+  },
+  {
+    "text": "basis so the the two solutions we we've discussed to expose servic AC cross",
+    "start": "842680",
+    "end": "848000"
+  },
+  {
+    "text": "clusters rely on proxies and load balances what if we could do it without",
+    "start": "848000",
+    "end": "853279"
+  },
+  {
+    "text": "it so there's another solution to expose Services across cluster which we've used extensively and this solution is called",
+    "start": "853279",
+    "end": "859560"
+  },
+  {
+    "text": "external DNS and the way this solution works is you have a controller in your",
+    "start": "859560",
+    "end": "865000"
+  },
+  {
+    "text": "clusters that are that is also watching endpoints and services and updating the",
+    "start": "865000",
+    "end": "871240"
+  },
+  {
+    "text": "cloud DNS entries right so for instance Cloud DNS or R",
+    "start": "871240",
+    "end": "876440"
+  },
+  {
+    "text": "53 when a client want to connect one of the storage pod it's going to get the IP",
+    "start": "876440",
+    "end": "882240"
+  },
+  {
+    "text": "back right so the IP that have been programmed by the controller and as you can see here this",
+    "start": "882240",
+    "end": "887680"
+  },
+  {
+    "text": "is extremely similar to what we had with uh headless services so it's very",
+    "start": "887680",
+    "end": "894040"
+  },
+  {
+    "text": "similar but there's a strong constraint here right it seems very simple on the slide you have the client but directly",
+    "start": "894040",
+    "end": "899560"
+  },
+  {
+    "text": "connected to the back end but of course because it's connecting to the IP of the back end it means the IP of the back end",
+    "start": "899560",
+    "end": "905680"
+  },
+  {
+    "text": "has to be addressable from the other cluster which is a constraint on the way you you design your commun clusters in",
+    "start": "905680",
+    "end": "912199"
+  },
+  {
+    "text": "our case uh we give native IPS of the underlying VPC to pods which we achieve",
+    "start": "912199",
+    "end": "917440"
+  },
+  {
+    "text": "with celum and this allows for the type of communications once again these are",
+    "start": "917440",
+    "end": "922839"
+  },
+  {
+    "text": "similarities with challenges we had with uh load balances because then again we have to uh we have to program the DNS of",
+    "start": "922839",
+    "end": "929920"
+  },
+  {
+    "text": "the provider which means we we can hit rate limits if we if we change things too fast uh I give a good example here",
+    "start": "929920",
+    "end": "936519"
+  },
+  {
+    "text": "which is the propagation latency is usually pretty good around a minute right but you can very easily get above",
+    "start": "936519",
+    "end": "943000"
+  },
+  {
+    "text": "10 minutes as soon as you have start hitting L limits which is a pretty long time once again the DNS API of providers",
+    "start": "943000",
+    "end": "950199"
+  },
+  {
+    "text": "are not designed to do this so what we wanted to say though for",
+    "start": "950199",
+    "end": "956319"
+  },
+  {
+    "text": "this solution in particular is I I mentioned the challenges we had with it however it got us pretty far I mean we",
+    "start": "956319",
+    "end": "962800"
+  },
+  {
+    "text": "run that for for many years probably three or four years before the limit was starting to mention start to hit us too",
+    "start": "962800",
+    "end": "969279"
+  },
+  {
+    "text": "too hard and we had to change and I let anine talk about the the other",
+    "start": "969279",
+    "end": "974319"
+  },
+  {
+    "text": "alternative who consider before diving into the solution we actually put in Pace okay okay so at this point you're",
+    "start": "974319",
+    "end": "982040"
+  },
+  {
+    "start": "978000",
+    "end": "1464000"
+  },
+  {
+    "text": "probably wondering have those people heard about service mches and it turns out we we have evaluated this solution",
+    "start": "982040",
+    "end": "989279"
+  },
+  {
+    "text": "um so just a quick reminder this is the example that Lauren was presenting with intake pods and storage pods I'm going",
+    "start": "989279",
+    "end": "995040"
+  },
+  {
+    "text": "to tell you what service mches how service mches work uh so typically you",
+    "start": "995040",
+    "end": "1001040"
+  },
+  {
+    "text": "have a main container uh that knows how to do networking this is the application that um developers have written and are",
+    "start": "1001040",
+    "end": "1006880"
+  },
+  {
+    "text": "running in kubernetes um and the idea of service matches is that you you're going to inject a sidecar container uh that is",
+    "start": "1006880",
+    "end": "1013720"
+  },
+  {
+    "text": "going to take care of pod networking uh needs um the the SAR container will",
+    "start": "1013720",
+    "end": "1020759"
+  },
+  {
+    "text": "connect to a control plane that itself sources data such as endpoint data um",
+    "start": "1020759",
+    "end": "1027480"
+  },
+  {
+    "text": "like IP addresses from the kubernetes API um so what do we expect to gain from",
+    "start": "1027480",
+    "end": "1034480"
+  },
+  {
+    "text": "this pattern uh so first of all so one thing is it's independent of cloud providers so you don't have these",
+    "start": "1034480",
+    "end": "1040360"
+  },
+  {
+    "text": "problems with rate limits and things like this uh it's also transparent um so in theory you don't have to touch your",
+    "start": "1040360",
+    "end": "1046360"
+  },
+  {
+    "text": "application and it will just work out of the box uh and then it gives you a bunch of neat",
+    "start": "1046360",
+    "end": "1051760"
+  },
+  {
+    "text": "things such as traffic management uh and load balancing so that would alleviate the problem that we saw with grpc before",
+    "start": "1051760",
+    "end": "1059280"
+  },
+  {
+    "text": "um the problem like the thing for us is that we actually already had invested in",
+    "start": "1059280",
+    "end": "1065080"
+  },
+  {
+    "text": "quite a lot of infrastructure in order to um make sure that um traffic for for",
+    "start": "1065080",
+    "end": "1071600"
+  },
+  {
+    "text": "example for our CFA work clads are assigned to the right pods and so on and so this would have kind of interfered",
+    "start": "1071600",
+    "end": "1078640"
+  },
+  {
+    "text": "with it it and we didn't think we would benefit that much from those features um also like we we're heavy users of grpc",
+    "start": "1078640",
+    "end": "1086000"
+  },
+  {
+    "text": "and grpc has bu this feature built in um another advant another upshot of",
+    "start": "1086000",
+    "end": "1093799"
+  },
+  {
+    "text": "um of service Machin is observability but as it turns out data dog already has",
+    "start": "1093799",
+    "end": "1099960"
+  },
+  {
+    "text": "great observability both into applications and in the infrastructure and this is not really something that we",
+    "start": "1099960",
+    "end": "1106320"
+  },
+  {
+    "text": "like adding a new thing in order to take care of observability just didn't really seem like the right thing to",
+    "start": "1106320",
+    "end": "1111919"
+  },
+  {
+    "text": "do um and the last big selling point of service maches is transparent TLS and mtls and here again some of our",
+    "start": "1111919",
+    "end": "1119480"
+  },
+  {
+    "text": "applications already had that uh configured and built in and like that would have been you would have had uh",
+    "start": "1119480",
+    "end": "1125520"
+  },
+  {
+    "text": "TLS twice uh which is not really needed so all of these are very useful features",
+    "start": "1125520",
+    "end": "1131559"
+  },
+  {
+    "text": "uh but for us they just seem a bit redundant um service maches also come",
+    "start": "1131559",
+    "end": "1140280"
+  },
+  {
+    "text": "with some downside one of them is General debuggability um so when users",
+    "start": "1140280",
+    "end": "1145720"
+  },
+  {
+    "text": "it it's great when it works but when it doesn't work um users tend to be confused a little bit because there's an",
+    "start": "1145720",
+    "end": "1152120"
+  },
+  {
+    "text": "additional moving part another big one is Resource Management um so at the bottom of this",
+    "start": "1152120",
+    "end": "1159760"
+  },
+  {
+    "text": "uh slide you can see the distribution this is actually taken from our own managed side car that we have internally",
+    "start": "1159760",
+    "end": "1166360"
+  },
+  {
+    "text": "that um and I'm not going to get into details here but we do use C cars for some specific cases and it runs about on",
+    "start": "1166360",
+    "end": "1174320"
+  },
+  {
+    "text": "about 5% of our infrastructure um and we",
+    "start": "1174320",
+    "end": "1179360"
+  },
+  {
+    "text": "here I captured the resource usage from all these side cars and as you can see",
+    "start": "1179360",
+    "end": "1185200"
+  },
+  {
+    "text": "at the top there some of them are using almost up to two cares some of them are like most of them are actually like the",
+    "start": "1185200",
+    "end": "1191640"
+  },
+  {
+    "text": "red line at the bottom is this is a heatmat so the red line at the bottom means like most of the workloads are",
+    "start": "1191640",
+    "end": "1198080"
+  },
+  {
+    "text": "there they're using us zero close to zero uh so how you're going to size that is tricky um unless you make service",
+    "start": "1198080",
+    "end": "1204440"
+  },
+  {
+    "text": "owners have to do it which is like one more things they had to care about um so",
+    "start": "1204440",
+    "end": "1209799"
+  },
+  {
+    "text": "yeah if you if you provision for the top here like you're going to waste a ton of cars you don't want to do that",
+    "start": "1209799",
+    "end": "1217120"
+  },
+  {
+    "text": "so uh there's also an inherent cost at um having an additional userland Network",
+    "start": "1217120",
+    "end": "1223240"
+  },
+  {
+    "text": "up um here this is captured from from something that is supposed to advertise Linker dis performance",
+    "start": "1223240",
+    "end": "1229159"
+  },
+  {
+    "text": "I think link this performance are great as you can see like this is the green line um the green line Sorry IO is in",
+    "start": "1229159",
+    "end": "1236400"
+  },
+  {
+    "text": "Gray it shows that the additional latency from uh the side car is lower on",
+    "start": "1236400",
+    "end": "1241440"
+  },
+  {
+    "text": "linkd but really if you make me Choice choose between the Baseline link or is here I I'll do my best to make the",
+    "start": "1241440",
+    "end": "1248520"
+  },
+  {
+    "text": "Baseline work really so yeah in in many scenario it",
+    "start": "1248520",
+    "end": "1253559"
+  },
+  {
+    "text": "won't matter because you don't have many hops but we tend to have large fanouts with services and so a given call to",
+    "start": "1253559",
+    "end": "1260320"
+  },
+  {
+    "text": "serve a user request is going to hop many times within our infrastructure through many applications and each time",
+    "start": "1260320",
+    "end": "1266799"
+  },
+  {
+    "text": "you're going to pay this um this hit like we we think this was not really",
+    "start": "1266799",
+    "end": "1272120"
+  },
+  {
+    "text": "acceptable for us um so some of the service mesh",
+    "start": "1272120",
+    "end": "1278000"
+  },
+  {
+    "text": "vendors have acknowledged the problems that uh you may face with side cars and it's being addressed in a V variety of",
+    "start": "1278000",
+    "end": "1285840"
+  },
+  {
+    "text": "ways uh one way is to just make the proxy as white lightweight as possible that's what link does um celium uses an",
+    "start": "1285840",
+    "end": "1295320"
+  },
+  {
+    "text": "L7 proxy on each node for example which um reduces the overall resource",
+    "start": "1295320",
+    "end": "1301440"
+  },
+  {
+    "text": "consumption because it's shared through multiple pods so it's a bit cheaper but then they are concerned about",
+    "start": "1301440",
+    "end": "1306960"
+  },
+  {
+    "text": "isolation here and then sizing again is not that obvious ISO has ambient mesh that is",
+    "start": "1306960",
+    "end": "1313840"
+  },
+  {
+    "text": "advertising now it's still like kind of early phase but it uses an L4 on each",
+    "start": "1313840",
+    "end": "1319080"
+  },
+  {
+    "text": "node which is again supposed to be very lightweight um but still prone to like",
+    "start": "1319080",
+    "end": "1325039"
+  },
+  {
+    "text": "isolation problems and things like that um and then again like alsoo witho",
+    "start": "1325039",
+    "end": "1332080"
+  },
+  {
+    "text": "you lose the L7 um features if you do that because there Z tunel is is only um",
+    "start": "1332080",
+    "end": "1338799"
+  },
+  {
+    "text": "doing L4 um like taking care of L4 concerns such as mtls and things like",
+    "start": "1338799",
+    "end": "1344279"
+  },
+  {
+    "text": "this but not of like request routing and all these fancy fancy features so for this they actually had a wayon proxy",
+    "start": "1344279",
+    "end": "1351240"
+  },
+  {
+    "text": "which adds potentially another Network up um how about multicluster so um this",
+    "start": "1351240",
+    "end": "1360320"
+  },
+  {
+    "text": "is a service machine in a single cluster um usually what they offer you to do is",
+    "start": "1360320",
+    "end": "1366080"
+  },
+  {
+    "text": "to match clusters together so you will go on each cluster and tell them what all other clusters are um and this work",
+    "start": "1366080",
+    "end": "1374120"
+  },
+  {
+    "text": "well is you you just have a few clusters but when you have dozens as we do uh it gets really difficult to",
+    "start": "1374120",
+    "end": "1381360"
+  },
+  {
+    "text": "manage um one thing that you may have run into also with um with um service maches",
+    "start": "1381360",
+    "end": "1388840"
+  },
+  {
+    "text": "which we did when we actually evaluated some of them um was a few years ago um",
+    "start": "1388840",
+    "end": "1394279"
+  },
+  {
+    "text": "was uh the high Ram need for scars because usually what they will do is load the entire mesh if you have",
+    "start": "1394279",
+    "end": "1400640"
+  },
+  {
+    "text": "thousands of services as we do um the data plan is just going to go crazy on memory um and even CPU because it has to",
+    "start": "1400640",
+    "end": "1407520"
+  },
+  {
+    "text": "con concent handle the churn in in in Services um so there are ways to change",
+    "start": "1407520",
+    "end": "1412919"
+  },
+  {
+    "text": "that but they they actually require additional configuration um so yeah in in summary",
+    "start": "1412919",
+    "end": "1420559"
+  },
+  {
+    "text": "for uh service maches um it provides many features but um many of them can be",
+    "start": "1420559",
+    "end": "1426240"
+  },
+  {
+    "text": "handeld by applications um the side cars are kind of complex uh and they have a",
+    "start": "1426240",
+    "end": "1432120"
+  },
+  {
+    "text": "cost both Financial cognitive and in terms of performance and then there are careless",
+    "start": "1432120",
+    "end": "1439000"
+  },
+  {
+    "text": "Solutions um but um some of them are very early stage um maybe the one to",
+    "start": "1439000",
+    "end": "1445720"
+  },
+  {
+    "text": "mention is thec proxyless which completely eliminates uh any proxy which is an interesting approach",
+    "start": "1445720",
+    "end": "1453360"
+  },
+  {
+    "text": "actually um but it's only GBC and then for multicluster Solutions",
+    "start": "1453360",
+    "end": "1459400"
+  },
+  {
+    "text": "are also kind of young and hard to manage so at this point you're probably wondering like if they don't use a",
+    "start": "1459400",
+    "end": "1464840"
+  },
+  {
+    "start": "1464000",
+    "end": "1733000"
+  },
+  {
+    "text": "service mesh if they don't use the built-in Cube primitiv then what what do they use uh turns out we built our own um so",
+    "start": "1464840",
+    "end": "1474240"
+  },
+  {
+    "text": "we had the following requirements uh when we built our service Discovery solution it had to work across clusters",
+    "start": "1474240",
+    "end": "1480360"
+  },
+  {
+    "text": "it had to enable uh direct P Discovery it had to merge end points from multiple clusters because we we have services",
+    "start": "1480360",
+    "end": "1487120"
+  },
+  {
+    "text": "that actually span multiple clusters um and it had to ideally require minimal",
+    "start": "1487120",
+    "end": "1492440"
+  },
+  {
+    "text": "application changes because we were a bit under pressure to replace external DNS that was causing problems",
+    "start": "1492440",
+    "end": "1500320"
+  },
+  {
+    "text": "um any other things that I didn't say is it has to be better than external DNS at dealing with things like um AP um API",
+    "start": "1500320",
+    "end": "1508080"
+  },
+  {
+    "text": "weight limits from cloud providers okay so this bring us to data dog's DNS system um back to our two",
+    "start": "1508080",
+    "end": "1515840"
+  },
+  {
+    "text": "applications uh the way it works is that uh we run controllers in each kubernetes uh cluster so when we install a cluster",
+    "start": "1515840",
+    "end": "1522360"
+  },
+  {
+    "text": "we just install this additional controller on it it goes and registers in a central biking store which is",
+    "start": "1522360",
+    "end": "1527960"
+  },
+  {
+    "text": "hosted in one of the kubernetes Clusters and it just um watches endpoints from",
+    "start": "1527960",
+    "end": "1533840"
+  },
+  {
+    "text": "the their own kubernetes API and will register them uh into into the backing",
+    "start": "1533840",
+    "end": "1539240"
+  },
+  {
+    "text": "store uh so this is the layout that we have in this data store we just write IP addresses or Associated to uh the the",
+    "start": "1539240",
+    "end": "1547720"
+  },
+  {
+    "text": "name space and service um of of these IPS and then we um install DNS servers",
+    "start": "1547720",
+    "end": "1556480"
+  },
+  {
+    "text": "on the on the kubernetes Clusters and they will be able to serve queries um based",
+    "start": "1556480",
+    "end": "1563520"
+  },
+  {
+    "text": "on on the service Name Across clusters uh so what happens when uh we",
+    "start": "1563520",
+    "end": "1570679"
+  },
+  {
+    "text": "want to do inter service communication here is that typically the intake pod will query DNS for the storage Service",
+    "start": "1570679",
+    "end": "1576279"
+  },
+  {
+    "text": "uh DNS will return the list of ips and then it can just directly connect to to to the pods based on their",
+    "start": "1576279",
+    "end": "1583880"
+  },
+  {
+    "text": "IPs um so one thing that is particularly",
+    "start": "1583880",
+    "end": "1589200"
+  },
+  {
+    "text": "useful for us is the ability to I was saying about um to to merge end points",
+    "start": "1589200",
+    "end": "1595159"
+  },
+  {
+    "text": "from multiple clusters and so um for example the storage system might span multiple clusters we do that for",
+    "start": "1595159",
+    "end": "1601520"
+  },
+  {
+    "text": "isolation actually for some of our systems um we run zonal clusters and",
+    "start": "1601520",
+    "end": "1607039"
+  },
+  {
+    "text": "some systems span span multiple of them um and so here as you can see uh you can",
+    "start": "1607039",
+    "end": "1612559"
+  },
+  {
+    "text": "have a query for like the metric storage that is has pods in both clusters and it will return all the all the",
+    "start": "1612559",
+    "end": "1620080"
+  },
+  {
+    "text": "itps we also attach additional metadata to each endpoint so here I gave the",
+    "start": "1620080",
+    "end": "1625440"
+  },
+  {
+    "text": "example of the availability Zone which lets users actually um query a a service",
+    "start": "1625440",
+    "end": "1632960"
+  },
+  {
+    "text": "in a given a uh we use that in order to keep the traffic Zone all and do that kind of things that can save on costs",
+    "start": "1632960",
+    "end": "1639919"
+  },
+  {
+    "text": "and also make reliability better in certain",
+    "start": "1639919",
+    "end": "1644080"
+  },
+  {
+    "text": "cases uh yeah one thing that I wanted to address is that uh etcd sounds like kind of a dangerous thing to run here uh so",
+    "start": "1645279",
+    "end": "1653000"
+  },
+  {
+    "text": "the way we address that is we actually run multiple um instances of this stack one per a and this gives us um",
+    "start": "1653000",
+    "end": "1660519"
+  },
+  {
+    "text": "sufficient redundancy that if we have a problem with one of them for example because we want to do an upgrade or",
+    "start": "1660519",
+    "end": "1666600"
+  },
+  {
+    "text": "something like this uh we will be able to to use the",
+    "start": "1666600",
+    "end": "1671518"
+  },
+  {
+    "text": "others um we have multiple layers of of of caching in in order to um to serve",
+    "start": "1672360",
+    "end": "1679360"
+  },
+  {
+    "text": "the high traffic of DNS queries that we have so I think the most interesting one",
+    "start": "1679360",
+    "end": "1684960"
+  },
+  {
+    "text": "here is that we have no local cache for all queries this is very useful because",
+    "start": "1684960",
+    "end": "1690720"
+  },
+  {
+    "text": "some applications like they're not all perfect and some some of them can go a bit crazy on DNS queries uh so that at",
+    "start": "1690720",
+    "end": "1698159"
+  },
+  {
+    "text": "that layer we typically manage to isolate um the nodes from each other and",
+    "start": "1698159",
+    "end": "1703960"
+  },
+  {
+    "text": "this this really limits the blast ruse in case one applications tries to to like do Z DNS",
+    "start": "1703960",
+    "end": "1712200"
+  },
+  {
+    "text": "server so um the our our custom Discovery system uh",
+    "start": "1712200",
+    "end": "1720200"
+  },
+  {
+    "text": "so it's been in production for a few years now and uh it's been working really well we've had no outage",
+    "start": "1720200",
+    "end": "1725760"
+  },
+  {
+    "text": "whatsoever uh and it's alleviated all the problems we had with external DNS and also enabled new use",
+    "start": "1725760",
+    "end": "1732080"
+  },
+  {
+    "text": "cases um so if if you've been following the cncf ecosystem in the last few years",
+    "start": "1732080",
+    "end": "1737600"
+  },
+  {
+    "start": "1733000",
+    "end": "1871000"
+  },
+  {
+    "text": "uh you wondering like can you do better than DNS um DNS is very primitive",
+    "start": "1737600",
+    "end": "1743799"
+  },
+  {
+    "text": "basically you give it a name or is that's true for I card you can do all sort of crazy things with DNS but",
+    "start": "1743799",
+    "end": "1749279"
+  },
+  {
+    "text": "clients usually don't support it so you're not really gaining anything from that um but in the normal case of a card",
+    "start": "1749279",
+    "end": "1755360"
+  },
+  {
+    "text": "you you give it a name and it will give you a bunch of IP addresses",
+    "start": "1755360",
+    "end": "1760640"
+  },
+  {
+    "text": "um some data planes have another service Discovery protocol that they're trying to standardize which is called XDS which",
+    "start": "1760640",
+    "end": "1767679"
+  },
+  {
+    "text": "has a much richer data model uh for example um beyond the DNS um interface",
+    "start": "1767679",
+    "end": "1775519"
+  },
+  {
+    "text": "that we saw uh it can also group IPS by localities and priorities you can do failover between them you can do all",
+    "start": "1775519",
+    "end": "1780960"
+  },
+  {
+    "text": "sort of interesting things uh this is actually what service maches use or not all of them but is still at least um and",
+    "start": "1780960",
+    "end": "1788320"
+  },
+  {
+    "text": "the envoy based one in order to do things like traffic splitting for example and then you can configure like",
+    "start": "1788320",
+    "end": "1794440"
+  },
+  {
+    "text": "the security policies and like a lot of things through this API uh but this doesn't doesn't like this is",
+    "start": "1794440",
+    "end": "1801320"
+  },
+  {
+    "text": "only first this is only available for Envoy and grpc so this is quite limited actually um",
+    "start": "1801320",
+    "end": "1807240"
+  },
+  {
+    "text": "and also this doesn't address scalability at all um XDS is push based",
+    "start": "1807240",
+    "end": "1812840"
+  },
+  {
+    "text": "compared to DNS that is pull base but honestly like you're not going to get a lot of um improvements based on that",
+    "start": "1812840",
+    "end": "1818600"
+  },
+  {
+    "text": "you're just going to save a bit of bandwidth on control plane um so if you remember the DNS",
+    "start": "1818600",
+    "end": "1825600"
+  },
+  {
+    "text": "design we we do use XDS actually uh with exactly the same layout we use re use",
+    "start": "1825600",
+    "end": "1831159"
+  },
+  {
+    "text": "the same data we have a custom XDS control plane um in and and we use it for a couple of cases such as to",
+    "start": "1831159",
+    "end": "1838399"
+  },
+  {
+    "text": "configure the envoice side cards that I talked about about before we use it to configure our Edge load balancers and",
+    "start": "1838399",
+    "end": "1844840"
+  },
+  {
+    "text": "our internal load balancers we have some of them in some cases they're useful um and we are rolling out using",
+    "start": "1844840",
+    "end": "1851480"
+  },
+  {
+    "text": "it directly from grpc clients uh for more advanced use cases and and we offer customer API uh",
+    "start": "1851480",
+    "end": "1859279"
+  },
+  {
+    "text": "for our internal users it kind of resembles the Gateway API really we get a lot of inspiration out of",
+    "start": "1859279",
+    "end": "1866639"
+  },
+  {
+    "text": "it okay so the the solution on when",
+    "start": "1866639",
+    "end": "1872840"
+  },
+  {
+    "text": "presented sounds simple it sounds it sounds great um but of course as you can imagine there are trade-off and the",
+    "start": "1872840",
+    "end": "1878919"
+  },
+  {
+    "text": "question is what's the catch so the key thing is it's it's actually not that",
+    "start": "1878919",
+    "end": "1884200"
+  },
+  {
+    "text": "simple right because sending all the IPS of the backend to the clients means mean that the logic has to be implemented and",
+    "start": "1884200",
+    "end": "1890399"
+  },
+  {
+    "text": "tuned in the client because defaults will usually not do what you want right for instance if you give five IPS to",
+    "start": "1890399",
+    "end": "1896360"
+  },
+  {
+    "text": "some client they will only connect to the first one which is not what you do what you want to do and this means a lot of things right",
+    "start": "1896360",
+    "end": "1903919"
+  },
+  {
+    "text": "uh we mentioned before that service mches were providing a lot of features uh cluster IPS were hiding a lot of the",
+    "start": "1903919",
+    "end": "1909440"
+  },
+  {
+    "text": "complexity and if you do it yourself like we do it means the client has to do it right you have to support and provide",
+    "start": "1909440",
+    "end": "1915840"
+  },
+  {
+    "text": "observability you have to detect St hand points you have to do load bouncing in a way that is U efficient and of course",
+    "start": "1915840",
+    "end": "1923159"
+  },
+  {
+    "text": "I'll check the back hands because sometimes they will be discovered but they won't be reachable and if you want",
+    "start": "1923159",
+    "end": "1928440"
+  },
+  {
+    "text": "to do authentication and TLS you have to do that too in addition you have to do these for",
+    "start": "1928440",
+    "end": "1934360"
+  },
+  {
+    "text": "all the protocols you want to support right in our case we use a lot we use GPC pretty heavily but we also have some",
+    "start": "1934360",
+    "end": "1940360"
+  },
+  {
+    "text": "HTTP and if you have other U Services you need to support them to kfka for",
+    "start": "1940360",
+    "end": "1945760"
+  },
+  {
+    "text": "instance and finally well you have to do this in every single language you run right in our case it's mostly go Java",
+    "start": "1945760",
+    "end": "1953200"
+  },
+  {
+    "text": "and python but we're seeing more and more rust and this mean we have to implement this for all the clients in in",
+    "start": "1953200",
+    "end": "1959000"
+  },
+  {
+    "text": "all these languages so this this is this works and we currently run this but this works",
+    "start": "1959000",
+    "end": "1965399"
+  },
+  {
+    "text": "because we have Onan team working on it and that is owning the libraries for all",
+    "start": "1965399",
+    "end": "1970480"
+  },
+  {
+    "text": "these languages and making sure that they do the right thing in an efficient way and this is getting us to our our",
+    "start": "1970480",
+    "end": "1977840"
+  },
+  {
+    "start": "1976000",
+    "end": "2115000"
+  },
+  {
+    "text": "conclusion right so if we we want you to to remember a few things from this talk uh in a few lines well the first thing",
+    "start": "1977840",
+    "end": "1984799"
+  },
+  {
+    "text": "is kubernetes native service Discovery Primitives work very well as long as you",
+    "start": "1984799",
+    "end": "1990519"
+  },
+  {
+    "text": "remain within a cluster right so with cluster IPS and headless Services you should be able to address most of your",
+    "start": "1990519",
+    "end": "1996519"
+  },
+  {
+    "text": "use cases however as soon as you start having multiple clusters this is much",
+    "start": "1996519",
+    "end": "2002960"
+  },
+  {
+    "text": "more challenging right I I mentioned load B to services and ingresses that will help but they they feel a bit hicky",
+    "start": "2002960",
+    "end": "2011440"
+  },
+  {
+    "text": "especially if you have many clusters and high stut applications and of course kubernetes",
+    "start": "2011440",
+    "end": "2017919"
+  },
+  {
+    "text": "primitive don't integrate with nonc Services what if we want to expose services that don't run in kubernetes",
+    "start": "2017919",
+    "end": "2024039"
+  },
+  {
+    "text": "it's very difficult to use with test Primitives of course service mches are are promising",
+    "start": "2024039",
+    "end": "2031360"
+  },
+  {
+    "text": "because they want to to hide a lot of this complexity but of course the trade-off is they come with their own",
+    "start": "2031360",
+    "end": "2037279"
+  },
+  {
+    "text": "complexity in terms of deployment debuggability and cost right uh for some",
+    "start": "2037279",
+    "end": "2042320"
+  },
+  {
+    "text": "of our applications it will be totally impossible for us to run with a side car just because it could almost double the",
+    "start": "2042320",
+    "end": "2048398"
+  },
+  {
+    "text": "cost of running the infra so in the end uh we ended up",
+    "start": "2048399",
+    "end": "2053800"
+  },
+  {
+    "text": "building our own service discovery that is independent of of kubernetes which is",
+    "start": "2053800",
+    "end": "2059079"
+  },
+  {
+    "text": "both good and bad right bad because we have to do it ourselves and and good",
+    "start": "2059079",
+    "end": "2064240"
+  },
+  {
+    "text": "because it means we can go we don't have limits around uh kubernetes boundaries",
+    "start": "2064240",
+    "end": "2069480"
+  },
+  {
+    "text": "of course we still heavily use kubernetes for information about endpoints and",
+    "start": "2069480",
+    "end": "2074520"
+  },
+  {
+    "text": "services and finally and this is what I was hinting at just before if this works because we heavily rely on our clients",
+    "start": "2074520",
+    "end": "2081679"
+  },
+  {
+    "text": "being being smart right so we're removing anything smart from the network and we're moving everything in the in",
+    "start": "2081679",
+    "end": "2087480"
+  },
+  {
+    "text": "the clients and and this is it so uh thank you very much if you're interested in",
+    "start": "2087480",
+    "end": "2093960"
+  },
+  {
+    "text": "this topic we always hire and if you have questions for us I think it's going to be a bit hot right now maybe we can",
+    "start": "2093960",
+    "end": "2100440"
+  },
+  {
+    "text": "get one question and but you can reach out to us either by email or on slack and we'll be around for for the rest of",
+    "start": "2100440",
+    "end": "2106599"
+  },
+  {
+    "text": "the day thank",
+    "start": "2106599",
+    "end": "2109599"
+  },
+  {
+    "text": "you",
+    "start": "2114640",
+    "end": "2117640"
+  }
+]

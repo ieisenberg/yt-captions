@@ -1,0 +1,2113 @@
+[
+  {
+    "start": "0",
+    "end": "139000"
+  },
+  {
+    "text": "today I'm going to talk about in memory caching so especially I want to talk about how to curb tail latencies and the",
+    "start": "4010",
+    "end": "13190"
+  },
+  {
+    "text": "ideas I talk about are summarizing this project that I'm right now working on which is called Pelican so before we",
+    "start": "13190",
+    "end": "19910"
+  },
+  {
+    "text": "start I want to sort of do a bit of self introductions tell you why I'm",
+    "start": "19910",
+    "end": "25460"
+  },
+  {
+    "text": "interested in this topic and why am I qualified to talk about in my opinion so I've been at Twitter for six years and",
+    "start": "25460",
+    "end": "31999"
+  },
+  {
+    "text": "this whole time I'm pretty much working on cash that's a very long time by",
+    "start": "31999",
+    "end": "37789"
+  },
+  {
+    "text": "Silicon Valley standards so during this time I've been the maintainer of Twitter's memcache fork which is called",
+    "start": "37789",
+    "end": "45379"
+  },
+  {
+    "text": "team cash and we also have our own Redis Fork which we did not open source so we",
+    "start": "45379",
+    "end": "50719"
+  },
+  {
+    "text": "didn't bother to give it a different name and we we are a small team that's",
+    "start": "50719",
+    "end": "56030"
+  },
+  {
+    "text": "both in charge of development and and operations so our fleet includes",
+    "start": "56030",
+    "end": "61429"
+  },
+  {
+    "text": "thousands of machines that are running basically cache servers right there are more running cache clients but there was",
+    "start": "61429",
+    "end": "67700"
+  },
+  {
+    "text": "a library on hardware that we don't control and internally we have hundreds",
+    "start": "67700",
+    "end": "73070"
+  },
+  {
+    "text": "of customers as you know you may know Twitter is a sort of a Microsoft service",
+    "start": "73070",
+    "end": "78470"
+  },
+  {
+    "text": "shop which basically we were one of the first few companies who championed this idea of micro services so so even so",
+    "start": "78470",
+    "end": "86689"
+  },
+  {
+    "text": "even though it whitter presents just you know one single product internally we have very lots of different services and",
+    "start": "86689",
+    "end": "93110"
+  },
+  {
+    "text": "teams and that in turn translates into lots of cash users so today's talk is",
+    "start": "93110",
+    "end": "102500"
+  },
+  {
+    "text": "mostly going to be about the disasters we have seen production as a lot of",
+    "start": "102500",
+    "end": "110420"
+  },
+  {
+    "text": "other things in life like relationships and politics you learn a lot more from failures than from success so by seeing",
+    "start": "110420",
+    "end": "118039"
+  },
+  {
+    "text": "all these failures and incidents there are some rules that we sort of summarized over the over the course of",
+    "start": "118039",
+    "end": "123740"
+  },
+  {
+    "text": "several years and that sort of boils down to what we decide to do with this",
+    "start": "123740",
+    "end": "129110"
+  },
+  {
+    "text": "new generation of cash which is Pelican our plan is actually to replace the",
+    "start": "129110",
+    "end": "134300"
+  },
+  {
+    "text": "current need for cash at Twitter using this single framework so I",
+    "start": "134300",
+    "end": "140720"
+  },
+  {
+    "start": "139000",
+    "end": "317000"
+  },
+  {
+    "text": "lied I'd like to introduce the problem which is cache performance I I think for",
+    "start": "140720",
+    "end": "146430"
+  },
+  {
+    "text": "a lot of you that would be that would not be a problem because you with in cache is very fast very lightweight it's",
+    "start": "146430",
+    "end": "152760"
+  },
+  {
+    "text": "a soft problem probably has been thought for years if not ten years so when I",
+    "start": "152760",
+    "end": "157860"
+  },
+  {
+    "text": "talk about cache performance what do I mean right so let's look at a happy case you have some kind of service you know a",
+    "start": "157860",
+    "end": "164850"
+  },
+  {
+    "text": "web service or some other streaming computing and there's a lot of data going in and out and these data live in",
+    "start": "164850",
+    "end": "172290"
+  },
+  {
+    "text": "some kind of database or HDFS whatever you want to have frequent access to them",
+    "start": "172290",
+    "end": "178080"
+  },
+  {
+    "text": "or you want to do some computation on them but the database does not provide enough throughput so easy you just put a",
+    "start": "178080",
+    "end": "185130"
+  },
+  {
+    "text": "cache alongside the database to absorb the load right this is a fairly standard",
+    "start": "185130",
+    "end": "190549"
+  },
+  {
+    "text": "set up and in the most cases that's enough to that's it that's basically",
+    "start": "190549",
+    "end": "196230"
+  },
+  {
+    "text": "enough for your entire use case you forget about it exacts you know it just work on your service so that's the happy",
+    "start": "196230",
+    "end": "202260"
+  },
+  {
+    "text": "case but sometimes you run into some weird situations which sort of",
+    "start": "202260",
+    "end": "209250"
+  },
+  {
+    "text": "diminishes the capacity of the cache just by a little bit so if you compare these two the cache is still working",
+    "start": "209250",
+    "end": "214890"
+  },
+  {
+    "text": "mostly fine but it's it just gets a little more loaded right what happens is",
+    "start": "214890",
+    "end": "220709"
+  },
+  {
+    "text": "if you have a very effective cache let's say you have a cache with 95% hit rate",
+    "start": "220709",
+    "end": "226350"
+  },
+  {
+    "text": "which is typical then if you lose just 5% of the data right so now from you",
+    "start": "226350",
+    "end": "234780"
+  },
+  {
+    "text": "your a cache hit rate dropped from 95% to maybe 90% but what that means is it",
+    "start": "234780",
+    "end": "241170"
+  },
+  {
+    "text": "translates to a doubling of the load in databases so we have seen even more dramatic cases where 99.5 percent of the",
+    "start": "241170",
+    "end": "249420"
+  },
+  {
+    "text": "data can be served out of cache so now if you lose 5% of your data you increase the load to the back end at least",
+    "start": "249420",
+    "end": "256229"
+  },
+  {
+    "text": "temporarily by 10x and very very few databases are provisioned or designed to",
+    "start": "256229",
+    "end": "262169"
+  },
+  {
+    "text": "handle such as big search so when when the cache slows down even just a little",
+    "start": "262169",
+    "end": "267510"
+  },
+  {
+    "text": "bit and the better you use the cache the bigger the problem in this case is that the database gets unhappy and",
+    "start": "267510",
+    "end": "273650"
+  },
+  {
+    "text": "because this whole service depends on getting data from somewhere and and if",
+    "start": "273650",
+    "end": "278870"
+  },
+  {
+    "text": "it can now get that from cache and it's getting it's very slowly from the database the entire service becomes not",
+    "start": "278870",
+    "end": "284510"
+  },
+  {
+    "text": "happy right so that affects the SLA and if you happen to run a micro service with lots of dependencies now is when",
+    "start": "284510",
+    "end": "291530"
+  },
+  {
+    "text": "the snowball starts to sort of rolling right so so you can have this very dramatic snowballing effect from just",
+    "start": "291530",
+    "end": "298730"
+  },
+  {
+    "text": "the tiny little glitch in your cache so you can go from cache rule rules",
+    "start": "298730",
+    "end": "304880"
+  },
+  {
+    "text": "everything around you the cabbie case to cash rules everything around you very fast in like seconds that means that the",
+    "start": "304880",
+    "end": "311900"
+  },
+  {
+    "text": "system by nature is very sensitive to the performance of cache and not just",
+    "start": "311900",
+    "end": "318290"
+  },
+  {
+    "start": "317000",
+    "end": "507000"
+  },
+  {
+    "text": "any performance right because the cash was still handling plenty of traffic it",
+    "start": "318290",
+    "end": "323540"
+  },
+  {
+    "text": "didn't die it's just a little slower so so really what you want from cache is as",
+    "start": "323540",
+    "end": "330020"
+  },
+  {
+    "text": "a level up from just having this throughput you won't have very predictable agencies and especially you",
+    "start": "330020",
+    "end": "336920"
+  },
+  {
+    "text": "want predictable tail latencies you want that few percent to be right or maybe",
+    "start": "336920",
+    "end": "342380"
+  },
+  {
+    "text": "under 1% to be right so the common interception for cache is it's really",
+    "start": "342380",
+    "end": "349580"
+  },
+  {
+    "text": "just you know this might be not everybody will agree it's the king of performance but you know just for a fact",
+    "start": "349580",
+    "end": "355010"
+  },
+  {
+    "text": "it does handle theoretically millions of QPS on the modern hardware a beefy",
+    "start": "355010",
+    "end": "361070"
+  },
+  {
+    "text": "machine it has typically has you know 200 millisecond 300 millisecond and to",
+    "start": "361070",
+    "end": "367220"
+  },
+  {
+    "text": "an sorry microsecond end-to-end latencies and it's not very hard to",
+    "start": "367220",
+    "end": "374210"
+  },
+  {
+    "text": "saturate the entire network if you have slightly larger objects however under",
+    "start": "374210",
+    "end": "381680"
+  },
+  {
+    "text": "the under the hood if you have if you run a large enough operation right if",
+    "start": "381680",
+    "end": "387110"
+  },
+  {
+    "text": "you have thousands of machines tens of thousands of instances and you run it for years sooner or later and you start",
+    "start": "387110",
+    "end": "393230"
+  },
+  {
+    "text": "to see these ghosts so it is fast but not always it's usually pretty fast",
+    "start": "393230",
+    "end": "399070"
+  },
+  {
+    "text": "sometimes there are hiccups that you wonder why they happen or how to get rid of them and under",
+    "start": "399070",
+    "end": "406190"
+  },
+  {
+    "text": "certain sort of predictable conditions these head cups or this problems come",
+    "start": "406190",
+    "end": "411830"
+  },
+  {
+    "text": "back more regularly or under you know some conditions that you think should",
+    "start": "411830",
+    "end": "417260"
+  },
+  {
+    "text": "not have impact on performance they come back so so these are what I call the",
+    "start": "417260",
+    "end": "422540"
+  },
+  {
+    "text": "ghosts of performance and if I look back on my entire sort of tenure at Twitter",
+    "start": "422540",
+    "end": "429110"
+  },
+  {
+    "text": "you know learning about cash was not that hard and you read the memcache decode you know hold your nose a little bit but you can",
+    "start": "429110",
+    "end": "435320"
+  },
+  {
+    "text": "do it and then you you know read the Redis code you learn about tamo hashing",
+    "start": "435320",
+    "end": "440690"
+  },
+  {
+    "text": "or other can you know cousin hashing and you're done you you're you can claim",
+    "start": "440690",
+    "end": "445880"
+  },
+  {
+    "text": "yourself to be you know some kind of cash expert you know know the thing but then what I didn't expect was I spent",
+    "start": "445880",
+    "end": "453410"
+  },
+  {
+    "text": "multiple years chasing these ghosts why is that because the thing is something",
+    "start": "453410",
+    "end": "460820"
+  },
+  {
+    "text": "if you have three cache servers you run into a problem maybe once every year you",
+    "start": "460820",
+    "end": "466220"
+  },
+  {
+    "text": "know you just shrug it off right life goes on I don't care if it comes back once in a year but if as we've sort of",
+    "start": "466220",
+    "end": "473210"
+  },
+  {
+    "text": "scale we have more instances we have more customers then you sort of get hunted a little bit more often and it's",
+    "start": "473210",
+    "end": "480200"
+  },
+  {
+    "text": "not really fun to be on call and get haunted by all these bugs that you cannot explain or you don't even know if",
+    "start": "480200",
+    "end": "486110"
+  },
+  {
+    "text": "they're bugs but but by these behaviors that you cannot explain so so basically I was like I do not like the fact that I",
+    "start": "486110",
+    "end": "494930"
+  },
+  {
+    "text": "was being hunted the only way I can get some joy or derive some fun out of this if is if I actually go attack these",
+    "start": "494930",
+    "end": "501290"
+  },
+  {
+    "text": "ghosts figure out why they show up and see if I can do something about it so basically bust all these ghosts so my",
+    "start": "501290",
+    "end": "508430"
+  },
+  {
+    "start": "507000",
+    "end": "552000"
+  },
+  {
+    "text": "plan of containing ghosts was I want to really minimize the the factors the the",
+    "start": "508430",
+    "end": "516080"
+  },
+  {
+    "text": "behavior that were that was indeterministic right I I'm not sure if they're bugs but they show up as",
+    "start": "516080",
+    "end": "522169"
+  },
+  {
+    "text": "something that I can explain and I cannot predict it I don't like it I want to get rid of these things so that's the",
+    "start": "522169",
+    "end": "527390"
+  },
+  {
+    "text": "the whole game plan so how do I do that first you identify you know what are",
+    "start": "527390",
+    "end": "533690"
+  },
+  {
+    "text": "these potential areas that's into terminus and then you can't you see if you can",
+    "start": "533690",
+    "end": "538790"
+  },
+  {
+    "text": "get rid of them not altogether that's the that's the happy case if we cannot avoid doing those things but then at",
+    "start": "538790",
+    "end": "545720"
+  },
+  {
+    "text": "least let's try some strategies to mitigate these problems right so so that's the plan so first step identify",
+    "start": "545720",
+    "end": "551390"
+  },
+  {
+    "text": "how do we before actually going into this I'll give you a very short two-minute primer of cashing in data",
+    "start": "551390",
+    "end": "558230"
+  },
+  {
+    "start": "552000",
+    "end": "659000"
+  },
+  {
+    "text": "center because some of the context actually applies in the later discussion so who will look at it so the context is",
+    "start": "558230",
+    "end": "564620"
+  },
+  {
+    "text": "caching is a very ubiquitous concept used everywhere but there's something",
+    "start": "564620",
+    "end": "570230"
+  },
+  {
+    "text": "special about caching and data center because data center itself is a little bit special data center machines are",
+    "start": "570230",
+    "end": "576080"
+  },
+  {
+    "text": "geographically centralized they're very very close to each other either they're in the same building or they're in adjacent beauties that are connected",
+    "start": "576080",
+    "end": "581630"
+  },
+  {
+    "text": "with very high-speed Network right so you really can expect you know high quality reliable highly commoditized",
+    "start": "581630",
+    "end": "589550"
+  },
+  {
+    "text": "networks as well as host set up in this environment so the entire infrastructure",
+    "start": "589550",
+    "end": "595730"
+  },
+  {
+    "text": "is very reliable and that's why we very consistently can see you know end-to-end",
+    "start": "595730",
+    "end": "601070"
+  },
+  {
+    "text": "latencies being in the sub millisecond range 200 300 microsecond being very typical with modern you know Linux",
+    "start": "601070",
+    "end": "607520"
+  },
+  {
+    "text": "networking stack as well as Ethernet as the backbone right so that's what people come to expect or rely on as a fact even",
+    "start": "607520",
+    "end": "616340"
+  },
+  {
+    "text": "though them sometimes may be violated and the people the way people use cache",
+    "start": "616340",
+    "end": "621650"
+  },
+  {
+    "text": "and data centers because you have this highly reliable environment people tend to create connections and keep them",
+    "start": "621650",
+    "end": "627200"
+  },
+  {
+    "text": "right because the cost of a connection is slow and is low and then because we",
+    "start": "627200",
+    "end": "632300"
+  },
+  {
+    "text": "are gonna pump a lot of data back and forth it makes sense to keep the connections around instead of tearing up",
+    "start": "632300",
+    "end": "638120"
+  },
+  {
+    "text": "and setting up them every time and for the most part cash deals with simple",
+    "start": "638120",
+    "end": "645410"
+  },
+  {
+    "text": "data structures and the operations are fairly simple too we have some simple data structures in bredis and from",
+    "start": "645410",
+    "end": "651320"
+  },
+  {
+    "text": "memcache it's mostly just a key value store so there's not much computation to do on the server so these are sort of",
+    "start": "651320",
+    "end": "658730"
+  },
+  {
+    "text": "what we know about cache so we mostly send request response and if we don't have a connection available or no",
+    "start": "658730",
+    "end": "665390"
+  },
+  {
+    "start": "659000",
+    "end": "723000"
+  },
+  {
+    "text": "connection at all we try to connect we try to create a new connection and because we're adults here",
+    "start": "665390",
+    "end": "670880"
+  },
+  {
+    "text": "running things in production you want the sort of the adult supervision of the cluster like stats logging health check",
+    "start": "670880",
+    "end": "677240"
+  },
+  {
+    "text": "you want to have visibility right it cannot just run wild so cash from a bird's view is very",
+    "start": "677240",
+    "end": "684170"
+  },
+  {
+    "text": "simple you have this box which is a host as operating system Network stuff and",
+    "start": "684170",
+    "end": "690020"
+  },
+  {
+    "text": "you run basically a high-performance event-driven server and then you support",
+    "start": "690020",
+    "end": "695210"
+  },
+  {
+    "text": "some kind of protocol most most likely memcache D protocol Redis protocol and you use some kind of data storage",
+    "start": "695210",
+    "end": "702200"
+  },
+  {
+    "text": "probably a memory and and there is your cache you know from a high level that's it",
+    "start": "702200",
+    "end": "707240"
+  },
+  {
+    "text": "and we don't really have much control in to both the network infrastructure as",
+    "start": "707240",
+    "end": "712820"
+  },
+  {
+    "text": "well as the operating system although I believe the person given the Scylla DB",
+    "start": "712820",
+    "end": "718850"
+  },
+  {
+    "text": "talk is gonna tell you otherwise so I think that will be interesting so so that's that's cash so how do we sort of",
+    "start": "718850",
+    "end": "725960"
+  },
+  {
+    "start": "723000",
+    "end": "818000"
+  },
+  {
+    "text": "find out where all these identify where all these indeterministic elements are the thing is you don't",
+    "start": "725960",
+    "end": "733880"
+  },
+  {
+    "text": "really go find ghosts the ghosts come find you right so so how we uncover this",
+    "start": "733880",
+    "end": "740660"
+  },
+  {
+    "text": "is basically through incidents so the way incidents work at Twitter is so we",
+    "start": "740660",
+    "end": "749150"
+  },
+  {
+    "text": "sort of rank incidents by how severe they are and over over years we have a fairly good definition of of what",
+    "start": "749150",
+    "end": "756800"
+  },
+  {
+    "text": "incidents are more severe and what are just trivial ones and generally cash",
+    "start": "756800",
+    "end": "761930"
+  },
+  {
+    "text": "incidents are quite likely to be the most severe which is fzero so so this",
+    "start": "761930",
+    "end": "768140"
+  },
+  {
+    "text": "tells you that that the cash thing is very sensitive so whenever we have one of these big incidents a sort of as a",
+    "start": "768140",
+    "end": "774950"
+  },
+  {
+    "text": "team and have teams assemble what everybody tries to get to the bottom of things and we come up with action items",
+    "start": "774950",
+    "end": "780260"
+  },
+  {
+    "text": "that actually would fix things in the long-term so so let me tell you some of the war stories or incidents that we",
+    "start": "780260",
+    "end": "786940"
+  },
+  {
+    "text": "have seen so in one case we know that some cache servers has really high",
+    "start": "786940",
+    "end": "792380"
+  },
+  {
+    "text": "bandwidth utilization but the request rate actually dropped quite a bit so",
+    "start": "792380",
+    "end": "798290"
+  },
+  {
+    "text": "there's you see all the Bice getting pumped in and out but noth-nothing is getting down so so we got into that and",
+    "start": "798290",
+    "end": "804769"
+  },
+  {
+    "text": "what we saw is that there's a lot of new connections being created but and not",
+    "start": "804769",
+    "end": "810230"
+  },
+  {
+    "text": "too many things being down on those connections so so what's the problem here so I would like to take a little",
+    "start": "810230",
+    "end": "816559"
+  },
+  {
+    "text": "bit of a detour and talk about syscalls so if you do with that you know",
+    "start": "816559",
+    "end": "822290"
+  },
+  {
+    "start": "818000",
+    "end": "973000"
+  },
+  {
+    "text": "programming on distributed system so you know and programs simple service you probably deal with these a fair amount",
+    "start": "822290",
+    "end": "828559"
+  },
+  {
+    "text": "and it turns out creating a connection a TCP connection is a activity that",
+    "start": "828559",
+    "end": "834319"
+  },
+  {
+    "text": "somewhat Cisco heavy so I marked all these activities steps involved and each",
+    "start": "834319",
+    "end": "840679"
+  },
+  {
+    "text": "one of them translates to at least one Cisco so we have four pluses calls to create a connection on the other hand",
+    "start": "840679",
+    "end": "847660"
+  },
+  {
+    "text": "requests even though take more steps they have fairly lightweight computation",
+    "start": "847660",
+    "end": "854239"
+  },
+  {
+    "text": "on the other hand they have fewer sis calls you will have at most recess calls",
+    "start": "854239",
+    "end": "859369"
+  },
+  {
+    "text": "and most of these can be amortized over multiple requests or multiple responses",
+    "start": "859369",
+    "end": "865910"
+  },
+  {
+    "text": "very effective effectively if you have a high request response rate where you can sort of batch them together or pipeline",
+    "start": "865910",
+    "end": "872269"
+  },
+  {
+    "text": "or things like that so it ends up being it ends up using a lot fewer sis calls",
+    "start": "872269",
+    "end": "878179"
+  },
+  {
+    "text": "per request and if you look at memcache so we benchmarked our we profiled our",
+    "start": "878179",
+    "end": "884629"
+  },
+  {
+    "text": "version of memcache which is 2m cache but the same conclusion applies to memcache T as well if you go through",
+    "start": "884629",
+    "end": "891769"
+  },
+  {
+    "text": "down this list then you need to go to at least the sixth or seventh function",
+    "start": "891769",
+    "end": "897110"
+  },
+  {
+    "text": "before it's not a Cisco right and and the big sis calls actually accumulate collectively they account for about 80",
+    "start": "897110",
+    "end": "903799"
+  },
+  {
+    "text": "percent of all your CPU time so really how many requests you can do boys down",
+    "start": "903799",
+    "end": "909319"
+  },
+  {
+    "text": "to how many Cisco because you need to make in the cache server okay so so given this fact what happens in the in",
+    "start": "909319",
+    "end": "917240"
+  },
+  {
+    "text": "the first scenario is that if for whatever reason the request r/a starts",
+    "start": "917240",
+    "end": "922669"
+  },
+  {
+    "text": "to the the request response starts to slow down a little bit usually what you have is a client that is aware of the",
+    "start": "922669",
+    "end": "929720"
+  },
+  {
+    "text": "speed and therefore has a timeout set so I'm not going to wait indefinitely for a cash request I want to I want to get it",
+    "start": "929720",
+    "end": "936649"
+  },
+  {
+    "text": "back in ten minutes and otherwise I'm gonna do it as a exception right well I will handle it s",
+    "start": "936649",
+    "end": "941650"
+  },
+  {
+    "text": "exception so it's very common for exception handling logic try to close down the connection assuming the server",
+    "start": "941650",
+    "end": "948280"
+  },
+  {
+    "text": "has gone away and then later reconnect right so this is why we see all that all",
+    "start": "948280",
+    "end": "954340"
+  },
+  {
+    "text": "those new connections because if you have a little bit of slowdown it's very likely for the client to behave in such",
+    "start": "954340",
+    "end": "960190"
+  },
+  {
+    "text": "a way that they would tear down existing connections and start this very cisco heavy connecting behavior right away and",
+    "start": "960190",
+    "end": "967420"
+  },
+  {
+    "text": "if you have a very large fleet or a lots of lots of clients who open in many connections you end up having connection",
+    "start": "967420",
+    "end": "974470"
+  },
+  {
+    "start": "973000",
+    "end": "1086000"
+  },
+  {
+    "text": "storm and connection storm actually is really bad for cache because once you're in under the attack of a connection",
+    "start": "974470",
+    "end": "981310"
+  },
+  {
+    "text": "storm it's very hard to get yourself out of it because you're basically being ddosed by your clients the clients",
+    "start": "981310",
+    "end": "986950"
+  },
+  {
+    "text": "probably won't give up because they really want to get the data right so so this is number one thing that causes bad",
+    "start": "986950",
+    "end": "993490"
+  },
+  {
+    "text": "tail latency slower it doesn't say seeing sort of rare scenarios is if you are in the condition of introducing",
+    "start": "993490",
+    "end": "1000660"
+  },
+  {
+    "text": "connection storms another incident that is a little more fun than that as we",
+    "start": "1000660",
+    "end": "1007290"
+  },
+  {
+    "text": "have these random pick ups but they always happen at the top of the hour so",
+    "start": "1007290",
+    "end": "1012590"
+  },
+  {
+    "text": "if you see this pattern what would be your first guess top of the hour so so",
+    "start": "1012590",
+    "end": "1020760"
+  },
+  {
+    "text": "basically it's something that occurs regularly right what thing occurs",
+    "start": "1020760",
+    "end": "1025890"
+  },
+  {
+    "text": "regularly things that are scheduled right so so we looked at a few places",
+    "start": "1025890",
+    "end": "1032280"
+  },
+  {
+    "text": "but you know you have your usual suspects that would happen periodically and you know scheduled jobs or cron jobs",
+    "start": "1032280",
+    "end": "1039990"
+  },
+  {
+    "text": "is one of them so what happens is because we're adults here we're trying to do logging at least every once in a",
+    "start": "1039990",
+    "end": "1046110"
+  },
+  {
+    "text": "while in the server and while we're logging we're implicitly making calls to the disk but the OS is smart it would",
+    "start": "1046110",
+    "end": "1052530"
+  },
+  {
+    "text": "try to buffer the data you try to write to the disk and only it flush it occasionally but you have to flush it",
+    "start": "1052530",
+    "end": "1057690"
+  },
+  {
+    "text": "sometime right if you're so unlucky to be trying to call flush where another",
+    "start": "1057690",
+    "end": "1063450"
+  },
+  {
+    "text": "cron job acts which happens to be very which happens to be packing on the disk",
+    "start": "1063450",
+    "end": "1068610"
+  },
+  {
+    "text": "just non-stop suddenly your worker threat can now move on anymore because it's it's blocked on",
+    "start": "1068610",
+    "end": "1074160"
+  },
+  {
+    "text": "this implicit call to the disk right so you wait here and you see I did a little",
+    "start": "1074160",
+    "end": "1080190"
+  },
+  {
+    "text": "bit of slowdown in the cache and things might just start to go downhill from",
+    "start": "1080190",
+    "end": "1085620"
+  },
+  {
+    "text": "there so the other thing is we really don't want to do blocking i/o even though they happen very infrequently so",
+    "start": "1085620",
+    "end": "1091770"
+  },
+  {
+    "start": "1086000",
+    "end": "1280000"
+  },
+  {
+    "text": "if you have one server or you don't have cron job you may never run into it but you don't know right someone else may",
+    "start": "1091770",
+    "end": "1097740"
+  },
+  {
+    "text": "schedule background draw job on the same highway that you have no control over so the best way to do this is just not",
+    "start": "1097740",
+    "end": "1103530"
+  },
+  {
+    "text": "doing blog hire at all so here's another one this one is similar we have these",
+    "start": "1103530",
+    "end": "1112200"
+  },
+  {
+    "text": "hiccups but the pattern is different we are seeing on them only after cache",
+    "start": "1112200",
+    "end": "1119100"
+  },
+  {
+    "text": "reboot and we see several of them in the road but they don't happen indefinitely",
+    "start": "1119100",
+    "end": "1124410"
+  },
+  {
+    "text": "after a while they things sort of just calm down and and server chugs along just fine so so basically now it's",
+    "start": "1124410",
+    "end": "1132480"
+  },
+  {
+    "text": "basically a good riddle it's like what in the cache would slow down several",
+    "start": "1132480",
+    "end": "1138120"
+  },
+  {
+    "text": "times but not continuously and eventually go away and the answer for",
+    "start": "1138120",
+    "end": "1143400"
+  },
+  {
+    "text": "that is hash tables function so if you have a cache that has nothing and then",
+    "start": "1143400",
+    "end": "1150090"
+  },
+  {
+    "text": "you try to insert one item it will you end up with a very small hash table and if you give a lot of memory safe 20 gigs",
+    "start": "1150090",
+    "end": "1157230"
+  },
+  {
+    "text": "of memory right old only reasonable and you have very small key values you can end up having hundreds of millions of",
+    "start": "1157230",
+    "end": "1163740"
+  },
+  {
+    "text": "keys and by default these hash tables expand when your key to hash entry ratio",
+    "start": "1163740",
+    "end": "1171360"
+  },
+  {
+    "text": "goes above the threshold so they will double the number of entries every time you go over a limit and that accounts",
+    "start": "1171360",
+    "end": "1177870"
+  },
+  {
+    "text": "for the several blips right the way we found out about this it's like oh these blips sort of keep widening up everyone",
+    "start": "1177870",
+    "end": "1184620"
+  },
+  {
+    "text": "is a little happens a little the intervals keeps going up a little bit and then we pull through a bunch of",
+    "start": "1184620",
+    "end": "1191760"
+  },
+  {
+    "text": "other metrics and say oh look the number of keys almost double every time this happens so that leads you to the hash",
+    "start": "1191760",
+    "end": "1198660"
+  },
+  {
+    "text": "tables so the reason that the hash table",
+    "start": "1198660",
+    "end": "1204120"
+  },
+  {
+    "text": "doubling it's so problematic in the case of memcache but stuff like that is when you",
+    "start": "1204120",
+    "end": "1209440"
+  },
+  {
+    "text": "try to move things between hash tables you sort of need to lock the entries so nobody is trying to copy the same data",
+    "start": "1209440",
+    "end": "1215290"
+  },
+  {
+    "text": "and locking happens to be not quite cheap right they're not X expensive as this calls for sure they're like 25",
+    "start": "1215290",
+    "end": "1222100"
+  },
+  {
+    "text": "nanoseconds for operation but they're they are still fairly expensive compared",
+    "start": "1222100",
+    "end": "1227230"
+  },
+  {
+    "text": "to other operations and it's really bad if you actually have contention which if",
+    "start": "1227230",
+    "end": "1232870"
+  },
+  {
+    "text": "you have two processes two threads trying to read a hash table will be the case so what we found is if we get rid",
+    "start": "1232870",
+    "end": "1239380"
+  },
+  {
+    "text": "of all the locks in chrome cache with eight threads we can actually get a 30%",
+    "start": "1239380",
+    "end": "1244540"
+  },
+  {
+    "text": "speed-up so so this is still quite significant so so in this case we have",
+    "start": "1244540",
+    "end": "1251980"
+  },
+  {
+    "text": "locking messing with us when we were doubling the hash tables and then and",
+    "start": "1251980",
+    "end": "1258160"
+  },
+  {
+    "text": "when things slow down we actually end up having connection storms which further slows down decline because of locking",
+    "start": "1258160",
+    "end": "1264970"
+  },
+  {
+    "text": "right because the the connection needs to be handed over to to the worker",
+    "start": "1264970",
+    "end": "1270250"
+  },
+  {
+    "text": "thread and then the clients start to fall over so so the in this incident the timeline is really just sort of",
+    "start": "1270250",
+    "end": "1276490"
+  },
+  {
+    "text": "different things compounding together until they stabilize so in this case you know locking is the problem and then",
+    "start": "1276490",
+    "end": "1283450"
+  },
+  {
+    "start": "1280000",
+    "end": "1421000"
+  },
+  {
+    "text": "there's more okay so we have a long list of incidents that can entertain people",
+    "start": "1283450",
+    "end": "1289210"
+  },
+  {
+    "text": "so hosts will or will have cash running",
+    "start": "1289210",
+    "end": "1294370"
+  },
+  {
+    "text": "for a long time everything is fine suddenly you're seeing boom in your kernel log and ends which ends up",
+    "start": "1294370",
+    "end": "1301330"
+  },
+  {
+    "text": "killing memcache or whatever so cash server because they use the most memory so that's the preference of the of the",
+    "start": "1301330",
+    "end": "1307270"
+  },
+  {
+    "text": "kernel what happens here what happened here is fermentation so after running",
+    "start": "1307270",
+    "end": "1314020"
+  },
+  {
+    "text": "for a very long time and tearing up connection no tearing setting up connection tearing down connection many",
+    "start": "1314020",
+    "end": "1320770"
+  },
+  {
+    "text": "many times I'm not gonna tell you how long we run our cache in one go I'm probably shouldn't disclose the number",
+    "start": "1320770",
+    "end": "1326830"
+  },
+  {
+    "text": "it's a little embarrassing but if you run a sufficiently long you end up having fragmented memory and kernel",
+    "start": "1326830",
+    "end": "1334120"
+  },
+  {
+    "text": "sometimes requires big chunks of contiguous memory and that's why another application which",
+    "start": "1334120",
+    "end": "1341320"
+  },
+  {
+    "text": "requires that contiguous memory may trigger a room that has nothing to do with cash but ends up killing cash so",
+    "start": "1341320",
+    "end": "1346809"
+  },
+  {
+    "text": "we've seen that and that's another problem we have to deal with or you can you know we boot your cache frequently I",
+    "start": "1346809",
+    "end": "1352119"
+  },
+  {
+    "text": "guess and in another case Redis instances basically were killed by",
+    "start": "1352119",
+    "end": "1357730"
+  },
+  {
+    "text": "scheduler so we use mesas and Aurora to schedule jobs essentially you're using these containers that you tell how much",
+    "start": "1357730",
+    "end": "1364749"
+  },
+  {
+    "text": "memory to give it to how many CPUs and CPU basically never was a problem for cache it has very low",
+    "start": "1364749",
+    "end": "1370749"
+  },
+  {
+    "text": "CPU utilization usually but in this case we saw Redis being killed we're like we",
+    "start": "1370749",
+    "end": "1377019"
+  },
+  {
+    "text": "want you know we want 10 gigs of Redis data to be stored we actually gave it",
+    "start": "1377019",
+    "end": "1382690"
+  },
+  {
+    "text": "like 12 gigs of memory and why are these jobs being killed and if you probe around Redis that's a little bit you",
+    "start": "1382690",
+    "end": "1388600"
+  },
+  {
+    "text": "find this metric called the fragment ratio which is how much memory you know",
+    "start": "1388600",
+    "end": "1395440"
+  },
+  {
+    "text": "the the kernel thinks you're using versus how much memory you think you think you're using or how much data you",
+    "start": "1395440",
+    "end": "1401350"
+  },
+  {
+    "text": "think your story right and this ratio actually can get fairly large can get to",
+    "start": "1401350",
+    "end": "1406809"
+  },
+  {
+    "text": "be 1.2 1.3 1.5 who knows it totally depends on the nature of your object so",
+    "start": "1406809",
+    "end": "1412869"
+  },
+  {
+    "text": "so even if you think you're giving it enough buffer you may not end up being the case and when you lose your cache",
+    "start": "1412869",
+    "end": "1419559"
+  },
+  {
+    "text": "bad things happen so it turns out memory is another thing that we need be careful",
+    "start": "1419559",
+    "end": "1425619"
+  },
+  {
+    "start": "1421000",
+    "end": "1447000"
+  },
+  {
+    "text": "about if we want to get rid of on deterministic behavior so to summarize you know I've picked the",
+    "start": "1425619",
+    "end": "1432129"
+  },
+  {
+    "text": "the good ones and the big ones and the important incidents that I told you and over time we realize that these are the",
+    "start": "1432129",
+    "end": "1440320"
+  },
+  {
+    "text": "things if we want really good tendencies we have to do something about so what",
+    "start": "1440320",
+    "end": "1445960"
+  },
+  {
+    "text": "are we going to do with them so first I want to talk about the things we have to mitigate because some of the things we",
+    "start": "1445960",
+    "end": "1452799"
+  },
+  {
+    "start": "1447000",
+    "end": "1480000"
+  },
+  {
+    "text": "cannot stop doing for example we cannot stop can accepting connections so they will happen and we don't have total",
+    "start": "1452799",
+    "end": "1459549"
+  },
+  {
+    "text": "control of our clients so I cannot say for sure whether I will experience",
+    "start": "1459549",
+    "end": "1464590"
+  },
+  {
+    "text": "connection storm or not right so I have to be as performant as possible when I",
+    "start": "1464590",
+    "end": "1469840"
+  },
+  {
+    "text": "have a lot of and the other thing is blocking i/o you have to log you have to at some point",
+    "start": "1469840",
+    "end": "1475130"
+  },
+  {
+    "text": "write to disk you just cannot not do it so how do we mitigate so here I want to sort of",
+    "start": "1475130",
+    "end": "1482179"
+  },
+  {
+    "start": "1480000",
+    "end": "1656000"
+  },
+  {
+    "text": "borrow a concept from the networking community so in computer networking",
+    "start": "1482179",
+    "end": "1487460"
+  },
+  {
+    "text": "there's this concept called the separation of data play and control playing data plan being the plane that",
+    "start": "1487460",
+    "end": "1493520"
+  },
+  {
+    "text": "handles the IP packets right the only task of data plane is to forward packets and you leave everything else like doing",
+    "start": "1493520",
+    "end": "1501049"
+  },
+  {
+    "text": "BGP or or configure rules or you know handle stray packets or things like that",
+    "start": "1501049",
+    "end": "1507470"
+  },
+  {
+    "text": "to the control plane which is also called sort of the slow path right so data plan corresponds to the fast path",
+    "start": "1507470",
+    "end": "1514010"
+  },
+  {
+    "text": "handles the capi case and the vast majority of the packets and you leave the rest of your control plane I think",
+    "start": "1514010",
+    "end": "1519679"
+  },
+  {
+    "text": "this separation is actually quite helpful in our case because we also have",
+    "start": "1519679",
+    "end": "1524840"
+  },
+  {
+    "text": "a situation where you have requests response with just the dominant case which has at least two three orders of",
+    "start": "1524840",
+    "end": "1531620"
+  },
+  {
+    "text": "magnitude more activity than the rest right in the in the steady case so you really want to optimize for the",
+    "start": "1531620",
+    "end": "1537290"
+  },
+  {
+    "text": "performance of requests response handling and you can't afford to do other things maybe a little slower so we",
+    "start": "1537290",
+    "end": "1544700"
+  },
+  {
+    "text": "sort of come up with this design decision saying we will put operations",
+    "start": "1544700",
+    "end": "1550010"
+  },
+  {
+    "text": "of either of different nature or for different purpose of different SLA on two different threads and we put a bunch",
+    "start": "1550010",
+    "end": "1557360"
+  },
+  {
+    "text": "of you know tasks that are necessary but not exactly performance critical onto",
+    "start": "1557360",
+    "end": "1563000"
+  },
+  {
+    "text": "what we call sort of a main thread so this is part of a control play which listens for connections that handles",
+    "start": "1563000",
+    "end": "1569809"
+  },
+  {
+    "text": "these activities you can get your stats exported on on this thread you can do",
+    "start": "1569809",
+    "end": "1574880"
+  },
+  {
+    "text": "stats aggregation you can do your lock dump if it gets blocked it gets blocked right it's fine and we then form or what",
+    "start": "1574880",
+    "end": "1582320"
+  },
+  {
+    "text": "we call the data plane which is the fast path and in particular we have exactly",
+    "start": "1582320",
+    "end": "1587720"
+  },
+  {
+    "text": "one thread that handles all the requests response so the entire flow of the work of thread is is shown on the slide",
+    "start": "1587720",
+    "end": "1593450"
+  },
+  {
+    "text": "that's the only thing it does and in addition to that we actually put another",
+    "start": "1593450",
+    "end": "1599450"
+  },
+  {
+    "text": "thread into the system which has been done by memcache so we're not the first one to do it but",
+    "start": "1599450",
+    "end": "1606080"
+  },
+  {
+    "text": "we we Street tweak to somehow but the idea is because connecting is expensive",
+    "start": "1606080",
+    "end": "1611240"
+  },
+  {
+    "text": "and you sometimes have to handle a lot of connections so you want to give it plenty of resource just for the you know",
+    "start": "1611240",
+    "end": "1618260"
+  },
+  {
+    "text": "the corner cases so basically we formed this little relationship between three",
+    "start": "1618260",
+    "end": "1623630"
+  },
+  {
+    "text": "three threads or three groups of threads in that one handles request want Ron",
+    "start": "1623630",
+    "end": "1629059"
+  },
+  {
+    "text": "hand owes you know connects and they all tried to log and just that's update and",
+    "start": "1629059",
+    "end": "1634820"
+  },
+  {
+    "text": "and push those updates to the background control control plane front which is the",
+    "start": "1634820",
+    "end": "1640490"
+  },
+  {
+    "text": "main thread and the amazing thread takes care of the rest of the tasks so that's",
+    "start": "1640490",
+    "end": "1646370"
+  },
+  {
+    "text": "how we mitigate connection storm and",
+    "start": "1646370",
+    "end": "1651610"
+  },
+  {
+    "text": "connection storm as well as blocking i/o so the things to avoid so if you look",
+    "start": "1652240",
+    "end": "1659000"
+  },
+  {
+    "start": "1656000",
+    "end": "1707000"
+  },
+  {
+    "text": "closely of what we are using the other things for it turns out a lot of the uncertainties in memory and a locking",
+    "start": "1659000",
+    "end": "1665809"
+  },
+  {
+    "text": "can actually build them eliminated let's talk about locking first so what we know is we do need because we have this you",
+    "start": "1665809",
+    "end": "1674690"
+  },
+  {
+    "text": "know three thread setup right it's not like we just have one thread and don't need any locks which is the case for",
+    "start": "1674690",
+    "end": "1680870"
+  },
+  {
+    "text": "Redis because we have threads and threads need to communicate so we just",
+    "start": "1680870",
+    "end": "1686600"
+  },
+  {
+    "text": "look at the nature of that communication and see can we do the the same communication without blocking right it",
+    "start": "1686600",
+    "end": "1693590"
+  },
+  {
+    "text": "turns out you can so that so the main communication are three there are three types you have stats you have logging",
+    "start": "1693590",
+    "end": "1699350"
+  },
+  {
+    "text": "and you need to handoff already established connection to the worker thread so it can process data and what",
+    "start": "1699350",
+    "end": "1707120"
+  },
+  {
+    "start": "1707000",
+    "end": "1806000"
+  },
+  {
+    "text": "we do for each one of these is for stats it's actually quite simple there's this thing which is amazing called atomic",
+    "start": "1707120",
+    "end": "1713740"
+  },
+  {
+    "text": "instructions and if you use that on basic data types it would sort of do",
+    "start": "1713740",
+    "end": "1720010"
+  },
+  {
+    "text": "locking or serialization add the hardware level and you don't have to incur any software over half of that",
+    "start": "1720010",
+    "end": "1725299"
+  },
+  {
+    "text": "which is perfect for updating metrics right especially a simple metrics tab types so now we take care of with just",
+    "start": "1725299",
+    "end": "1732530"
+  },
+  {
+    "text": "atomic instructions what about logging so for logging we also use another fairly",
+    "start": "1732530",
+    "end": "1738679"
+  },
+  {
+    "text": "common data structure which is a ring buffer or a cyclic offer right I'm sure",
+    "start": "1738679",
+    "end": "1744500"
+  },
+  {
+    "text": "many of you know that how this works but I will just talk a little bit in that you have a reader and writer which",
+    "start": "1744500",
+    "end": "1750289"
+  },
+  {
+    "text": "points to the reposition and ride position in this buffer and the writer will move the right position forward",
+    "start": "1750289",
+    "end": "1757250"
+  },
+  {
+    "text": "reader will move the reposition forward and the way you avoid using lock in the setup is again you use atomic",
+    "start": "1757250",
+    "end": "1764600"
+  },
+  {
+    "text": "instruction as well as a locally cached by local I mean threat local cached a",
+    "start": "1764600",
+    "end": "1771169"
+  },
+  {
+    "text": "copy of the values to prevent stepping onto the the other threads feet right so",
+    "start": "1771169",
+    "end": "1776780"
+  },
+  {
+    "text": "basically you will see oh how much room do I have for right by reading both counters and then you know how much you",
+    "start": "1776780",
+    "end": "1782809"
+  },
+  {
+    "text": "can safely write or you can read but between the read and write positions all",
+    "start": "1782809",
+    "end": "1787880"
+  },
+  {
+    "text": "right so so if you use atomic instructions together with the simple data structure you can communicate",
+    "start": "1787880",
+    "end": "1793700"
+  },
+  {
+    "text": "between two threads without using locks and for connection handout if the story",
+    "start": "1793700",
+    "end": "1798980"
+  },
+  {
+    "text": "is similar except that you know instead of ring buffer we use a ring array because every object is the same size so",
+    "start": "1798980",
+    "end": "1804289"
+  },
+  {
+    "text": "I'm not gonna say more about that so what do we do with memory how do we",
+    "start": "1804289",
+    "end": "1809630"
+  },
+  {
+    "start": "1806000",
+    "end": "1981000"
+  },
+  {
+    "text": "remove our certainties in memory so their voice down to a few design sort of principles what we know is memory",
+    "start": "1809630",
+    "end": "1818150"
+  },
+  {
+    "text": "compared to other computation is actually relatively expensive and alack and free cause fragmentation so if you",
+    "start": "1818150",
+    "end": "1825530"
+  },
+  {
+    "text": "get connections turns that cost fermentation and we also have control over internal versus external",
+    "start": "1825530",
+    "end": "1831260"
+  },
+  {
+    "text": "fragmentation does any everybody know what internal fragmentation means right",
+    "start": "1831260",
+    "end": "1838610"
+  },
+  {
+    "text": "so you're basically internal from engine is you slice things up in neat chunks but you may not use all of it external",
+    "start": "1838610",
+    "end": "1845059"
+  },
+  {
+    "text": "fragmentation means you slide things up exactly at at the size that you need but",
+    "start": "1845059",
+    "end": "1851150"
+  },
+  {
+    "text": "you know whoever is providing this malloc functionality or the memory management library may decide that it",
+    "start": "1851150",
+    "end": "1857659"
+  },
+  {
+    "text": "needs to cut more memory to fit your need so so and and the goal is we never",
+    "start": "1857659",
+    "end": "1864440"
+  },
+  {
+    "text": "want to do any swapping because once you get to disk and the performance is gone",
+    "start": "1864440",
+    "end": "1870590"
+  },
+  {
+    "text": "and we want to avoid so one thing is we really want to control the footprint as",
+    "start": "1870590",
+    "end": "1876230"
+  },
+  {
+    "text": "I said if you go over your expected footprint the scheduler or the Machine",
+    "start": "1876230",
+    "end": "1881900"
+  },
+  {
+    "text": "may decide to kill your job or do something wacky about it so what we want to do is we want avoid external",
+    "start": "1881900",
+    "end": "1888140"
+  },
+  {
+    "text": "fermentation because if you introduce external fermentation it's very hard to put a lid on that number you don't know",
+    "start": "1888140",
+    "end": "1895580"
+  },
+  {
+    "text": "whether your fermentation ratio is going to be one point one or one point two or two point zero so it's very easy to sort",
+    "start": "1895580",
+    "end": "1902750"
+  },
+  {
+    "text": "of under a provision the amount of memory you need so we want to I would take internal fermentation over external",
+    "start": "1902750",
+    "end": "1909890"
+  },
+  {
+    "text": "fragmentation any day I would rather store a few fewer keys but that's okay",
+    "start": "1909890",
+    "end": "1915049"
+  },
+  {
+    "text": "and the other thing is you want to cap all your memory resources not just not",
+    "start": "1915049",
+    "end": "1920659"
+  },
+  {
+    "text": "just the keys you store because you if you have one ten thousand connections",
+    "start": "1920659",
+    "end": "1926330"
+  },
+  {
+    "text": "and each connection takes ten you know 100k memory just to maintain that's memory you have to provision on top of",
+    "start": "1926330",
+    "end": "1933980"
+  },
+  {
+    "text": "whatever you're storing as well right and people often forget the hash table takes memory connection buffer takes",
+    "start": "1933980",
+    "end": "1939200"
+  },
+  {
+    "text": "memory whatever data structure you are using in the interim takes memory factor all of them in and put a lid on every",
+    "start": "1939200",
+    "end": "1945440"
+  },
+  {
+    "text": "one of them and to get sort of predictable performance or runtime behavior what we what we decide to do is",
+    "start": "1945440",
+    "end": "1954039"
+  },
+  {
+    "text": "cache is very simple it doesn't need too many data types or data structures why don't we just reuse them so you know we",
+    "start": "1954039",
+    "end": "1960200"
+  },
+  {
+    "text": "should just reuse our connection buffers and stuff like that so we don't have to call malloc or realloc all the time and",
+    "start": "1960200",
+    "end": "1965870"
+  },
+  {
+    "text": "and why stop there if you have already capped all your resources you can allocate to the maximum extent possible",
+    "start": "1965870",
+    "end": "1972799"
+  },
+  {
+    "text": "or your memory intensive resources at the beginning of the process then you never need to worry about memory",
+    "start": "1972799",
+    "end": "1977960"
+  },
+  {
+    "text": "performance ever again so these are the two things we try to stick to okay so to",
+    "start": "1977960",
+    "end": "1983059"
+  },
+  {
+    "start": "1981000",
+    "end": "2138000"
+  },
+  {
+    "text": "put these together right so we have our mitigation scheme and we have things to avoid by using somewhat clever data",
+    "start": "1983059",
+    "end": "1990559"
+  },
+  {
+    "text": "structures is we put these ideas into our cache which is Pelican and you don't",
+    "start": "1990559",
+    "end": "1997549"
+  },
+  {
+    "text": "have to read the entire trial that we're just trying to show you though we do follow a modular design",
+    "start": "1997549",
+    "end": "2004000"
+  },
+  {
+    "text": "and the performance go for Pelican really is to be deterministically fast and to achieve that we've pretty much",
+    "start": "2004000",
+    "end": "2010780"
+  },
+  {
+    "text": "summarizes the things we have learned with Twitter's cash operation and put the put them in there and if you appear",
+    "start": "2010780",
+    "end": "2019090"
+  },
+  {
+    "text": "interesting the code and how certain things are implemented I encourage you to go to this link and you can which",
+    "start": "2019090",
+    "end": "2026470"
+  },
+  {
+    "text": "will lead you to the get up repo as well as some more blog posts and articles about how things are designed and I want",
+    "start": "2026470",
+    "end": "2033910"
+  },
+  {
+    "text": "to do a comparison because the cash space is not very crowded right the the dominant and use cases are run by",
+    "start": "2033910",
+    "end": "2040180"
+  },
+  {
+    "text": "memcache the rhetta's and I you know I just become there for comparison you can",
+    "start": "2040180",
+    "end": "2046210"
+  },
+  {
+    "text": "see that existing solutions do some of the things that I talked about or just",
+    "start": "2046210",
+    "end": "2052060"
+  },
+  {
+    "text": "do them to some extent but unto now I don't think any of them has sort of",
+    "start": "2052060",
+    "end": "2057520"
+  },
+  {
+    "text": "systematically looked at this Te'o latency problem and sort of adopt best measures for for all of them although",
+    "start": "2057520",
+    "end": "2065648"
+  },
+  {
+    "text": "I've been talking with the author of Redis a fair amount and in the in their",
+    "start": "2065649",
+    "end": "2071530"
+  },
+  {
+    "text": "unstable version they're actually starting to adopt some of the things like you know moving intensive",
+    "start": "2071530",
+    "end": "2076840"
+  },
+  {
+    "text": "operations on a separate thread and stuff like that so I just want to leave this chart here so people can do a",
+    "start": "2076840",
+    "end": "2083440"
+  },
+  {
+    "text": "comparison and to give these existing solutions credit Pelican cash is very",
+    "start": "2083440",
+    "end": "2088810"
+  },
+  {
+    "text": "young right it doesn't have nearly as much feature as the existing memcache do",
+    "start": "2088810",
+    "end": "2093908"
+  },
+  {
+    "text": "especially Redis right I'll have a full list of things that patent doesn't do",
+    "start": "2093909",
+    "end": "2098950"
+  },
+  {
+    "text": "but Redis does right so so these are things that's basically future work as we poured more features into our code",
+    "start": "2098950",
+    "end": "2106870"
+  },
+  {
+    "text": "base hopefully we can catch up a little bit with the the other solutions but",
+    "start": "2106870",
+    "end": "2112180"
+  },
+  {
+    "text": "basically because we have a very large operation we decide to prioritize",
+    "start": "2112180",
+    "end": "2117850"
+  },
+  {
+    "text": "performance concerns over features while some of them for example Redis answers",
+    "start": "2117850",
+    "end": "2123490"
+  },
+  {
+    "text": "to the open source community and therefore is much more aggressive in adopting new features and maybe a little",
+    "start": "2123490",
+    "end": "2129400"
+  },
+  {
+    "text": "bit more conservative when it comes to performance fixes alright so this is just if you apply to different contexts",
+    "start": "2129400",
+    "end": "2135250"
+  },
+  {
+    "text": "you will end up having different agendas so that's pretty much my talk and I I",
+    "start": "2135250",
+    "end": "2142030"
+  },
+  {
+    "start": "2138000",
+    "end": "2155000"
+  },
+  {
+    "text": "just want to put it out there that I think the best cash should be always",
+    "start": "2142030",
+    "end": "2147339"
+  },
+  {
+    "text": "fast never slow and I think that's quite possible if if you take care of your",
+    "start": "2147339",
+    "end": "2152349"
+  },
+  {
+    "text": "basic operations so that's it questions",
+    "start": "2152349",
+    "end": "2166530"
+  },
+  {
+    "text": "so you talked about profiling your caches and how it mapped to you know",
+    "start": "2170700",
+    "end": "2177760"
+  },
+  {
+    "text": "fragmentation and other over specific things how did you profile them like was",
+    "start": "2177760",
+    "end": "2183099"
+  },
+  {
+    "text": "there some tool or basic unix commands or so if you basically if you compile",
+    "start": "2183099",
+    "end": "2189160"
+  },
+  {
+    "text": "your code using the mainstream compilers like GCC or seal and there are these",
+    "start": "2189160",
+    "end": "2196109"
+  },
+  {
+    "text": "flags that you can enable so you it would basically generate the the chart",
+    "start": "2196109",
+    "end": "2204040"
+  },
+  {
+    "text": "the with the function the most frequently called functions with percentage charts right that chart you",
+    "start": "2204040",
+    "end": "2209770"
+  },
+  {
+    "text": "can get by using existing compiler with specific flash turn-on and existing",
+    "start": "2209770",
+    "end": "2215710"
+  },
+  {
+    "text": "tools and from there you can annotate however you want so basically if annotation is a standard feature in in",
+    "start": "2215710",
+    "end": "2223059"
+  },
+  {
+    "text": "compilers and fragmentation we actually looked at either metrics in the case of",
+    "start": "2223059",
+    "end": "2229960"
+  },
+  {
+    "text": "Redis right at tracks what's the fragmentation ratio so would you just see that and the other thing is if you",
+    "start": "2229960",
+    "end": "2235089"
+  },
+  {
+    "text": "look at the the the slab system it's the condition of the slab system which is",
+    "start": "2235089",
+    "end": "2240910"
+  },
+  {
+    "text": "how memory is managed is reported on the proc so the system has it if people",
+    "start": "2240910",
+    "end": "2246400"
+  },
+  {
+    "text": "usually don't look at it but when you're desperate you were looking at everything and and that's how we stumble up",
+    "start": "2246400",
+    "end": "2251559"
+  },
+  {
+    "text": "stumbled upon this we're like oh actually it's really really fragmented after run it for X days",
+    "start": "2251559",
+    "end": "2257780"
+  },
+  {
+    "text": "so hi do you recommend cache replication between multiple regions or data centers",
+    "start": "2257780",
+    "end": "2266560"
+  },
+  {
+    "text": "so I think the the I think the problem",
+    "start": "2266560",
+    "end": "2272960"
+  },
+  {
+    "text": "is very real right so we do best-effort cache replication at Twitter as well but",
+    "start": "2272960",
+    "end": "2279040"
+  },
+  {
+    "text": "the the understanding is that because here the cache is run as a lookaside",
+    "start": "2279040",
+    "end": "2285970"
+  },
+  {
+    "text": "meaning that the the service is responsible for coordinating between the",
+    "start": "2285970",
+    "end": "2291320"
+  },
+  {
+    "text": "cache and the database right the cache itself does not really have the ability to reconcile with the database so if you",
+    "start": "2291320",
+    "end": "2297740"
+  },
+  {
+    "text": "if you do this in one datacenter you already have run into a danger of being sort of out of sync it's going to be",
+    "start": "2297740",
+    "end": "2304340"
+  },
+  {
+    "text": "even worse when you extend to a much larger to your graphical region because now you have much more complicated race",
+    "start": "2304340",
+    "end": "2310550"
+  },
+  {
+    "text": "conditions so what I recommend is basically try not to do synchronization",
+    "start": "2310550",
+    "end": "2318650"
+  },
+  {
+    "text": "between caches and different regions but instead sort of send a signal that doesn't involve data for example you can",
+    "start": "2318650",
+    "end": "2326960"
+  },
+  {
+    "text": "do a read sort of read through cache in each data center but if you want to update keys in the remote data center",
+    "start": "2326960",
+    "end": "2334880"
+  },
+  {
+    "text": "while right has happened in the local data center you can try to invalidate the remote key by just deleting it right",
+    "start": "2334880",
+    "end": "2341810"
+  },
+  {
+    "text": "so so at least you avoid having stale data but you're not really introducing the danger danger of having stale data",
+    "start": "2341810",
+    "end": "2348280"
+  },
+  {
+    "text": "propagated by the caching layer so I think that's the the saner approach to this",
+    "start": "2348280",
+    "end": "2354819"
+  },
+  {
+    "text": "thanks for the talk I noticed in your slide where you were talking about",
+    "start": "2366240",
+    "end": "2371430"
+  },
+  {
+    "text": "growing the hash table and replacing it with a lock free table that the max",
+    "start": "2371430",
+    "end": "2378880"
+  },
+  {
+    "text": "latency was still on the same order of magnitude as the the walk based version",
+    "start": "2378880",
+    "end": "2384540"
+  },
+  {
+    "text": "and I was wondering if you attributed that to like qpi throughput or something",
+    "start": "2384540",
+    "end": "2395290"
+  },
+  {
+    "text": "to do with with Atomics or if there was something else queueing in that system as well so I think I should clarify a",
+    "start": "2395290",
+    "end": "2401470"
+  },
+  {
+    "text": "little bit I actually didn't even allow doubling in the new in right now Pelican",
+    "start": "2401470",
+    "end": "2406900"
+  },
+  {
+    "text": "doesn't even allow you to do doubling you've got to pick a hash table size and run with it the reason for that design",
+    "start": "2406900",
+    "end": "2413110"
+  },
+  {
+    "text": "decision is first of all I don't want to do locking right the second thing is I",
+    "start": "2413110",
+    "end": "2419850"
+  },
+  {
+    "text": "calculate the the footprint for hash table assuming you have the smallest key",
+    "start": "2419850",
+    "end": "2425230"
+  },
+  {
+    "text": "possible because even you have you have only one byte in key and one byte in value storing an object in memory but",
+    "start": "2425230",
+    "end": "2432850"
+  },
+  {
+    "text": "cause a bunch of metadata overhead right so you realistically the smallest object you can store from memcache and Redis is",
+    "start": "2432850",
+    "end": "2439420"
+  },
+  {
+    "text": "around 64 bytes so if you run that calculation very conservatively see",
+    "start": "2439420",
+    "end": "2444460"
+  },
+  {
+    "text": "everything I have is 64 bytes and I have a 20 GB heap how am i much storage do I",
+    "start": "2444460",
+    "end": "2450550"
+  },
+  {
+    "text": "need to allocate to the hash table it ends up not being a very large fraction of that you know it's like it's like",
+    "start": "2450550",
+    "end": "2456610"
+  },
+  {
+    "text": "like 10 percent you know 1 to 10 ratio which most people I think kind of can't afford so why not just you know",
+    "start": "2456610",
+    "end": "2463480"
+  },
+  {
+    "text": "conservatively estimate how many keys you're gonna have allocate the memory to the hash table right away and be done with it",
+    "start": "2463480",
+    "end": "2468760"
+  },
+  {
+    "text": "so so that's what we did",
+    "start": "2468760",
+    "end": "2472290"
+  },
+  {
+    "text": "okay so Redis for example is a distributed",
+    "start": "2480220",
+    "end": "2488030"
+  },
+  {
+    "text": "caching framework right now even it's like no cycle in memory so in this case if we have to use it from a cloud app",
+    "start": "2488030",
+    "end": "2495980"
+  },
+  {
+    "text": "let's say how would we initialize or connect is it same paradigm as ready sir",
+    "start": "2495980",
+    "end": "2504050"
+  },
+  {
+    "text": "so the the goal the code the Redis support is due in development the goal",
+    "start": "2504050",
+    "end": "2509570"
+  },
+  {
+    "text": "is to support the the common data structures but not the DB part right",
+    "start": "2509570",
+    "end": "2516350"
+  },
+  {
+    "text": "Redis also has a DB so I know a lot of people actually use Redis as their database we have other solutions for DB",
+    "start": "2516350",
+    "end": "2523070"
+  },
+  {
+    "text": "so we own we're strictly sticking to the cache case otherwise it will be similar to if you already use Redis for cash",
+    "start": "2523070",
+    "end": "2529250"
+  },
+  {
+    "text": "once we have the Redis support it will be the same because it speaks the same protocol",
+    "start": "2529250",
+    "end": "2535599"
+  },
+  {
+    "text": "so usually there is a limit for each object values so for example one magpie",
+    "start": "2545029",
+    "end": "2551999"
+  },
+  {
+    "text": "so what a limitation for Palika and also a pizza for certain use cases in that we",
+    "start": "2551999",
+    "end": "2558479"
+  },
+  {
+    "text": "have to if about that limit is any way could create in the to another way or",
+    "start": "2558479",
+    "end": "2564059"
+  },
+  {
+    "text": "yeah so this actually is also possible with memcache except that memcache the",
+    "start": "2564059",
+    "end": "2569640"
+  },
+  {
+    "text": "version that I looked at had a slight small bug that actually made it quite not quite possible to use a bigger than",
+    "start": "2569640",
+    "end": "2576299"
+  },
+  {
+    "text": "1mb object we actually already fixed that in chrome cache and we carried it over to Pelican so you can set max the",
+    "start": "2576299",
+    "end": "2583739"
+  },
+  {
+    "text": "slab size right so default it's 1 megabytes but you can set it up to I",
+    "start": "2583739",
+    "end": "2590009"
+  },
+  {
+    "text": "believe 512 megabytes which should be plenty for anybody you know practically",
+    "start": "2590009",
+    "end": "2596249"
+  },
+  {
+    "text": "so if you pass in this parameter when you start your server you will have the",
+    "start": "2596249",
+    "end": "2602699"
+  },
+  {
+    "text": "possibility to store large keys a large value is I should say the key limitation",
+    "start": "2602699",
+    "end": "2607739"
+  },
+  {
+    "text": "remains the same",
+    "start": "2607739",
+    "end": "2610339"
+  },
+  {
+    "text": "all right thank you [Applause]",
+    "start": "2617530",
+    "end": "2624000"
+  }
+]

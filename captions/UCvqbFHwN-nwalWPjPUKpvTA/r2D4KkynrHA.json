@@ -1,0 +1,2012 @@
+[
+  {
+    "text": "perfect so i think i've started recording um and you should be able to hear me fine",
+    "start": "1360",
+    "end": "7279"
+  },
+  {
+    "text": "so hi my name is nigel douglas i'm a solutions architect here at tigera and today i'm going to focus on",
+    "start": "7279",
+    "end": "15120"
+  },
+  {
+    "text": "specifically network policy implementation with respect to project calico",
+    "start": "15120",
+    "end": "20800"
+  },
+  {
+    "text": "so for today's session we are going to focus on the policy implementation for those who are let's say unfamiliar with",
+    "start": "21680",
+    "end": "27680"
+  },
+  {
+    "text": "project calico or starting off with it recently um calico as an open source project is",
+    "start": "27680",
+    "end": "34800"
+  },
+  {
+    "text": "split up into really three functionality so there's the cni plugin so the container networking interface um cni",
+    "start": "34800",
+    "end": "42960"
+  },
+  {
+    "text": "for again those who are trying to understand this it's responsible for setting up the networking between your",
+    "start": "42960",
+    "end": "48879"
+  },
+  {
+    "text": "containers adding ip addresses for those containers um now there's also the ip allocation",
+    "start": "48879",
+    "end": "57520"
+  },
+  {
+    "text": "management piece the ipam plugin as you can imagine this plugin is responsible for creating",
+    "start": "57520",
+    "end": "63920"
+  },
+  {
+    "text": "um or assigning the ip addresses for those pods",
+    "start": "63920",
+    "end": "68960"
+  },
+  {
+    "text": "although these two pieces are fundamental for container networking and they're not actually relevant to today's",
+    "start": "68960",
+    "end": "75200"
+  },
+  {
+    "text": "session so the agent we're going to focus on here is felix as you can see in the architectural",
+    "start": "75200",
+    "end": "81680"
+  },
+  {
+    "text": "diagram i've got in front of me felix is what the agent that's responsible for speaking with",
+    "start": "81680",
+    "end": "88240"
+  },
+  {
+    "text": "iptables for the policy implementation so um felix is responsible for calculating and",
+    "start": "88240",
+    "end": "94640"
+  },
+  {
+    "text": "enforcing um network policies seen in this presentation as i just said there a",
+    "start": "94640",
+    "end": "100079"
+  },
+  {
+    "text": "second ago um it will use standard linux control plane",
+    "start": "100079",
+    "end": "105360"
+  },
+  {
+    "text": "implementation with qproxy um we do also support ebbs without using cubeproxy",
+    "start": "105360",
+    "end": "111200"
+  },
+  {
+    "text": "that's worth noting and this updates ip tables for you so",
+    "start": "111200",
+    "end": "116560"
+  },
+  {
+    "text": "this is just a high level view of architecture with the product if you are looking to learn more about the",
+    "start": "116560",
+    "end": "122000"
+  },
+  {
+    "text": "architecture of the open source project my colleague casey who's a maintainer of project calico",
+    "start": "122000",
+    "end": "127520"
+  },
+  {
+    "text": "actually has the video uploaded at tigera.io four slash video four slash tigera dash calico fundamentals um",
+    "start": "127520",
+    "end": "134720"
+  },
+  {
+    "text": "definitely recommend checking it out so we can go into that later but for this session we're going to",
+    "start": "134720",
+    "end": "140319"
+  },
+  {
+    "text": "assume you've now you're using well pretty much any cni implementation and you've",
+    "start": "140319",
+    "end": "145760"
+  },
+  {
+    "text": "decided yeah for cni you could be using a bunch of plugins but we're going to focus on network policy implementation",
+    "start": "145760",
+    "end": "153040"
+  },
+  {
+    "text": "so why do we need network policy kubernetes essentially is a flat network",
+    "start": "153040",
+    "end": "158400"
+  },
+  {
+    "text": "so what this means is that the pods on those nodes can freely talk to other",
+    "start": "158400",
+    "end": "163440"
+  },
+  {
+    "text": "pods across other nodes without the use of network address translation",
+    "start": "163440",
+    "end": "168640"
+  },
+  {
+    "text": "so on day one when you set up a cluster pods are incredibly insecure they're freely talking amongst each other and",
+    "start": "168640",
+    "end": "174000"
+  },
+  {
+    "text": "there's no guardrails essentially configured in this case um they're also ephemeral so what i mean",
+    "start": "174000",
+    "end": "180480"
+  },
+  {
+    "text": "by this is pods don't have a fixed ip that's going to last very long because kubernetes",
+    "start": "180480",
+    "end": "185840"
+  },
+  {
+    "text": "itself is highly scalable pods are brought up and torn down regularly and ips again the ipam plugin",
+    "start": "185840",
+    "end": "193920"
+  },
+  {
+    "text": "that i quickly went over a second ago is responsible for assigning the ip addresses for those pods",
+    "start": "193920",
+    "end": "199360"
+  },
+  {
+    "text": "so we need something that is essentially deterministic because of the particular locations being non-deterministic we",
+    "start": "199360",
+    "end": "204799"
+  },
+  {
+    "text": "need something static and in this case we will talk about label selectors as that",
+    "start": "204799",
+    "end": "211519"
+  },
+  {
+    "text": "kubernetes specific abstraction layer by which we can build policy around something that is somewhat fixed um",
+    "start": "211519",
+    "end": "219120"
+  },
+  {
+    "text": "so again as the pods scale up and down as long as they have label schema built around them then policy is dynamic it",
+    "start": "219120",
+    "end": "225680"
+  },
+  {
+    "text": "doesn't have to worry about the ip address is changing and if in fact we're not going to build policy around ip",
+    "start": "225680",
+    "end": "230879"
+  },
+  {
+    "text": "address specifically um so the network policy is the primary tool to secure kubernetes traditional",
+    "start": "230879",
+    "end": "236799"
+  },
+  {
+    "text": "applications let's say you're making a migration over from a traditional monarch architecture what",
+    "start": "236799",
+    "end": "242959"
+  },
+  {
+    "text": "i mean by that is you kind of have like a you know a server hosting a front-end",
+    "start": "242959",
+    "end": "248080"
+  },
+  {
+    "text": "application maybe the back-end being a microsoft sql back-end database",
+    "start": "248080",
+    "end": "253599"
+  },
+  {
+    "text": "but in this case we've got microservices so it's a kind of a cloud native or microservice architecture",
+    "start": "253599",
+    "end": "260239"
+  },
+  {
+    "text": "and in this case you know traditionally the firewall was great because you had a static ip",
+    "start": "260239",
+    "end": "266400"
+  },
+  {
+    "text": "usually associated with that host that server that was hosting the application it was very easy to build perimeter",
+    "start": "266400",
+    "end": "271919"
+  },
+  {
+    "text": "based ruling to say allow these ports and protocols over these ips to this destination",
+    "start": "271919",
+    "end": "278000"
+  },
+  {
+    "text": "when in reality with kubernetes because of it being highly dynamic and as we mentioned there pods being ephemeral um it's not",
+    "start": "278000",
+    "end": "284240"
+  },
+  {
+    "text": "going to be something we can work with long term uh with ips so we're not even going to focus on using a traditional",
+    "start": "284240",
+    "end": "290000"
+  },
+  {
+    "text": "firewall implementation we're going to use policy or network policy as an alternative to your traditional",
+    "start": "290000",
+    "end": "296240"
+  },
+  {
+    "text": "firewalls um also whether we're talking about project calico or the kubernetes default network",
+    "start": "296240",
+    "end": "304400"
+  },
+  {
+    "text": "policy implementation it uses standard policy api and this is going to be relevant throughout our session",
+    "start": "304400",
+    "end": "311680"
+  },
+  {
+    "text": "so yeah these are the three things i just want to focus on when we're talking about policy whether it be",
+    "start": "311680",
+    "end": "316720"
+  },
+  {
+    "text": "again calico's policy or to default kubernetes policy um is that we're",
+    "start": "316720",
+    "end": "321919"
+  },
+  {
+    "text": "trying to identify what context we're going to select for policy",
+    "start": "321919",
+    "end": "328160"
+  },
+  {
+    "text": "rules based on key pair values so those will be the labels you'll usually",
+    "start": "328160",
+    "end": "333440"
+  },
+  {
+    "text": "have as you see in the picture owner equals nigel or",
+    "start": "333440",
+    "end": "339680"
+  },
+  {
+    "text": "um distribution or platform equals you know gke now we're not going to talk",
+    "start": "339680",
+    "end": "345039"
+  },
+  {
+    "text": "about making rules on a platform perspective so let's say i could have um type equals front end or type equals",
+    "start": "345039",
+    "end": "351919"
+  },
+  {
+    "text": "back end then we know which pods are assigned to those key value pairs so those labels and those again are going",
+    "start": "351919",
+    "end": "359120"
+  },
+  {
+    "text": "to be static regardless again of the pods being scaled up or down and the ips being reassigned on those",
+    "start": "359120",
+    "end": "364720"
+  },
+  {
+    "text": "since it's declarative we're essentially declaring once we scope it to those labels then",
+    "start": "364720",
+    "end": "370720"
+  },
+  {
+    "text": "apply these actions on it and since the environment is highly dynamic in by",
+    "start": "370720",
+    "end": "377120"
+  },
+  {
+    "text": "nature kubernetes is designed to be dynamic our policy needs to be dynamic with that so we shouldn't have to",
+    "start": "377120",
+    "end": "382720"
+  },
+  {
+    "text": "continuously revise network policy that we would have done with traditional firewalls if we're ip based we'd have to",
+    "start": "382720",
+    "end": "388000"
+  },
+  {
+    "text": "keep changing in those rules we want it so that once we have those guardrails defined especially again default denies",
+    "start": "388000",
+    "end": "393759"
+  },
+  {
+    "text": "we'll talk about that in a while so that even as new workloads get introduced ones that we're not even familiar with with other label based schema they would",
+    "start": "393759",
+    "end": "400400"
+  },
+  {
+    "text": "be captured by these catch-alls and again that is a similar concept to firewalling but we're going to apply",
+    "start": "400400",
+    "end": "406080"
+  },
+  {
+    "text": "that to network policy so it has to stay dynamic so yeah we'll stick to that first point",
+    "start": "406080",
+    "end": "412080"
+  },
+  {
+    "text": "there about labels so labels is not a calico specific",
+    "start": "412080",
+    "end": "417280"
+  },
+  {
+    "text": "concept this is a kubernetes concept you can see the source link there to",
+    "start": "417280",
+    "end": "422479"
+  },
+  {
+    "text": "kubernetes io if you want to find out more about how it works but as you see from the example it is essentially key",
+    "start": "422479",
+    "end": "429680"
+  },
+  {
+    "text": "value pairs um so what are key value pairs like i say it's usually",
+    "start": "429680",
+    "end": "435360"
+  },
+  {
+    "text": "um you know a concept something that you want to focus on a purpose an intention",
+    "start": "435360",
+    "end": "440720"
+  },
+  {
+    "text": "and then the associated value with that so if it's ownership or organizational structure define that is the value and",
+    "start": "440720",
+    "end": "448479"
+  },
+  {
+    "text": "then or the the pair and the key and then you want to assign a relevant value to that so each key must be unique for a",
+    "start": "448479",
+    "end": "455440"
+  },
+  {
+    "text": "given object um and that way once we have that unique nature then it's very easy for us to say again we create a",
+    "start": "455440",
+    "end": "462160"
+  },
+  {
+    "text": "schema we strongly recommend defining a kind of a a label schema so you understand the",
+    "start": "462160",
+    "end": "467599"
+  },
+  {
+    "text": "intentions the purpose of your your workloads going forward and it'll be so much easier for us to build our policy",
+    "start": "467599",
+    "end": "473199"
+  },
+  {
+    "text": "around that so here's an example if we didn't use calico we have um an api version coming",
+    "start": "473199",
+    "end": "480319"
+  },
+  {
+    "text": "from networking.kx.ios was the standard kubernetes api uh the kind is network policy so that is",
+    "start": "480319",
+    "end": "487360"
+  },
+  {
+    "text": "what we're making right now it's a crd call network policy i've given a name called my network",
+    "start": "487360",
+    "end": "492400"
+  },
+  {
+    "text": "policy it's a simple name because that's what it is um you it by default in kubernetes the",
+    "start": "492400",
+    "end": "499199"
+  },
+  {
+    "text": "the structure is that the scope to a namespace so you have to define a specific namespace and then whatever",
+    "start": "499199",
+    "end": "505759"
+  },
+  {
+    "text": "pods reside inside that network namespace then we're going to specify that what we",
+    "start": "505759",
+    "end": "511120"
+  },
+  {
+    "text": "actually want to scope so under the specification we're looking for pod selectors those selectors are matched",
+    "start": "511120",
+    "end": "517839"
+  },
+  {
+    "text": "labels and as you'll be saw there about the key value pair it's role equals db",
+    "start": "517839",
+    "end": "523200"
+  },
+  {
+    "text": "so if you assign a label to a database and you call it role the intention and then we say well the intended part is",
+    "start": "523200",
+    "end": "530160"
+  },
+  {
+    "text": "going to be a database then say roll equals db in this case any time a new database or",
+    "start": "530160",
+    "end": "536160"
+  },
+  {
+    "text": "a change has happened to those db's no matter how many pods there might be anything with that matching label this",
+    "start": "536160",
+    "end": "541360"
+  },
+  {
+    "text": "policy will apply to it and in this case it's only scoping action that is ingress received traffic to the pods so you see",
+    "start": "541360",
+    "end": "548800"
+  },
+  {
+    "text": "ingress from other pods that have pod selectors matching the label role equals front end",
+    "start": "548800",
+    "end": "555279"
+  },
+  {
+    "text": "now that's a very simple logic it is very structured it is um again declarative so we're saying",
+    "start": "555279",
+    "end": "561760"
+  },
+  {
+    "text": "anything with the role of db then it can receive traffic from front end but notice how the example of the",
+    "start": "561760",
+    "end": "568720"
+  },
+  {
+    "text": "other role which was the role equals helper because we never scope that into our rule condition it means even if a",
+    "start": "568720",
+    "end": "575360"
+  },
+  {
+    "text": "new workload came along and he had a different role it would be automatically denied and",
+    "start": "575360",
+    "end": "581200"
+  },
+  {
+    "text": "also i didn't clarify that was we only allowed specifically tcp 6379",
+    "start": "581200",
+    "end": "587200"
+  },
+  {
+    "text": "for that um db to talk to the front end so anything else would be ultimately",
+    "start": "587200",
+    "end": "592800"
+  },
+  {
+    "text": "denied or received traffic from the front end i should say now with these um we'll go over kind of",
+    "start": "592800",
+    "end": "600399"
+  },
+  {
+    "text": "crossover between network policy with kubernetes and obviously the advantages of using calico's pulse implication but",
+    "start": "600399",
+    "end": "606560"
+  },
+  {
+    "text": "the next bit i'm just going to suppose specifies via an ip block so i mentioned briefly earlier we don't",
+    "start": "606560",
+    "end": "612000"
+  },
+  {
+    "text": "build policy based on ip that's not necessarily true like there might be an example where you",
+    "start": "612000",
+    "end": "617519"
+  },
+  {
+    "text": "want to say allow a pod to talk to public internet you know or a specific range of ips that",
+    "start": "617519",
+    "end": "624320"
+  },
+  {
+    "text": "you want to declare and in that case you can absolutely declare here's my ip block specify decider range and then say",
+    "start": "624320",
+    "end": "631680"
+  },
+  {
+    "text": "am i going to allow traffic to as we saw there um 172.18.0.0 over the 24 um cider",
+    "start": "631680",
+    "end": "640320"
+  },
+  {
+    "text": "range then you can absolutely say allow that and that anything else that doesn't isn't part of the ip block will",
+    "start": "640320",
+    "end": "646160"
+  },
+  {
+    "text": "obviously be denied but what we want to do is not focus on policy for workloads based on ip we want",
+    "start": "646160",
+    "end": "654320"
+  },
+  {
+    "text": "to keep to that label idea of something that's static but of course you can build policy around",
+    "start": "654320",
+    "end": "660720"
+  },
+  {
+    "text": "ips and of course it's relevant when you're declaring what are the again ranges that i should be allowed to talk",
+    "start": "660720",
+    "end": "667519"
+  },
+  {
+    "text": "to and as you can see from this example it's saying anything with the label construct is now allowing egress to talk",
+    "start": "667519",
+    "end": "675200"
+  },
+  {
+    "text": "out to those ip ranges so this only an egress action the previous one was received from so that was an ingress",
+    "start": "675200",
+    "end": "681040"
+  },
+  {
+    "text": "action now some organizations don't do it i strongly recommend everyone should have",
+    "start": "681040",
+    "end": "687680"
+  },
+  {
+    "text": "this implemented an organization um it is the simplest guardrail you can organize but again it's all based on",
+    "start": "687680",
+    "end": "694959"
+  },
+  {
+    "text": "you already enforcing zero trust and this is what we call it fault deny so a default deny is essentially saying i've",
+    "start": "694959",
+    "end": "702399"
+  },
+  {
+    "text": "scoped both ingress and egress actions so as we said it's still a kubernetes network policy so it's using api version",
+    "start": "702399",
+    "end": "708640"
+  },
+  {
+    "text": "network policy.oh this will work for both kubernetes as you can see here as well as calico but i'm specifying for",
+    "start": "708640",
+    "end": "715040"
+  },
+  {
+    "text": "all my ingress and egress action i'm matching quite literally every um label",
+    "start": "715040",
+    "end": "720240"
+  },
+  {
+    "text": "selection i could find for those pod selectors um so regardless of workload it's going to deny it because i've enabled the",
+    "start": "720240",
+    "end": "726800"
+  },
+  {
+    "text": "action it's looking for something to do because i never gave it anything i didn't declare",
+    "start": "726800",
+    "end": "732639"
+  },
+  {
+    "text": "something for it specifically do then it's not um exclusively or explicitly denying the",
+    "start": "732639",
+    "end": "738720"
+  },
+  {
+    "text": "traffic it's um implicitly denying the traffic so regardless of new workloads that get introduced whether they're",
+    "start": "738720",
+    "end": "745440"
+  },
+  {
+    "text": "permitted or rogue so someone tried introducing the cluster they will automatically be",
+    "start": "745440",
+    "end": "750880"
+  },
+  {
+    "text": "denied so how this would work is we would implement zero trust and i'll try and",
+    "start": "750880",
+    "end": "756800"
+  },
+  {
+    "text": "explain that in this session about only allowing the traffic you actually would permit in your environment and sometimes",
+    "start": "756800",
+    "end": "762240"
+  },
+  {
+    "text": "you can be a bit broad with it but certainly try to be as granular as you can and once those workloads are freely",
+    "start": "762240",
+    "end": "768000"
+  },
+  {
+    "text": "talking of the ports and protocols that you do permit then as long as this defaults in ice it's at the end of every namespace or",
+    "start": "768000",
+    "end": "774320"
+  },
+  {
+    "text": "potentially a global rule which we'll talk on in a while then any new unwanted traffic will",
+    "start": "774320",
+    "end": "779680"
+  },
+  {
+    "text": "automatically be captured it's a very uh powerful policy and quite simple to implement as",
+    "start": "779680",
+    "end": "786000"
+  },
+  {
+    "text": "we can see here but it can be dangerous if you implement this in the beginning without putting",
+    "start": "786000",
+    "end": "791040"
+  },
+  {
+    "text": "a serious uh thought into zero trust because you'll end up denying traffic that you actually would otherwise wish",
+    "start": "791040",
+    "end": "796480"
+  },
+  {
+    "text": "to permit um so yeah here's some kind of um",
+    "start": "796480",
+    "end": "801680"
+  },
+  {
+    "text": "ideas around calico's network policy i've only shown you kubernetes so far so it's important to know what are the",
+    "start": "801680",
+    "end": "807279"
+  },
+  {
+    "text": "advantages of using calico's implementation so it's an extension on the kubernetes network policy implementation it's not",
+    "start": "807279",
+    "end": "814160"
+  },
+  {
+    "text": "um an alternative way of looking at it it takes the exact same structure that we're familiar with so if you're already",
+    "start": "814160",
+    "end": "819680"
+  },
+  {
+    "text": "using kubernetes but you would like some additional capabilities then do that you know i strongly",
+    "start": "819680",
+    "end": "825440"
+  },
+  {
+    "text": "recommend using it as you can see here it requires calico for policy so we",
+    "start": "825440",
+    "end": "830959"
+  },
+  {
+    "text": "talked about the felix agent in the architectural diagram it's not necessarily as the cni so even if you're",
+    "start": "830959",
+    "end": "837279"
+  },
+  {
+    "text": "using aws vpc cni on an eks cluster or you're using um",
+    "start": "837279",
+    "end": "843760"
+  },
+  {
+    "text": "azure's um cni they you know they have their own cni so there's a bunch of different cni's you could use but that",
+    "start": "843760",
+    "end": "849760"
+  },
+  {
+    "text": "shouldn't affect using calico um for the network policy implementation that should be a separate",
+    "start": "849760",
+    "end": "856000"
+  },
+  {
+    "text": "logic here another thing is when we looked at the examples of the policy",
+    "start": "856000",
+    "end": "862480"
+  },
+  {
+    "text": "we actually can define explicit ordering or precedence of our policies",
+    "start": "862480",
+    "end": "867519"
+  },
+  {
+    "text": "within um calico so you can say read this policy before these policies",
+    "start": "867519",
+    "end": "874320"
+  },
+  {
+    "text": "again globally or in a name space so that we know this is higher precedence",
+    "start": "874320",
+    "end": "879360"
+  },
+  {
+    "text": "it's more important to have security actions enforced before the",
+    "start": "879360",
+    "end": "885680"
+  },
+  {
+    "text": "xero trust starts implementing on a per application level um",
+    "start": "885680",
+    "end": "891040"
+  },
+  {
+    "text": "all kubernetes network policies are named space scoped that's perfect in most cases",
+    "start": "891040",
+    "end": "896399"
+  },
+  {
+    "text": "however as an example i want to implement a high-level security rule so i want to",
+    "start": "896399",
+    "end": "901440"
+  },
+  {
+    "text": "say deny traffic associated with known bad ips or to known bad actors",
+    "start": "901440",
+    "end": "907360"
+  },
+  {
+    "text": "or even around say the the default and i even though in this case default and i makes more sense this",
+    "start": "907360",
+    "end": "913519"
+  },
+  {
+    "text": "way you don't want to keep building identical replicated actions um for each",
+    "start": "913519",
+    "end": "919199"
+  },
+  {
+    "text": "namespace because it just takes time you have to keep building new policy invitation and if you have dozens of namespaces you're replicating the rule",
+    "start": "919199",
+    "end": "925839"
+  },
+  {
+    "text": "across all of those namespaces so calico also offers a globally scoped policy rule that way if we know there's",
+    "start": "925839",
+    "end": "933040"
+  },
+  {
+    "text": "a known bad actor or we want to build a quarantining rule to deny all traffic",
+    "start": "933040",
+    "end": "938160"
+  },
+  {
+    "text": "associated with a specific bad actor then i wouldn't have to keep replicating the same rule for each namespace i can",
+    "start": "938160",
+    "end": "943920"
+  },
+  {
+    "text": "say apply it with this globally scoped so it'd be called a global network",
+    "start": "943920",
+    "end": "949120"
+  },
+  {
+    "text": "policy as a crd and then within that object you can then filter down for here",
+    "start": "949120",
+    "end": "955040"
+  },
+  {
+    "text": "is the scope of that context even though it's a global rule that's really powerful and i'll show some examples to that in a while",
+    "start": "955040",
+    "end": "961600"
+  },
+  {
+    "text": "and within kubernetes it is explicitly just allowing traffic so as i said with",
+    "start": "961600",
+    "end": "967279"
+  },
+  {
+    "text": "the default deny you allow the traffic you want anything that wasn't what you do permit catch it through default and i",
+    "start": "967279",
+    "end": "973680"
+  },
+  {
+    "text": "implicitly deny it whereas in this case you can explicitly use an action to deny",
+    "start": "973680",
+    "end": "979759"
+  },
+  {
+    "text": "you can also explicitly pass and log traffic and why um logging is quite good alongside",
+    "start": "979759",
+    "end": "986959"
+  },
+  {
+    "text": "denying is it as the example i mentioned there a quarantine rule so you're saying",
+    "start": "986959",
+    "end": "992320"
+  },
+  {
+    "text": "anything that matches these contexts we know we otherwise would never trust like it might be a communication between",
+    "start": "992320",
+    "end": "998720"
+  },
+  {
+    "text": "certain pods they're doing certain actions then you quarantine it so you action it to say deny all traffic from this pod to",
+    "start": "998720",
+    "end": "1006320"
+  },
+  {
+    "text": "this other location but then you could also say well log it so that way you're",
+    "start": "1006320",
+    "end": "1011519"
+  },
+  {
+    "text": "forwarding a syslog message to notify yourself via a centralized sim solution that there is some unusual",
+    "start": "1011519",
+    "end": "1018480"
+  },
+  {
+    "text": "activity based on the fact that we created a rule that says deny that actions we obviously don't want it so we",
+    "start": "1018480",
+    "end": "1023839"
+  },
+  {
+    "text": "want to be uh dynamically ahead of it so we're outright going ahead and trying to deny unwanted traffic but also logging",
+    "start": "1023839",
+    "end": "1030558"
+  },
+  {
+    "text": "it so we notify ourselves that there's an unusual actor there um",
+    "start": "1030559",
+    "end": "1035760"
+  },
+  {
+    "text": "i'll try to go through this a little quicker so we allow you to scope down per endpoint",
+    "start": "1035760",
+    "end": "1041678"
+  },
+  {
+    "text": "namespace as you can imagine but also service counts and when you're trying to enforce things like pci compliance then",
+    "start": "1041679",
+    "end": "1048160"
+  },
+  {
+    "text": "if there's a user that should be permitted to access for instance workloads that handle payments details",
+    "start": "1048160",
+    "end": "1054640"
+  },
+  {
+    "text": "then perfect allow them to define um service accounts like the the user account into",
+    "start": "1054640",
+    "end": "1062000"
+  },
+  {
+    "text": "the context of the policy to say well don't allow this service account to talk to this one and again i'll show this",
+    "start": "1062000",
+    "end": "1067440"
+  },
+  {
+    "text": "example earlier by default we're handling layer five to you know layer three layer four you know network",
+    "start": "1067440",
+    "end": "1073280"
+  },
+  {
+    "text": "traffic up to there five um we integrate nicely with projects like envoy an istio",
+    "start": "1073280",
+    "end": "1079919"
+  },
+  {
+    "text": "as a service mesh so if we use the envoy daemon set then we have the ability also to collect layer 7",
+    "start": "1079919",
+    "end": "1086480"
+  },
+  {
+    "text": "traffic and similarly build network policy around not just the network",
+    "start": "1086480",
+    "end": "1091520"
+  },
+  {
+    "text": "specific traffic but also the application layer the https traffic that we would otherwise be logging through",
+    "start": "1091520",
+    "end": "1097679"
+  },
+  {
+    "text": "layer 7. um and this is probably my most interesting part that i get excited about is we're not just building policy",
+    "start": "1097679",
+    "end": "1105039"
+  },
+  {
+    "text": "around uh workloads like we talk about with the kubernetes implementation we can create what we call host endpoints",
+    "start": "1105039",
+    "end": "1111520"
+  },
+  {
+    "text": "so you can in the felix configuration you can ask for it to um or you can flag it to",
+    "start": "1111520",
+    "end": "1117919"
+  },
+  {
+    "text": "uh automatically create host endpoints associated with your nodes in your cluster and those nodes then we can",
+    "start": "1117919",
+    "end": "1123440"
+  },
+  {
+    "text": "build policy around them to say just like workload like the pods to say allow this or deny this traffic for those",
+    "start": "1123440",
+    "end": "1130400"
+  },
+  {
+    "text": "hosts so you might have a specific use case where you have an scd host and you want to",
+    "start": "1130400",
+    "end": "1135520"
+  },
+  {
+    "text": "again allow or deny that traffic perfect you know allow those specific ports or deny",
+    "start": "1135520",
+    "end": "1141520"
+  },
+  {
+    "text": "specific ports for the host endpoint and i'll show a good example in a while for why host endpoint is quite powerful",
+    "start": "1141520",
+    "end": "1148400"
+  },
+  {
+    "text": "um it again it's just like the kubernetes implementation you can use kubectl to apply dash f on any yaml",
+    "start": "1148400",
+    "end": "1155600"
+  },
+  {
+    "text": "manifest as long as you're using the correct kinds and using the correct api version it's going to work",
+    "start": "1155600",
+    "end": "1161440"
+  },
+  {
+    "text": "we also offer our own calico cto i think as time moves on we're probably going to deprecate that as most people use cube",
+    "start": "1161440",
+    "end": "1168080"
+  },
+  {
+    "text": "ctl universally for different frameworks not just with calico so i",
+    "start": "1168080",
+    "end": "1173200"
+  },
+  {
+    "text": "guess everyone has a preference to continue using cube ctl again if you use our enterprise",
+    "start": "1173200",
+    "end": "1179440"
+  },
+  {
+    "text": "technology i'm not here to sell enterprise to a community it's just worth noting that if you use enterprise",
+    "start": "1179440",
+    "end": "1186559"
+  },
+  {
+    "text": "there is even further extensions like the ability to specify dns policy on egress level to say you",
+    "start": "1186559",
+    "end": "1193280"
+  },
+  {
+    "text": "know don't just allow um it to talk to these ikea address like we talked about but also",
+    "start": "1193280",
+    "end": "1199120"
+  },
+  {
+    "text": "whitelist or block list this specific you know wildcard.domain.com and that way",
+    "start": "1199120",
+    "end": "1205200"
+  },
+  {
+    "text": "again a further abstraction rather than just focusing on ip we can now do with dns but this is something you cannot do",
+    "start": "1205200",
+    "end": "1210640"
+  },
+  {
+    "text": "in kubernetes policy implementation there's this concept of tiering and preview and staging",
+    "start": "1210640",
+    "end": "1216559"
+  },
+  {
+    "text": "all really useful if you want to have better understanding of is the policy going to work or i want to",
+    "start": "1216559",
+    "end": "1222480"
+  },
+  {
+    "text": "set stronger guardrails around it but open source with the policy imitation as you can see from the top there are so",
+    "start": "1222480",
+    "end": "1228559"
+  },
+  {
+    "text": "many added capabilities we should be able to address those on the session so here is a calico network policy",
+    "start": "1228559",
+    "end": "1235760"
+  },
+  {
+    "text": "as you can see it's highlighted for project calico.org is the api version we're dealing with it has the same kind",
+    "start": "1235760",
+    "end": "1242000"
+  },
+  {
+    "text": "so it's a network scope our namespace scoped network policy the order value as i mentioned earlier",
+    "start": "1242000",
+    "end": "1248159"
+  },
+  {
+    "text": "it's saying the precedence of the policy so order 900 uh comes after order 800 or",
+    "start": "1248159",
+    "end": "1253919"
+  },
+  {
+    "text": "after order 700 so you know it's further down the chain um it's also scoping the same way as we",
+    "start": "1253919",
+    "end": "1260400"
+  },
+  {
+    "text": "did earlier under specification we say selector based on the label role assigned to it",
+    "start": "1260400",
+    "end": "1266080"
+  },
+  {
+    "text": "but here's the bits that are different for um calico that we didn't see earlier you",
+    "start": "1266080",
+    "end": "1272080"
+  },
+  {
+    "text": "can specify action explicit actions so we never mentioned actions earlier",
+    "start": "1272080",
+    "end": "1277520"
+  },
+  {
+    "text": "because it was only allow so in this case we can say well i would permit certain ports and protocols but i would",
+    "start": "1277520",
+    "end": "1284480"
+  },
+  {
+    "text": "never allow tcp or in this case where i'm trying to do uh i don't permit certain service accounts well then i",
+    "start": "1284480",
+    "end": "1290480"
+  },
+  {
+    "text": "could say deny ingress so i'm not allowing to receive traffic that is tcp",
+    "start": "1290480",
+    "end": "1296080"
+  },
+  {
+    "text": "from the source where it's a service account with the name sre account and the graph on the right should or the diagram on the graph",
+    "start": "1296080",
+    "end": "1302799"
+  },
+  {
+    "text": "should give a better idea of that so the service account sre account he cannot talk or she cannot talk to",
+    "start": "1302799",
+    "end": "1310400"
+  },
+  {
+    "text": "any workload that has the label role equals helper over tcp however",
+    "start": "1310400",
+    "end": "1316480"
+  },
+  {
+    "text": "in the case of the second action we are also focusing on logging icmp traffic",
+    "start": "1316480",
+    "end": "1322880"
+  },
+  {
+    "text": "that's coming from the source with the name say selector color equals green so notice how you can be quite broad um",
+    "start": "1322880",
+    "end": "1328400"
+  },
+  {
+    "text": "i'm ju this isn't a really a powerful example it's just to show how flexible it is so you can",
+    "start": "1328400",
+    "end": "1335679"
+  },
+  {
+    "text": "not just allow you can explicitly deny we also allow service count context",
+    "start": "1335679",
+    "end": "1340799"
+  },
+  {
+    "text": "you can log which is brilliant if you're forwarding to a syslog or sim solution",
+    "start": "1340799",
+    "end": "1346080"
+  },
+  {
+    "text": "and then you have icmp amongst other protocols so it's not just tcp udp icmp like ping scanning we can",
+    "start": "1346080",
+    "end": "1353760"
+  },
+  {
+    "text": "also log deny allow that traffic so yeah i'm going gonna try and show a",
+    "start": "1353760",
+    "end": "1359760"
+  },
+  {
+    "text": "real world example of what you might do with a traditional firewalling tool so",
+    "start": "1359760",
+    "end": "1364799"
+  },
+  {
+    "text": "in a monolith architecture you would have a zone based architecture that is what they often try to create so you create a",
+    "start": "1364799",
+    "end": "1372159"
+  },
+  {
+    "text": "demilitarized zone or a dmz it means that those pods as long as they have the label context for",
+    "start": "1372159",
+    "end": "1377840"
+  },
+  {
+    "text": "you know again we're not basing it on ip we want to do this based on label so we say if",
+    "start": "1377840",
+    "end": "1383039"
+  },
+  {
+    "text": "it has the label fw zone equals dmz then it is categorized as a",
+    "start": "1383039",
+    "end": "1388400"
+  },
+  {
+    "text": "demilitarized zone workload what do i mean by that as you can see in the diagram they should be pods that can",
+    "start": "1388400",
+    "end": "1394559"
+  },
+  {
+    "text": "talk to the public internet and also receive traffic from the public internet so there's in this example there looks",
+    "start": "1394559",
+    "end": "1400559"
+  },
+  {
+    "text": "like there's four kubernetes pods in that dmc they can talk to public internet",
+    "start": "1400559",
+    "end": "1405679"
+  },
+  {
+    "text": "and they will have a labels concept of or construct of firewall zones dmz",
+    "start": "1405679",
+    "end": "1410960"
+  },
+  {
+    "text": "now as you can see the trusted pod should be able to talk to dmz um i think the diagram",
+    "start": "1410960",
+    "end": "1416880"
+  },
+  {
+    "text": "should better explain that it's also allowed to receive traffic from dmz but the point here is that",
+    "start": "1416880",
+    "end": "1423679"
+  },
+  {
+    "text": "trusted zone by no means can talk directly to internet in the same way the restricted zone cannot talk to it",
+    "start": "1423679",
+    "end": "1430559"
+  },
+  {
+    "text": "so what we're ultimately trying to do is we're not really concerned with trusted pods what we are concerned with is",
+    "start": "1430559",
+    "end": "1436559"
+  },
+  {
+    "text": "we want to ensure that only permitted pods can talk for permitted",
+    "start": "1436559",
+    "end": "1442480"
+  },
+  {
+    "text": "purposes that we've approved and by having strength and depth it means that",
+    "start": "1442480",
+    "end": "1447520"
+  },
+  {
+    "text": "well it would be near impossible for us to get a compromised workload into the restricted zone where all the personally",
+    "start": "1447520",
+    "end": "1453840"
+  },
+  {
+    "text": "identifiable data is so like keep in mind we're trying to comply with pci or hipaa or soc2 and we want to make sure",
+    "start": "1453840",
+    "end": "1461360"
+  },
+  {
+    "text": "that if we have sensitive data whether it be payment details or other pii data in that oracle db example that back-end",
+    "start": "1461360",
+    "end": "1468559"
+  },
+  {
+    "text": "pod that it can only talk to trusted or permitted pods over trusted permitted ports and protocols",
+    "start": "1468559",
+    "end": "1474640"
+  },
+  {
+    "text": "we're applying zero trust and only then will the trusted pod be able to relay that data onto a dmz which",
+    "start": "1474640",
+    "end": "1481520"
+  },
+  {
+    "text": "now can talk to public internet so the dmz essentially has no visibility",
+    "start": "1481520",
+    "end": "1486559"
+  },
+  {
+    "text": "within the zone there's large ips between those zones so with traditional firewalls you would",
+    "start": "1486559",
+    "end": "1492559"
+  },
+  {
+    "text": "have three firewall zones again it's a lot of context here so we need to make it",
+    "start": "1492559",
+    "end": "1498559"
+  },
+  {
+    "text": "static so as those workloads go up and down i don't have to keep rebuilding the structure we need it to be highly dynamic",
+    "start": "1498559",
+    "end": "1505200"
+  },
+  {
+    "text": "and then those pods otherwise you know if we didn't create this they would have full lateral access between those zones",
+    "start": "1505200",
+    "end": "1512240"
+  },
+  {
+    "text": "so there's nothing no nothing to stop a compromise workload if it did get into that unidentified dmz zone from talking",
+    "start": "1512240",
+    "end": "1519360"
+  },
+  {
+    "text": "straight to a restricted db stealing personally identifiable data even if it was just doing port scanning once it's",
+    "start": "1519360",
+    "end": "1525760"
+  },
+  {
+    "text": "got that data if it gets away with it then it can reach out to a command and control server and do whatever it wants",
+    "start": "1525760",
+    "end": "1530799"
+  },
+  {
+    "text": "because it can talk to public internet so that's why we absolutely need these zones so as i say large ip range is for egress",
+    "start": "1530799",
+    "end": "1538480"
+  },
+  {
+    "text": "and then you have a bunch of different tools as you can see from the example that they need to talk to and maybe the trusted pods or the dmz",
+    "start": "1538480",
+    "end": "1545520"
+  },
+  {
+    "text": "yeah probably the front-end pod needs to access those external endpoints or maybe",
+    "start": "1545520",
+    "end": "1551440"
+  },
+  {
+    "text": "the trusted pods need to so we will make certain exceptions to the rule we'll say",
+    "start": "1551440",
+    "end": "1556880"
+  },
+  {
+    "text": "only allowed to talk to dmz unless it talks to external endpoints um and again",
+    "start": "1556880",
+    "end": "1562240"
+  },
+  {
+    "text": "we need to identify exactly what endpoint we're opening it up to not opening up dns to potentially anywhere",
+    "start": "1562240",
+    "end": "1568559"
+  },
+  {
+    "text": "so that's why we mentioned earlier that the dns egress rules are really useful in calico enterprise",
+    "start": "1568559",
+    "end": "1575039"
+  },
+  {
+    "text": "so um i have an example um you know that i can",
+    "start": "1575039",
+    "end": "1580080"
+  },
+  {
+    "text": "share actually you can go to docs.calico cloud.io if you're interested in it but it's um application called storefront",
+    "start": "1580080",
+    "end": "1586799"
+  },
+  {
+    "text": "it's pretty standard it's got a front end uh two mark services so they're in the trusted zone and a back",
+    "start": "1586799",
+    "end": "1592640"
+  },
+  {
+    "text": "end and a login component you know you have a standard logging tool but that's also holding sensitive data and within",
+    "start": "1592640",
+    "end": "1599200"
+  },
+  {
+    "text": "those zones we notice that someone may introduce a rogue workload like we have to assume that someone's",
+    "start": "1599200",
+    "end": "1605279"
+  },
+  {
+    "text": "capable of compromising our cluster so if they do compromise it they perform tcp board scanning some data",
+    "start": "1605279",
+    "end": "1611360"
+  },
+  {
+    "text": "exfiltration then they're going to try and reach out to a command and control server to relay that data that they've",
+    "start": "1611360",
+    "end": "1616640"
+  },
+  {
+    "text": "otherwise uh taken from our back-end pods so we are building the zones we're",
+    "start": "1616640",
+    "end": "1621919"
+  },
+  {
+    "text": "building a dmz trusted and restricted so that the blast radius in this case is",
+    "start": "1621919",
+    "end": "1627200"
+  },
+  {
+    "text": "far more restricted because as you see the rogue workload managed to get into the restricted zone",
+    "start": "1627200",
+    "end": "1633440"
+  },
+  {
+    "text": "but it can't talk outside the zone because we've really set no like zero trust to the outside the only",
+    "start": "1633440",
+    "end": "1640640"
+  },
+  {
+    "text": "way the data could have got to a different zone is over permitted ports and protocols only from a back end or logging pod to those other intermediate",
+    "start": "1640640",
+    "end": "1647679"
+  },
+  {
+    "text": "workloads so in this case we need to lock down not just north",
+    "start": "1647679",
+    "end": "1654640"
+  },
+  {
+    "text": "south traditional firewall can do that but the east-west traffic's where it gets complicated as i mentioned staging",
+    "start": "1654640",
+    "end": "1661120"
+  },
+  {
+    "text": "the different environments we can talk about that in a while but it's important to understand within this tenant that um",
+    "start": "1661120",
+    "end": "1668159"
+  },
+  {
+    "text": "i have like i say their front end i have a screenshot from a google cloud environment that i run and you can see i",
+    "start": "1668159",
+    "end": "1674000"
+  },
+  {
+    "text": "have a front end pod back end two micro services and they have those labels so when you say cube ctl get pods within",
+    "start": "1674000",
+    "end": "1680399"
+  },
+  {
+    "text": "the namespace storefront where the application is running show labels so i want to see the labels",
+    "start": "1680399",
+    "end": "1685760"
+  },
+  {
+    "text": "associated with it now you won't have a structured label schema by default you",
+    "start": "1685760",
+    "end": "1691760"
+  },
+  {
+    "text": "may have something similar to what you can see there where you have a generic pod template hash value assigned to it",
+    "start": "1691760",
+    "end": "1697679"
+  },
+  {
+    "text": "or maybe just app equals intention that can be okay but when you're building zone structure",
+    "start": "1697679",
+    "end": "1703919"
+  },
+  {
+    "text": "it's good to also add additional labels like i've done here where you say fw zone is equal to dmz trusted or",
+    "start": "1703919",
+    "end": "1710880"
+  },
+  {
+    "text": "restricted and once you have those labels it's very easy to build a policy like i've done here now i just realized",
+    "start": "1710880",
+    "end": "1717600"
+  },
+  {
+    "text": "there's a one slight thing to mention why this policy is different the other one is because it's you it originated from",
+    "start": "1717600",
+    "end": "1724080"
+  },
+  {
+    "text": "calico enterprise so it has for instance this concept of tiering so you have product tier",
+    "start": "1724080",
+    "end": "1730960"
+  },
+  {
+    "text": "um so the tier is called product again it's another abstraction associated with enterprise so in the",
+    "start": "1730960",
+    "end": "1736320"
+  },
+  {
+    "text": "case of the policy name it's product.dmz as opposed to just dmz but",
+    "start": "1736320",
+    "end": "1742640"
+  },
+  {
+    "text": "other than that if you remove those two lines or if you just remove the tier and remove product from the name",
+    "start": "1742640",
+    "end": "1748960"
+  },
+  {
+    "text": "that policy will be the same for open source for free everything about this will work so as you can see from the screenshot",
+    "start": "1748960",
+    "end": "1755200"
+  },
+  {
+    "text": "example that i've taken anything that's scoped in the namespace storefront which was the test",
+    "start": "1755200",
+    "end": "1760799"
+  },
+  {
+    "text": "application we just introduced in that case if it has the label",
+    "start": "1760799",
+    "end": "1766559"
+  },
+  {
+    "text": "um dmz for that firewall zone then i'm allowing it to talk to public internet",
+    "start": "1766559",
+    "end": "1771600"
+  },
+  {
+    "text": "which i've actually abstracted a bit where i've said type equals public for that ip range so that network set",
+    "start": "1771600",
+    "end": "1778720"
+  },
+  {
+    "text": "alternatively if you're not creating network sets which we haven't discussed yet you could just say cider match to",
+    "start": "1778720",
+    "end": "1784320"
+  },
+  {
+    "text": "the ip range everything else as you can see here from an ingress from what we receive is",
+    "start": "1784320",
+    "end": "1789840"
+  },
+  {
+    "text": "denied and similarly what egress what tops out from that um dmz is allowed to",
+    "start": "1789840",
+    "end": "1796240"
+  },
+  {
+    "text": "talk to pods with the labels far well known as trusted and or map equals logging so notice how there's",
+    "start": "1796240",
+    "end": "1803440"
+  },
+  {
+    "text": "fine-grained uh i guess it's boolean logic we're talking about here so and or logic so you know",
+    "start": "1803440",
+    "end": "1809039"
+  },
+  {
+    "text": "we're allowing it to talk to trusted but rather than creating another rule we're saying or if it has map equals logging",
+    "start": "1809039",
+    "end": "1814399"
+  },
+  {
+    "text": "or you could say if it's firewall trust it and and app equals logging so you can define again fine grain context as for",
+    "start": "1814399",
+    "end": "1821760"
+  },
+  {
+    "text": "that if it's not in those permitted zones as you can see here the other action is to utter it you know otherwise didn't deny",
+    "start": "1821760",
+    "end": "1828720"
+  },
+  {
+    "text": "that traffic um so that's really powerful strongly create i recommend creating something",
+    "start": "1828720",
+    "end": "1834240"
+  },
+  {
+    "text": "like this for your own workloads especially if they have similar architecture so the example i showed there was yet",
+    "start": "1834240",
+    "end": "1840880"
+  },
+  {
+    "text": "demilitarized zone then we have a trusted zone same idea again uh firewall zone is set to trusted so we",
+    "start": "1840880",
+    "end": "1847679"
+  },
+  {
+    "text": "know what pods this going to apply to it's going to be highly dynamic because even as pods go up and down they should",
+    "start": "1847679",
+    "end": "1853440"
+  },
+  {
+    "text": "keep this static firewall zone label and then we have the rule always stay the same so it says allow it to talk to the",
+    "start": "1853440",
+    "end": "1860080"
+  },
+  {
+    "text": "dmz trust it could talk up to dmc or it can talk yes again this is ingress so it's allowed to receive traffic from",
+    "start": "1860080",
+    "end": "1867039"
+  },
+  {
+    "text": "the dmz the one above it and it's allowed to receive traffic from trusted below it but if it's not in those two",
+    "start": "1867039",
+    "end": "1873039"
+  },
+  {
+    "text": "zones then it's not permitted because it is trusted as the name goes and then egress what it talks about we're",
+    "start": "1873039",
+    "end": "1879120"
+  },
+  {
+    "text": "allowing it to talk only to restrict it so pods within the same zone",
+    "start": "1879120",
+    "end": "1884559"
+  },
+  {
+    "text": "so it can talk out to pods in the same zone but anything it's receiving is from those two zones on a relay and then",
+    "start": "1884559",
+    "end": "1891039"
+  },
+  {
+    "text": "anything else is denied so it really is fine grain context here and then the final one it seems repetitious but it's",
+    "start": "1891039",
+    "end": "1898320"
+  },
+  {
+    "text": "really powerful is to say the last zone is restricted then it can also receive traffic from the trusted zone or other",
+    "start": "1898320",
+    "end": "1905679"
+  },
+  {
+    "text": "pods in the restricted zone because as we found out although there's one back-end pod with that zone uh there may",
+    "start": "1905679",
+    "end": "1911440"
+  },
+  {
+    "text": "be more pods in the future so it's important to have that there otherwise if there were more pods",
+    "start": "1911440",
+    "end": "1916799"
+  },
+  {
+    "text": "than they couldn't actually you know receive traffic from one another um and then it's allowing all egress",
+    "start": "1916799",
+    "end": "1922640"
+  },
+  {
+    "text": "access uh traffic that's another point make it's allowed any egress traffic out but of course if it tried to talk to",
+    "start": "1922640",
+    "end": "1929440"
+  },
+  {
+    "text": "some other ip range that would otherwise be blocked by other guardrails we've already configured",
+    "start": "1929440",
+    "end": "1935360"
+  },
+  {
+    "text": "um so yeah this is our network policy um like i mentioned it's",
+    "start": "1935360",
+    "end": "1942080"
+  },
+  {
+    "text": "you're probably getting quite familiar with the idea of deny allow logging",
+    "start": "1942080",
+    "end": "1947120"
+  },
+  {
+    "text": "if you want to see which policies you've created and again you may have tiering like we saw with enterprise then you can say",
+    "start": "1947120",
+    "end": "1953440"
+  },
+  {
+    "text": "cube ctl get network policy for the namespace scope policy or you can say",
+    "start": "1953440",
+    "end": "1958880"
+  },
+  {
+    "text": "and you can see on the right side here qctl get global network policy to see which ones are globally scoped the only",
+    "start": "1958880",
+    "end": "1965519"
+  },
+  {
+    "text": "reason the syntax is slightly different here is that we have tier dot",
+    "start": "1965519",
+    "end": "1970559"
+  },
+  {
+    "text": "policy name which is familiar in calico enterprise but if you're using calc open source it would just be policy name",
+    "start": "1970559",
+    "end": "1976880"
+  },
+  {
+    "text": "because it doesn't understand this unique construct or concept of tiering um which is not an issue",
+    "start": "1976880",
+    "end": "1983039"
+  },
+  {
+    "text": "um so to find your policies is just cuddle get policy or network policy or get global network",
+    "start": "1983039",
+    "end": "1988960"
+  },
+  {
+    "text": "policy um for logging and denying actions again",
+    "start": "1988960",
+    "end": "1994320"
+  },
+  {
+    "text": "just trying to enforce if zero trust like i say strongly recommended for",
+    "start": "1994320",
+    "end": "2000159"
+  },
+  {
+    "text": "if you've got different environments like you have let's say you have a single cluster but you have some things that you consider",
+    "start": "2000159",
+    "end": "2005919"
+  },
+  {
+    "text": "like test namespaces or kind of in there even in a production environment it's really important to define what are the",
+    "start": "2005919",
+    "end": "2012320"
+  },
+  {
+    "text": "purpose and intentions of workloads so like here we've got environmental",
+    "start": "2012320",
+    "end": "2017440"
+  },
+  {
+    "text": "variable of environment equals prod or environment equals def and that way in this case if",
+    "start": "2017440",
+    "end": "2024480"
+  },
+  {
+    "text": "it's a front-end part it should be so yeah if there's royal front end but it can talk to anything",
+    "start": "2024480",
+    "end": "2030960"
+  },
+  {
+    "text": "or receive anything from production environments but otherwise it's denying tcp traffic um",
+    "start": "2030960",
+    "end": "2037840"
+  },
+  {
+    "text": "to prod i think i made a typo there but the point still stands as you can see on the right side view",
+    "start": "2037840",
+    "end": "2044720"
+  },
+  {
+    "text": "the development view what we're trying to specify here is even if there's new workloads it's development it could be",
+    "start": "2044720",
+    "end": "2049839"
+  },
+  {
+    "text": "identical to production one it couldn't hypothetically talk to production and compromise that",
+    "start": "2049839",
+    "end": "2056398"
+  },
+  {
+    "text": "production because again this is the applications that are being used by our users so it's important to set those",
+    "start": "2056399",
+    "end": "2062878"
+  },
+  {
+    "text": "guardrails based on intentions as well not just their zones um so we've gone over the difference",
+    "start": "2062879",
+    "end": "2069440"
+  },
+  {
+    "text": "between kubernetes and calico network policy calico or kubernetes goes quite far you know it allows us to do ingress",
+    "start": "2069440",
+    "end": "2075919"
+  },
+  {
+    "text": "egress rules we can specify the pods it already scopes to a name space there's port matching tier you know protocol",
+    "start": "2075919",
+    "end": "2082960"
+  },
+  {
+    "text": "traffic matching even ip blocks however when it does come down to",
+    "start": "2082960",
+    "end": "2088720"
+  },
+  {
+    "text": "scoping rich const uh you know richly detailed environments",
+    "start": "2088720",
+    "end": "2094240"
+  },
+  {
+    "text": "then you may also want to have globally scoped policy you may need to explicitly deny or log the traffic to better",
+    "start": "2094240",
+    "end": "2100240"
+  },
+  {
+    "text": "understand from forensic analysis where that traffic's going and from a you know compliance",
+    "start": "2100240",
+    "end": "2105760"
+  },
+  {
+    "text": "perspective you may have in-compliant users or compliant users that shouldn't be permitted to",
+    "start": "2105760",
+    "end": "2111920"
+  },
+  {
+    "text": "you know make traffic from workloads to other workloads so having the ability to scope",
+    "start": "2111920",
+    "end": "2117040"
+  },
+  {
+    "text": "service accounts into those richer matches as well as integrating with your existing service mesh if you're using",
+    "start": "2117040",
+    "end": "2123440"
+  },
+  {
+    "text": "istio and you need to you know understand what is the",
+    "start": "2123440",
+    "end": "2129599"
+  },
+  {
+    "text": "https layer 7 traffic on top of what we can already scope by default in um our",
+    "start": "2129599",
+    "end": "2135599"
+  },
+  {
+    "text": "network policy then you can go so much further to get kind of a full scope of what traffic we're going",
+    "start": "2135599",
+    "end": "2141599"
+  },
+  {
+    "text": "to allow where it's not in our environment and sticking on the topic of those traditional firewalling solutions um",
+    "start": "2141599",
+    "end": "2149760"
+  },
+  {
+    "text": "firewalls are deployed enterprise wide they can be quite expensive",
+    "start": "2149760",
+    "end": "2155839"
+  },
+  {
+    "text": "again we're talking about totally free open source writing in yaml manifest",
+    "start": "2155839",
+    "end": "2162480"
+  },
+  {
+    "text": "and we gave some simple examples but i guess why some organizations still today ask for firewalls and that's",
+    "start": "2162480",
+    "end": "2168800"
+  },
+  {
+    "text": "absolutely fine it does fall under some regulatory standards is that some of those compliance frameworks are somewhat",
+    "start": "2168800",
+    "end": "2174079"
+  },
+  {
+    "text": "archaic you know they've been around for a long time will they change in the time in the future it's hard to know but in",
+    "start": "2174079",
+    "end": "2179280"
+  },
+  {
+    "text": "the meantime you may still have a firewall solution it needs to sit on the perimeter that's fine you know that's not the",
+    "start": "2179280",
+    "end": "2186800"
+  },
+  {
+    "text": "discussion we're having here it's more that if you have a traditional firewall that you've invested into",
+    "start": "2186800",
+    "end": "2192800"
+  },
+  {
+    "text": "and you can't understand it has no visibility of the east-west what traffic goes on between pods in the cluster not",
+    "start": "2192800",
+    "end": "2199440"
+  },
+  {
+    "text": "just goes out of the cluster then it's have no control over that so we have to use policy implementation",
+    "start": "2199440",
+    "end": "2205040"
+  },
+  {
+    "text": "here and also your security team is centered around those firewalls",
+    "start": "2205040",
+    "end": "2210800"
+  },
+  {
+    "text": "their concern maybe is you know how much time does it take to start writing network policy because it",
+    "start": "2210800",
+    "end": "2216800"
+  },
+  {
+    "text": "is a new thing they have to get skilled up and familiar with or maybe your development you need to write policy",
+    "start": "2216800",
+    "end": "2222160"
+  },
+  {
+    "text": "alongside security and we have again fine grain policy which is easy to use is good to know but",
+    "start": "2222160",
+    "end": "2229359"
+  },
+  {
+    "text": "if you are looking at potentially talking with about calico enterprise there's web user interface and",
+    "start": "2229359",
+    "end": "2235520"
+  },
+  {
+    "text": "additional controls for your security and devops team so",
+    "start": "2235520",
+    "end": "2240720"
+  },
+  {
+    "text": "that they can work alongside one another but ultimately network policy as you probably could see",
+    "start": "2240720",
+    "end": "2246640"
+  },
+  {
+    "text": "from the session so far is the de facto way for us to secure east west as well as north south traffic for those pods",
+    "start": "2246640",
+    "end": "2253440"
+  },
+  {
+    "text": "um yeah existing policy creation process is essentially slow for devops so it",
+    "start": "2253440",
+    "end": "2258960"
+  },
+  {
+    "text": "needs to be as i say a tool that works alongside security and devops um the",
+    "start": "2258960",
+    "end": "2264400"
+  },
+  {
+    "text": "devops teams themselves rely on kubernetes to enable agility and speed that's why they're using kubernetes",
+    "start": "2264400",
+    "end": "2269520"
+  },
+  {
+    "text": "today um that's not a surprise connecting new applications or services um requires a firewall rule change um",
+    "start": "2269520",
+    "end": "2277280"
+  },
+  {
+    "text": "that takes time the idea of our policy being highly dynamic as i mentioned earlier is",
+    "start": "2277280",
+    "end": "2282800"
+  },
+  {
+    "text": "as new workloads are brought up we don't want to invest time in redesigning the wheel we don't want to",
+    "start": "2282800",
+    "end": "2288400"
+  },
+  {
+    "text": "spend a lot of time implementing new firewall rule changes based on ip so we can maybe even from the beginning",
+    "start": "2288400",
+    "end": "2295280"
+  },
+  {
+    "text": "as you have a small environment and as it scales from something quite large or multiple clusters that you can replicate",
+    "start": "2295280",
+    "end": "2300880"
+  },
+  {
+    "text": "the same policy mutation across multiple distributions multiple different cloud",
+    "start": "2300880",
+    "end": "2306079"
+  },
+  {
+    "text": "or on-prem bare metal environments without any major choke point in that so you know you've",
+    "start": "2306079",
+    "end": "2312880"
+  },
+  {
+    "text": "got a centralized deployment it's easy to replicate uh same api for each",
+    "start": "2312880",
+    "end": "2318560"
+  },
+  {
+    "text": "environment and realistic devops can apply this into ci cd pipeline that's probably the most",
+    "start": "2318560",
+    "end": "2325440"
+  },
+  {
+    "text": "important part that this yaml manifest is no reason why they can't make these changes at the highest point",
+    "start": "2325440",
+    "end": "2331920"
+  },
+  {
+    "text": "in the deployment chain so security should never be an afterthought it will always be you know as part of the",
+    "start": "2331920",
+    "end": "2339200"
+  },
+  {
+    "text": "development or sorry security is code i think is the phrase that people like using but you know use it within your ci",
+    "start": "2339200",
+    "end": "2345200"
+  },
+  {
+    "text": "cd pipeline for automation um so as we're coming up to an end on this session it's important to know it's",
+    "start": "2345200",
+    "end": "2351920"
+  },
+  {
+    "text": "not just security it's also compliance you may still be using firewalls for",
+    "start": "2351920",
+    "end": "2357280"
+  },
+  {
+    "text": "that compliance which is totally understandable however if it doesn't maintain the compliance the existing",
+    "start": "2357280",
+    "end": "2363680"
+  },
+  {
+    "text": "firewall investment that it doesn't give us that control it doesn't guarantee for external auditor that we are complying",
+    "start": "2363680",
+    "end": "2371200"
+  },
+  {
+    "text": "with the east west traffic that's going on within our cluster then yeah we need to start really looking into how far can",
+    "start": "2371200",
+    "end": "2377040"
+  },
+  {
+    "text": "we go with our policy and similarly from an access controls if there are no access controls already for those",
+    "start": "2377040",
+    "end": "2383440"
+  },
+  {
+    "text": "external resources then we need to do that we need to define which pods can talk to external",
+    "start": "2383440",
+    "end": "2389359"
+  },
+  {
+    "text": "crds and again what is the ports and protocols that are permitted for those if there's a lack of visibility we have",
+    "start": "2389359",
+    "end": "2396720"
+  },
+  {
+    "text": "enterprise grade offering that's dynamic to give more visibility into it but either way um the policy scoping is so",
+    "start": "2396720",
+    "end": "2404640"
+  },
+  {
+    "text": "well defined so as long as you write up a good label schema from the beginning um",
+    "start": "2404640",
+    "end": "2410319"
+  },
+  {
+    "text": "you're pretty confident that your policy is working and it's matching what you expect it to um so that's again it's",
+    "start": "2410319",
+    "end": "2416480"
+  },
+  {
+    "text": "trustworthy and uh it's popular for a reason so i hope the session was interesting",
+    "start": "2416480",
+    "end": "2421760"
+  },
+  {
+    "text": "and that you got a lot out of it um as you know it's an open source community um we have uh open slack",
+    "start": "2421760",
+    "end": "2429200"
+  },
+  {
+    "text": "channel uh we have over four thousand users in it which is great it's always going up if you have questions about any",
+    "start": "2429200",
+    "end": "2436240"
+  },
+  {
+    "text": "of the content you've seen today you can contact you can reach out to me directly for your slack community",
+    "start": "2436240",
+    "end": "2441280"
+  },
+  {
+    "text": "the project itself calico has over 150 contributors so it is worth noting that we have",
+    "start": "2441280",
+    "end": "2446720"
+  },
+  {
+    "text": "the project calico github repo again you can bring up these discussion points with our developers directly via",
+    "start": "2446720",
+    "end": "2453520"
+  },
+  {
+    "text": "slack via that community or via discuss.projectcalico.org um the project",
+    "start": "2453520",
+    "end": "2458880"
+  },
+  {
+    "text": "is widely adopted i think it's still the most widely adopted um networking and",
+    "start": "2458880",
+    "end": "2464319"
+  },
+  {
+    "text": "security solution for kubernetes with over one and a half million nodes powered by calico every day so whether",
+    "start": "2464319",
+    "end": "2471359"
+  },
+  {
+    "text": "you're looking at using our cni implementation or just the policy that we discussed today um you can reach out",
+    "start": "2471359",
+    "end": "2478560"
+  },
+  {
+    "text": "to us in a bunch of different forms so hope you had a great session and look forward to hearing from you soon",
+    "start": "2478560",
+    "end": "2486280"
+  }
+]

@@ -1,0 +1,1667 @@
+[
+  {
+    "text": "all right thanks for coming everyone this is a cig off deep dive we're going",
+    "start": "30",
+    "end": "6299"
+  },
+  {
+    "text": "to be covering the kubernetes authentication and authorization subsystem I did okay so who are we",
+    "start": "6299",
+    "end": "21240"
+  },
+  {
+    "text": "my name is Matt Rogers I'm the senior software engineer with Red Hat my co-presenter is makan and a software",
+    "start": "21240",
+    "end": "29609"
+  },
+  {
+    "text": "engineer at Red Hat and we both work on open shift on the auth team mo is also a",
+    "start": "29609",
+    "end": "35489"
+  },
+  {
+    "text": "sig auth co-chair okay to start with an",
+    "start": "35489",
+    "end": "42210"
+  },
+  {
+    "text": "outline we are going to cover the request flow the request handler",
+    "start": "42210",
+    "end": "48989"
+  },
+  {
+    "text": "registration the the request context",
+    "start": "48989",
+    "end": "54780"
+  },
+  {
+    "text": "request metadata all of the items in the request flow we're going to go over the",
+    "start": "54780",
+    "end": "61800"
+  },
+  {
+    "text": "authentication piece we're going to look at some of the Authenticator types we're",
+    "start": "61800",
+    "end": "69450"
+  },
+  {
+    "text": "also going to cover the Authenticator Union semantics how the authenticators",
+    "start": "69450",
+    "end": "75170"
+  },
+  {
+    "text": "interact with each other and the same thing for the authorization of peace",
+    "start": "75170",
+    "end": "83810"
+  },
+  {
+    "text": "so this diagram shows the flow that an incoming request goes through the HTTP",
+    "start": "84700",
+    "end": "90700"
+  },
+  {
+    "text": "request starts off by being converted into request info metadata and it's",
+    "start": "90700",
+    "end": "98170"
+  },
+  {
+    "text": "passed to the authentication layer the authentication layer authenticates the",
+    "start": "98170",
+    "end": "103509"
+  },
+  {
+    "text": "request and passes it to the audit layer where there might be a log generated",
+    "start": "103509",
+    "end": "108700"
+  },
+  {
+    "text": "somewhere about the request after the audit layer comes the impersonation",
+    "start": "108700",
+    "end": "113710"
+  },
+  {
+    "text": "layer this layer we're not going to cover this in detail but this layer checks if there was the desire to",
+    "start": "113710",
+    "end": "119740"
+  },
+  {
+    "text": "perform an action as some user if so then there's some check to see if the",
+    "start": "119740",
+    "end": "125890"
+  },
+  {
+    "text": "requester has permission to act as the user and assuming that that checks out",
+    "start": "125890",
+    "end": "131769"
+  },
+  {
+    "text": "the request is modified so that the action is performed as the requested user",
+    "start": "131769",
+    "end": "137459"
+  },
+  {
+    "text": "so after impersonation is authorization here the request is authorized and",
+    "start": "137459",
+    "end": "144810"
+  },
+  {
+    "text": "resource rest is where the request finally hits the REST API or the business logic at the end and if there's",
+    "start": "144810",
+    "end": "152290"
+  },
+  {
+    "text": "a failure at any of these layers then the requests flow stops",
+    "start": "152290",
+    "end": "158250"
+  },
+  {
+    "text": "so the authentication authorization framework is implemented as a series of HTTP server handlers so if you're",
+    "start": "161190",
+    "end": "169200"
+  },
+  {
+    "text": "familiar with go you've most likely come across this code or written some variant of it you define your handler function",
+    "start": "169200",
+    "end": "176810"
+  },
+  {
+    "text": "that might that might do something with the request and write to the response",
+    "start": "176810",
+    "end": "182240"
+  },
+  {
+    "text": "and then you register the hand the handler to handle under a specific path",
+    "start": "182240",
+    "end": "189030"
+  },
+  {
+    "text": "on the server and then you you start your server so since the request has to",
+    "start": "189030",
+    "end": "199200"
+  },
+  {
+    "text": "go through multiple layers as you saw from the earlier slide processing is implemented as a series of wrapped HTTP",
+    "start": "199200",
+    "end": "206670"
+  },
+  {
+    "text": "handlers the registration function which the signature here you takes an existing",
+    "start": "206670",
+    "end": "214350"
+  },
+  {
+    "text": "Handler and here's some configurable data item that defines the behavior of",
+    "start": "214350",
+    "end": "220350"
+  },
+  {
+    "text": "the handler and then it wraps that existing Handler and returns a new",
+    "start": "220350",
+    "end": "226080"
+  },
+  {
+    "text": "handler so this slide shows some example",
+    "start": "226080",
+    "end": "233580"
+  },
+  {
+    "text": "code to display the ordering of these wrapped handlers during registration the handler that implements your business",
+    "start": "233580",
+    "end": "239700"
+  },
+  {
+    "text": "logic is wrap is wrapped first with an authorization Handler here and then an",
+    "start": "239700",
+    "end": "246300"
+  },
+  {
+    "text": "authentication handler right there so the last handler to be registered acts",
+    "start": "246300",
+    "end": "253140"
+  },
+  {
+    "text": "on the request first so in this example we have an authentication we have",
+    "start": "253140",
+    "end": "258959"
+  },
+  {
+    "text": "authentication that will act on the request first and then the next in line would be authorization so it's it's a",
+    "start": "258959",
+    "end": "266610"
+  },
+  {
+    "text": "basically a stack the request comes up dude that way",
+    "start": "266610",
+    "end": "271730"
+  },
+  {
+    "text": "so these wrapped handlers are distinct and they don't communicate with each",
+    "start": "272230",
+    "end": "277250"
+  },
+  {
+    "text": "other directly only through the past in requests so during the request flow each",
+    "start": "277250",
+    "end": "283010"
+  },
+  {
+    "text": "layer communicates with the next by modifying the request context object at",
+    "start": "283010",
+    "end": "288680"
+  },
+  {
+    "text": "each layer with context is called to include the data specific for that layer the flow of information here is",
+    "start": "288680",
+    "end": "296030"
+  },
+  {
+    "text": "just one way down the chain delay they don't ever communicate back up to the",
+    "start": "296030",
+    "end": "301190"
+  },
+  {
+    "text": "previous layer so as you saw in the",
+    "start": "301190",
+    "end": "306470"
+  },
+  {
+    "text": "previous slide each layer adds on to the context that moves through the request flow using with value and with context",
+    "start": "306470",
+    "end": "314810"
+  },
+  {
+    "text": "functions together adds data and replaces the current context with the",
+    "start": "314810",
+    "end": "320570"
+  },
+  {
+    "text": "new one while keeping a shallow copy of the old request so taking a look at the",
+    "start": "320570",
+    "end": "330050"
+  },
+  {
+    "text": "the context interface as a value method that takes some key and return something",
+    "start": "330050",
+    "end": "338210"
+  },
+  {
+    "text": "so empty interfaces there the width value function takes an existing context",
+    "start": "338210",
+    "end": "343460"
+  },
+  {
+    "text": "a key and a value and returns a context",
+    "start": "343460",
+    "end": "350229"
+  },
+  {
+    "text": "so here's the context implementation returned by with value we're calling value follows the parent context in",
+    "start": "352319",
+    "end": "359520"
+  },
+  {
+    "text": "order to find the value under the key this highlights something about the key",
+    "start": "359520",
+    "end": "364559"
+  },
+  {
+    "text": "that we use here if the key is not guaranteed to be unique across all contexts then you could potentially have",
+    "start": "364559",
+    "end": "371460"
+  },
+  {
+    "text": "a collision and return the wrong data so",
+    "start": "371460",
+    "end": "376770"
+  },
+  {
+    "text": "as you and as you might have noticed that this context I mean this chain is effectively a linked list so we don't",
+    "start": "376770",
+    "end": "387869"
+  },
+  {
+    "text": "care about the key itself we just want to make it unique across the entire program so how we do that and go",
+    "start": "387869",
+    "end": "395149"
+  },
+  {
+    "text": "normally is the you define a private type alias to int and making a constant",
+    "start": "395149",
+    "end": "402300"
+  },
+  {
+    "text": "of that alias is guaranteed to be unique as that's a private type for your package so even if a type with the same",
+    "start": "402300",
+    "end": "410039"
+  },
+  {
+    "text": "name is declared in a different package they won't compare as equal as you saw",
+    "start": "410039",
+    "end": "416159"
+  },
+  {
+    "text": "before there's a just a comparison there to see if that that key is is",
+    "start": "416159",
+    "end": "423059"
+  },
+  {
+    "text": "appropriate for that particular context in the in the list",
+    "start": "423059",
+    "end": "429949"
+  },
+  {
+    "text": "and here we use the with value function to store some data under the unique key",
+    "start": "432279",
+    "end": "438159"
+  },
+  {
+    "text": "so we have with the data type that's relevant for your handler and and then",
+    "start": "438159",
+    "end": "444909"
+  },
+  {
+    "text": "it's added to D context with the width value call and under that unique key and",
+    "start": "444909",
+    "end": "452499"
+  },
+  {
+    "text": "similarly extracting the data in a handler involves using our unique key",
+    "start": "452499",
+    "end": "458619"
+  },
+  {
+    "text": "with the value method and casting it to our unique data type so bringing this",
+    "start": "458619",
+    "end": "467409"
+  },
+  {
+    "text": "together that you can see there's the example update of the request context",
+    "start": "467409",
+    "end": "473110"
+  },
+  {
+    "text": "and also later fetching the data so this",
+    "start": "473110",
+    "end": "480579"
+  },
+  {
+    "text": "slide shows an expanded example of the context after moving through the request flow as you can see there are nested",
+    "start": "480579",
+    "end": "488829"
+  },
+  {
+    "text": "context with key value data and added at each layer at the deepest nesting we",
+    "start": "488829",
+    "end": "494769"
+  },
+  {
+    "text": "have the request info data which we'll look at look at that a little closer",
+    "start": "494769",
+    "end": "501360"
+  },
+  {
+    "text": "after that is the user info data here that's added by the authentication layer",
+    "start": "501360",
+    "end": "509939"
+  },
+  {
+    "text": "and finally at the at the highest level of nesting we have the audit data added",
+    "start": "509939",
+    "end": "516550"
+  },
+  {
+    "text": "by the audit layer so this slide shows the requests info",
+    "start": "516550",
+    "end": "523110"
+  },
+  {
+    "text": "from the first layer in more detail this object contains metadata about the",
+    "start": "523110",
+    "end": "528120"
+  },
+  {
+    "text": "requests that'll be used by the rest of the stack the request info is especially",
+    "start": "528120",
+    "end": "535400"
+  },
+  {
+    "text": "important for the authorization layer it contains a minimal amount of request",
+    "start": "535400",
+    "end": "540570"
+  },
+  {
+    "text": "information that the author that a later handler can base and access decision on",
+    "start": "540570",
+    "end": "547490"
+  },
+  {
+    "text": "and it could feasibly cache this as opposed to doing something like caching",
+    "start": "547490",
+    "end": "553740"
+  },
+  {
+    "text": "though the entire HTTP request which even though it might be a request for",
+    "start": "553740",
+    "end": "558810"
+  },
+  {
+    "text": "the same path and everything the body would be different and that wouldn't",
+    "start": "558810",
+    "end": "564720"
+  },
+  {
+    "text": "work for for caching and you can expect later handlers to always like reach out",
+    "start": "564720",
+    "end": "570990"
+  },
+  {
+    "text": "to to something or fetch any other data",
+    "start": "570990",
+    "end": "576570"
+  },
+  {
+    "text": "about the request so it prepares this for the whole stack",
+    "start": "576570",
+    "end": "582320"
+  },
+  {
+    "text": "so if you look at the default build handler chain function in the API server package there's a lot of coal a lot of",
+    "start": "585550",
+    "end": "592420"
+  },
+  {
+    "text": "code here hold on you can see how the standard handler chain is set up where",
+    "start": "592420",
+    "end": "598990"
+  },
+  {
+    "text": "the handlers are registered in an order where the last to be registered are the first to touch the request so you can",
+    "start": "598990",
+    "end": "605470"
+  },
+  {
+    "text": "see that with request info down here and it goes up authenticates the second step authentication audit impersonation and",
+    "start": "605470",
+    "end": "613090"
+  },
+  {
+    "text": "authorization alright so this slide",
+    "start": "613090",
+    "end": "619330"
+  },
+  {
+    "text": "shows the with authentication wrapper which takes a handler and something that",
+    "start": "619330",
+    "end": "626830"
+  },
+  {
+    "text": "can authenticate a request if no Authenticator here is passed in it's an",
+    "start": "626830",
+    "end": "632980"
+  },
+  {
+    "text": "OAuth it returns the current handler",
+    "start": "632980",
+    "end": "637019"
+  },
+  {
+    "text": "otherwise we're wrapping the input handler with a hand with another handler function that first tries to",
+    "start": "638130",
+    "end": "644110"
+  },
+  {
+    "text": "authenticate the request here if there's an unsuccessful authentication then the",
+    "start": "644110",
+    "end": "649780"
+  },
+  {
+    "text": "handler returns otherwise the user is added to the existing context and the",
+    "start": "649780",
+    "end": "655870"
+  },
+  {
+    "text": "request with the new context is passed on to the next handler in the chain",
+    "start": "655870",
+    "end": "661620"
+  },
+  {
+    "text": "so here we're starting to look at the authenticator interfaces so this is the",
+    "start": "665050",
+    "end": "670450"
+  },
+  {
+    "text": "request interface as you can see it has an authenticate request method that",
+    "start": "670450",
+    "end": "676270"
+  },
+  {
+    "text": "takes an HTTP request it returns the response object a boolean if you're",
+    "start": "676270",
+    "end": "682390"
+  },
+  {
+    "text": "authenticated or not and an error for there being a hard failure now to give a",
+    "start": "682390",
+    "end": "689070"
+  },
+  {
+    "text": "an example of the behavior of the bull in the error returned together so if the",
+    "start": "689070",
+    "end": "695500"
+  },
+  {
+    "text": "Authenticator for example compares a token in the request header against tokens in a",
+    "start": "695500",
+    "end": "701950"
+  },
+  {
+    "text": "backing store and if there was no match that's an unsuccessful authentication",
+    "start": "701950",
+    "end": "707910"
+  },
+  {
+    "text": "and in that case the return would be false and nil error but if the",
+    "start": "707910",
+    "end": "715540"
+  },
+  {
+    "text": "Authenticator encountered like some kind of network air or database error reading",
+    "start": "715540",
+    "end": "721540"
+  },
+  {
+    "text": "the backing store something like that then that would return false and actually return an error so here's the",
+    "start": "721540",
+    "end": "733870"
+  },
+  {
+    "text": "response struct the response contains some user info about the authenticated",
+    "start": "733870",
+    "end": "740830"
+  },
+  {
+    "text": "user to be used by the later layers and plus a list of audiences for who the",
+    "start": "740830",
+    "end": "747730"
+  },
+  {
+    "text": "authenticated token might be intended for",
+    "start": "747730",
+    "end": "753360"
+  },
+  {
+    "text": "so here's the user interface user info interface which describes a user that",
+    "start": "755940",
+    "end": "761769"
+  },
+  {
+    "text": "has been authenticated to the system contains methods for fetching the authenticated output so getname returns",
+    "start": "761769",
+    "end": "770440"
+  },
+  {
+    "text": "the name that uniquely identifies the user yet UID returns a unique value for",
+    "start": "770440",
+    "end": "777550"
+  },
+  {
+    "text": "a particular user that will change if the user is removed from the system and another user is added with the same name",
+    "start": "777550",
+    "end": "784800"
+  },
+  {
+    "text": "there's also the groups that the user is a member of and an extra map that",
+    "start": "784800",
+    "end": "791410"
+  },
+  {
+    "text": "contains information that the Authenticator thought was interesting",
+    "start": "791410",
+    "end": "796600"
+  },
+  {
+    "text": "and one example of that is scopes on a token now a note about the name versus",
+    "start": "796600",
+    "end": "804639"
+  },
+  {
+    "text": "the UID so cube is generally named based in in this area so the use of the UID is",
+    "start": "804639",
+    "end": "812170"
+  },
+  {
+    "text": "not particularly common using the UID depends on a later handlers behavior so",
+    "start": "812170",
+    "end": "819550"
+  },
+  {
+    "text": "some may handle that and not",
+    "start": "819550",
+    "end": "823649"
+  },
+  {
+    "text": "okay so like with all with the are back",
+    "start": "827730",
+    "end": "832740"
+  },
+  {
+    "text": "authorizer does not use the UID that'll",
+    "start": "832740",
+    "end": "837940"
+  },
+  {
+    "text": "use get name so that's kind of the canonical authorizer here with our back",
+    "start": "837940",
+    "end": "845070"
+  },
+  {
+    "text": "so here's the x.509 request Authenticator here the certificate is",
+    "start": "845640",
+    "end": "853180"
+  },
+  {
+    "text": "verified using a CA that the Authenticator is configured with and then the user information is extracted",
+    "start": "853180",
+    "end": "860620"
+  },
+  {
+    "text": "from the certificate subject and returned so if you look at the verify options struct in the corner",
+    "start": "860620",
+    "end": "869380"
+  },
+  {
+    "text": "this is configuration for the verify for the verifier where you can configure the",
+    "start": "869380",
+    "end": "874959"
+  },
+  {
+    "text": "see a pool and any acceptable key usage for the certificate so for that",
+    "start": "874959",
+    "end": "885760"
+  },
+  {
+    "text": "Authenticator this is the default user conversion function that extracts the",
+    "start": "885760",
+    "end": "890920"
+  },
+  {
+    "text": "user from a certificate chain at the leaf certificate and and here is an",
+    "start": "890920",
+    "end": "899920"
+  },
+  {
+    "text": "example of the certificate conversion so",
+    "start": "899920",
+    "end": "905440"
+  },
+  {
+    "text": "in this case the subject the certificate subject of oh you foo and see in a bar",
+    "start": "905440",
+    "end": "912630"
+  },
+  {
+    "text": "gets the user info that gets extracted is the name bar and groups food",
+    "start": "912630",
+    "end": "920820"
+  },
+  {
+    "text": "so there's also a header Authenticator that gathers the user information from",
+    "start": "923210",
+    "end": "931310"
+  },
+  {
+    "text": "specific request headers and that's all it does and use the loan it's completely",
+    "start": "931310",
+    "end": "937100"
+  },
+  {
+    "text": "insecure configuring this name headers group headers it could be an it could be",
+    "start": "937100",
+    "end": "943580"
+  },
+  {
+    "text": "like cube underscore or whatever whatever you defined here it'll just",
+    "start": "943580",
+    "end": "949790"
+  },
+  {
+    "text": "grab that information from the header and stick it into the user info so this",
+    "start": "949790",
+    "end": "959510"
+  },
+  {
+    "text": "is the other variant of the x.509 request Authenticator so this one instead of just verifying and just",
+    "start": "959510",
+    "end": "966290"
+  },
+  {
+    "text": "returning the user conversion results it verifies the certificate and then checks",
+    "start": "966290",
+    "end": "971360"
+  },
+  {
+    "text": "the common name against a configured set of allowed common names so if the name",
+    "start": "971360",
+    "end": "976790"
+  },
+  {
+    "text": "checks out then it continues on to call the wrapped request header Authenticator that we showed in the previous slide",
+    "start": "976790",
+    "end": "983590"
+  },
+  {
+    "text": "since this Authenticator provides the right certificate authentication and then cause the header authenticate",
+    "start": "983590",
+    "end": "990560"
+  },
+  {
+    "text": "Authenticator right afterwards then it makes the use of the header",
+    "start": "990560",
+    "end": "996020"
+  },
+  {
+    "text": "Authenticator secure alright moving on",
+    "start": "996020",
+    "end": "1002110"
+  },
+  {
+    "text": "now we'll cover the token interface the authenticate token method takes a",
+    "start": "1002110",
+    "end": "1007120"
+  },
+  {
+    "text": "context and a token and returns response bull or air the same semantics from the",
+    "start": "1007120",
+    "end": "1014770"
+  },
+  {
+    "text": "the other Authenticator interface so",
+    "start": "1014770",
+    "end": "1020470"
+  },
+  {
+    "text": "this is an example of some of the kind of a glue code between between two",
+    "start": "1020470",
+    "end": "1025660"
+  },
+  {
+    "text": "authenticators so the bearer token authentic that the bearer token",
+    "start": "1025660",
+    "end": "1031870"
+  },
+  {
+    "text": "Authenticator here starts out as a request header Authenticator and but you",
+    "start": "1031870",
+    "end": "1038530"
+  },
+  {
+    "text": "can just see that that that extracts the bearer token from the authorization header and then passes that to the",
+    "start": "1038530",
+    "end": "1045310"
+  },
+  {
+    "text": "actual token Authenticator",
+    "start": "1045310",
+    "end": "1048900"
+  },
+  {
+    "text": "here's the OID C Authenticator it's a",
+    "start": "1050820",
+    "end": "1056250"
+  },
+  {
+    "text": "common one to configure since you might use it with many other providers such as Google and get lab some of the",
+    "start": "1056250",
+    "end": "1062340"
+  },
+  {
+    "text": "configuration for IDC includes the server audiences which will be compared against audiences in the request if",
+    "start": "1062340",
+    "end": "1068640"
+  },
+  {
+    "text": "configured an issuer URL to verify against the issue or claim in the token and if these preliminary checks succeed",
+    "start": "1068640",
+    "end": "1076830"
+  },
+  {
+    "text": "we verify and then start to extract claims from the token the claim names",
+    "start": "1076830",
+    "end": "1083460"
+  },
+  {
+    "text": "are also configure configurable so you can think of that at that part of it as similar to the simple header",
+    "start": "1083460",
+    "end": "1090270"
+  },
+  {
+    "text": "Authenticator that we showed earlier and this slide shows the Authenticator which",
+    "start": "1090270",
+    "end": "1097710"
+  },
+  {
+    "text": "is used to authenticate service account tokens the token is parsed claims are",
+    "start": "1097710",
+    "end": "1105800"
+  },
+  {
+    "text": "claims an audience is our process and then the token is validated and the user",
+    "start": "1105800",
+    "end": "1111060"
+  },
+  {
+    "text": "info is returned so we've talked about",
+    "start": "1111060",
+    "end": "1117720"
+  },
+  {
+    "text": "different kinds of token authenticators already so if you think about what authenticating a token might entail it",
+    "start": "1117720",
+    "end": "1124170"
+  },
+  {
+    "text": "could involve some expensive lookup remote lookup or an encryption operation",
+    "start": "1124170",
+    "end": "1129750"
+  },
+  {
+    "text": "in this case being able to wrap the token auth with a customizable caching",
+    "start": "1129750",
+    "end": "1135180"
+  },
+  {
+    "text": "Authenticator allows for like a short-lived token cache for optimization",
+    "start": "1135180",
+    "end": "1142850"
+  },
+  {
+    "text": "so here's the Union Authenticator handler so this Authenticator is configured with a slice of",
+    "start": "1145310",
+    "end": "1151280"
+  },
+  {
+    "text": "authenticators and a fail on-air option so all authenticators are tried in a",
+    "start": "1151280",
+    "end": "1157310"
+  },
+  {
+    "text": "successful authentication from any of them returns an okay response if fail an",
+    "start": "1157310",
+    "end": "1164450"
+  },
+  {
+    "text": "error is set to false then a fatal error from one Authenticator can be over I did buy a successful return from a later",
+    "start": "1164450",
+    "end": "1171380"
+  },
+  {
+    "text": "Authenticator so if fail and error is true then an error from any Authenticator in the",
+    "start": "1171380",
+    "end": "1177740"
+  },
+  {
+    "text": "slice short-circuits the rest of the authenticators and returns the air so",
+    "start": "1177740",
+    "end": "1187130"
+  },
+  {
+    "text": "this is the authenticate request version of the Union and there's also an",
+    "start": "1187130",
+    "end": "1192260"
+  },
+  {
+    "text": "authenticate token varying it the parts that are highlighted in blue is literally the only thing that changes in",
+    "start": "1192260",
+    "end": "1199250"
+  },
+  {
+    "text": "the code between requests and token unions right and I'm going to pass it",
+    "start": "1199250",
+    "end": "1207020"
+  },
+  {
+    "text": "off the mode to wrap it up with the full example ok so here we have like a visual",
+    "start": "1207020",
+    "end": "1212780"
+  },
+  {
+    "text": "representation of what we sort of talked so far so I'll walk you guys through it so I walk from the outside or the inside",
+    "start": "1212780",
+    "end": "1218960"
+  },
+  {
+    "text": "out first so pretend you have a service account token Authenticator here right and we also want to honor Oh a DC tokens",
+    "start": "1218960",
+    "end": "1226010"
+  },
+  {
+    "text": "so we're gonna Union those two things together right so now we have a singular token Authenticator and these two things",
+    "start": "1226010",
+    "end": "1233180"
+  },
+  {
+    "text": "can be expensive you may have some lookups you do in verification so we go",
+    "start": "1233180",
+    "end": "1238250"
+  },
+  {
+    "text": "ahead and wrap it with and at that point you still can't honor requests because this is a token",
+    "start": "1238250",
+    "end": "1243850"
+  },
+  {
+    "text": "Authenticator another request Authenticator so we need to wrap it with a glue code that gives us and perhaps",
+    "start": "1243850",
+    "end": "1251980"
+  },
+  {
+    "text": "you also wanna honor nine search as was covered earlier and they kind of look at",
+    "start": "1251980",
+    "end": "1258400"
+  },
+  {
+    "text": "the order of these things x1i x.509 is a super cheap check you're just looking at metadata on the request so we put that",
+    "start": "1258400",
+    "end": "1264550"
+  },
+  {
+    "text": "one first and similarly service accounts are super common right they're part of the core",
+    "start": "1264550",
+    "end": "1269650"
+  },
+  {
+    "text": "infrastructure whereas why do you see is users interacting with the system generally speaking right so we put that one first",
+    "start": "1269650",
+    "end": "1275530"
+  },
+  {
+    "text": "we want it to be tried first and all of this gets Union together so like let's",
+    "start": "1275530",
+    "end": "1281080"
+  },
+  {
+    "text": "walk a request coming in right so someone tries to authenticate and this is a request that does not have a client",
+    "start": "1281080",
+    "end": "1286120"
+  },
+  {
+    "text": "cert on it it just has a very quick time so it's gonna go through here it's gonna hit the x509 certifcate ER which will",
+    "start": "1286120",
+    "end": "1292480"
+  },
+  {
+    "text": "say there's nothing here for me so they'll keep going down well let's pretend that these unions are both don't",
+    "start": "1292480",
+    "end": "1298870"
+  },
+  {
+    "text": "fail on any errors it's going to pass things through the bear took an Authenticator will strip out the bearer",
+    "start": "1298870",
+    "end": "1304900"
+  },
+  {
+    "text": "token for us pass it down the cache is empty and keep passing it down we'll hit the Union if it the service account",
+    "start": "1304900",
+    "end": "1312730"
+  },
+  {
+    "text": "authenticator let's say this was a user the service account open air often terrible error or otherwise say",
+    "start": "1312730",
+    "end": "1318740"
+  },
+  {
+    "text": "that this is not properly signed for me they'll let it go down to IDC hey let's pretend that gets verified correctly and",
+    "start": "1318740",
+    "end": "1325789"
+  },
+  {
+    "text": "as it comes back around the cash will report it and you're authenticated so let's say a few seconds later you could",
+    "start": "1325789",
+    "end": "1332210"
+  },
+  {
+    "text": "do another request you know you keep still get two more pots comes back in goes to the cache the cache is warm it",
+    "start": "1332210",
+    "end": "1339830"
+  },
+  {
+    "text": "knows who you are",
+    "start": "1339830",
+    "end": "1342669"
+  },
+  {
+    "text": "so as a actual example from the codebase for how we wire these things look together so this is the delegating hot",
+    "start": "1346040",
+    "end": "1353000"
+  },
+  {
+    "text": "code so things like the cubelet inside should lie on this any sort of external component that wants to delegate it's",
+    "start": "1353000",
+    "end": "1359210"
+  },
+  {
+    "text": "off to the QA tester can use this type of code so now you guys said we might use this so we have the best I dropped",
+    "start": "1359210",
+    "end": "1367970"
+  },
+  {
+    "text": "indicator first client sir token all of",
+    "start": "1367970",
+    "end": "1373820"
+  },
+  {
+    "text": "this is getting Union together at the end so all the token off bits were you knew together with the cash as I showed",
+    "start": "1373820",
+    "end": "1379910"
+  },
+  {
+    "text": "earlier they get turned into a request Authenticator and then all of those authenticators get Union together if",
+    "start": "1379910",
+    "end": "1386600"
+  },
+  {
+    "text": "you're authenticated you need to have the system for authenticated group added to you automatically so we have just a",
+    "start": "1386600",
+    "end": "1391700"
+  },
+  {
+    "text": "little wrapper that does that and then that final Authenticator is what seems so if you remember back earlier the",
+    "start": "1391700",
+    "end": "1396950"
+  },
+  {
+    "text": "widow's education bit takes a single Authenticator but it doesn't",
+    "start": "1396950",
+    "end": "1402040"
+  },
+  {
+    "text": "so without authorization is very similar to with authentication has that no",
+    "start": "1405310",
+    "end": "1410390"
+  },
+  {
+    "text": "operator at the top technically you could have an authorizer I don't recommend it well let's walk through this so it's",
+    "start": "1410390",
+    "end": "1417410"
+  },
+  {
+    "text": "gonna get some kind of authorization attributes from the complex we'll see in the next slide what that looks like",
+    "start": "1417410",
+    "end": "1423010"
+  },
+  {
+    "text": "then the authorizer is going to attempt an authorization and decisions based on those attributes and here we see sort of",
+    "start": "1423010",
+    "end": "1429800"
+  },
+  {
+    "text": "the most distinct difference between authentication authorization thank you instead of having a boolean state we",
+    "start": "1429800",
+    "end": "1435470"
+  },
+  {
+    "text": "actually have a tri-state of allowed in I in my opinion this allows an",
+    "start": "1435470",
+    "end": "1441110"
+  },
+  {
+    "text": "authorizer to say that I explicitly know that this is a denied you don't get to",
+    "start": "1441110",
+    "end": "1446450"
+  },
+  {
+    "text": "keep going so the unions on this don't have a concept of balaam error or not it's a gonna get denied",
+    "start": "1446450",
+    "end": "1454450"
+  },
+  {
+    "text": "so let's look through the interface right so the authorizer take some attributes and give us a decision a",
+    "start": "1456070",
+    "end": "1461350"
+  },
+  {
+    "text": "reason for that decision and an arrow all right so the decision is pretty straightforward right did you explicitly",
+    "start": "1461350",
+    "end": "1467919"
+  },
+  {
+    "text": "denied this stop crossing them exclusively or is this a no opinion I",
+    "start": "1467919",
+    "end": "1475600"
+  },
+  {
+    "text": "don't know so maybe somebody else does let them have a shot at the attributes",
+    "start": "1475600",
+    "end": "1481330"
+  },
+  {
+    "text": "interface is just a combination of request info and user info and a simple method that just checks if this were",
+    "start": "1481330",
+    "end": "1487539"
+  },
+  {
+    "text": "read only actions against the API so I didn't expand this out because you've already seen these two interfaces so all",
+    "start": "1487539",
+    "end": "1499869"
+  },
+  {
+    "text": "this authorizer does is it looks at the user on the request check cert groups and sees if that group intersects with a",
+    "start": "1499869",
+    "end": "1507099"
+  },
+  {
+    "text": "configured set of groups and think does it says listen aloud so we generally refer this to this as the system for",
+    "start": "1507099",
+    "end": "1514029"
+  },
+  {
+    "text": "masters magic authorizes it's effectively the way of saying that if you're a user with this group you can do",
+    "start": "1514029",
+    "end": "1519460"
+  },
+  {
+    "text": "anything otherwise you just say",
+    "start": "1519460",
+    "end": "1526258"
+  },
+  {
+    "text": "and more complex authorizer so this is the web book authorizer right so this is a delegating authorizer in the sense",
+    "start": "1528810",
+    "end": "1534690"
+  },
+  {
+    "text": "that it delegates the cube api server to do some authorization decision so with",
+    "start": "1534690",
+    "end": "1539910"
+  },
+  {
+    "text": "the external component asking the qubit castle so we have an API call subject",
+    "start": "1539910",
+    "end": "1545550"
+  },
+  {
+    "text": "access review that helps us sort of do this let me walk through this there's a conversion from these attributes and to",
+    "start": "1545550",
+    "end": "1552690"
+  },
+  {
+    "text": "subject access it's really straightforward because subject access review is basically can some user perform some action which is exactly",
+    "start": "1552690",
+    "end": "1560040"
+  },
+  {
+    "text": "what attributes has within it right so a",
+    "start": "1560040",
+    "end": "1565890"
+  },
+  {
+    "text": "tiny little bit of detail in there right so there's some user groups all these other things here as well as well as",
+    "start": "1565890",
+    "end": "1570990"
+  },
+  {
+    "text": "what what are they trying to do they're trying to create a pod in the empty string group that is the question you're",
+    "start": "1570990",
+    "end": "1578460"
+  },
+  {
+    "text": "going to ask the remote this is the way you do this is you you build up that subject access review and",
+    "start": "1578460",
+    "end": "1585479"
+  },
+  {
+    "text": "then you create it which is the remote call against a few API server and based",
+    "start": "1585479",
+    "end": "1590549"
+  },
+  {
+    "text": "on that result so you've asked the cube API server can this person actually",
+    "start": "1590549",
+    "end": "1597349"
+  },
+  {
+    "text": "so our Baptist's like the canonical example of an authorizer but we never fit on the slide and Jordan has done it",
+    "start": "1598450",
+    "end": "1606940"
+  },
+  {
+    "text": "far more justice and I be able to so please call us that",
+    "start": "1606940",
+    "end": "1612359"
+  },
+  {
+    "text": "so let's try to put some authorizers together so this is the Union for authorizers so as you can see we're",
+    "start": "1615140",
+    "end": "1622190"
+  },
+  {
+    "text": "going to try all of the ones that we're configured to try but when we get down here we only short-circuit if there's an",
+    "start": "1622190",
+    "end": "1629929"
+  },
+  {
+    "text": "explicit allow or an explicit deny it's no opinion we keep going so this is the",
+    "start": "1629929",
+    "end": "1635480"
+  },
+  {
+    "text": "sort of distinct so let's look at the delegating",
+    "start": "1635480",
+    "end": "1641960"
+  },
+  {
+    "text": "authorized rules so as we covered we have the magic authorizer at the top we",
+    "start": "1641960",
+    "end": "1648080"
+  },
+  {
+    "text": "have some hats that we don't authorize for so it's for example like ten",
+    "start": "1648080",
+    "end": "1654730"
+  },
+  {
+    "text": "privileged information and here we have that subject access review based",
+    "start": "1655270",
+    "end": "1660590"
+  },
+  {
+    "text": "delegating osomatsu we just Union those things together and we have one authorizer that with",
+    "start": "1660590",
+    "end": "1666710"
+  },
+  {
+    "text": "authorization",
+    "start": "1666710",
+    "end": "1669010"
+  },
+  {
+    "text": "let's talk about authentication and authorization together as a bit of leeway so we covered in the user info",
+    "start": "1671840",
+    "end": "1679160"
+  },
+  {
+    "text": "interface this extra so we can sort of think about this in certain situation as",
+    "start": "1679160",
+    "end": "1686330"
+  },
+  {
+    "text": "a contract between authentication and authorization doesn't have to be that but let's consider a specific example we",
+    "start": "1686330",
+    "end": "1693370"
+  },
+  {
+    "text": "in opens if we use this as a way of having scopes you can also see like this little bit",
+    "start": "1693370",
+    "end": "1701090"
+  },
+  {
+    "text": "right here the key is just a string so you do need to kind of name spaces so that other things don't get confused when they see this so what does this",
+    "start": "1701090",
+    "end": "1709340"
+  },
+  {
+    "text": "look like right so we use this specific key as a way of carrying some valleys or slopes the exact semantics of the",
+    "start": "1709340",
+    "end": "1716210"
+  },
+  {
+    "text": "valleys don't matter too much here just I'll walk you guys to the authorizer you can kind of see what it does with these",
+    "start": "1716210",
+    "end": "1722210"
+  },
+  {
+    "text": "things so this a little bit of open code",
+    "start": "1722210",
+    "end": "1728050"
+  },
+  {
+    "text": "it's a scope authorizer so the takeaway I want you guys to get from this is that this isn't an actual explicit denial",
+    "start": "1728050",
+    "end": "1734470"
+  },
+  {
+    "text": "it never returns in allow it only ever denies or returns no opinion right so it",
+    "start": "1734470",
+    "end": "1739930"
+  },
+  {
+    "text": "checks their user extra and sees it there's some scopes on this request there's not it doesn't have anything to",
+    "start": "1739930",
+    "end": "1745720"
+  },
+  {
+    "text": "do you to the bone otherwise it's going to take the scope so that were passed them and it's going to convert into a",
+    "start": "1745720",
+    "end": "1751870"
+  },
+  {
+    "text": "set of our back rules so we didn't cover our back but the general gist is very",
+    "start": "1751870",
+    "end": "1756910"
+  },
+  {
+    "text": "similar to like the subject actually bit sourcing right there's some verbs some resources right so can you get so your",
+    "start": "1756910",
+    "end": "1765190"
+  },
+  {
+    "text": "scope gets converted into a set of rules and if those rules cover the action",
+    "start": "1765190",
+    "end": "1770620"
+  },
+  {
+    "text": "you're trying to actually do then it's no opinion it's not allowed there's no opinion so it's basically saying your",
+    "start": "1770620",
+    "end": "1776679"
+  },
+  {
+    "text": "scopes did not deny this request otherwise they don't cover it",
+    "start": "1776679",
+    "end": "1782280"
+  },
+  {
+    "text": "so does anyone here use open ship for anyone run the install them any demos",
+    "start": "1784180",
+    "end": "1790550"
+  },
+  {
+    "text": "obviously you work on so if you if you",
+    "start": "1790550",
+    "end": "1797090"
+  },
+  {
+    "text": "guys have used it there's this user that you can log in as initially in the web console called Q : admin so when I",
+    "start": "1797090",
+    "end": "1803360"
+  },
+  {
+    "text": "initially wrote the code for this I made a mistake which is on the slide so let's",
+    "start": "1803360",
+    "end": "1809150"
+  },
+  {
+    "text": "kind of walk through this right this user has authenticated to the system it's given the system : master to break",
+    "start": "1809150",
+    "end": "1814610"
+  },
+  {
+    "text": "this is a bootstrap user can do anything is how do you manage the cluster Buddha possible in the beginning so it kind of",
+    "start": "1814610",
+    "end": "1819770"
+  },
+  {
+    "text": "makes sense and let's say it went through a flow of that game with the scope right so if you have ever used",
+    "start": "1819770",
+    "end": "1825620"
+  },
+  {
+    "text": "open ship and logged into Jenkins be OAuth we disk Ravana that's what scope that component gets so",
+    "start": "1825620",
+    "end": "1833300"
+  },
+  {
+    "text": "like you're finding it's a token for you that has no scope on it it's perfectly safe if this token can't be doing",
+    "start": "1833300",
+    "end": "1839259"
+  },
+  {
+    "text": "and as a very trim down example of how authorizers looking Novacek let's pretend you have a magic authorizer",
+    "start": "1839259",
+    "end": "1845679"
+  },
+  {
+    "text": "your scope authorizer anybody tell me why this cannot work",
+    "start": "1845679",
+    "end": "1853320"
+  },
+  {
+    "text": "yes correct these are good yeah so",
+    "start": "1862140",
+    "end": "1867150"
+  },
+  {
+    "text": "basically the mistake I made when I wrote this was I was thinking in my mind well this user can do anything so I",
+    "start": "1867150",
+    "end": "1873720"
+  },
+  {
+    "text": "should give them the script I don't have to check anything else except what happened is when they would get a scope",
+    "start": "1873720",
+    "end": "1880170"
+  },
+  {
+    "text": "token scopes would never get a chance to deny would always just approve and so",
+    "start": "1880170",
+    "end": "1888630"
+  },
+  {
+    "text": "certainly you could try to reorder the authorizers but you really want this one for super cheap and a lot of things use it and you don't",
+    "start": "1888630",
+    "end": "1895920"
+  },
+  {
+    "text": "want all the bad connections to start having random authorizers so what I",
+    "start": "1895920",
+    "end": "1901290"
+  },
+  {
+    "text": "ended up doing is less I change this out to system polling questions which is normal that's just a sign you are back",
+    "start": "1901290",
+    "end": "1909120"
+  },
+  {
+    "text": "the cluster at so this gets skipped this goes to nice expect",
+    "start": "1909120",
+    "end": "1916820"
+  },
+  {
+    "text": "yes [Applause]",
+    "start": "1921650",
+    "end": "1928539"
+  },
+  {
+    "text": "so one thing that's kind of annoying is that I can't have Bruce for my service accounts right so there's an implicit",
+    "start": "1941800",
+    "end": "1948670"
+  },
+  {
+    "text": "group for the namespace there's a group for all service accounts but there's no I want this one being are you guys going",
+    "start": "1948670",
+    "end": "1955450"
+  },
+  {
+    "text": "to try to address that so I'm pretty sure Clayton's gonna make me address it",
+    "start": "1955450",
+    "end": "1960460"
+  },
+  {
+    "text": "at some point let's be very fair but yeah I have thought about it certainly I",
+    "start": "1960460",
+    "end": "1966570"
+  },
+  {
+    "text": "was tempted at some point of happy decided that was a waste of my time but",
+    "start": "1966570",
+    "end": "1973420"
+  },
+  {
+    "text": "yeah I I've thought about what that would kind of look like I assume exist in the namespace live in the namespace",
+    "start": "1973420",
+    "end": "1982080"
+  },
+  {
+    "text": "yeah",
+    "start": "1982080",
+    "end": "1985080"
+  },
+  {
+    "text": "anybody else don't be shy",
+    "start": "1995980",
+    "end": "1999240"
+  },
+  {
+    "text": "do you have any plans to extend our back to people do or like label-based",
+    "start": "2003830",
+    "end": "2011020"
+  },
+  {
+    "text": "authorization of resources so like this",
+    "start": "2011020",
+    "end": "2016760"
+  },
+  {
+    "text": "is a very common feature request but so like if we go back and look at our interface",
+    "start": "2016760",
+    "end": "2024400"
+  },
+  {
+    "text": "[Music] I guess I guess I really want them I'll",
+    "start": "2025870",
+    "end": "2032980"
+  },
+  {
+    "text": "get there right",
+    "start": "2032980",
+    "end": "2040540"
+  },
+  {
+    "text": "yeah you have no access to the body whatsoever so authorizers cannot make a",
+    "start": "2041530",
+    "end": "2047590"
+  },
+  {
+    "text": "decision about the shape of an object admission is the soul sort of curated",
+    "start": "2047590",
+    "end": "2052929"
+  },
+  {
+    "text": "there also we we want authorisation to",
+    "start": "2052929",
+    "end": "2059200"
+  },
+  {
+    "text": "be extremely fast and using the cache and having decisions that are based on the body of objects we did have some of",
+    "start": "2059200",
+    "end": "2066490"
+  },
+  {
+    "text": "this this stuff over our back it was",
+    "start": "2066490",
+    "end": "2073040"
+  },
+  {
+    "text": "yeah I'm aware it's kind of messy some oak line stuff",
+    "start": "2088919",
+    "end": "2094970"
+  },
+  {
+    "text": "read there it's not so",
+    "start": "2102180",
+    "end": "2110080"
+  },
+  {
+    "text": "so one other thing I've been looking for so one particular problem solved",
+    "start": "2117570",
+    "end": "2124560"
+  },
+  {
+    "text": "actually by implementing some these interfaces is authentication with firebase kind of a weird use case there",
+    "start": "2124560",
+    "end": "2130650"
+  },
+  {
+    "text": "I wasn't able to use OID C even though it's an OID c2 token because they don't",
+    "start": "2130650",
+    "end": "2137520"
+  },
+  {
+    "text": "have to discover URLs is initially I was looking to find webhook implementations",
+    "start": "2137520",
+    "end": "2144960"
+  },
+  {
+    "text": "or like scaffolding but really couldn't find it other than inside existing API",
+    "start": "2144960",
+    "end": "2150210"
+  },
+  {
+    "text": "server is there a plan with the cig to maybe provide a framework or add something in like key builder or some of",
+    "start": "2150210",
+    "end": "2156840"
+  },
+  {
+    "text": "the other associated ecosystem projects",
+    "start": "2156840",
+    "end": "2161180"
+  },
+  {
+    "text": "so you couldn't use OID C because they don't provide you with the public keys",
+    "start": "2163670",
+    "end": "2169990"
+  },
+  {
+    "text": "it doesn't have like the well-known girl can you just host one",
+    "start": "2172270",
+    "end": "2178960"
+  },
+  {
+    "text": "but it's like you should have you had the public keys somewhere right that somebody has that great so you're not",
+    "start": "2181510",
+    "end": "2187599"
+  },
+  {
+    "text": "minting the token with yourself right you just want to educate them so I mean so there are plans in general like if",
+    "start": "2187599",
+    "end": "2196990"
+  },
+  {
+    "text": "you've been following the new token request API for service accounts if we want those identities to be able to",
+    "start": "2196990",
+    "end": "2202780"
+  },
+  {
+    "text": "assert it outside of the cluster like inside of like your cloud provider and so there are plans on making it so that",
+    "start": "2202780",
+    "end": "2208839"
+  },
+  {
+    "text": "the cube API server it's so exerts metadata about tokens but on to your",
+    "start": "2208839",
+    "end": "2214450"
+  },
+  {
+    "text": "specific question that like it's very like I would expect they're like you",
+    "start": "2214450",
+    "end": "2220420"
+  },
+  {
+    "text": "should be able to technically postal on URL to pass to our o IDC educator",
+    "start": "2220420",
+    "end": "2226380"
+  },
+  {
+    "text": "attended a verification because as long as the issuer URL is correct and all the",
+    "start": "2226380",
+    "end": "2232510"
+  },
+  {
+    "text": "public key business practice should be able otherwise I'm trying to think about",
+    "start": "2232510",
+    "end": "2240230"
+  },
+  {
+    "text": "we moved out of court so",
+    "start": "2241960",
+    "end": "2247530"
+  },
+  {
+    "text": "the delegated opcode is relatively separate now but I don't know it's like",
+    "start": "2249630",
+    "end": "2255360"
+  },
+  {
+    "text": "super easy to consume certainly I would",
+    "start": "2255360",
+    "end": "2264140"
+  },
+  {
+    "text": "Oh like we're like self-hosting on the bus",
+    "start": "2270480",
+    "end": "2275240"
+  },
+  {
+    "text": "yes I mean the the general desire for that",
+    "start": "2284790",
+    "end": "2291760"
+  },
+  {
+    "text": "stuff have always been that like like sort of they're all",
+    "start": "2291760",
+    "end": "2300930"
+  },
+  {
+    "text": "so I would think it we sort of thing but it it should all just be a pretty small",
+    "start": "2307159",
+    "end": "2315529"
+  },
+  {
+    "text": "you shouldn't have accepted my delegating authorization to that code -",
+    "start": "2319380",
+    "end": "2325320"
+  },
+  {
+    "text": "it's possible",
+    "start": "2325320",
+    "end": "2328280"
+  },
+  {
+    "text": "now what time is it are we done we way past thank you guys for coming",
+    "start": "2331730",
+    "end": "2341900"
+  },
+  {
+    "text": "Oh [Applause]",
+    "start": "2341900",
+    "end": "2348329"
+  }
+]

@@ -1,0 +1,1472 @@
+[
+  {
+    "text": "hi my name is Aleksandra and I'm a software engineer at Google working at",
+    "start": "4190",
+    "end": "10110"
+  },
+  {
+    "text": "kubernetes auto-scaling team and today I'll talk about how to add support to a",
+    "start": "10110",
+    "end": "16830"
+  },
+  {
+    "text": "cluster autoscaler to run it on your own cloud on an environment not yet",
+    "start": "16830",
+    "end": "22619"
+  },
+  {
+    "text": "supported so let's start with what is cluster autoscaler it's an open source",
+    "start": "22619",
+    "end": "28470"
+  },
+  {
+    "text": "component and I am one of the maintainer of it it has a support in a cluster is",
+    "start": "28470",
+    "end": "35910"
+  },
+  {
+    "text": "there usually on the master node and it's just possibilities adding and deleting nodes to the cluster as needed",
+    "start": "35910",
+    "end": "43260"
+  },
+  {
+    "text": "by the word close deployed there and the code can be found on github under",
+    "start": "43260",
+    "end": "49260"
+  },
+  {
+    "text": "kubernetes the slash autoscaler there are several auto scaling components there it should be easy to find so when",
+    "start": "49260",
+    "end": "57660"
+  },
+  {
+    "text": "we tell the story of cluster autoscaler we usually talk about pods and nodes we",
+    "start": "57660",
+    "end": "63840"
+  },
+  {
+    "text": "tell how we trance bin packing simulations and to ensure that it adds their correct number of nodes or that",
+    "start": "63840",
+    "end": "70710"
+  },
+  {
+    "text": "the nodes can be safely removed we focus on how it carefully drains the nodes one",
+    "start": "70710",
+    "end": "76560"
+  },
+  {
+    "text": "by one but deletes the empty ones in bulk but this is only half of the story",
+    "start": "76560",
+    "end": "83630"
+  },
+  {
+    "text": "the other half is that nodes here are just cube anita's objects this is what",
+    "start": "83630",
+    "end": "90390"
+  },
+  {
+    "text": "you get if you run cube CTL get nodes but underneath they correspond to VM",
+    "start": "90390",
+    "end": "95460"
+  },
+  {
+    "text": "instances usually unless you run cube my curvature cubelet or something like this",
+    "start": "95460",
+    "end": "100520"
+  },
+  {
+    "text": "so in practice if we see an empty node and we decide to delete it it's not",
+    "start": "100520",
+    "end": "107189"
+  },
+  {
+    "text": "enough to use queue permittees api to try to delete node objects right then it would result in a VM still hanging there",
+    "start": "107189",
+    "end": "114659"
+  },
+  {
+    "text": "users still paying for the VM that can turn on anything so this is not good and",
+    "start": "114659",
+    "end": "120479"
+  },
+  {
+    "text": "we don't do that what we do instead is we want to delete the VM and then when",
+    "start": "120479",
+    "end": "126420"
+  },
+  {
+    "text": "it's gracefully shuts down the node will disappear as well so similarly when",
+    "start": "126420",
+    "end": "131819"
+  },
+  {
+    "text": "there are pending pots and you want to add a note we don't want to create a fake note",
+    "start": "131819",
+    "end": "137160"
+  },
+  {
+    "text": "what you want to do is to spin up another VM instance that will register as a node in the cluster and then the",
+    "start": "137160",
+    "end": "144570"
+  },
+  {
+    "text": "boss can be scheduled there so this may all seem fairly obvious and",
+    "start": "144570",
+    "end": "149910"
+  },
+  {
+    "text": "but it's important from cluster auto-scaling point of view to divide data there is the cluster state we can",
+    "start": "149910",
+    "end": "157230"
+  },
+  {
+    "text": "observe and interact via kubernetes api and then there are VM instances that we",
+    "start": "157230",
+    "end": "162239"
+  },
+  {
+    "text": "can access only through clouds API and well the moment we have we use two api's",
+    "start": "162239",
+    "end": "169260"
+  },
+  {
+    "text": "to get two data sets and we need to correlate one with the other we start running into problems so problem one is",
+    "start": "169260",
+    "end": "178379"
+  },
+  {
+    "text": "how do we merge node to a VM instance this one is easy right note objects have",
+    "start": "178379",
+    "end": "184470"
+  },
+  {
+    "text": "provider ID which should be set to some unique resource identifier that can be",
+    "start": "184470",
+    "end": "189510"
+  },
+  {
+    "text": "used to interact with the instance using cloud providers API that's how it works",
+    "start": "189510",
+    "end": "194879"
+  },
+  {
+    "text": "in most cases at least so the first thing you need to ensure when you want to run it on your own cloud is that the",
+    "start": "194879",
+    "end": "201569"
+  },
+  {
+    "text": "cloud controller for your cluster says this provider IDs correctly because",
+    "start": "201569",
+    "end": "207750"
+  },
+  {
+    "text": "cluster autoscaler absolutely depends on this so we can March them but what if",
+    "start": "207750",
+    "end": "215069"
+  },
+  {
+    "text": "there is a node we've provided ID set and you can't find an instance with that",
+    "start": "215069",
+    "end": "220950"
+  },
+  {
+    "text": "provider ID what if you have an instance that looks like it should belong to the cluster but",
+    "start": "220950",
+    "end": "228329"
+  },
+  {
+    "text": "there is no node with matching provider ID and it might be tempting to say okay",
+    "start": "228329",
+    "end": "234209"
+  },
+  {
+    "text": "this is not our problem this is just some instance it doesn't belong to the cluster but what if it was customer of",
+    "start": "234209",
+    "end": "240299"
+  },
+  {
+    "text": "the scaler I think a node created a VM instance hoping it will register us now",
+    "start": "240299",
+    "end": "245970"
+  },
+  {
+    "text": "during the cluster run pods but it didn't if we just ignored it it may",
+    "start": "245970",
+    "end": "252090"
+  },
+  {
+    "text": "never be cleaned up it might be Starks perhaps such instances can accumulate so in addition to set two nodes having",
+    "start": "252090",
+    "end": "259079"
+  },
+  {
+    "text": "correct provider IDs it's required for us to be able to list all the instances that should belong to the cluster from",
+    "start": "259079",
+    "end": "266220"
+  },
+  {
+    "text": "cloud provider API on the problem tool so how do we actually start and now at",
+    "start": "266220",
+    "end": "273570"
+  },
+  {
+    "text": "VM that will become a node and there are many ways to bootstrapping a kubernetes",
+    "start": "273570",
+    "end": "280680"
+  },
+  {
+    "text": "cluster and in most environments there is more than one way to create a node",
+    "start": "280680",
+    "end": "285830"
+  },
+  {
+    "text": "you can use some sort of config management tool for deploying your cluster you can use custom scripts for",
+    "start": "285830",
+    "end": "292260"
+  },
+  {
+    "text": "it clustering the autoscaler doesn't know about any of that so in order to spin up",
+    "start": "292260",
+    "end": "298440"
+  },
+  {
+    "text": "a new instance it needs to know something and this something we'll get",
+    "start": "298440",
+    "end": "304560"
+  },
+  {
+    "text": "to but the first assumption important here is that it makes an observation",
+    "start": "304560",
+    "end": "310020"
+  },
+  {
+    "text": "that if it there is a node a and it corresponds to a VM instance B then",
+    "start": "310020",
+    "end": "315360"
+  },
+  {
+    "text": "perhaps if we add another instance that looks just like B it may register in the",
+    "start": "315360",
+    "end": "320669"
+  },
+  {
+    "text": "cluster and the node will have the same scheduling properties as the original",
+    "start": "320669",
+    "end": "325860"
+  },
+  {
+    "text": "node head and by properties here I am in anything that affects scheduling all the",
+    "start": "325860",
+    "end": "332130"
+  },
+  {
+    "text": "resources panes labels the availability zone all of them are supposed to be",
+    "start": "332130",
+    "end": "339330"
+  },
+  {
+    "text": "identical so this approach of using the existing nodes as blueprint helps us",
+    "start": "339330",
+    "end": "345300"
+  },
+  {
+    "text": "handle the case when there are different types of nodes in the cluster right it works out of the box if we want",
+    "start": "345300",
+    "end": "351599"
+  },
+  {
+    "text": "to add a bigger node we just request the same is that bigger now designing her that's",
+    "start": "351599",
+    "end": "357730"
+  },
+  {
+    "text": "fine but then if we want to check all the nodes in the cluster we click we",
+    "start": "357730",
+    "end": "363160"
+  },
+  {
+    "text": "will quickly run into scalability issues right there may be so many nodes in the cluster and it doesn't make sense to run",
+    "start": "363160",
+    "end": "369730"
+  },
+  {
+    "text": "the simulations on all of them so there is another observation and that is that",
+    "start": "369730",
+    "end": "376090"
+  },
+  {
+    "text": "in most clusters especially large clusters nodes aren't individually much",
+    "start": "376090",
+    "end": "381910"
+  },
+  {
+    "text": "difference there are some several types of nodes and usually several thousands",
+    "start": "381910",
+    "end": "387310"
+  },
+  {
+    "text": "of nodes of every type so if we just group them into some sort of sets we",
+    "start": "387310",
+    "end": "393040"
+  },
+  {
+    "text": "call them node groups because we like obvious names then we can for example",
+    "start": "393040",
+    "end": "398590"
+  },
+  {
+    "text": "use just one node from each node group as blueprint for adding more nodes of the type so this abstraction has no",
+    "start": "398590",
+    "end": "407770"
+  },
+  {
+    "text": "obvious benefit of optimizing the skylab which is one of the reasons we use it",
+    "start": "407770",
+    "end": "415350"
+  },
+  {
+    "text": "but another benefit perhaps kind of unexpected is that by adding it the core",
+    "start": "415350",
+    "end": "421990"
+  },
+  {
+    "text": "logic has a very convenient way of requesting more instances just like when",
+    "start": "421990",
+    "end": "429700"
+  },
+  {
+    "text": "you have a cuban ets deployment or replica set controlling costs you just provide a blueprint and when you want",
+    "start": "429700",
+    "end": "435040"
+  },
+  {
+    "text": "more replicas you increase the number of replicas set so with respect to scalar",
+    "start": "435040",
+    "end": "442810"
+  },
+  {
+    "text": "plot groups were pretty much like this and it's very useful but it's not a",
+    "start": "442810",
+    "end": "448720"
+  },
+  {
+    "text": "Cuban a this concept there is no such thing as node group in a Cuban II this API this is an extra layer of",
+    "start": "448720",
+    "end": "456460"
+  },
+  {
+    "text": "abstraction that is added in cluster of the scaler and its purpose is not to be",
+    "start": "456460",
+    "end": "463300"
+  },
+  {
+    "text": "specific to any environment and to be as useful as possible but it turns out it",
+    "start": "463300",
+    "end": "469720"
+  },
+  {
+    "text": "becomes very much cloud provider specific very soon because the nodes are started differently in different",
+    "start": "469720",
+    "end": "475600"
+  },
+  {
+    "text": "environments and for other reasons I will get into in a second so how does it",
+    "start": "475600",
+    "end": "480790"
+  },
+  {
+    "text": "look like there this big blob in the middle is clustered to scatter binary it",
+    "start": "480790",
+    "end": "486760"
+  },
+  {
+    "text": "of course can the core Albury the logic that decides whether to other note what type of note",
+    "start": "486760",
+    "end": "493550"
+  },
+  {
+    "text": "to add work to reduce the pulse which knows to delete it imports schedulers",
+    "start": "493550",
+    "end": "499460"
+  },
+  {
+    "text": "code which is important because this is the default scheduler from core kubernetes and it doesn't make a guess",
+    "start": "499460",
+    "end": "507770"
+  },
+  {
+    "text": "will that pod be able to shut you on this note its tracks it's running a simulation of the shaders code so she's",
+    "start": "507770",
+    "end": "513800"
+  },
+  {
+    "text": "and the scheduler extenders or custom scheduling solution it might not work very well with cluster autoscaler",
+    "start": "513800",
+    "end": "519950"
+  },
+  {
+    "text": "and it observes the cluster stayed by using kubernetes api which is obviously",
+    "start": "519950",
+    "end": "525650"
+  },
+  {
+    "text": "the same in all environments so it can be used directly but in order to interact with the cloud API it has also",
+    "start": "525650",
+    "end": "533960"
+  },
+  {
+    "text": "a cloud provider module which is of course different for every cloud provider but all of the logic of",
+    "start": "533960",
+    "end": "540890"
+  },
+  {
+    "text": "interacting with that cloud provider is uncaps elated so the main thing to do",
+    "start": "540890",
+    "end": "546650"
+  },
+  {
+    "text": "when running it on a new environment is to write the cloud provider module for",
+    "start": "546650",
+    "end": "552380"
+  },
+  {
+    "text": "that environment how to do it well there are very few requirements for how this",
+    "start": "552380",
+    "end": "559940"
+  },
+  {
+    "text": "cloud provider module will interact with cloud provider API it's super specific",
+    "start": "559940",
+    "end": "565190"
+  },
+  {
+    "text": "to environment every cloud works a little bit different and from cluster autoscaler point of view it doesn't",
+    "start": "565190",
+    "end": "570890"
+  },
+  {
+    "text": "really matter how it gets done as long as it gets done there are only some",
+    "start": "570890",
+    "end": "577250"
+  },
+  {
+    "text": "minimal functional requirements that must be achieved in order to make it work but cluster autoscaler logic",
+    "start": "577250",
+    "end": "586340"
+  },
+  {
+    "text": "depends on cloud provider model behaving in a very specific way and this is what I'm going to focus on so the entire",
+    "start": "586340",
+    "end": "593210"
+  },
+  {
+    "text": "surface is not very impressive connection it's just to calanque interfaces connecting the main logic and",
+    "start": "593210",
+    "end": "600500"
+  },
+  {
+    "text": "the cloud provider module and the first",
+    "start": "600500",
+    "end": "605510"
+  },
+  {
+    "text": "one is primarily responsible for providing node groups so they can be",
+    "start": "605510",
+    "end": "610610"
+  },
+  {
+    "text": "really thought of as a single thing to implement we just split into two for",
+    "start": "610610",
+    "end": "615860"
+  },
+  {
+    "text": "some syntactic sugar so how do we implement these no groups we don't have",
+    "start": "615860",
+    "end": "621290"
+  },
+  {
+    "text": "kubernetes we really need them in cluster autoscaler well the good news is",
+    "start": "621290",
+    "end": "626389"
+  },
+  {
+    "text": "and this is what actually all existing implementations though that most cloud",
+    "start": "626389",
+    "end": "631459"
+  },
+  {
+    "text": "already supports some sort of VM groups so you can just deploy your cluster in a",
+    "start": "631459",
+    "end": "636680"
+  },
+  {
+    "text": "way that all knows we run on instances that are part of some instance groups and all nodes within that in the group",
+    "start": "636680",
+    "end": "643880"
+  },
+  {
+    "text": "are identical and then implement cloud provider module in a way that interacts",
+    "start": "643880",
+    "end": "649579"
+  },
+  {
+    "text": "with those groups requesting new nodes based on some template which is like say set specific to our cloud and deleting",
+    "start": "649579",
+    "end": "656149"
+  },
+  {
+    "text": "some notes so as usual release will but a good news it's followed by bad news this groups",
+    "start": "656149",
+    "end": "663199"
+  },
+  {
+    "text": "work slightly differently for every cloud provider but they rarely work out of the box with cluster autoscaler it's",
+    "start": "663199",
+    "end": "670699"
+  },
+  {
+    "text": "mostly related to how these groups tend to limit the users ability to control their machines so let's have a look at",
+    "start": "670699",
+    "end": "678230"
+  },
+  {
+    "text": "what is required to make the node groups abstraction work for us there are two",
+    "start": "678230",
+    "end": "684829"
+  },
+  {
+    "text": "critical requirements of an outgrowth first is that all nodes within it must",
+    "start": "684829",
+    "end": "689959"
+  },
+  {
+    "text": "be identical and I mean identical with respect to scheduling properties all resources the labels depends the",
+    "start": "689959",
+    "end": "697970"
+  },
+  {
+    "text": "availability zone this one is often overlooked but if your workloads depend on it for scheduling it must be the same",
+    "start": "697970",
+    "end": "705199"
+  },
+  {
+    "text": "for all nodes in the node group if you want to have similar nodes across several different zones just have",
+    "start": "705199",
+    "end": "711380"
+  },
+  {
+    "text": "several different node groups that's fine okay it will work it will save you a lot of trouble later and the second",
+    "start": "711380",
+    "end": "718970"
+  },
+  {
+    "text": "requirement no less important is that we must be able to delete a specific node cluster of the scalar coordinance drains",
+    "start": "718970",
+    "end": "726260"
+  },
+  {
+    "text": "and deletes nodes and it wouldn't make any sense to simulate scale down if in",
+    "start": "726260",
+    "end": "733370"
+  },
+  {
+    "text": "the end we could just request okay I removed two instances I don't care which we very much care which instances are",
+    "start": "733370",
+    "end": "740000"
+  },
+  {
+    "text": "going to be removed and so this requirements translate into some",
+    "start": "740000",
+    "end": "745040"
+  },
+  {
+    "text": "requirements for VM groups that must be fulfilled in order to make them work as node groups and I put something slightly",
+    "start": "745040",
+    "end": "752720"
+  },
+  {
+    "text": "different here than in other groups because I believe that it is possible to use regional node",
+    "start": "752720",
+    "end": "759839"
+  },
+  {
+    "text": "groups for example regional node groups that have nodes in different zones and artificially split them in cloud",
+    "start": "759839",
+    "end": "766380"
+  },
+  {
+    "text": "provider modules into several node groups one person if you must use",
+    "start": "766380",
+    "end": "771600"
+  },
+  {
+    "text": "regional VM groups but you must be able to create instance in a specific node group and therefore in a specific zone",
+    "start": "771600",
+    "end": "778199"
+  },
+  {
+    "text": "and the requirement to delete a specific note obviously translates directly into",
+    "start": "778199",
+    "end": "784199"
+  },
+  {
+    "text": "a requirement to delete a specific machine if you can't do that and that node group might not be that VM group",
+    "start": "784199",
+    "end": "791639"
+  },
+  {
+    "text": "might not be very useful for you so what",
+    "start": "791639",
+    "end": "796860"
+  },
+  {
+    "text": "if there is bad news there is no VM groups in your cloud perhaps is just starting out and decided not to",
+    "start": "796860",
+    "end": "803160"
+  },
+  {
+    "text": "implement it yet or perhaps the node groups are frankly unusable for this purpose you can delete",
+    "start": "803160",
+    "end": "809670"
+  },
+  {
+    "text": "a specific machine or you can only create a regional node group which will",
+    "start": "809670",
+    "end": "815040"
+  },
+  {
+    "text": "always have the same number of nodes in each zone so if you add one nose it will",
+    "start": "815040",
+    "end": "820350"
+  },
+  {
+    "text": "actually act or free depending on the number of zones in spans",
+    "start": "820350",
+    "end": "825709"
+  },
+  {
+    "text": "so in my opinion not all hope is lost I haven't done it I haven't seen anyone do",
+    "start": "825750",
+    "end": "832290"
+  },
+  {
+    "text": "it but I don't see any issue preventing implementing not groups directly in",
+    "start": "832290",
+    "end": "839280"
+  },
+  {
+    "text": "cloud provider module I believe it should be possible although of course it's going to be much more complicated",
+    "start": "839280",
+    "end": "846270"
+  },
+  {
+    "text": "because you effectively have to implement the logic of VM instance",
+    "start": "846270",
+    "end": "852210"
+  },
+  {
+    "text": "groups inside this cloud provider module but in principle I believe is possible",
+    "start": "852210",
+    "end": "858170"
+  },
+  {
+    "text": "so this is enough for the basic functionality to make cluster autoscaler",
+    "start": "858170",
+    "end": "866070"
+  },
+  {
+    "text": "add some nulls delete some nodes more or less work for your cloud but there are",
+    "start": "866070",
+    "end": "872400"
+  },
+  {
+    "text": "some features that it may not be obvious why but they are optional so for example",
+    "start": "872400",
+    "end": "879000"
+  },
+  {
+    "text": "the assumption that we always use existing nodes as blueprint for a group",
+    "start": "879000",
+    "end": "884480"
+  },
+  {
+    "text": "it works very well except when you really want to delete the last note of",
+    "start": "884480",
+    "end": "891420"
+  },
+  {
+    "text": "that group for example it is a GPU node and it's only useful when the batch job",
+    "start": "891420",
+    "end": "897990"
+  },
+  {
+    "text": "is running or for some other reason you have expensive nodes that you really want to scale down to zero instances in",
+    "start": "897990",
+    "end": "905430"
+  },
+  {
+    "text": "that group escaping to zero is trivial we can just",
+    "start": "905430",
+    "end": "911980"
+  },
+  {
+    "text": "delete the last note the problem is without a blueprint we will not be able to scale up again so what you can do is",
+    "start": "911980",
+    "end": "920709"
+  },
+  {
+    "text": "provide a blueprint and we do it by implementing an optional method in all",
+    "start": "920709",
+    "end": "925720"
+  },
+  {
+    "text": "group interface using which cloud provider module will retain a fake note",
+    "start": "925720",
+    "end": "931870"
+  },
+  {
+    "text": "object how a note in that group would look like if we requested it to the core",
+    "start": "931870",
+    "end": "937480"
+  },
+  {
+    "text": "algorithm and then we can set the minimum size of this node group to be 0",
+    "start": "937480",
+    "end": "942550"
+  },
+  {
+    "text": "and close the autoscaler should be able to scale to and from 0 a scale from 0",
+    "start": "942550",
+    "end": "948939"
+  },
+  {
+    "text": "might seem like pretty obvious but sometimes it requires non-trivial logic to for example parse the instance",
+    "start": "948939",
+    "end": "955300"
+  },
+  {
+    "text": "template of a VM group or something like this it really depends on how you go with the implementation but it's very",
+    "start": "955300",
+    "end": "962769"
+  },
+  {
+    "text": "useful and so the other option we might",
+    "start": "962769",
+    "end": "970959"
+  },
+  {
+    "text": "want to have is to have smarter selection of the node to add",
+    "start": "970959",
+    "end": "977910"
+  },
+  {
+    "text": "because for some cases only one load group may be a suitable fit for the pods",
+    "start": "978390",
+    "end": "983730"
+  },
+  {
+    "text": "that are pending but in other cases for example adding two loads to one group or",
+    "start": "983730",
+    "end": "990600"
+  },
+  {
+    "text": "adding one node to another group will both allow some of the pods to run we",
+    "start": "990600",
+    "end": "996180"
+  },
+  {
+    "text": "call such possibilities of expanding the cluster expansion options and by default",
+    "start": "996180",
+    "end": "1002510"
+  },
+  {
+    "text": "if you do nothing personal flag the random one will be chosen on scalable and well this is obviously not optimal",
+    "start": "1002510",
+    "end": "1011420"
+  },
+  {
+    "text": "because sometimes you might clearly prefer to run your pods on 160 core",
+    "start": "1011420",
+    "end": "1016880"
+  },
+  {
+    "text": "machine dot on 15 one core machines so there are other options to select from",
+    "start": "1016880",
+    "end": "1023750"
+  },
+  {
+    "text": "that should work out of the box for example most pods strategy which basically selects the option which will",
+    "start": "1023750",
+    "end": "1031189"
+  },
+  {
+    "text": "allow most pots to schedule least waste option which will calculate how much",
+    "start": "1031190",
+    "end": "1037790"
+  },
+  {
+    "text": "spare capacity will be left in the cluster how much CPU and memory and",
+    "start": "1037790",
+    "end": "1042819"
+  },
+  {
+    "text": "decide that expansion option that leaves the list under unused space is the best",
+    "start": "1042820",
+    "end": "1048800"
+  },
+  {
+    "text": "one this seems like really close to what we want to achieve laughs all right we",
+    "start": "1048800",
+    "end": "1054500"
+  },
+  {
+    "text": "want to avoid wasting resources but as it turns out the users really care about",
+    "start": "1054500",
+    "end": "1060770"
+  },
+  {
+    "text": "wasting one resource Martin about any other they want to avoid burning money",
+    "start": "1060770",
+    "end": "1067000"
+  },
+  {
+    "text": "if a 16 core machine is cheaper than one 8 core machine and one further machine",
+    "start": "1067000",
+    "end": "1073250"
+  },
+  {
+    "text": "that's fine they are happy with 16 core machine and burning to the 4 cores so",
+    "start": "1073250",
+    "end": "1080260"
+  },
+  {
+    "text": "this is super cloud provider specific right pricing model is very different",
+    "start": "1080260",
+    "end": "1086390"
+  },
+  {
+    "text": "for every cloud provider and it's hard to keep up with it and it keeps changing and there is not always a consistent API",
+    "start": "1086390",
+    "end": "1094520"
+  },
+  {
+    "text": "to get the prices of VMs so how do we deal with it well",
+    "start": "1094520",
+    "end": "1100130"
+  },
+  {
+    "text": "we introduced even more abstractions that are supposed to be called provider agnostic into our other you can use a",
+    "start": "1100130",
+    "end": "1107390"
+  },
+  {
+    "text": "pricing expander which should calculate the best utilization interest cost efficiency if",
+    "start": "1107390",
+    "end": "1114730"
+  },
+  {
+    "text": "you provide us with a pricing model and this pricing model needs to answer two",
+    "start": "1114730",
+    "end": "1120520"
+  },
+  {
+    "text": "questions first is how much it costs to run a given note this one is obvious",
+    "start": "1120520",
+    "end": "1126580"
+  },
+  {
+    "text": "right we want to know how expensive that option will be so this is one thing but",
+    "start": "1126580",
+    "end": "1132910"
+  },
+  {
+    "text": "there is another perhaps less intuitive how much it costs to run a given pot and",
+    "start": "1132910",
+    "end": "1138190"
+  },
+  {
+    "text": "why is that well in terms of cost expansion options that for example allow",
+    "start": "1138190",
+    "end": "1145660"
+  },
+  {
+    "text": "your scheduling just one note one pot on one note but this is a very small note",
+    "start": "1145660",
+    "end": "1150760"
+  },
+  {
+    "text": "will always win even if that pot would fit with the other pots on a big machine",
+    "start": "1150760",
+    "end": "1156870"
+  },
+  {
+    "text": "so instead of adding a small machine for this single pot and then adding a larger",
+    "start": "1156870",
+    "end": "1162490"
+  },
+  {
+    "text": "machine for the other pots anyway we need to calculate how well utilized this",
+    "start": "1162490",
+    "end": "1170170"
+  },
+  {
+    "text": "will be we need to factor in how many pots are served by this expansion option",
+    "start": "1170170",
+    "end": "1175300"
+  },
+  {
+    "text": "essentially so this abstraction of how much it costs to run a pot is very much",
+    "start": "1175300",
+    "end": "1183000"
+  },
+  {
+    "text": "it's not reality it's not how much you will pay for this pot it is based on the",
+    "start": "1183000",
+    "end": "1190020"
+  },
+  {
+    "text": "cost of raw resources like CPU and memory that this pot requests so that if",
+    "start": "1190020",
+    "end": "1197230"
+  },
+  {
+    "text": "it was scheduled in a on the perfect to utilize perfectly sized machine it would",
+    "start": "1197230",
+    "end": "1202270"
+  },
+  {
+    "text": "cost at least this much it is how much it must cost to run a despot on this cloud provider and then using this and",
+    "start": "1202270",
+    "end": "1210490"
+  },
+  {
+    "text": "some some math formula which was basically invented to make sure that the",
+    "start": "1210490",
+    "end": "1217660"
+  },
+  {
+    "text": "option is the thing is behaving as we want it we can select them up the",
+    "start": "1217660",
+    "end": "1224770"
+  },
+  {
+    "text": "expansion option that is the most cost efficient and it should be independent",
+    "start": "1224770",
+    "end": "1231040"
+  },
+  {
+    "text": "on cloud provider I hope it is but if you have like any questions or want are",
+    "start": "1231040",
+    "end": "1238330"
+  },
+  {
+    "text": "interested in implementing it for your own cloud please let us know I'd be happy to find out if it's chaos a",
+    "start": "1238330",
+    "end": "1245500"
+  },
+  {
+    "text": "sweet fault so a small note on dependencies there are you see multiple",
+    "start": "1245500",
+    "end": "1252220"
+  },
+  {
+    "text": "problems with cloud provider modules it's hard to add support to a new cloud and hard to maintain it in main wrapper",
+    "start": "1252220",
+    "end": "1258880"
+  },
+  {
+    "text": "there are cluster of the scalar releases and if update to your clouds requires a",
+    "start": "1258880",
+    "end": "1264190"
+  },
+  {
+    "text": "release to be rolled out then well you might have to wait for that release and",
+    "start": "1264190",
+    "end": "1269470"
+  },
+  {
+    "text": "it puts an extra burden on maintenance and all of these has to be reviewed by people who will never run your code and",
+    "start": "1269470",
+    "end": "1276220"
+  },
+  {
+    "text": "that's very good so this is the same thing that kubernetes cloud provider code in",
+    "start": "1276220",
+    "end": "1283090"
+  },
+  {
+    "text": "kubernetes faced and it has been resolved by moving or is being resolved",
+    "start": "1283090",
+    "end": "1288220"
+  },
+  {
+    "text": "by moving two out of three cloud providers the other problem is that you",
+    "start": "1288220",
+    "end": "1293440"
+  },
+  {
+    "text": "are likely to be implementing the same thing or slightly different but more or less the same thing over again in",
+    "start": "1293440",
+    "end": "1299409"
+  },
+  {
+    "text": "different places perhaps you have some automated way of creating clusters and",
+    "start": "1299409",
+    "end": "1304840"
+  },
+  {
+    "text": "boot strapping node and then you will be duplicating that logic in cloud provider there module or reverse engineering kit",
+    "start": "1304840",
+    "end": "1313360"
+  },
+  {
+    "text": "and third and this is like the nightmare from nine miners point of view is the",
+    "start": "1313360",
+    "end": "1320350"
+  },
+  {
+    "text": "growing number of dependencies we simply don't have the manpower to audit all of them and we really hate increasing this",
+    "start": "1320350",
+    "end": "1329470"
+  },
+  {
+    "text": "binary size even more so about this dependencies there is a fun fact this is",
+    "start": "1329470",
+    "end": "1337510"
+  },
+  {
+    "text": "how some go apps look like think of some actual logic they use some dependency management tool gotham's or something",
+    "start": "1337510",
+    "end": "1344080"
+  },
+  {
+    "text": "newer and fancier and this dependencies are sometimes story did vendor director",
+    "start": "1344080",
+    "end": "1350350"
+  },
+  {
+    "text": "so this is how cork you Bernie this looks like it has the components which",
+    "start": "1350350",
+    "end": "1355570"
+  },
+  {
+    "text": "are often vendored and they are separate from the main wrapper in order so to not",
+    "start": "1355570",
+    "end": "1361539"
+  },
+  {
+    "text": "be to not have to vendor the whole thing so they are separate reports fine we can",
+    "start": "1361539",
+    "end": "1368380"
+  },
+  {
+    "text": "just use them right except they are actually developed in court kubernetes",
+    "start": "1368380",
+    "end": "1374350"
+  },
+  {
+    "text": "under the staging direct which means they are sync there but the cork you burn it is itself siblings in",
+    "start": "1374350",
+    "end": "1381550"
+  },
+  {
+    "text": "its vendor to staging so that the compatibility is maintained so this",
+    "start": "1381550",
+    "end": "1387610"
+  },
+  {
+    "text": "works for abilities with the assumption and recommendation that culture brain it",
+    "start": "1387610",
+    "end": "1393190"
+  },
+  {
+    "text": "is is not intended to be rendered guess what scheduler code lives in tark or",
+    "start": "1393190",
+    "end": "1400150"
+  },
+  {
+    "text": "kubernetes and this little component called cluster autoscaler depends on that so we must somehow deal with it and",
+    "start": "1400150",
+    "end": "1408040"
+  },
+  {
+    "text": "the way we do it is that we do some hacks around our dependencies to use the",
+    "start": "1408040",
+    "end": "1415030"
+  },
+  {
+    "text": "color but it is dependencies instead of check out as fixed version and then any",
+    "start": "1415030",
+    "end": "1422440"
+  },
+  {
+    "text": "dependencies that we don't can take from kubernetes because it doesn't have them we put in an override so there's a bit",
+    "start": "1422440",
+    "end": "1431140"
+  },
+  {
+    "text": "of nasty hug here but it also I hope explains how why is it so complex for us",
+    "start": "1431140",
+    "end": "1437650"
+  },
+  {
+    "text": "and difficult to maintain the growing number of dependencies and why we want to avoid them as much as possible so",
+    "start": "1437650",
+    "end": "1445440"
+  },
+  {
+    "text": "onto a better brighter future cause the API this the idea behind this thing is",
+    "start": "1445440",
+    "end": "1454890"
+  },
+  {
+    "text": "very interesting like in kubernetes you have deployments",
+    "start": "1454890",
+    "end": "1461470"
+  },
+  {
+    "text": "and replicas of managing pods what if you could have machine deployments and",
+    "start": "1461470",
+    "end": "1466870"
+  },
+  {
+    "text": "machine set managing machines the VM instances an abstraction that is Kuban",
+    "start": "1466870",
+    "end": "1472300"
+  },
+  {
+    "text": "it is like and independent of cloud provider so if you want to create a node on and a cloud you just go class there",
+    "start": "1472300",
+    "end": "1479950"
+  },
+  {
+    "text": "API and set one more note on that cloud please please create a node group like",
+    "start": "1479950",
+    "end": "1484960"
+  },
+  {
+    "text": "this in this cloud so this is very similar in some way to the node group",
+    "start": "1484960",
+    "end": "1490900"
+  },
+  {
+    "text": "abstractions we already used although it has like it takes it much further",
+    "start": "1490900",
+    "end": "1496030"
+  },
+  {
+    "text": "obviously allowing crawling cup grades and stuff like this and it also means",
+    "start": "1496030",
+    "end": "1501700"
+  },
+  {
+    "text": "that you will implement this for each specific environment only once if you",
+    "start": "1501700",
+    "end": "1506740"
+  },
+  {
+    "text": "implement cluster pl-4 your cloud then any component that wants to manipulate your cluster the",
+    "start": "1506740",
+    "end": "1513909"
+  },
+  {
+    "text": "resources the machines can just use it and doesn't need to have the specific code so maintaining that code becomes",
+    "start": "1513909",
+    "end": "1520450"
+  },
+  {
+    "text": "much easier because it's contained in one place and also if you have clusters",
+    "start": "1520450",
+    "end": "1525549"
+  },
+  {
+    "text": "deployed on different clouds you can manage them using a single API with many implementations each for a different",
+    "start": "1525549",
+    "end": "1532029"
+  },
+  {
+    "text": "route so you can find out more about it on seek cluster API and this is just one",
+    "start": "1532029",
+    "end": "1541120"
+  },
+  {
+    "text": "possible future I don't know if it's gonna happen but if it does I I think it",
+    "start": "1541120",
+    "end": "1546639"
+  },
+  {
+    "text": "will help us a lot with managing dependencies and stuff instead of having cloud provider modules in castor",
+    "start": "1546639",
+    "end": "1553000"
+  },
+  {
+    "text": "autoscaler we will have a sort of adapter module that basically implements",
+    "start": "1553000",
+    "end": "1558399"
+  },
+  {
+    "text": "our abstractions using the cluster API and then it calls the cluster API for each given cloud to request VM delete",
+    "start": "1558399",
+    "end": "1566590"
+  },
+  {
+    "text": "VMs discover VMs read instance temple legs and create a node info out of it so",
+    "start": "1566590",
+    "end": "1573760"
+  },
+  {
+    "text": "that way we can have all the features without and a cloud provider specific code in our binary and without having",
+    "start": "1573760",
+    "end": "1581289"
+  },
+  {
+    "text": "and it would basically warcraft of the box so the obvious question to me at",
+    "start": "1581289",
+    "end": "1588100"
+  },
+  {
+    "text": "least is if we have this one took out all about implementing cloud provider",
+    "start": "1588100",
+    "end": "1594460"
+  },
+  {
+    "text": "modules anymore why should we add another one when we should be migrating",
+    "start": "1594460",
+    "end": "1599500"
+  },
+  {
+    "text": "to this the answer is reality cuz our API is not yet ready by this I don't",
+    "start": "1599500",
+    "end": "1607870"
+  },
+  {
+    "text": "mean that it's not yet implemented everywhere but also that the API itself is missing a critical requirement for",
+    "start": "1607870",
+    "end": "1615429"
+  },
+  {
+    "text": "cluster autoscaler it's missing the ability to delete a specific machine and if we can't do that",
+    "start": "1615429",
+    "end": "1622450"
+  },
+  {
+    "text": "in a transaction reduce the size of machine deployment and delete a specific",
+    "start": "1622450",
+    "end": "1628450"
+  },
+  {
+    "text": "machine then we can't migrate to it so this is like the major blocker right",
+    "start": "1628450",
+    "end": "1635860"
+  },
+  {
+    "text": "now but there is ongoing work to make this migration possible perhaps step-by-step",
+    "start": "1635860",
+    "end": "1641330"
+  },
+  {
+    "text": "perhaps for some cloud provide their first and I believe this is go I believe",
+    "start": "1641330",
+    "end": "1647600"
+  },
+  {
+    "text": "this would be a great thing if it happens so that would be it if you have",
+    "start": "1647600",
+    "end": "1654110"
+  },
+  {
+    "text": "any questions I believe we have a few more minutes still feel free to ask about anything and if you would like to",
+    "start": "1654110",
+    "end": "1661909"
+  },
+  {
+    "text": "find out more or run into any problem or would like to ask us our skilled maintenance about anything you can",
+    "start": "1661909",
+    "end": "1668299"
+  },
+  {
+    "text": "always find us on github open an issue in that report pingas directly or on",
+    "start": "1668299",
+    "end": "1674870"
+  },
+  {
+    "text": "slug siegel to skiving thank you let's",
+    "start": "1674870",
+    "end": "1688669"
+  },
+  {
+    "text": "wait for a microphone",
+    "start": "1688669",
+    "end": "1691330"
+  },
+  {
+    "text": "in class or scalloway we can configure different not group but if we migrated",
+    "start": "1698809",
+    "end": "1706019"
+  },
+  {
+    "text": "to class API is there at the at the net hell ways to do the same things so the",
+    "start": "1706019",
+    "end": "1713130"
+  },
+  {
+    "text": "question if I hear correctly is that in clouds there autoscaler we can configure",
+    "start": "1713130",
+    "end": "1718460"
+  },
+  {
+    "text": "settings for each node group and which cluster API will not be possible",
+    "start": "1718460",
+    "end": "1724049"
+  },
+  {
+    "text": "I believe so because cluster API will provide us with abstraction like machine deployment and machine set and if your",
+    "start": "1724049",
+    "end": "1730830"
+  },
+  {
+    "text": "trusted is deployed using these abstractions then from the user point of",
+    "start": "1730830",
+    "end": "1736200"
+  },
+  {
+    "text": "view it should work more or less the same okay thank you",
+    "start": "1736200",
+    "end": "1741200"
+  },
+  {
+    "text": "just a quick question so far I can see you are like this project but for the",
+    "start": "1741289",
+    "end": "1747809"
+  },
+  {
+    "text": "node itself in the future for example if I have a different CNI or all these kind of thing because so far we are not only",
+    "start": "1747809",
+    "end": "1754019"
+  },
+  {
+    "text": "today talking about the node itself right what are the storage also the network so well that all be included in",
+    "start": "1754019",
+    "end": "1761220"
+  },
+  {
+    "text": "this autoscaler ap cluster API whether was all the",
+    "start": "1761220",
+    "end": "1766620"
+  },
+  {
+    "text": "effort will be put in this project if we are dealing with different kind of CNI",
+    "start": "1766620",
+    "end": "1772200"
+  },
+  {
+    "text": "interface for example unlike an on-premise back and use weave I can use some other Sdn solution can I pick from",
+    "start": "1772200",
+    "end": "1779970"
+  },
+  {
+    "text": "this or I just this party only generate nodes so this question about custard API",
+    "start": "1779970",
+    "end": "1786630"
+  },
+  {
+    "text": "how it will deal with storage and different CNI drivers and stuff like",
+    "start": "1786630",
+    "end": "1792840"
+  },
+  {
+    "text": "this so the answer to is this I honestly I'm not sure about it because I'm not",
+    "start": "1792840",
+    "end": "1799320"
+  },
+  {
+    "text": "working on tosser API directly but from cluster auto-scaling perspective I",
+    "start": "1799320",
+    "end": "1804900"
+  },
+  {
+    "text": "believe it should be pretty independent of that basically if noise in some",
+    "start": "1804900",
+    "end": "1812280"
+  },
+  {
+    "text": "machine deployment have storage then we will assume that other nodes deployed",
+    "start": "1812280",
+    "end": "1817830"
+  },
+  {
+    "text": "there will have storage I am NOT fortunately not able to answer your question about cluster API plans for",
+    "start": "1817830",
+    "end": "1824310"
+  },
+  {
+    "text": "support of this okay so maybe you can",
+    "start": "1824310",
+    "end": "1830310"
+  },
+  {
+    "text": "pause the microphone yeah thanks I can help a little bit because I work on the",
+    "start": "1830310",
+    "end": "1835920"
+  },
+  {
+    "text": "cars API so yeah seeing my difference kind of seeing I support is in there in",
+    "start": "1835920",
+    "end": "1841470"
+  },
+  {
+    "text": "the discussion of the house API but it's it's obstruction and autoscaler should",
+    "start": "1841470",
+    "end": "1848850"
+  },
+  {
+    "text": "not care about it yeah thank you I do",
+    "start": "1848850",
+    "end": "1853860"
+  },
+  {
+    "text": "have the question so so how you work how",
+    "start": "1853860",
+    "end": "1859020"
+  },
+  {
+    "text": "do you work with acosta api we have the cart api weekly meeting and discussions",
+    "start": "1859020",
+    "end": "1867800"
+  },
+  {
+    "text": "the two project going to merge right so",
+    "start": "1867800",
+    "end": "1874860"
+  },
+  {
+    "text": "the question is how do we work with toaster api and are those project going to merge or something and the answer is",
+    "start": "1874860",
+    "end": "1880860"
+  },
+  {
+    "text": "I believe no because we are doing different things we as kloster autoscaler would like to use cluster api",
+    "start": "1880860",
+    "end": "1887180"
+  },
+  {
+    "text": "but we don't actively work on cluster api like i don't of course that's the",
+    "start": "1887180",
+    "end": "1896820"
+  },
+  {
+    "text": "only speaking for myself other people obviously do and yeah this i don't",
+    "start": "1896820",
+    "end": "1902490"
+  },
+  {
+    "text": "believe these projects are going to merge because they are essentially doing different things thank you",
+    "start": "1902490",
+    "end": "1911720"
+  },
+  {
+    "text": "okay so thank you very much again",
+    "start": "1917120",
+    "end": "1922309"
+  }
+]

@@ -1,0 +1,1692 @@
+[
+  {
+    "text": "we're going to be talking about operationalizing high performance GPU clusters in kubernetes we're going to",
+    "start": "0",
+    "end": "5040"
+  },
+  {
+    "text": "take lessons learned from train training data Brick's dbrx this was a state-of-the-art model released in March",
+    "start": "5040",
+    "end": "11559"
+  },
+  {
+    "text": "of 2024 um yeah we'll start with some introductions here my name is will glake",
+    "start": "11559",
+    "end": "16680"
+  },
+  {
+    "text": "I'm a devops engineer focused on kubernetes infrastructure and machine learning operations and we have I'm wwu",
+    "start": "16680",
+    "end": "22640"
+  },
+  {
+    "text": "I'm a software engineer focused on free trading yeah both why and myself were part of the Mosaic ml acquisition into",
+    "start": "22640",
+    "end": "28080"
+  },
+  {
+    "text": "Data breaks so we came uh part of we joined data breaks last year so we'll start with a slide or we'll start with",
+    "start": "28080",
+    "end": "34719"
+  },
+  {
+    "text": "we'll start with a talk overview here first we'll be talking about the problem space regarding GPU clusters for Gen",
+    "start": "34719",
+    "end": "40920"
+  },
+  {
+    "text": "training why we use gpus what makes gpus different from CPUs",
+    "start": "40920",
+    "end": "46480"
+  },
+  {
+    "text": "then we'll go into the solution space regarding passive monitoring for single node jobs then an overview of GD RDMA as and",
+    "start": "46480",
+    "end": "54120"
+  },
+  {
+    "text": "how we consume it within data breaks no we are consumers of the public Cloud so this will all be like a cloud Focus talk",
+    "start": "54120",
+    "end": "60600"
+  },
+  {
+    "text": "so there won't be much there won't be any on Prem kind of",
+    "start": "60600",
+    "end": "65440"
+  },
+  {
+    "text": "logistics yeah then finally we'll look at the Active Health checks and auto mitigation that we implemented for active for fabric Health checking so",
+    "start": "66080",
+    "end": "73880"
+  },
+  {
+    "text": "we'll look at llm training as a whole right here data bricks is in the business of customizing llms and you",
+    "start": "73880",
+    "end": "79479"
+  },
+  {
+    "text": "really have three starting points when you're when you're looking into this space first you can create your own",
+    "start": "79479",
+    "end": "84600"
+  },
+  {
+    "text": "pre-training data set pick a new model architecture and pre-train the model from scratch this is foundation model",
+    "start": "84600",
+    "end": "90400"
+  },
+  {
+    "text": "training this is what dbrx was this is uh llama GPT Gemini Claud all of these",
+    "start": "90400",
+    "end": "96119"
+  },
+  {
+    "text": "you know big foundational models but you don't have to pre-train a model you can do continued training or continued",
+    "start": "96119",
+    "end": "102600"
+  },
+  {
+    "text": "pre-training this allows you to take one of those base models presuming the licensing uh supports that then you can",
+    "start": "102600",
+    "end": "109320"
+  },
+  {
+    "text": "continually or you can continue training it on your domain data this allows the model to generalize even further into",
+    "start": "109320",
+    "end": "114640"
+  },
+  {
+    "text": "your domain into your spectrum lastly and what generally happens for kind of",
+    "start": "114640",
+    "end": "119680"
+  },
+  {
+    "text": "uh App application implementation is fine-tuning this specializes a model for a particular task and reduces",
+    "start": "119680",
+    "end": "126600"
+  },
+  {
+    "text": "generalizability you really are trying to tune for input output um ml pre-training workloads shift the scale",
+    "start": "126600",
+    "end": "133239"
+  },
+  {
+    "text": "to you know thousands or even tens of thousands of gpus in some some cases at such scale failure is not a matter of if",
+    "start": "133239",
+    "end": "140760"
+  },
+  {
+    "text": "but when you know these gpus are yeah um anyway fine-tuning lowers the need so if",
+    "start": "140760",
+    "end": "147239"
+  },
+  {
+    "text": "you're just doing a fine-tuning job depending on the the the size of the model this is 10 to 100 gpus in any case",
+    "start": "147239",
+    "end": "153599"
+  },
+  {
+    "text": "you need large reliable clusters to run production workloads across many nodes uh we'll talk about the the the",
+    "start": "153599",
+    "end": "160920"
+  },
+  {
+    "text": "scale of dbrx so dbrx uh got coined internally as DB Rex so you'll see we",
+    "start": "160920",
+    "end": "166720"
+  },
+  {
+    "text": "have the the dinosaur branding for this uh kind of a fun thing dbx was an open",
+    "start": "166720",
+    "end": "172480"
+  },
+  {
+    "text": "llm built entirely at data brakes fully pre-trained with 132 billion parameters",
+    "start": "172480",
+    "end": "178000"
+  },
+  {
+    "text": "uh behaves like 36 billion parameters due to its architecture mixture of experts not really in scope for this",
+    "start": "178000",
+    "end": "183760"
+  },
+  {
+    "text": "talk but I'd encourage you to take a look at that to see how you can you know up and down sample your uh your models",
+    "start": "183760",
+    "end": "190239"
+  },
+  {
+    "text": "uh the workload size was uh 372 Nvidia h100 gpus trained over the",
+    "start": "190239",
+    "end": "197120"
+  },
+  {
+    "text": "course of two and a half months uh we'll do a brief overview into kind of the deep learning stack so um here you'll",
+    "start": "197120",
+    "end": "204519"
+  },
+  {
+    "text": "see the red outline slides this is where data brakes operates this is the space in which data oper data bricks operates",
+    "start": "204519",
+    "end": "210799"
+  },
+  {
+    "text": "uh firstly we have cloud storage management and data prepping we have data brick SQL we offer extensive ETL",
+    "start": "210799",
+    "end": "217519"
+  },
+  {
+    "text": "functionality in our Unity catalog which offers data governance which is crucial for um any kind of privileged machine",
+    "start": "217519",
+    "end": "224799"
+  },
+  {
+    "text": "learning model because you're going to be using your domain data and uh you need to make sure it's secure GPU",
+    "start": "224799",
+    "end": "230599"
+  },
+  {
+    "text": "management we offer manage GPU Compu compute for AI and ml workloads um in",
+    "start": "230599",
+    "end": "236400"
+  },
+  {
+    "text": "this talk we'll be talking about how we leverage Nvidia for comms and the Cuda kernel as well as pie torch for the uh",
+    "start": "236400",
+    "end": "244319"
+  },
+  {
+    "text": "for the trainer or for the framework and then data bricks Builds on top of that with our Mosaic AI composer and",
+    "start": "244319",
+    "end": "250560"
+  },
+  {
+    "text": "streaming modules these are abstractions these are pytorch abstractions that allow for easily easy optimizations and",
+    "start": "250560",
+    "end": "257720"
+  },
+  {
+    "text": "configurability of uh neural network and ml training also the the data loader",
+    "start": "257720",
+    "end": "263120"
+  },
+  {
+    "text": "streaming uh offers really uh really slick functionality for streaming off of S3",
+    "start": "263120",
+    "end": "270320"
+  },
+  {
+    "text": "so worth highlighting here how nickel nickel we'll talk about nickel quite a bit that's the Nvidia Collective Communications library on the uh the",
+    "start": "270320",
+    "end": "277160"
+  },
+  {
+    "text": "communication space so what makes GPU clusters different from CPU clusters so",
+    "start": "277160",
+    "end": "282960"
+  },
+  {
+    "text": "GPU clusters GPU instances are highly contended within clouds difficult to obtain through on demand and autoscaling",
+    "start": "282960",
+    "end": "289360"
+  },
+  {
+    "text": "requests we joke internally about how you know a CPU operator will come in they'll say oh we're just going to Auto",
+    "start": "289360",
+    "end": "295280"
+  },
+  {
+    "text": "scale up for our workload needs and you know that's why we have the Willy Wonka meme cuz uh",
+    "start": "295280",
+    "end": "300720"
+  },
+  {
+    "text": "the GPU instances are often hidden behind uh CSP reservations so you'll often need to have threeyear commits on",
+    "start": "300720",
+    "end": "307919"
+  },
+  {
+    "text": "your um on your compute there's some exceptions obviously AWS has new uh",
+    "start": "307919",
+    "end": "313000"
+  },
+  {
+    "text": "shorter term reservations like capacity blocks but really um it's not necessarily the scarcity but the",
+    "start": "313000",
+    "end": "318759"
+  },
+  {
+    "text": "additional Hardware drivers monitors toolkits and plugins increase the complexity and software surface for this",
+    "start": "318759",
+    "end": "324840"
+  },
+  {
+    "text": "kind of deployment this causes much higher failure rates because these these SE machines are running like full Hall",
+    "start": "324840",
+    "end": "331639"
+  },
+  {
+    "text": "high heat I mean you're trying to get as much compute out of them as possible failures are a also difficult to detect",
+    "start": "331639",
+    "end": "338160"
+  },
+  {
+    "text": "by Cloud providers nodes with bad Hardware can't just be terminated like CPU nodes and run through the cloud",
+    "start": "338160",
+    "end": "344199"
+  },
+  {
+    "text": "provider Diagnostics we often have to report these via support requests because sometimes the uh the failure is",
+    "start": "344199",
+    "end": "351400"
+  },
+  {
+    "text": "complex enough that the the cloud provider sends it back to us and we've had that I believe on all of our Cloud",
+    "start": "351400",
+    "end": "356759"
+  },
+  {
+    "text": "providers where uh where a failure goes undetected and and the note is brought back after a terminate and",
+    "start": "356759",
+    "end": "362759"
+  },
+  {
+    "text": "recycle so going into some of that complexity uh we're going to talk about drivers so uh Nvidia offers the GPU",
+    "start": "362759",
+    "end": "370479"
+  },
+  {
+    "text": "operator this is a kubernetes operator that allows for easy deployment of NVIDIA drivers on nodes that are",
+    "start": "370479",
+    "end": "375919"
+  },
+  {
+    "text": "configured for gpus so an asset provided from Nvidia is shown here on the the",
+    "start": "375919",
+    "end": "381000"
+  },
+  {
+    "text": "right this shows the stack um one of the the cool really neat aspects of this is",
+    "start": "381000",
+    "end": "386720"
+  },
+  {
+    "text": "that this is a Helm chart deployment on your kubernetes cluster that deploys like all the GPU drivers toolkits device",
+    "start": "386720",
+    "end": "392599"
+  },
+  {
+    "text": "plugins you know monitoring it is like a one one step install uh it even offens",
+    "start": "392599",
+    "end": "398479"
+  },
+  {
+    "text": "offers like orthogonal auto updates on your cluster you don't have to have the driver on your node Os or Ami you can do",
+    "start": "398479",
+    "end": "405280"
+  },
+  {
+    "text": "it all in the containerized version and it'll do the kernel load and unload of the driver um yeah always be sure to",
+    "start": "405280",
+    "end": "411840"
+  },
+  {
+    "text": "test any kind of this automatic functionality one of our earliest failures was or one of our earlier failures we had some nvml based",
+    "start": "411840",
+    "end": "418560"
+  },
+  {
+    "text": "monitoring that would tie up the uh the kernel preventing it from unloading but um or preventing it from reloading and",
+    "start": "418560",
+    "end": "425199"
+  },
+  {
+    "text": "this caused an outage for us where we uh didn't have the uh the appropriate capacity um but you don't have to you",
+    "start": "425199",
+    "end": "432479"
+  },
+  {
+    "text": "don't have to do the GPU operator you can load all of these on your node Os or Ami if you'd like to all right yeah I'm going to",
+    "start": "432479",
+    "end": "438879"
+  },
+  {
+    "text": "transition here to Y for uh llm training discussion yeah thank you",
+    "start": "438879",
+    "end": "445080"
+  },
+  {
+    "text": "VI so we've talked a bit about GPU clusters now we want to dive a bit deep deeper into how exactly a large language",
+    "start": "445080",
+    "end": "451560"
+  },
+  {
+    "text": "model training workload looks like when we train large models they do not fit in single machine so we need to implement",
+    "start": "451560",
+    "end": "457639"
+  },
+  {
+    "text": "shutting techniques to distribute both data and model weights across multiple gpus in this diagram each GPU maintains",
+    "start": "457639",
+    "end": "465360"
+  },
+  {
+    "text": "a shattered copy of the model on its GPU holding only a portion of parameters to optimize memory usage before each",
+    "start": "465360",
+    "end": "472720"
+  },
+  {
+    "text": "forward pass each process on the GPU otherwise known as a rank you'll need to gather weights across gpus using nickel",
+    "start": "472720",
+    "end": "479879"
+  },
+  {
+    "text": "all gather operation this ensures that each rank has the required parameters needed for the next computation now",
+    "start": "479879",
+    "end": "486560"
+  },
+  {
+    "text": "during the forward pass each model can then perform its own local computation and similarly on the backward pass each",
+    "start": "486560",
+    "end": "492919"
+  },
+  {
+    "text": "rank computes gradients locally for its shart of the model now after Computing these gradients A reduced scal nickel",
+    "start": "492919",
+    "end": "499680"
+  },
+  {
+    "text": "operation is done to distribute and average the gradients across all GPU devices and once this GPU these",
+    "start": "499680",
+    "end": "506280"
+  },
+  {
+    "text": "gradients are synchronized each rank can then update its local sh out of the model parameters the updated weights are",
+    "start": "506280",
+    "end": "512200"
+  },
+  {
+    "text": "then used for the next trading step and the cycle then repeats itself in principle shutting enables H GPU to",
+    "start": "512200",
+    "end": "518680"
+  },
+  {
+    "text": "handle the fraction of the overall workload this is very highly efficient trading process however if even one",
+    "start": "518680",
+    "end": "524959"
+  },
+  {
+    "text": "process is hung it can lead to time out for the other n minus one training processes and this sols the entire",
+    "start": "524959",
+    "end": "530800"
+  },
+  {
+    "text": "training Loop so now that we have a mentor model of what happens in a training Loop let's take a look at what",
+    "start": "530800",
+    "end": "537120"
+  },
+  {
+    "text": "happens at a kubernetes level now now pots are scheduled on multiple machines via pot group custom resource",
+    "start": "537120",
+    "end": "543040"
+  },
+  {
+    "text": "definations this is maintained by humanum S this approach is known as gang scheduling andurs that the entire",
+    "start": "543040",
+    "end": "548760"
+  },
+  {
+    "text": "training workload starts simultaneously across all machines in the top right of the diagram we see that a minimum number",
+    "start": "548760",
+    "end": "555880"
+  },
+  {
+    "text": "of pots need to be scheduled before the pot group as a whole can be scheduled and similarly A Min number of pots need",
+    "start": "555880",
+    "end": "561959"
+  },
+  {
+    "text": "to run before the whole pot group can start running however a single note failure forces a restart of the training",
+    "start": "561959",
+    "end": "567680"
+  },
+  {
+    "text": "loop from the last safe model state or checkpoint because the computations made from the last saved model state is lost",
+    "start": "567680",
+    "end": "575000"
+  },
+  {
+    "text": "uh so yeah from diagram you can see when at least one of these ports fill we want the entire Port group to fill and this",
+    "start": "575000",
+    "end": "580560"
+  },
+  {
+    "text": "problem gets especially bad with larger runs because first there's a higher probability of placing a workload on at",
+    "start": "580560",
+    "end": "586720"
+  },
+  {
+    "text": "least one unhealthy note and secondly during a restart gang scheding can leave",
+    "start": "586720",
+    "end": "591839"
+  },
+  {
+    "text": "unal healthy notes sitting idle so this waiting for the bad machine to recover so this leads to underutilization of",
+    "start": "591839",
+    "end": "598519"
+  },
+  {
+    "text": "gpus which is very expensive now now that we know that the small number of notes uh can note",
+    "start": "598519",
+    "end": "605360"
+  },
+  {
+    "text": "failures can disproportionately affect a large run let's take a look at why notes can even fail in the first place there's",
+    "start": "605360",
+    "end": "611360"
+  },
+  {
+    "text": "a variety of failures uh some of these are GPU errors which manifest as xids",
+    "start": "611360",
+    "end": "616440"
+  },
+  {
+    "text": "there's over 140 different kinds the most common in this category is Envy link arrows this basically the highspeed",
+    "start": "616440",
+    "end": "623279"
+  },
+  {
+    "text": "interconnect between gpus there's GPU follow off the bus error that's disconnected from the PCI bus",
+    "start": "623279",
+    "end": "630120"
+  },
+  {
+    "text": "um there stuff like error correcting code memory errors indicating data corruption uh more buus errors gpus can",
+    "start": "630120",
+    "end": "637399"
+  },
+  {
+    "text": "overheat leading to Thermal degradations uh connectx network interface card errors uh file system failures C blet",
+    "start": "637399",
+    "end": "644959"
+  },
+  {
+    "text": "hung issues C CPU out of memory uh stuff that folks are familiar with um so some of these are self-recovering errors that",
+    "start": "644959",
+    "end": "652200"
+  },
+  {
+    "text": "do not require remediative action but others are critical errors that require production engineering to replace",
+    "start": "652200",
+    "end": "658120"
+  },
+  {
+    "text": "Hardware from the vendor um and all of this contribute to very heavy on costs for production Engineers",
+    "start": "658120",
+    "end": "663760"
+  },
+  {
+    "text": "like real and myself and therefore we need precise monitoring to gain realtime insights into GPU health and performance",
+    "start": "663760",
+    "end": "671440"
+  },
+  {
+    "text": "uh what we do is we parse locks from Nvidia GPU kernels uh for non GPU faults",
+    "start": "671440",
+    "end": "676560"
+  },
+  {
+    "text": "these are available in D message logs and example is in the screenshot above um this has error code xid 74 indicating",
+    "start": "676560",
+    "end": "683959"
+  },
+  {
+    "text": "an Envy link error so issue with inter uh interconnects between gpus in addition to Locks we also",
+    "start": "683959",
+    "end": "690160"
+  },
+  {
+    "text": "monitor metrics errors can be exported by Nvidia data center GPU manager or",
+    "start": "690160",
+    "end": "695360"
+  },
+  {
+    "text": "dcgm as Prometheus metrics for example dcgm exp xid error count Aggregates xid",
+    "start": "695360",
+    "end": "702399"
+  },
+  {
+    "text": "Errors By error codes um and we can see when an error starts to resolve over time um there's stuff like thermal",
+    "start": "702399",
+    "end": "709480"
+  },
+  {
+    "text": "violation metrics which detect overheating of gpus which could lead to throttling on the GPU and there's also",
+    "start": "709480",
+    "end": "715639"
+  },
+  {
+    "text": "ECC eror uncorrectable errors which when they occur in bu over a short period of time this requires a GPU reboot now note",
+    "start": "715639",
+    "end": "724040"
+  },
+  {
+    "text": "that all of these checks can have overlaps across various failure domains sometimes we see thermal violation",
+    "start": "724040",
+    "end": "730040"
+  },
+  {
+    "text": "matrics that correspond with strange kernel locks for magic number mismatch on GPU even if we don't see a",
+    "start": "730040",
+    "end": "735920"
+  },
+  {
+    "text": "corresponding xid event so therefore we need to treat any of these metric anomalies or lock anomalies as",
+    "start": "735920",
+    "end": "741440"
+  },
+  {
+    "text": "production issues and we accordingly escalate with alert manager uh as critical alerts for production and to",
+    "start": "741440",
+    "end": "747680"
+  },
+  {
+    "text": "look into now the default configuration of dcgm exporter often excludes critical",
+    "start": "747680",
+    "end": "753120"
+  },
+  {
+    "text": "error counters and violations so we need to Leverage The customized Matrix option",
+    "start": "753120",
+    "end": "758360"
+  },
+  {
+    "text": "of the GPU operator which is linked in the slide above um to include customized matric and once these matric are enabled",
+    "start": "758360",
+    "end": "764800"
+  },
+  {
+    "text": "on the exporer they can be easily visualized with a standard CU preter stack uh below we see that notes with a",
+    "start": "764800",
+    "end": "770839"
+  },
+  {
+    "text": "high number of violations or thermal violations uh easily on a graun dashboard and we then able to C in the",
+    "start": "770839",
+    "end": "777399"
+  },
+  {
+    "text": "node what are the results of uh what of this metrix detection system well in",
+    "start": "777399",
+    "end": "783000"
+  },
+  {
+    "text": "practice we do see that not level metrix uh metric nales correlate very closely",
+    "start": "783000",
+    "end": "788440"
+  },
+  {
+    "text": "to drops in training efficiency on the left you see a real graph of the dbr RX training um it shows a run level Matrix",
+    "start": "788440",
+    "end": "795440"
+  },
+  {
+    "text": "for model flops utilization or mfu mfu is the ratio of observed throughput to",
+    "start": "795440",
+    "end": "800760"
+  },
+  {
+    "text": "the theoretical maximum trut so it is a training efficiency metric um we",
+    "start": "800760",
+    "end": "806040"
+  },
+  {
+    "text": "typically want mfu to stabilize at 30% uh for this run specifically to indicate",
+    "start": "806040",
+    "end": "811760"
+  },
+  {
+    "text": "optimal and to end training speed but at 8,000 steps we actually saw a prolonged drop in MF view uh down to 20% um so we",
+    "start": "811760",
+    "end": "821240"
+  },
+  {
+    "text": "needed to look up our infrastructure dashboards um to see if there's any metric anomalies in this case we saw",
+    "start": "821240",
+    "end": "826920"
+  },
+  {
+    "text": "that there was a drop in PCI uh traffic received on specific GPU which indicated",
+    "start": "826920",
+    "end": "832720"
+  },
+  {
+    "text": "a problem with that GPU and again we're able to C in the noes so this is pretty effective in in practice um but",
+    "start": "832720",
+    "end": "839519"
+  },
+  {
+    "text": "sometimes you're not as lucky as xid monitoring has very narrow event scope it's good for specific error detection",
+    "start": "839519",
+    "end": "846199"
+  },
+  {
+    "text": "but it's not exhaustively going to cover all types of Hardware errors at the end of the day researchers care about",
+    "start": "846199",
+    "end": "852560"
+  },
+  {
+    "text": "efficiency metrics like mfu they don't care as much about infrastructure metrix per se so um we had to improve our",
+    "start": "852560",
+    "end": "860759"
+  },
+  {
+    "text": "training platform to have additional capabilities to autod detect notes that are straggling behind in the Run um a",
+    "start": "860759",
+    "end": "867279"
+  },
+  {
+    "text": "platform detector runs with low and prolong mfu it stopped the job it automatically swi notes with Diagnostics",
+    "start": "867279",
+    "end": "874759"
+  },
+  {
+    "text": "um using smaller runs with lower number of parameters that could complete under a small number of minutes right um and",
+    "start": "874759",
+    "end": "881639"
+  },
+  {
+    "text": "then weon sets of notes with lower mfu to prevent workload from scheduling on them and then autor resume the workload",
+    "start": "881639",
+    "end": "888399"
+  },
+  {
+    "text": "um from the latest checkpoint and uh this is an example of",
+    "start": "888399",
+    "end": "893839"
+  },
+  {
+    "text": "how the impact we saw of these changes on the dashboard uh this is ml flow uh",
+    "start": "893839",
+    "end": "899079"
+  },
+  {
+    "text": "which is in data bricks researchers and Engineers use ml flow and open source project for dashboarding experiment",
+    "start": "899079",
+    "end": "904680"
+  },
+  {
+    "text": "results so researchers saw this view um for this specific run the first mfu drop",
+    "start": "904680",
+    "end": "910680"
+  },
+  {
+    "text": "in Blue uh was actually correlated xid errors the platform was able to quickly Cardon the node and resume the run",
+    "start": "910680",
+    "end": "916920"
+  },
+  {
+    "text": "without having a sweep now in the second drop there was actually a more prolonged mfu drop uh we weren't able to find any",
+    "start": "916920",
+    "end": "924120"
+  },
+  {
+    "text": "correlated metrics uh so the Diagnostics STP had to happen um note that we did",
+    "start": "924120",
+    "end": "929160"
+  },
+  {
+    "text": "not actually determine the root cost for note failures on this um on this run uh",
+    "start": "929160",
+    "end": "934360"
+  },
+  {
+    "text": "the important thing here was being able to C the nodes uh and then resume the run without any kind of interference so",
+    "start": "934360",
+    "end": "941160"
+  },
+  {
+    "text": "that it doesn't affect any production workloads um and then in the last case uh we did run a diagnostic scrip as well",
+    "start": "941160",
+    "end": "948120"
+  },
+  {
+    "text": "um on the platform but it wasn't able to find any abnormal mfu and so we did not",
+    "start": "948120",
+    "end": "953519"
+  },
+  {
+    "text": "over codon nodes and overcoding is actually another separate problem where if you have false positive actually",
+    "start": "953519",
+    "end": "959399"
+  },
+  {
+    "text": "leads to even more GPU scarcity if that's uh if if you overcard them wrongly so this kind of represents the",
+    "start": "959399",
+    "end": "966279"
+  },
+  {
+    "text": "three different cases that we saw on our platform and auto recovery from um issues I now want to transition back to",
+    "start": "966279",
+    "end": "973560"
+  },
+  {
+    "text": "VI to talk more about RDMA because so far we've talked about single note problems and solutions we haven't discussed network issues across multiple",
+    "start": "973560",
+    "end": "980399"
+  },
+  {
+    "text": "nodes sweet yeah all right so yeah we are going to start",
+    "start": "980399",
+    "end": "985560"
+  },
+  {
+    "text": "talking about RDMA so RDMA is uh GPU so we're going to use RDMA and GD RDMA as",
+    "start": "985560",
+    "end": "992519"
+  },
+  {
+    "text": "synonymous here we're going to go kind of back and forth here but uh we are talking about GPU direct remote direct",
+    "start": "992519",
+    "end": "998639"
+  },
+  {
+    "text": "memory access GD RDMA and this provides direct communication between GPU memory",
+    "start": "998639",
+    "end": "1003920"
+  },
+  {
+    "text": "and remote systems eliminating the need for CPU and system memory buffering it's a core technical requirement for large",
+    "start": "1003920",
+    "end": "1010839"
+  },
+  {
+    "text": "model fine tuning as well as found foundational model uh continued training or pre-training um and if you look at",
+    "start": "1010839",
+    "end": "1016639"
+  },
+  {
+    "text": "this diagram here it is uh exactly what you think you skip the kernel space alt together on your data flow so",
+    "start": "1016639",
+    "end": "1022440"
+  },
+  {
+    "text": "traditional data would flow through the kernel space through the um for both TCP",
+    "start": "1022440",
+    "end": "1028000"
+  },
+  {
+    "text": "and then as well as uh CPU transport but this goes all the way around from Nick directly into application memory uh this",
+    "start": "1028000",
+    "end": "1035000"
+  },
+  {
+    "text": "is really awesome technology um and we're going to illustrate that further in the next diagram so just wanted to",
+    "start": "1035000",
+    "end": "1040480"
+  },
+  {
+    "text": "say big kudos to our partners at Nvidia for providing these crisp representations of GPU data pass so what",
+    "start": "1040480",
+    "end": "1047120"
+  },
+  {
+    "text": "we're looking at here is not an RDMA data path this is a traditional GPU GPU flow uh you see the GPU memory starts at",
+    "start": "1047120",
+    "end": "1055559"
+  },
+  {
+    "text": "uh server one it has to go through the Cuda driver buffer infiniband driver buffer on server one infiniband Cuda",
+    "start": "1055559",
+    "end": "1061400"
+  },
+  {
+    "text": "driver buffer on server two traversing system and CPU memory on both until it gets to GPU gpu2 on server 2 um five",
+    "start": "1061400",
+    "end": "1069640"
+  },
+  {
+    "text": "copies within that operation and if we go look at RDMA we see oh it goes right",
+    "start": "1069640",
+    "end": "1076360"
+  },
+  {
+    "text": "through it goes right past CPU and system memory it is GPU direct as it's called right uh this is awesome but it",
+    "start": "1076360",
+    "end": "1084080"
+  },
+  {
+    "text": "also provides or or poses additional complexities and challenges uh RDMA",
+    "start": "1084080",
+    "end": "1089320"
+  },
+  {
+    "text": "traffic bypasses the CPU entirely uh traditional node and network monitoring",
+    "start": "1089320",
+    "end": "1094480"
+  },
+  {
+    "text": "tools like do not have visibility at all you can't just wire shark this traffic it is not seen at all on the system",
+    "start": "1094480",
+    "end": "1100440"
+  },
+  {
+    "text": "level other than on um some performance insights can be gleaned from pcie or",
+    "start": "1100440",
+    "end": "1106440"
+  },
+  {
+    "text": "nvlink metrics uh the problem with this when you're talking about a multi-node run is that Collective operations slow",
+    "start": "1106440",
+    "end": "1112400"
+  },
+  {
+    "text": "down the whole mesh of gpus so like and and furthermore uh these metrics do not",
+    "start": "1112400",
+    "end": "1118679"
+  },
+  {
+    "text": "isolate single or multi- node so like the PCI could have stuff tra traversing",
+    "start": "1118679",
+    "end": "1123919"
+  },
+  {
+    "text": "um uh the internal board it it's hard to decipher what's going on the RDMA Network um inter or multi-node",
+    "start": "1123919",
+    "end": "1131559"
+  },
+  {
+    "text": "performance can only be monitored really on the application um or on the on the",
+    "start": "1131559",
+    "end": "1136799"
+  },
+  {
+    "text": "network switch but in a public cloud envir you don't have access to the network switch information because you",
+    "start": "1136799",
+    "end": "1141840"
+  },
+  {
+    "text": "don't have those uh those interfaces um yeah so we're going to do",
+    "start": "1141840",
+    "end": "1147280"
+  },
+  {
+    "text": "a quick overview of like the the options that cloud service providers offer and this is further offering additional",
+    "start": "1147280",
+    "end": "1154039"
+  },
+  {
+    "text": "complexity in a multicloud environment uh or as you're comparing configurations",
+    "start": "1154039",
+    "end": "1159799"
+  },
+  {
+    "text": "um the core tenant for GD RDMA though and and the infrastructure there in is that you need to provide some kind of",
+    "start": "1159799",
+    "end": "1165840"
+  },
+  {
+    "text": "base for IB verbs those are the core Primitives for nickel uh and they feed into nickel Collective",
+    "start": "1165840",
+    "end": "1171480"
+  },
+  {
+    "text": "op operations so AWS offers uh epha they have an El elastic fabric adapter which",
+    "start": "1171480",
+    "end": "1177880"
+  },
+  {
+    "text": "is a rocky like solution using lib fabric it has a total different totally different driver set um Oracle oci they",
+    "start": "1177880",
+    "end": "1186320"
+  },
+  {
+    "text": "offer Rocky so RDMA over converged ethernet and they have melanox ofed drivers Azure has infiniband with",
+    "start": "1186320",
+    "end": "1193159"
+  },
+  {
+    "text": "melanox ofed and then you have some a provider like cor weave for example they have infiniband but they offer like a",
+    "start": "1193159",
+    "end": "1199000"
+  },
+  {
+    "text": "fully managed kubernetes interface like it has all of the um it has they have",
+    "start": "1199000",
+    "end": "1204480"
+  },
+  {
+    "text": "their own set of Health monitoring and metrics so um yeah we operate in all of these and they all have different quirks",
+    "start": "1204480",
+    "end": "1210960"
+  },
+  {
+    "text": "and uh Nuance to deployment so uh the core tenant here or like kind of the core uh idea is that you want to do",
+    "start": "1210960",
+    "end": "1218400"
+  },
+  {
+    "text": "testing leverage and we leverage nvidia's nickel test binaries or or moreover we've been looking we've been",
+    "start": "1218400",
+    "end": "1224480"
+  },
+  {
+    "text": "using meta Pam module which is a p torch based uh benchmarking uh",
+    "start": "1224480",
+    "end": "1229919"
+  },
+  {
+    "text": "di or benchmarking framework so now we're going to talk and this is um we're",
+    "start": "1229919",
+    "end": "1235200"
+  },
+  {
+    "text": "going to talk about switch failures one of the hairiest problems we've encountered in an RDMA Network so we're going to use this diagram to discuss",
+    "start": "1235200",
+    "end": "1241559"
+  },
+  {
+    "text": "what a f switch failure looks like we've encountered this a handful of times in our in our just this year uh and it did",
+    "start": "1241559",
+    "end": "1248360"
+  },
+  {
+    "text": "happen during dbrx training so shown here is a diagram of AG GPU nodes so each one of these is a node and in that",
+    "start": "1248360",
+    "end": "1255600"
+  },
+  {
+    "text": "there's eight gpus um they are connected into a a switch mesh us or you can see there green internal interconnects the",
+    "start": "1255600",
+    "end": "1262280"
+  },
+  {
+    "text": "NV link interconnects are shown in green but then those gpus are connected into the PCI switch mesh and each uh each",
+    "start": "1262280",
+    "end": "1269320"
+  },
+  {
+    "text": "switch switch and GPU is assigned to specific ncks so each of those Rocky adapters is a is a network interface",
+    "start": "1269320",
+    "end": "1276039"
+  },
+  {
+    "text": "card um so the switch topology is not visualized here but you can think of a",
+    "start": "1276039",
+    "end": "1281799"
+  },
+  {
+    "text": "an RDMA switch topology like a binary tree so you have high level uh you have",
+    "start": "1281799",
+    "end": "1287360"
+  },
+  {
+    "text": "highle tree which we we refer to as a spine there's then Leaf switches and then the GPU nodes are on the bottom of",
+    "start": "1287360",
+    "end": "1293159"
+  },
+  {
+    "text": "the binary tree um in the event of a highle tree or or a spine failure we",
+    "start": "1293159",
+    "end": "1298799"
+  },
+  {
+    "text": "we'll mark that as the X um you'll end up with partitions within the network with the nested trees still able to",
+    "start": "1298799",
+    "end": "1305320"
+  },
+  {
+    "text": "communicate so we we've we we visualized here two separate kind of RDMA Fabrics",
+    "start": "1305320",
+    "end": "1311279"
+  },
+  {
+    "text": "because the the network or the the the the adjoining switch has uh partitioned",
+    "start": "1311279",
+    "end": "1316520"
+  },
+  {
+    "text": "them out so this is a particularly difficult and stressful scenario as any workload spanning the partitions you you",
+    "start": "1316520",
+    "end": "1323880"
+  },
+  {
+    "text": "any workload that would go on the whole cluster would fail and then uh a production engineer like ourselves would",
+    "start": "1323880",
+    "end": "1329279"
+  },
+  {
+    "text": "then try and figure out what what the problem is we're often looking for bad nodes in this scenario so the yellow box",
+    "start": "1329279",
+    "end": "1335000"
+  },
+  {
+    "text": "would be a nickel test so I'd run a nickel test on those two nodes and I'd say oh it's failing which one of those",
+    "start": "1335000",
+    "end": "1340760"
+  },
+  {
+    "text": "nodes is bad which has the bad Nicks which has the bad Hardware so then I would take those two nodes and test them",
+    "start": "1340760",
+    "end": "1346279"
+  },
+  {
+    "text": "with two other nodes and then then they would pass the nickel test and you'd be left scratching your head and you're",
+    "start": "1346279",
+    "end": "1351480"
+  },
+  {
+    "text": "like oh no right so you have to figure out if you want your job to keep going you have to figure out what partition",
+    "start": "1351480",
+    "end": "1357880"
+  },
+  {
+    "text": "you can work on um yeah a node is not good or bad by its nature or health but",
+    "start": "1357880",
+    "end": "1363679"
+  },
+  {
+    "text": "rather its network path and where it lives in the topology of the fabric um we had a war room like this at at 3 in",
+    "start": "1363679",
+    "end": "1370559"
+  },
+  {
+    "text": "the morning one time and yeah after that we realized we needed better Insight uh",
+    "start": "1370559",
+    "end": "1376039"
+  },
+  {
+    "text": "see I'm going to pass pass to Y to further illustrate uh how how we address this thank you",
+    "start": "1376039",
+    "end": "1383240"
+  },
+  {
+    "text": "Bill so yes we had all of these fabric issues um we also incurred a lot of",
+    "start": "1383240",
+    "end": "1388799"
+  },
+  {
+    "text": "overhead running paravis ncot test manually across partitions uh one thing we realized was that ncot test are not",
+    "start": "1388799",
+    "end": "1394679"
+  },
+  {
+    "text": "always deal to fabric issues um in the diagram remember that each training process gathers only necessary States",
+    "start": "1394679",
+    "end": "1400799"
+  },
+  {
+    "text": "from other gpus if a nickel all GA operation so a nickel timeout can actually occur when the rank observes",
+    "start": "1400799",
+    "end": "1407279"
+  },
+  {
+    "text": "that a collective operation has not completed and that could mean that some of the rank like the rank below is just",
+    "start": "1407279",
+    "end": "1413559"
+  },
+  {
+    "text": "not uh finishing it data loading right so it's not able to finish a niik operation and the issue could be related",
+    "start": "1413559",
+    "end": "1420159"
+  },
+  {
+    "text": "to the other rank rather than the rank on which the ni timeout is observed so this makes issues very difficult to to",
+    "start": "1420159",
+    "end": "1427559"
+  },
+  {
+    "text": "debug and an example here is uh these are the nickel timeouts from every single rank um if you stare closely you",
+    "start": "1427559",
+    "end": "1435559"
+  },
+  {
+    "text": "realize that rank 28 is missing from ranks one to rank 32 right and that",
+    "start": "1435559",
+    "end": "1440880"
+  },
+  {
+    "text": "means that rank 28 actually did not reach the nickel barrier so when we looked into locks for this specific rank",
+    "start": "1440880",
+    "end": "1447679"
+  },
+  {
+    "text": "uh we saw that there was actually user errors with regards to Yo configurations um so yeah we have two",
+    "start": "1447679",
+    "end": "1454720"
+  },
+  {
+    "text": "extremes now right sometimes Nick timeouts are due to real fabric issues other times we realize that it's it's",
+    "start": "1454720",
+    "end": "1460919"
+  },
+  {
+    "text": "due to off fiscated user arrow and actually when we did an analysis of data we found that majority of Ni timeouts",
+    "start": "1460919",
+    "end": "1467720"
+  },
+  {
+    "text": "are uh due to S like ca out of memory due to misconfiguration or Y configuration errors such as misspelling",
+    "start": "1467720",
+    "end": "1474799"
+  },
+  {
+    "text": "a checkpoint safe path and really only 16% of n timeouts across all workloads not just dbrx were dual to some kind of",
+    "start": "1474799",
+    "end": "1482039"
+  },
+  {
+    "text": "fabric issue um so rather than research having research or runtime on calls over",
+    "start": "1482039",
+    "end": "1487440"
+  },
+  {
+    "text": "escalate issues to production engineering we realized that we needed periodic health checks on the fabric to",
+    "start": "1487440",
+    "end": "1492720"
+  },
+  {
+    "text": "more conclusively provide infrastructure signal on fabric health and this brings us to our internal solution called echol",
+    "start": "1492720",
+    "end": "1499880"
+  },
+  {
+    "text": "location um which we develop internally why Echo well Wheels use echol location",
+    "start": "1499880",
+    "end": "1505279"
+  },
+  {
+    "text": "to navigate communicate and hunt in the dark milky Waters of the ocean BS are actively making calls listening for Echo",
+    "start": "1505279",
+    "end": "1512440"
+  },
+  {
+    "text": "detecting threats early on and similarly our internal solution uh would pair",
+    "start": "1512440",
+    "end": "1517600"
+  },
+  {
+    "text": "together notes at regular intervals right each po would then spawn the distributor trading process that runs",
+    "start": "1517600",
+    "end": "1522919"
+  },
+  {
+    "text": "nickel all reduce um at at regular Nick all reduce test across both noes",
+    "start": "1522919",
+    "end": "1528880"
+  },
+  {
+    "text": "and then the pot zero rank would then uh the rank zero pot would then send Matrix back into the Echolocation service um",
+    "start": "1528880",
+    "end": "1536039"
+  },
+  {
+    "text": "which would then uh send metrix to Prometheus time series DB um Prometheus",
+    "start": "1536039",
+    "end": "1541240"
+  },
+  {
+    "text": "rules were then configured right to alert on notes with anomalous metrix so if the buz band weave was deviating by",
+    "start": "1541240",
+    "end": "1547640"
+  },
+  {
+    "text": "more than 5 to 10% for example this specific note uh we would then be able to uh send web hook to the web server to",
+    "start": "1547640",
+    "end": "1555559"
+  },
+  {
+    "text": "call in the node um I want to make two call here the first is that there's a lot of complexity of State Management",
+    "start": "1555559",
+    "end": "1562039"
+  },
+  {
+    "text": "here because the checks need to be done in multiple rounds where if you have two faulty notes you don't know which one is",
+    "start": "1562039",
+    "end": "1568360"
+  },
+  {
+    "text": "actually faulty so you need to split them apart and test them together with another good note to determine which note has actually degraded so State",
+    "start": "1568360",
+    "end": "1575480"
+  },
+  {
+    "text": "Management is complex and secondly this is a generic framework using kubernetes scheduling Primitives like pains",
+    "start": "1575480",
+    "end": "1581200"
+  },
+  {
+    "text": "tolerations uh to orchestrate uh multi note tracks on saturated clusters and we could easily bake new signals and",
+    "start": "1581200",
+    "end": "1587679"
+  },
+  {
+    "text": "introduce new types of multi note tests uh to this orchestration framework over time so um going to end soon uh end of",
+    "start": "1587679",
+    "end": "1595360"
+  },
+  {
+    "text": "the day we run into a lot of operational problems when we manage large GPU fleets uh this is a very complicated flow shot",
+    "start": "1595360",
+    "end": "1601799"
+  },
+  {
+    "text": "uh it's just a taste of the types of remediative actions we take on production engineering to fix note",
+    "start": "1601799",
+    "end": "1607080"
+  },
+  {
+    "text": "issues that we've covered in the presentation it's hard to read here but you can read it offline uh I also want to note that this is not an exhaustive",
+    "start": "1607080",
+    "end": "1614200"
+  },
+  {
+    "text": "set of remediative actions uh discussing Auto remediation on no notes themselves is a whole different presentation uh",
+    "start": "1614200",
+    "end": "1621120"
+  },
+  {
+    "text": "with that I want to end off with a quote from kapati we Al LM training runs a significant stress test of overall",
+    "start": "1621120",
+    "end": "1627720"
+  },
+  {
+    "text": "thought tolerance you need to think about the whole service from Hardware to software across storage Network and",
+    "start": "1627720",
+    "end": "1632960"
+  },
+  {
+    "text": "compute you need to think about whether the team that maintains it looks like the Avengers and whether you can become best friends so will myself and the rest",
+    "start": "1632960",
+    "end": "1640520"
+  },
+  {
+    "text": "of the team here we have fought a lot of fires together I think we are best work friends at this point have lots of",
+    "start": "1640520",
+    "end": "1646399"
+  },
+  {
+    "text": "respect for this team and it's definitely been very meaningful today to present all our learnings based on real",
+    "start": "1646399",
+    "end": "1651760"
+  },
+  {
+    "text": "life experience from From The Trenches and with that I want to end with saying uh data break is hiring um yes uh",
+    "start": "1651760",
+    "end": "1659520"
+  },
+  {
+    "text": "production engineering and AI Engineers so thank you very",
+    "start": "1659520",
+    "end": "1664480"
+  },
+  {
+    "text": "much any questions from",
+    "start": "1668399",
+    "end": "1672320"
+  },
+  {
+    "text": "anyone how many of this is nvdia saying that we are also working and trying to",
+    "start": "1674720",
+    "end": "1680480"
+  },
+  {
+    "text": "make this moreable right the coming yeah so the question is how how",
+    "start": "1680480",
+    "end": "1686360"
+  },
+  {
+    "text": "much of this is how how much of this is NVIDIA trying to increase the stability of their product right that's the gist",
+    "start": "1686360",
+    "end": "1693480"
+  },
+  {
+    "text": "of it yeah so um this is kind of goes back to the the triangle of you know",
+    "start": "1693480",
+    "end": "1699120"
+  },
+  {
+    "text": "speed cost and reliability and you've already thrown what you've already you've already targeted one of those you're you're targeting it's it's HPC so",
+    "start": "1699120",
+    "end": "1706240"
+  },
+  {
+    "text": "like you're trying to go as fast as possible to get you know the most results so um reliability I mean if you",
+    "start": "1706240",
+    "end": "1713320"
+  },
+  {
+    "text": "look back at the switch diagram like you're using and you're full blasting all of your Nicks so like I think",
+    "start": "1713320",
+    "end": "1719279"
+  },
+  {
+    "text": "failure is you know it's a it's it's a reality I mean Nvidia tries to provide",
+    "start": "1719279",
+    "end": "1725519"
+  },
+  {
+    "text": "and Nvidia we work closely with them and they do provide good signal so um the",
+    "start": "1725519",
+    "end": "1731919"
+  },
+  {
+    "text": "the problem is with the network traffic it gets it just gets hairy right there's just a lot of moving parts",
+    "start": "1731919",
+    "end": "1738200"
+  },
+  {
+    "text": "you you think that this is a worth add sorry what one more time you you think",
+    "start": "1738200",
+    "end": "1743240"
+  },
+  {
+    "text": "that this is a worth of value so that it can be carried over yeah yeah I mean and I think a lot",
+    "start": "1743240",
+    "end": "1749799"
+  },
+  {
+    "text": "of this comes to the cloud providers too it's not necessarily just Nvidia so like there's that there's a bit of that uh",
+    "start": "1749799",
+    "end": "1755600"
+  },
+  {
+    "text": "bit of that CU we're we're we're public Cloud consumers too so um again a lot of",
+    "start": "1755600",
+    "end": "1760799"
+  },
+  {
+    "text": "the signal that we could have is admitted that Echo cancellation one have you guys open sour",
+    "start": "1760799",
+    "end": "1769799"
+  },
+  {
+    "text": "the EO cancellation was your own solution right correct yeah yeah we had some yeah active health checks that",
+    "start": "1769799",
+    "end": "1775360"
+  },
+  {
+    "text": "would then go in and periodically uh taint nodes and then schedule a workload onto them in order to validate and I",
+    "start": "1775360",
+    "end": "1782159"
+  },
+  {
+    "text": "think that would be uh something you would want to do even in a single note environment just to uh um yeah just to",
+    "start": "1782159",
+    "end": "1788279"
+  },
+  {
+    "text": "validate your service from time to time yeah the other thing is we also have production voal we have uh different",
+    "start": "1788279",
+    "end": "1793360"
+  },
+  {
+    "text": "kind of trends that we observe that am media may not have insight into so it's important for for us to provide that",
+    "start": "1793360",
+    "end": "1799080"
+  },
+  {
+    "text": "Telemetry to uh in our own solution versus just relying on kernel event locks yeah um we we do have a lot of",
+    "start": "1799080",
+    "end": "1807720"
+  },
+  {
+    "text": "discussions Nvidia as well on the Next Generation uh uh reliability systems I",
+    "start": "1807720",
+    "end": "1812880"
+  },
+  {
+    "text": "think uh with with the dcgm upgrades there's going to be a lot more granularity into event logging um but I",
+    "start": "1812880",
+    "end": "1819640"
+  },
+  {
+    "text": "don't think that it's going to be fully sufficient uh because we still need to have like our workloads are very",
+    "start": "1819640",
+    "end": "1826000"
+  },
+  {
+    "text": "variable across the cluster right so we uh they will not have all the full information to of what kind of Errors to",
+    "start": "1826000",
+    "end": "1833720"
+  },
+  {
+    "text": "anticipate on the kind of work we run on classer that's why we did our own t measy",
+    "start": "1833720",
+    "end": "1839640"
+  },
+  {
+    "text": "solution yes sweet next U yeah so when you guys Cordon nodes um how do you guys",
+    "start": "1840159",
+    "end": "1846679"
+  },
+  {
+    "text": "prevent that note from just kind of coming back into your node group if you know you're dealing with a cloud provider where let's say it's faulty",
+    "start": "1846679",
+    "end": "1853240"
+  },
+  {
+    "text": "Hardware you you know you kill that instance and then maybe it comes back so",
+    "start": "1853240",
+    "end": "1858360"
+  },
+  {
+    "text": "I'll take this one yeah yeah so uh we leverage kubernetes labels to to kind of to and we have both uh node conditions",
+    "start": "1858360",
+    "end": "1864360"
+  },
+  {
+    "text": "and kubernetes labels to handle that kind of situation so we have you know partitions of nodes that are you know in",
+    "start": "1864360",
+    "end": "1871399"
+  },
+  {
+    "text": "uh maintenance mode as we call them where we're either in uh we're either freshly provisioned or they're break in",
+    "start": "1871399",
+    "end": "1877200"
+  },
+  {
+    "text": "breake fix mode and then yeah we label nodes that are ready for service with a different",
+    "start": "1877200",
+    "end": "1883080"
+  },
+  {
+    "text": "label okay but if you're dealing with like AWS then how do you like do you",
+    "start": "1883080",
+    "end": "1888600"
+  },
+  {
+    "text": "have a way of telling them to like when you kill that ec2 instance like how do",
+    "start": "1888600",
+    "end": "1893639"
+  },
+  {
+    "text": "you get that capacity back and make sure that it's like like when you get a new capacity or like a new node from AWS how",
+    "start": "1893639",
+    "end": "1900799"
+  },
+  {
+    "text": "do you not know it's not the same one that you just like so we test it we we basically test anything before it goes",
+    "start": "1900799",
+    "end": "1905919"
+  },
+  {
+    "text": "into our production like uh before we turn it into before we",
+    "start": "1905919",
+    "end": "1911080"
+  },
+  {
+    "text": "return it to our production pools so everything goes through Diagnostics before it goes back in um so yeah starts",
+    "start": "1911080",
+    "end": "1918480"
+  },
+  {
+    "text": "in like any node freshly provision from a cloud provider goes into maintenance mode as we call it like there there's a",
+    "start": "1918480",
+    "end": "1925159"
+  },
+  {
+    "text": "whole bunch of things we do here before return to service right including uh more testing",
+    "start": "1925159",
+    "end": "1931720"
+  },
+  {
+    "text": "yeah uh you mentioned the complexity of nickel debugging in general uh besides kind of the active testing I'm curious",
+    "start": "1931720",
+    "end": "1938039"
+  },
+  {
+    "text": "are there any like patterns or like uh kind of techniques that you found useful for debugging those",
+    "start": "1938039",
+    "end": "1943200"
+  },
+  {
+    "text": "failures pretty opaque so so yeah I I can take yeah yeah yeah so upgrading",
+    "start": "1943200",
+    "end": "1948799"
+  },
+  {
+    "text": "nickel upgrading P so we we leverage P torch um yeah trying to stay on you know",
+    "start": "1948799",
+    "end": "1954399"
+  },
+  {
+    "text": "the latest tip has you know solved a lot of problems for us and and yeah they're continually you know making things",
+    "start": "1954399",
+    "end": "1961840"
+  },
+  {
+    "text": "faster and more reliable so and um that's tricky for us cuz we like to stay on the ptch main branch which has a",
+    "start": "1961840",
+    "end": "1968760"
+  },
+  {
+    "text": "pre-compiled nickel version with it so um yeah but generally just staying off",
+    "start": "1968760",
+    "end": "1973799"
+  },
+  {
+    "text": "the tip has been one of the the best strategies we've had um yeah the active",
+    "start": "1973799",
+    "end": "1978880"
+  },
+  {
+    "text": "health check has helped with um yeah thank you uh has helped with kind of did",
+    "start": "1978880",
+    "end": "1984200"
+  },
+  {
+    "text": "as why pointed out that runtime vers infrastructure issue because a lot of times you know things have been brought",
+    "start": "1984200",
+    "end": "1989600"
+  },
+  {
+    "text": "to us as infrastructure issues and you know they actually are configuration issues within the workload so it's nice",
+    "start": "1989600",
+    "end": "1995559"
+  },
+  {
+    "text": "to have uh some kind of some kind of evidence or uh some kind of",
+    "start": "1995559",
+    "end": "2001440"
+  },
+  {
+    "text": "retort with our researchers um maybe similar to that",
+    "start": "2001440",
+    "end": "2007399"
+  },
+  {
+    "text": "question I guess so as far as the amount of sort of",
+    "start": "2007399",
+    "end": "2012600"
+  },
+  {
+    "text": "Diagnostics that you done is it mostly sort of in response to an issue that you detect or are there sort of periodic sort of health checks that you run and",
+    "start": "2012600",
+    "end": "2018799"
+  },
+  {
+    "text": "how does that how do you sort of inter that between like sort of you have a model sort of training in Full Tilt for",
+    "start": "2018799",
+    "end": "2024679"
+  },
+  {
+    "text": "months at a time over infrastructure do you sort of pause into on diagnostics intermittently is that what you do that is what we do today yes so um do you",
+    "start": "2024679",
+    "end": "2031919"
+  },
+  {
+    "text": "want to take it or we we kind of did both uh I think the first thing we showed was the responsive checks right",
+    "start": "2031919",
+    "end": "2037840"
+  },
+  {
+    "text": "whenever there's low mfu we would run a set of smaller diagnostic test um but then we also have the proactive checks",
+    "start": "2037840",
+    "end": "2044039"
+  },
+  {
+    "text": "where we add a Tain on the on the part uh sorry a toleration and a Tain right and if the when when when the bulo",
+    "start": "2044039",
+    "end": "2051320"
+  },
+  {
+    "text": "reaches a number of trading steps uh we then kill it and then check the fabric Health before restarting uh the the",
+    "start": "2051320",
+    "end": "2057599"
+  },
+  {
+    "text": "workloads again so both types of tracks are important got it thank you I think this",
+    "start": "2057599",
+    "end": "2064599"
+  },
+  {
+    "text": "is the last one we can continue discussions outside too I guess this is kind of a continuation of that question",
+    "start": "2064599",
+    "end": "2070000"
+  },
+  {
+    "text": "a little bit I'm just curious on the active health checks and checks like are you guys utilizing any open source framework for this or is this all",
+    "start": "2070000",
+    "end": "2075919"
+  },
+  {
+    "text": "homegrown or I know I've kind of in the space been looking for like a good checking framework so to speak I'm just",
+    "start": "2075919",
+    "end": "2082760"
+  },
+  {
+    "text": "curious how you guys kind of s the open source stuff utilize us the params module from meta um but then the extra",
+    "start": "2082760",
+    "end": "2089520"
+  },
+  {
+    "text": "cubern scattering framework was homegrown okay look more scheduling okay so you guys had to come up with",
+    "start": "2089520",
+    "end": "2095480"
+  },
+  {
+    "text": "something okay yeah the pram modules are really nice cuz it's a p torch based like all reduce and nickel Collective",
+    "start": "2095480",
+    "end": "2101520"
+  },
+  {
+    "text": "operation Benchmark so um it's we like it a little bit better than okay yeah",
+    "start": "2101520",
+    "end": "2106720"
+  },
+  {
+    "text": "yeah we like it a little bit better than nickel test but um yeah they both would provide the same kind of signal just depending on your uh scheduling",
+    "start": "2106720",
+    "end": "2113040"
+  },
+  {
+    "text": "framework we don't use MPI but um yeah if you were using that nickel test would",
+    "start": "2113040",
+    "end": "2120000"
+  },
+  {
+    "text": "would be sufficient you just need to uh kind kind of massage that output a bit",
+    "start": "2120000",
+    "end": "2126400"
+  }
+]

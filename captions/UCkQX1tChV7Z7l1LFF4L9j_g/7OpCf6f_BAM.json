@@ -1,0 +1,2223 @@
+[
+  {
+    "start": "0",
+    "end": "42000"
+  },
+  {
+    "text": "as everybody doing awake bull",
+    "start": "3980",
+    "end": "10010"
+  },
+  {
+    "text": "so I'm Kavya and I'm here today to talk with you about lock specifically lock internals and some performance now I",
+    "start": "10010",
+    "end": "17960"
+  },
+  {
+    "text": "take it everybody here is familiar with multi-threaded programming cool so you're all familiar with locks you all",
+    "start": "17960",
+    "end": "25039"
+  },
+  {
+    "text": "probably Lovelock know right we'll use lock but locks have somewhat",
+    "start": "25039",
+    "end": "32390"
+  },
+  {
+    "text": "of this big bads Airy reputation and this is for good reason right we've all",
+    "start": "32390",
+    "end": "38000"
+  },
+  {
+    "text": "probably worked with or heard about systems that where the locking caused",
+    "start": "38000",
+    "end": "43730"
+  },
+  {
+    "start": "42000",
+    "end": "42000"
+  },
+  {
+    "text": "performance problem here's an example from one of our production services this",
+    "start": "43730",
+    "end": "49399"
+  },
+  {
+    "text": "is from Satara where I work and this is a graph of a service that's a critical",
+    "start": "49399",
+    "end": "55100"
+  },
+  {
+    "text": "component of our read pipelines do we care a lot about the latent service and this graph we see this is from pretty",
+    "start": "55100",
+    "end": "61489"
+  },
+  {
+    "text": "recently where the latency went up by about 10x and we trace this down to lock contention",
+    "start": "61489",
+    "end": "67890"
+  },
+  {
+    "text": "do we know locked it better be kind of cautious better yet try and not even use",
+    "start": "67890",
+    "end": "75570"
+  },
+  {
+    "text": "them right but that said this production service is written though and the girl",
+    "start": "75570",
+    "end": "82230"
+  },
+  {
+    "text": "runtime uses box extensively under the hood as does your favorite operating",
+    "start": "82230",
+    "end": "88200"
+  },
+  {
+    "text": "system scheduler your favorite memory allocator the really locks are everywhere so what M what is it about",
+    "start": "88200",
+    "end": "98490"
+  },
+  {
+    "text": "lock that causes them to have this this fascinating spectrum of effects on",
+    "start": "98490",
+    "end": "105150"
+  },
+  {
+    "text": "performance of our programs and what in what scenarios do they do well when do",
+    "start": "105150",
+    "end": "112020"
+  },
+  {
+    "text": "they cause a problem and what can we do about it these are the questions we'll answer today and to do that we will first will",
+    "start": "112020",
+    "end": "121530"
+  },
+  {
+    "text": "first talk about lock internals will then talk locking performance and then",
+    "start": "121530",
+    "end": "126780"
+  },
+  {
+    "text": "finally we'll touch upon Bart walking rabid now first things first before we begin",
+    "start": "126780",
+    "end": "133769"
+  },
+  {
+    "text": "an important note everything about locks the lock implementation and performance",
+    "start": "133769",
+    "end": "139079"
+  },
+  {
+    "start": "137000",
+    "end": "137000"
+  },
+  {
+    "text": "is specific to the hardware the instruction set the operating system and",
+    "start": "139079",
+    "end": "144420"
+  },
+  {
+    "text": "the specific language implementation so today we'll assume a standard SMP system",
+    "start": "144420",
+    "end": "150959"
+  },
+  {
+    "text": "so we have multiple cores that share memory bus will assume x86 64 running",
+    "start": "150959",
+    "end": "158760"
+  },
+  {
+    "text": "modern Linux and we'll look at the lock implementation though now the reason we choose go is because it's a modern",
+    "start": "158760",
+    "end": "164969"
+  },
+  {
+    "text": "programming language it has a sophisticated concurrency model and so it has sophisticated lock implementation",
+    "start": "164969",
+    "end": "173129"
+  },
+  {
+    "text": "speaking of go any go programmers in the house okay a few uh you're wearing go for",
+    "start": "173129",
+    "end": "181159"
+  },
+  {
+    "text": "t-shirt yeah cool um the world those of",
+    "start": "181159",
+    "end": "186500"
+  },
+  {
+    "text": "you are not go programmers don't worry I gotcha all you need to know about go for",
+    "start": "186500",
+    "end": "192920"
+  },
+  {
+    "start": "191000",
+    "end": "191000"
+  },
+  {
+    "text": "this talk today is that the unit of concurrency in go is the go routine and",
+    "start": "192920",
+    "end": "198650"
+  },
+  {
+    "text": "goroutines are conceptually very similar to regular threads so you'd use them",
+    "start": "198650",
+    "end": "205099"
+  },
+  {
+    "text": "just like you use spreads in a language like Java or C++ but the big difference",
+    "start": "205099",
+    "end": "210440"
+  },
+  {
+    "text": "is that they are uses space so they are run and managed entirely by the go",
+    "start": "210440",
+    "end": "216980"
+  },
+  {
+    "text": "runtime and not by the operating they're created and scheduled by the runtime the",
+    "start": "216980",
+    "end": "222920"
+  },
+  {
+    "text": "details don't matter right now now like with regular threads when you",
+    "start": "222920",
+    "end": "228200"
+  },
+  {
+    "text": "have to go routines accessing a shared memory location that access needs synchronize and yeah you can synchronize",
+    "start": "228200",
+    "end": "236720"
+  },
+  {
+    "text": "it using goes block implementation the implementation we'll be looking at today the sync dot mutex now the mutex is a",
+    "start": "236720",
+    "end": "244790"
+  },
+  {
+    "text": "blocking non recursive walk so there no try acquire semantics",
+    "start": "244790",
+    "end": "250099"
+  },
+  {
+    "text": "if a girl routine tries to acquire a lock and it can't get it it will block",
+    "start": "250099",
+    "end": "255110"
+  },
+  {
+    "text": "okay now with that out of the way let's turn our attention and talk about bloc",
+    "start": "255110",
+    "end": "262380"
+  },
+  {
+    "text": "internals or better yet let's just build a lot okay so where do we start well let's see",
+    "start": "262380",
+    "end": "271280"
+  },
+  {
+    "text": "let's start with what we know we want and work backwards we know we want locks",
+    "start": "271280",
+    "end": "278910"
+  },
+  {
+    "text": "to give us mutual exclusion right that is say we have this simple example",
+    "start": "278910",
+    "end": "284250"
+  },
+  {
+    "text": "program we have two girl routines that access a shared task view so t1 is the",
+    "start": "284250",
+    "end": "293010"
+  },
+  {
+    "text": "reader it's going to read task a task queue and t2 is the writer that puts items into view",
+    "start": "293010",
+    "end": "299850"
+  },
+  {
+    "text": "we know we want whatever lock construct we build to make it so that t1 and t2",
+    "start": "299850",
+    "end": "306390"
+  },
+  {
+    "text": "and never access that task view at the time right cool so how do we do this",
+    "start": "306390",
+    "end": "314100"
+  },
+  {
+    "text": "well let's see we just use a flag the",
+    "start": "314100",
+    "end": "320040"
+  },
+  {
+    "text": "way this would work is our flag is going to track whether the task view is being accessed already so whether it's free if",
+    "start": "320040",
+    "end": "328260"
+  },
+  {
+    "text": "it's free it's going to be 0 if it's being used it's going to be 1 the code",
+    "start": "328260",
+    "end": "334500"
+  },
+  {
+    "text": "the way the code will work is you have the reader it checks to see if the flag is 0 so if the task U is free then it",
+    "start": "334500",
+    "end": "343020"
+  },
+  {
+    "text": "that's flag to indicate that the task to use and use it does its thing it unset",
+    "start": "343020",
+    "end": "348630"
+  },
+  {
+    "text": "slag now if flag is 1 however it means the other",
+    "start": "348630",
+    "end": "355410"
+  },
+  {
+    "text": "Gertie n-- is accessing the task view that's simply going to loop it's going to try again pretty simple the writer",
+    "start": "355410",
+    "end": "362430"
+  },
+  {
+    "text": "code looks exactly the same now does this work are we done we go",
+    "start": "362430",
+    "end": "369460"
+  },
+  {
+    "text": "home no this doesn't work for a couple of reasons that both I'm down to what",
+    "start": "369460",
+    "end": "376630"
+  },
+  {
+    "text": "finally gets run on the hard way right the first problem is with this line this",
+    "start": "376630",
+    "end": "382379"
+  },
+  {
+    "text": "flag plus plus this is compiled down in x86 for the increment fraction which is",
+    "start": "382379",
+    "end": "389400"
+  },
+  {
+    "text": "run by the processor in three steps this is a read modify write instruction",
+    "start": "389400",
+    "end": "394439"
+  },
+  {
+    "text": "though the variable is read from memory into a local CPU register it's modified here it's incremented and then it's",
+    "start": "394439",
+    "end": "401310"
+  },
+  {
+    "text": "written back memory so our single instruction has resulted in new memory",
+    "start": "401310",
+    "end": "408180"
+  },
+  {
+    "text": "accident now why is this a problem well what this means is that it's",
+    "start": "408180",
+    "end": "413849"
+  },
+  {
+    "text": "totally possible for the read and write of a threads read-modify-write",
+    "start": "413849",
+    "end": "420020"
+  },
+  {
+    "text": "instruction to be interleaved with the other threads read so it's totally",
+    "start": "420020",
+    "end": "426629"
+  },
+  {
+    "text": "possible for T two's feed start after T",
+    "start": "426629",
+    "end": "431699"
+  },
+  {
+    "text": "ones flag plus plus and still see the old value of flagged they'll see flag",
+    "start": "431699",
+    "end": "438300"
+  },
+  {
+    "text": "equal zero which is no bueno now these are these instructions the these",
+    "start": "438300",
+    "end": "444930"
+  },
+  {
+    "text": "operations this is an example of a non atomic operation right all this means is",
+    "start": "444930",
+    "end": "450479"
+  },
+  {
+    "start": "448000",
+    "end": "448000"
+  },
+  {
+    "text": "that other processors can speak its effects half complete now operations can be non-atomic because",
+    "start": "450479",
+    "end": "458690"
+  },
+  {
+    "text": "they use many CPU instructions so they're compiled down to have any instructions under the hood so like a",
+    "start": "458690",
+    "end": "464930"
+  },
+  {
+    "text": "load or store on a large data structure or because they compile down to a single",
+    "start": "464930",
+    "end": "471830"
+  },
+  {
+    "text": "CPU instruction but that results in many memory accidents like the example we just saw the opposite of a non atomic",
+    "start": "471830",
+    "end": "480470"
+  },
+  {
+    "text": "operation is an atomic operation and in x86 loads and stores that are naturally",
+    "start": "480470",
+    "end": "488030"
+  },
+  {
+    "text": "aligned to within a cache line these are guaranteed the atomic right and these guarantees come from the fact",
+    "start": "488030",
+    "end": "495500"
+  },
+  {
+    "text": "that x86 is cache parent so it guarantees that if your data fits within",
+    "start": "495500",
+    "end": "501199"
+  },
+  {
+    "text": "a single cache line then all the CPU cores they have a consistent view this",
+    "start": "501199",
+    "end": "508880"
+  },
+  {
+    "text": "is cache coherency they have a consistent view for a single casual",
+    "start": "508880",
+    "end": "514318"
+  },
+  {
+    "text": "so atomic is good and atomic is what we want but using a flag is not atomic and",
+    "start": "514319",
+    "end": "523138"
+  },
+  {
+    "text": "there's another problem the second problem has to do with this block of",
+    "start": "523139",
+    "end": "528730"
+  },
+  {
+    "text": "code and so this is setting the flag reading task setting the flag again on",
+    "start": "528730",
+    "end": "537069"
+  },
+  {
+    "text": "the problem with this you'll see the problem with us the problem with this is a problem we're familiar with thanks to",
+    "start": "537069",
+    "end": "544060"
+  },
+  {
+    "text": "the recent Specter in meltdown which is that memory operations get reordered",
+    "start": "544060",
+    "end": "549819"
+  },
+  {
+    "text": "they can be reordered by the compiler so over here we see that the flag equal",
+    "start": "549819",
+    "end": "555490"
+  },
+  {
+    "text": "to 0 is reordered to happen before the task before reading task and the",
+    "start": "555490",
+    "end": "563620"
+  },
+  {
+    "text": "processor can also reorder memory operation so in this example this is an",
+    "start": "563620",
+    "end": "569319"
+  },
+  {
+    "text": "example of a store load reordering where the the load the read of asks is hoisted",
+    "start": "569319",
+    "end": "577269"
+  },
+  {
+    "text": "to happen before the right and the reason to do this is is to hide brightly",
+    "start": "577269",
+    "end": "583500"
+  },
+  {
+    "text": "writing is expensive because of cache coherency because of fashion validations that have to happen and so this is",
+    "start": "583500",
+    "end": "591370"
+  },
+  {
+    "text": "something that x86 does what it does is it starts the read while the right is in",
+    "start": "591370",
+    "end": "598389"
+  },
+  {
+    "text": "progress though that can happen to hide the right sleep that makes sense",
+    "start": "598389",
+    "end": "605240"
+  },
+  {
+    "text": "yeah cool so the compiler and the",
+    "start": "605240",
+    "end": "610980"
+  },
+  {
+    "start": "608000",
+    "end": "608000"
+  },
+  {
+    "text": "processor they reorder memory operations all the time to speed things up there",
+    "start": "610980",
+    "end": "617130"
+  },
+  {
+    "text": "are some rules around what they can and can't reorder and this is the only",
+    "start": "617130",
+    "end": "624780"
+  },
+  {
+    "text": "Cardinal rule is sequential consistency for single threaded programs right so",
+    "start": "624780",
+    "end": "630440"
+  },
+  {
+    "text": "they can reorder things as long as it doesn't change it doesn't change the",
+    "start": "630440",
+    "end": "638040"
+  },
+  {
+    "text": "order as visible to a single-threaded program now there are other rules in the",
+    "start": "638040",
+    "end": "644190"
+  },
+  {
+    "text": "case of the compiler this is captured by the programs by those the languages",
+    "start": "644190",
+    "end": "649380"
+  },
+  {
+    "text": "memory model so go and C++ and I think Java 2 they guarantee that if your",
+    "start": "649380",
+    "end": "657980"
+  },
+  {
+    "text": "multi-threaded program is data race-free so you've used synchronization",
+    "start": "657980",
+    "end": "663780"
+  },
+  {
+    "text": "constructs in all the right ways then it guarantees that memory operations will",
+    "start": "663780",
+    "end": "669750"
+  },
+  {
+    "text": "not be reordered that your program remains sequentially consistent even",
+    "start": "669750",
+    "end": "675950"
+  },
+  {
+    "text": "even as a multi-threaded program as for compass this is compilers reordering as",
+    "start": "675950",
+    "end": "684060"
+  },
+  {
+    "text": "for processor reordering the rules around that are captured by the hardware's memory model so in the case",
+    "start": "684060",
+    "end": "692820"
+  },
+  {
+    "text": "of x86 for example this is a form of relaxed consistency called totaled store",
+    "start": "692820",
+    "end": "699690"
+  },
+  {
+    "text": "ordering and what this says is most reorderings of memory are not allowed",
+    "start": "699690",
+    "end": "706080"
+  },
+  {
+    "text": "they're not valid but store load reordering like the thing we just saw",
+    "start": "706080",
+    "end": "711570"
+  },
+  {
+    "text": "that's totally valid all right so our",
+    "start": "711570",
+    "end": "717930"
+  },
+  {
+    "text": "flag is not going to work it's not going to work because it's not atomic and it",
+    "start": "717930",
+    "end": "723930"
+  },
+  {
+    "text": "doesn't give us memory ordering guarantees okay no problem why don't we",
+    "start": "723930",
+    "end": "731790"
+  },
+  {
+    "text": "just build a construct that gets us a Thomas city and gets his memory ordering easy right",
+    "start": "731790",
+    "end": "738350"
+  },
+  {
+    "text": "well no but luckily for us the hardware provides the instruction set exposes",
+    "start": "738350",
+    "end": "748740"
+  },
+  {
+    "text": "these special Hardware instructions that give us otama city and give us memory",
+    "start": "748740",
+    "end": "755040"
+  },
+  {
+    "start": "749000",
+    "end": "749000"
+  },
+  {
+    "text": "order and guarantees an x86 an example of a memory instruction that is that",
+    "start": "755040",
+    "end": "760830"
+  },
+  {
+    "text": "gives us a Tama City is the exchange instruction an example of instructions",
+    "start": "760830",
+    "end": "767790"
+  },
+  {
+    "text": "that preserve memory ordering these these instructions are called memory",
+    "start": "767790",
+    "end": "772860"
+  },
+  {
+    "text": "fences or memory barriers and examples are the memory fence the store fence and",
+    "start": "772860",
+    "end": "778110"
+  },
+  {
+    "text": "the load fence now being really powerful tool x86 gets also is the lock",
+    "start": "778110",
+    "end": "785940"
+  },
+  {
+    "text": "instruction prefix nubby lock and is it the lock prefix is an instruction prefix",
+    "start": "785940",
+    "end": "792690"
+  },
+  {
+    "text": "you can apply it to certain memory operations like loads and stores and increments and this gets us both it gets",
+    "start": "792690",
+    "end": "800670"
+  },
+  {
+    "text": "us both otama city and memory operations are preserved the order is preserved in",
+    "start": "800670",
+    "end": "807300"
+  },
+  {
+    "text": "fact these lock instruction prefix are other things that power atomic",
+    "start": "807300",
+    "end": "814740"
+  },
+  {
+    "text": "operations in most programming languages so this sounds useful can we use this to",
+    "start": "814740",
+    "end": "822990"
+  },
+  {
+    "text": "solve our conundrum why yes we can the lock prefixed compare and exchange",
+    "start": "822990",
+    "end": "830190"
+  },
+  {
+    "text": "instruction or the atomic compare-and-swap is exactly what we need this this",
+    "start": "830190",
+    "end": "837959"
+  },
+  {
+    "text": "instruction conditionally updates a variable so only if it's equal to a",
+    "start": "837959",
+    "end": "843060"
+  },
+  {
+    "text": "certain value does it update it to another value but this read-modify-write",
+    "start": "843060",
+    "end": "848730"
+  },
+  {
+    "text": "is atomic which is which is exactly what we want so let's take this atomic",
+    "start": "848730",
+    "end": "855870"
+  },
+  {
+    "text": "compare and swap and try and build our lock with it back to our example program",
+    "start": "855870",
+    "end": "861290"
+  },
+  {
+    "text": "here we're just going to all our all our operations using all our operations on",
+    "start": "861290",
+    "end": "868440"
+  },
+  {
+    "text": "the flag variable we're going to make them atomic operations so we're going to use",
+    "start": "868440",
+    "end": "873600"
+  },
+  {
+    "text": "the atomic compare-and-swap to check if flag is zero and if it's zero to set it to one and we're going to use atomic",
+    "start": "873600",
+    "end": "882029"
+  },
+  {
+    "text": "operations everywhere else now if that atomic compare-and-swap fails we're just",
+    "start": "882029",
+    "end": "888000"
+  },
+  {
+    "text": "going to loop around and try it again makes sense does this work actually it",
+    "start": "888000",
+    "end": "899010"
+  },
+  {
+    "text": "does it does work this is a simplified implementation of a spin lock and the",
+    "start": "899010",
+    "end": "905760"
+  },
+  {
+    "start": "902000",
+    "end": "902000"
+  },
+  {
+    "text": "spin locks are used extensively all through the Linux kernel so what does",
+    "start": "905760",
+    "end": "914070"
+  },
+  {
+    "text": "this cost us right that's what we're interested in well let's just measure it",
+    "start": "914070",
+    "end": "919700"
+  },
+  {
+    "text": "here out before we go on to measuring it though an important note is that these",
+    "start": "919700",
+    "end": "926220"
+  },
+  {
+    "text": "atomic compare and swaps there are the quintessence of any lock implementation as we'll see throughout this talk cool",
+    "start": "926220",
+    "end": "934920"
+  },
+  {
+    "text": "so measuring it so here we have a simple micro benchmark we are going to perform",
+    "start": "934920",
+    "end": "942300"
+  },
+  {
+    "text": "so this isn't si we're going to perform an atomic store ten million times in a tight loop and measure the time it takes",
+    "start": "942300",
+    "end": "949079"
+  },
+  {
+    "text": "per operation we see that with one thread so when there's no contention it",
+    "start": "949079",
+    "end": "955140"
+  },
+  {
+    "text": "takes about ten nanoseconds so this isn't n times about ten times as much as a regular operation now in the contended",
+    "start": "955140",
+    "end": "963779"
+  },
+  {
+    "text": "case when we have twelve threads it takes about 12 times as much which is exactly what we'd expect right because",
+    "start": "963779",
+    "end": "970649"
+  },
+  {
+    "text": "these atomic operations effectively serialize our threads so cool we have",
+    "start": "970649",
+    "end": "978600"
+  },
+  {
+    "text": "this construct it gives us mutual exclusion it gives us a Tama City it",
+    "start": "978600",
+    "end": "985440"
+  },
+  {
+    "text": "prevents memory ordering and it's pretty inexpensive should we ship it no there's",
+    "start": "985440",
+    "end": "994410"
+  },
+  {
+    "text": "one big problem and the big problem is that we have this thread just spinning",
+    "start": "994410",
+    "end": "1000440"
+  },
+  {
+    "text": "just busy waiting and this is wasteful it burns",
+    "start": "1000440",
+    "end": "1005600"
+  },
+  {
+    "text": "CPU cycles and it takes precious CPU time away from other threads that could",
+    "start": "1005600",
+    "end": "1011300"
+  },
+  {
+    "text": "be running you know what would be really nice it would be really nice if when our",
+    "start": "1011300",
+    "end": "1020450"
+  },
+  {
+    "text": "thread did this compare and swap and it failed if rather than spinning we could",
+    "start": "1020450",
+    "end": "1025610"
+  },
+  {
+    "text": "just put it away if we could just put it to sleep and resume it when it can when",
+    "start": "1025610",
+    "end": "1032180"
+  },
+  {
+    "text": "the value flag has changed and it can try again right that sounds nice",
+    "start": "1032180",
+    "end": "1037189"
+  },
+  {
+    "text": "well lucky for lucky for us the operating system gives us a way to do just that",
+    "start": "1037190",
+    "end": "1043069"
+  },
+  {
+    "text": "in Linux you have these few taxes and few taxes provide both an interface and",
+    "start": "1043070",
+    "end": "1050000"
+  },
+  {
+    "start": "1047000",
+    "end": "1047000"
+  },
+  {
+    "text": "a mechanism for for user space for programs to ask the kernel to request",
+    "start": "1050000",
+    "end": "1056690"
+  },
+  {
+    "text": "the kernel to sleep and wake threads the interface piece of this is the few tax",
+    "start": "1056690",
+    "end": "1062330"
+  },
+  {
+    "text": "system call and the mechanism is kernel managed wait queues let's see how these",
+    "start": "1062330",
+    "end": "1069650"
+  },
+  {
+    "text": "few taxes work in practice all right so we're going to extend our",
+    "start": "1069650",
+    "end": "1075680"
+  },
+  {
+    "text": "flag variable to be able to take on another value so 0 if task queue is free",
+    "start": "1075680",
+    "end": "1081680"
+  },
+  {
+    "text": "1 if it's locked and 2 if there is a thread waiting if",
+    "start": "1081680",
+    "end": "1086810"
+  },
+  {
+    "text": "there's a thread waiting on the value flag to change here in our reader we do",
+    "start": "1086810",
+    "end": "1093320"
+  },
+  {
+    "text": "the atomic compare and swap assume it fails here first we're going to change flag to be 2 to indicate that the thread",
+    "start": "1093320",
+    "end": "1100430"
+  },
+  {
+    "text": "is going to sleep and then we issue the futex system call to tell the kernel to",
+    "start": "1100430",
+    "end": "1107990"
+  },
+  {
+    "text": "put us to sleep to suspend us to tell the kernel we want to be woken up once",
+    "start": "1107990",
+    "end": "1113120"
+  },
+  {
+    "text": "the value of flag changes the kernel takes care of that part and then once",
+    "start": "1113120",
+    "end": "1118310"
+  },
+  {
+    "text": "we're resumed we're going to try and compare and swap again now switching to",
+    "start": "1118310",
+    "end": "1124040"
+  },
+  {
+    "text": "kernel and let's see what the kernel does now the kernel needs to do two things the first thing is it needs to",
+    "start": "1124040",
+    "end": "1131750"
+  },
+  {
+    "text": "store away this information that we have t1 on the flag and waiting on the flag",
+    "start": "1131750",
+    "end": "1137559"
+  },
+  {
+    "text": "variable so it can be resumed in the future right and the way the the Linux kernel does this is we generate a key",
+    "start": "1137559",
+    "end": "1145029"
+  },
+  {
+    "text": "from the use of space address we need to do this because we're in the kernel now and this is an stored away in a wait",
+    "start": "1145029",
+    "end": "1152620"
+  },
+  {
+    "text": "queue entry that stores the thread and the key now if we had one wait queue per",
+    "start": "1152620",
+    "end": "1159789"
+  },
+  {
+    "text": "user space that address that sounds incredibly wasteful right so what actually happens is the key is we use a",
+    "start": "1159789",
+    "end": "1166840"
+  },
+  {
+    "text": "hash table the key is hashed and we have a weight Q per hash bucket but what this",
+    "start": "1166840",
+    "end": "1173409"
+  },
+  {
+    "text": "means is you can have to use space addresses that hash to the same hash",
+    "start": "1173409",
+    "end": "1178509"
+  },
+  {
+    "text": "bucket and those entries would be stored in the same way q not a problem because",
+    "start": "1178509",
+    "end": "1185200"
+  },
+  {
+    "text": "the entries store the key as well okay cool so now that we've stored away this",
+    "start": "1185200",
+    "end": "1192009"
+  },
+  {
+    "text": "information to resume the thread later we can put the thread to sleep so this",
+    "start": "1192009",
+    "end": "1198129"
+  },
+  {
+    "text": "is what the kernel does it D schedules the calling thread now on the writer",
+    "start": "1198129",
+    "end": "1204549"
+  },
+  {
+    "text": "side say the writer comes along it finishes what it's doing it's going to",
+    "start": "1204549",
+    "end": "1210369"
+  },
+  {
+    "text": "set the flag to unlocked and then it's going to issue a few tax system call to",
+    "start": "1210369",
+    "end": "1216249"
+  },
+  {
+    "text": "tell the colonel to wake up a thread that was waiting on flag now the kernel",
+    "start": "1216249",
+    "end": "1223059"
+  },
+  {
+    "text": "does its thing it finds the right hash bucket it walks the wait queue and it",
+    "start": "1223059",
+    "end": "1228159"
+  },
+  {
+    "text": "wakes up the first thread that was waiting on flag alright so this is",
+    "start": "1228159",
+    "end": "1236409"
+  },
+  {
+    "text": "pretty nice this is really convenient right this implementation we saw was an",
+    "start": "1236409",
+    "end": "1243190"
+  },
+  {
+    "text": "extremely simplified futex implementation few taxes are notoriously tricky but conceptually this is how they",
+    "start": "1243190",
+    "end": "1250570"
+  },
+  {
+    "text": "work and what they give us is this nice lightweight primitive to build",
+    "start": "1250570",
+    "end": "1256509"
+  },
+  {
+    "text": "synchronous synchronization constructs like locks in fact the pthread mutex",
+    "start": "1256509",
+    "end": "1261659"
+  },
+  {
+    "text": "that you use in C in Java they are they",
+    "start": "1261659",
+    "end": "1267129"
+  },
+  {
+    "text": "all use very of this few tracks so our question again",
+    "start": "1267129",
+    "end": "1274770"
+  },
+  {
+    "text": "is well this is nice and all but what is this upgrade going to cost us so we",
+    "start": "1274770",
+    "end": "1282570"
+  },
+  {
+    "start": "1278000",
+    "end": "1278000"
+  },
+  {
+    "text": "measure it here is a micro benchmark this is again and see so we're measuring the cost of a lock/unlock pair for a",
+    "start": "1282570",
+    "end": "1291330"
+  },
+  {
+    "text": "mutex for a pthread mutex and we see that in the unconsented case with one",
+    "start": "1291330",
+    "end": "1297900"
+  },
+  {
+    "text": "thread again it's about ten nanoseconds which is the cost of an atomic",
+    "start": "1297900",
+    "end": "1303870"
+  },
+  {
+    "text": "compare-and-swap which is what we'd expect it's that atomic compare-and-swap that succeeded in the contended case though with twelve",
+    "start": "1303870",
+    "end": "1312570"
+  },
+  {
+    "text": "threads the cost goes up to one microsecond and this comes from the",
+    "start": "1312570",
+    "end": "1318810"
+  },
+  {
+    "text": "context switching cost from switching into from that syscall from switching",
+    "start": "1318810",
+    "end": "1323910"
+  },
+  {
+    "text": "into the kernel from the waiting that's where that's why it goes up to a whole microsecond",
+    "start": "1323910",
+    "end": "1331130"
+  },
+  {
+    "text": "so at this point it's worth asking if it",
+    "start": "1332450",
+    "end": "1337770"
+  },
+  {
+    "start": "1333000",
+    "end": "1333000"
+  },
+  {
+    "text": "makes sense to sleep rather than spin right and and really it comes down to an",
+    "start": "1337770",
+    "end": "1345690"
+  },
+  {
+    "text": "amortized cost argument it makes sense to spin if the lock duration that the",
+    "start": "1345690",
+    "end": "1352920"
+  },
+  {
+    "text": "time for which we're going to hold a lock is going to be short but the trade-off is while holding while",
+    "start": "1352920",
+    "end": "1360390"
+  },
+  {
+    "text": "spinning we're not doing any useful work we're burning CPU cycles and so at some",
+    "start": "1360390",
+    "end": "1365610"
+  },
+  {
+    "text": "point it makes sense to pay the cost of that thread contact switch to put the",
+    "start": "1365610",
+    "end": "1371280"
+  },
+  {
+    "text": "thread to sleep and run other threads so we can do useful work now this insight",
+    "start": "1371280",
+    "end": "1377160"
+  },
+  {
+    "text": "this trade-off is captured in hybrid few taxes now hyper and few taxes the way",
+    "start": "1377160",
+    "end": "1383850"
+  },
+  {
+    "text": "the work the way they work is the thread does that compare and swap if it fails if first spins a fixed a small fixed",
+    "start": "1383850",
+    "end": "1392250"
+  },
+  {
+    "text": "number of times and if it still doesn't get flag only then is the thread",
+    "start": "1392250",
+    "end": "1397440"
+  },
+  {
+    "text": "suspended now these hybrid few taxes are pretty",
+    "start": "1397440",
+    "end": "1402760"
+  },
+  {
+    "text": "clever and this is a variant of the pthread mutex uses the hybrid few checks",
+    "start": "1402760",
+    "end": "1409539"
+  },
+  {
+    "text": "and go has an internal few tax implementation and this is a hybrid few checks cool so at this point we've",
+    "start": "1409539",
+    "end": "1420190"
+  },
+  {
+    "text": "evolved from spin locks to few taxes to hybrid few taxes are we done now well we",
+    "start": "1420190",
+    "end": "1429070"
+  },
+  {
+    "text": "could be and if we were talking about a language like Java or C++ that has a",
+    "start": "1429070",
+    "end": "1436539"
+  },
+  {
+    "text": "native threading model we would be but what about a language that uses a user",
+    "start": "1436539",
+    "end": "1444730"
+  },
+  {
+    "text": "that uses userspace threads like go with it's go routines can we do even better",
+    "start": "1444730",
+    "end": "1452970"
+  },
+  {
+    "text": "now the whole thing about userspace threads is that they run on top of",
+    "start": "1452970",
+    "end": "1459520"
+  },
+  {
+    "text": "regular threads so the go runtime takes care of multiplexing of scheduling",
+    "start": "1459520",
+    "end": "1465279"
+  },
+  {
+    "text": "goroutines on top of regular operating system threads but the goroutines",
+    "start": "1465279",
+    "end": "1470799"
+  },
+  {
+    "text": "themselves run entirely in user space and so context switching between",
+    "start": "1470799",
+    "end": "1476020"
+  },
+  {
+    "text": "goroutines is cheap it's fast it takes tens of nanoseconds rather than the one",
+    "start": "1476020",
+    "end": "1481539"
+  },
+  {
+    "text": "microsecond we just saw now why does this matter well this gives us an",
+    "start": "1481539",
+    "end": "1489370"
+  },
+  {
+    "text": "opportunity to do something clever this gives us an opportunity to block the",
+    "start": "1489370",
+    "end": "1497679"
+  },
+  {
+    "text": "goroutine rather than the underlying operating system thread so if a goroutine tries to acquire mutex and it",
+    "start": "1497679",
+    "end": "1504970"
+  },
+  {
+    "text": "can't we can totally put the girl routine to sleep without without putting",
+    "start": "1504970",
+    "end": "1511120"
+  },
+  {
+    "text": "the underlying thread to sleep so we don't have to pay that expensive thread switching cost now this is clever and",
+    "start": "1511120",
+    "end": "1519610"
+  },
+  {
+    "text": "this is exactly what the go runtime does the go runtime has an implementation has",
+    "start": "1519610",
+    "end": "1526899"
+  },
+  {
+    "text": "a semaphore implementation now the semaphore is conceptually very",
+    "start": "1526899",
+    "end": "1532410"
+  },
+  {
+    "text": "similar to the few texts we just saw except it's used to sleep and wake up",
+    "start": "1532410",
+    "end": "1537420"
+  },
+  {
+    "text": "guru teens not threads now let's see how this works in our program when the",
+    "start": "1537420",
+    "end": "1546780"
+  },
+  {
+    "text": "compare-and-swap fails the go runtime is going to add the goroutine to a wait",
+    "start": "1546780",
+    "end": "1553800"
+  },
+  {
+    "text": "queue except in this case the wait queue is managed in userspace the way queue",
+    "start": "1553800",
+    "end": "1560970"
+  },
+  {
+    "text": "looks very similar to the few text wait queue we have a hash table and we have a",
+    "start": "1560970",
+    "end": "1566610"
+  },
+  {
+    "text": "wait cube per hash bucket the details of the Hat of the wait queues themselves",
+    "start": "1566610",
+    "end": "1571620"
+  },
+  {
+    "text": "are slightly different but the details don't matter today and once the go routine has been added",
+    "start": "1571620",
+    "end": "1579120"
+  },
+  {
+    "text": "to the wake you the go runtime D schedules the go routine by calling into the go scheduler now the go the go",
+    "start": "1579120",
+    "end": "1587550"
+  },
+  {
+    "text": "routine is suspended but the underlying thread keeps running and the underlying thread just picks up other girl routines",
+    "start": "1587550",
+    "end": "1593820"
+  },
+  {
+    "text": "to run instead now when the writer comes along it finishes its thing the go",
+    "start": "1593820",
+    "end": "1600600"
+  },
+  {
+    "text": "runtime the go runtime walks the wait",
+    "start": "1600600",
+    "end": "1605790"
+  },
+  {
+    "text": "queue finds the first go routine to run that that was waiting on the flag",
+    "start": "1605790",
+    "end": "1611730"
+  },
+  {
+    "text": "variable and then it rescheduled it on to an operating system thread so the girl routine can run cool so this is",
+    "start": "1611730",
+    "end": "1622410"
+  },
+  {
+    "text": "clever we've found a way to avoid that heavy thread context switch cost now at",
+    "start": "1622410",
+    "end": "1631320"
+  },
+  {
+    "text": "this point we could almost be done but we're not and we're not for a couple of",
+    "start": "1631320",
+    "end": "1637770"
+  },
+  {
+    "text": "reasons there are a couple of problems with this implementation and they both",
+    "start": "1637770",
+    "end": "1644070"
+  },
+  {
+    "text": "come down to this they come down to the fact that once a goroutine is woken up",
+    "start": "1644070",
+    "end": "1650100"
+  },
+  {
+    "text": "so a goroutine tried to acquire a lock it failed it was put on awake queue",
+    "start": "1650100",
+    "end": "1655500"
+  },
+  {
+    "text": "once it's resumed it has to compete it has to do that compare and swap it has",
+    "start": "1655500",
+    "end": "1660570"
+  },
+  {
+    "text": "to compete with other in goroutines that are also trying to do the compare-and-swap so it's totally",
+    "start": "1660570",
+    "end": "1666030"
+  },
+  {
+    "text": "possible it's going to lose again and it's going to be put to sleep again in",
+    "start": "1666030",
+    "end": "1671600"
+  },
+  {
+    "text": "fact not only is it possible it's very likely this will happen because the",
+    "start": "1671600",
+    "end": "1676830"
+  },
+  {
+    "text": "other goroutines the the incoming goroutines they're already scheduled on two threads",
+    "start": "1676830",
+    "end": "1681840"
+  },
+  {
+    "text": "they're already running on the CPU versus figure routine that we just woke up there's a scheduling delay before",
+    "start": "1681840",
+    "end": "1687929"
+  },
+  {
+    "text": "it's put onto a thread and run so it's likely that it will lose and this is",
+    "start": "1687929",
+    "end": "1694830"
+  },
+  {
+    "text": "problematic for a couple of reasons well first of all we're going to unnecessarily you wake and sleep wake",
+    "start": "1694830",
+    "end": "1700830"
+  },
+  {
+    "text": "and sleep the go routines so we're going to pay that goroutine context switching cost over and over again and secondly",
+    "start": "1700830",
+    "end": "1708419"
+  },
+  {
+    "text": "this can cause go routines starvation right and this in turn means that",
+    "start": "1708419",
+    "end": "1713460"
+  },
+  {
+    "text": "there's like a high scheduling tail latency which can show up in our applications performance so what does",
+    "start": "1713460",
+    "end": "1722220"
+  },
+  {
+    "text": "the go runtime do about it well the go runtime adds another layer of implementation another layer of",
+    "start": "1722220",
+    "end": "1729750"
+  },
+  {
+    "text": "sophistication around the semaphore and this nicely wrapped up package is the",
+    "start": "1729750",
+    "end": "1736110"
+  },
+  {
+    "text": "synced up mutex that our applications use and so finally we can talk about the",
+    "start": "1736110",
+    "end": "1743549"
+  },
+  {
+    "text": "sync mutex now the both synced up mutex it's a hybrid lock so it so if the",
+    "start": "1743549",
+    "end": "1752549"
+  },
+  {
+    "start": "1744000",
+    "end": "1744000"
+  },
+  {
+    "text": "compare-and-swap fails the goroutine first spins a fixed number of times and",
+    "start": "1752549",
+    "end": "1757559"
+  },
+  {
+    "text": "if that fails it uses a semaphore to go to sleep and and resume but it's not a",
+    "start": "1757559",
+    "end": "1767039"
+  },
+  {
+    "text": "simple hybrid lock it's it has that additional layer of implementation it",
+    "start": "1767039",
+    "end": "1772740"
+  },
+  {
+    "text": "has this additional state tracking that fixes the two problems that we just saw",
+    "start": "1772740",
+    "end": "1778760"
+  },
+  {
+    "text": "now the details don't matter today if you're curious ask me afterwards but yes",
+    "start": "1778760",
+    "end": "1785760"
+  },
+  {
+    "text": "this is our sync mutex we have arrived and again our question now is what does",
+    "start": "1785760",
+    "end": "1793930"
+  },
+  {
+    "text": "this Kostas right what is this what is this fancy mutex get us performance-wise",
+    "start": "1793930",
+    "end": "1800010"
+  },
+  {
+    "text": "well let's see in the uncontested case it takes what we'd expect about 10",
+    "start": "1800010",
+    "end": "1806910"
+  },
+  {
+    "start": "1802000",
+    "end": "1802000"
+  },
+  {
+    "text": "nanoseconds the cost of an atomic compare-and-swap in the contended case",
+    "start": "1806910",
+    "end": "1812590"
+  },
+  {
+    "text": "it seems to take about a microsecond again that's curious so let's dig into",
+    "start": "1812590",
+    "end": "1820540"
+  },
+  {
+    "text": "it more let's break down that contended case performance and compare it to the",
+    "start": "1820540",
+    "end": "1826480"
+  },
+  {
+    "text": "pthread mutex implementation and see what's going on well we see that",
+    "start": "1826480",
+    "end": "1831610"
+  },
+  {
+    "text": "initially as the number of goroutines increases as the contention increases",
+    "start": "1831610",
+    "end": "1837010"
+  },
+  {
+    "text": "there's a significant difference between the go performance and cease performance",
+    "start": "1837010",
+    "end": "1843930"
+  },
+  {
+    "text": "but eventually once the concurrency level the number of goroutines gets high",
+    "start": "1844380",
+    "end": "1850450"
+  },
+  {
+    "text": "enough that different escapes smaller and thus the ghost performance starts to",
+    "start": "1850450",
+    "end": "1857140"
+  },
+  {
+    "text": "converge with these performance what does that happen we we expect go to do",
+    "start": "1857140",
+    "end": "1864130"
+  },
+  {
+    "text": "better than see because of this fancy mutex implementation because of goroutines but at a high enough concurrency level",
+    "start": "1864130",
+    "end": "1873400"
+  },
+  {
+    "text": "that doesn't hold true anymore well I let you in on a secret",
+    "start": "1873400",
+    "end": "1879270"
+  },
+  {
+    "text": "remember mutexes use semaphores and",
+    "start": "1879270",
+    "end": "1884610"
+  },
+  {
+    "text": "semaphores have that hash table what happens if you have two goroutines",
+    "start": "1884610",
+    "end": "1891070"
+  },
+  {
+    "text": "both waiting on variables that hash to the same hash bucket and needs to be",
+    "start": "1891070",
+    "end": "1897400"
+  },
+  {
+    "text": "added to the same way queue it's almost like those hash buckets need to be",
+    "start": "1897400",
+    "end": "1902470"
+  },
+  {
+    "text": "synchronized so we need perhaps it terms",
+    "start": "1902470",
+    "end": "1908230"
+  },
+  {
+    "text": "of these per hash bucket locks are few taxes so what happens at like high",
+    "start": "1908230",
+    "end": "1918430"
+  },
+  {
+    "text": "enough concurrency is is we're seeing thread contention we have threads",
+    "start": "1918430",
+    "end": "1923680"
+  },
+  {
+    "text": "contending on getting the hache bucket futex and so we're paying the thread context switching cost now",
+    "start": "1923680",
+    "end": "1933590"
+  },
+  {
+    "text": "wait a minute the few taxes also had a hash-table so do the few taxes also need",
+    "start": "1933590",
+    "end": "1942140"
+  },
+  {
+    "text": "/ hashtag locks / hash bucket locks yes they do and the few taxes use spin locks",
+    "start": "1942140",
+    "end": "1952059"
+  },
+  {
+    "text": "and so we're come full circle we have mutexes which use semaphores",
+    "start": "1952059",
+    "end": "1959090"
+  },
+  {
+    "text": "which use few Texas which use spin locks it's locks all the way down you know",
+    "start": "1959090",
+    "end": "1966650"
+  },
+  {
+    "text": "what this reminds me of you'll watch the movie the inception it's like that but",
+    "start": "1966650",
+    "end": "1973429"
+  },
+  {
+    "text": "with walks it's totally wild okay so at",
+    "start": "1973429",
+    "end": "1979040"
+  },
+  {
+    "text": "this point we're we're done it's time to move on I could stand here and talk",
+    "start": "1979040",
+    "end": "1984559"
+  },
+  {
+    "text": "about lock internals all day but let's turn our attention to talking about performance now we've seen that there's",
+    "start": "1984559",
+    "end": "1993170"
+  },
+  {
+    "text": "a huge disconnect between the block and performance and the uncontained the contended case we knew that from our",
+    "start": "1993170",
+    "end": "2001179"
+  },
+  {
+    "text": "programs but now we understand why what are micro benchmarks don't tell us",
+    "start": "2001179",
+    "end": "2007390"
+  },
+  {
+    "text": "though is how our applications performance degrades with concurrency",
+    "start": "2007390",
+    "end": "2013510"
+  },
+  {
+    "text": "right as contention increases we know performance is going to get worse but",
+    "start": "2013510",
+    "end": "2018640"
+  },
+  {
+    "text": "how much worse is it going to get because really as application developers and systems builders what we'd like to",
+    "start": "2018640",
+    "end": "2027130"
+  },
+  {
+    "start": "2027000",
+    "end": "2027000"
+  },
+  {
+    "text": "know is as I increase the number of threads in my program how's my programs performance going to change we care",
+    "start": "2027130",
+    "end": "2033940"
+  },
+  {
+    "text": "about this for throughput considerations if I have a target throughput how many",
+    "start": "2033940",
+    "end": "2041230"
+  },
+  {
+    "text": "extra threads should I add while keeping response time the same or perhaps you",
+    "start": "2041230",
+    "end": "2046540"
+  },
+  {
+    "text": "care about latency so how so as I change",
+    "start": "2046540",
+    "end": "2053800"
+  },
+  {
+    "text": "the number of threads how much more can I speed up my program how can I decrease the latency of my program and",
+    "start": "2053800",
+    "end": "2062230"
+  },
+  {
+    "text": "to answer these questions we turn to the theory and the theory says use adults",
+    "start": "2062230",
+    "end": "2069320"
+  },
+  {
+    "text": "law maybe now I'm though it's law you're probably familiar with adults law basically tells us that the speed up how",
+    "start": "2069320",
+    "end": "2077720"
+  },
+  {
+    "text": "much speed up you can get by adding threads by increasing the concurrency",
+    "start": "2077720",
+    "end": "2084280"
+  },
+  {
+    "text": "that speed up depends on the workload it depends on how much of the workload is",
+    "start": "2084280",
+    "end": "2089929"
+  },
+  {
+    "text": "serial versus parallel so that's the formula for adults law it doesn't mean",
+    "start": "2089930",
+    "end": "2095690"
+  },
+  {
+    "text": "much to me let's just measure it so in our simple experiment we are going to",
+    "start": "2095690",
+    "end": "2101690"
+  },
+  {
+    "start": "2098000",
+    "end": "2098000"
+  },
+  {
+    "text": "create different workloads the workloads are pretty much the same except they have a different serial fraction so a",
+    "start": "2101690",
+    "end": "2108110"
+  },
+  {
+    "text": "different fraction that's done holding the lock and a different parallel fraction and we're going to scale up the",
+    "start": "2108110",
+    "end": "2115010"
+  },
+  {
+    "text": "number of guru teens and see how that affects our performance this is the",
+    "start": "2115010",
+    "end": "2121130"
+  },
+  {
+    "text": "Ombuds law graph it tells us that when",
+    "start": "2121130",
+    "end": "2126530"
+  },
+  {
+    "text": "our winner when our workload is mostly cereal we expect as the number of",
+    "start": "2126530",
+    "end": "2135020"
+  },
+  {
+    "text": "threads increases we expect the program to get faster up to a point and then",
+    "start": "2135020",
+    "end": "2140270"
+  },
+  {
+    "text": "flatline but that line is going to be a lot lower we're going to start to flatline a lot earlier than if we had a",
+    "start": "2140270",
+    "end": "2148090"
+  },
+  {
+    "text": "highly parallelizable program right which is what we'd expect so on those",
+    "start": "2148090",
+    "end": "2153200"
+  },
+  {
+    "text": "law is one way of getting at this but and umbels law is good in all but on",
+    "start": "2153200",
+    "end": "2162590"
+  },
+  {
+    "text": "those law doesn't account for an additional cost factor in the",
+    "start": "2162590",
+    "end": "2167810"
+  },
+  {
+    "text": "performance of our programs so our programs don't just exhibit contention",
+    "start": "2167810",
+    "end": "2173180"
+  },
+  {
+    "text": "they also exhibit coordination a coordination or a cross stock penalty",
+    "start": "2173180",
+    "end": "2180010"
+  },
+  {
+    "text": "and on notes law doesn't capture that but a performance model does that does",
+    "start": "2180010",
+    "end": "2186320"
+  },
+  {
+    "text": "capture that is the universal scalability law and the universal scalability",
+    "start": "2186320",
+    "end": "2191490"
+  },
+  {
+    "text": "scalability law or the USL it tells us that the scalability of our programs",
+    "start": "2191490",
+    "end": "2197859"
+  },
+  {
+    "text": "depends on both contention on how much contention there is in the system but also how much coordination there is in",
+    "start": "2197859",
+    "end": "2203769"
+  },
+  {
+    "text": "the system and the graph the USL gives us is that it looks like this now don't",
+    "start": "2203769",
+    "end": "2212319"
+  },
+  {
+    "text": "let the formula scare you breaking it down all this tells us is in a system",
+    "start": "2212319",
+    "end": "2217539"
+  },
+  {
+    "text": "with no contention penalty and no coordination penalty we expect linear scaling we expect that straight line as",
+    "start": "2217539",
+    "end": "2224289"
+  },
+  {
+    "text": "we increase the number of threads we expect the throughput of our program to",
+    "start": "2224289",
+    "end": "2229299"
+  },
+  {
+    "text": "increase right if there is contention though we get the Andaz law graph so the",
+    "start": "2229299",
+    "end": "2236710"
+  },
+  {
+    "text": "throughput increases up to a point and then at flatlines and if we have both contention and",
+    "start": "2236710",
+    "end": "2242640"
+  },
+  {
+    "text": "coordination then we actually start to see retrograde scalability the way to",
+    "start": "2242640",
+    "end": "2249640"
+  },
+  {
+    "text": "use the universal scalability law is you get performance measurements from your application so you measure its",
+    "start": "2249640",
+    "end": "2257369"
+  },
+  {
+    "text": "throughput or its response time at different concurrency levels and then",
+    "start": "2257369",
+    "end": "2262720"
+  },
+  {
+    "text": "you you can use R or has a USL package you can use other other software to",
+    "start": "2262720",
+    "end": "2271329"
+  },
+  {
+    "text": "extend this to graph it to predict as I continue to increase the number of threads in my program what's going to",
+    "start": "2271329",
+    "end": "2277990"
+  },
+  {
+    "text": "happen to its performance cool so this",
+    "start": "2277990",
+    "end": "2285130"
+  },
+  {
+    "text": "for example is the same experiment plotted under the universal scalability law using the R package cool so with",
+    "start": "2285130",
+    "end": "2295869"
+  },
+  {
+    "text": "that we now have a couple of tools a couple of performance models we can use",
+    "start": "2295869",
+    "end": "2301259"
+  },
+  {
+    "text": "to answer the question of contention and application performance it's now let's",
+    "start": "2301259",
+    "end": "2309579"
+  },
+  {
+    "text": "talk about or touch upon rather a few smart strategies we can use in the case",
+    "start": "2309579",
+    "end": "2315880"
+  },
+  {
+    "text": "we start to see contention what can we do about it to reduce contention well first things first profile right we",
+    "start": "2315880",
+    "end": "2325820"
+  },
+  {
+    "start": "2324000",
+    "end": "2324000"
+  },
+  {
+    "text": "see that locks have this vast spectrum of performance characteristics locks might not even be the problem so profile",
+    "start": "2325820",
+    "end": "2333050"
+  },
+  {
+    "text": "your application you can use if you're working with go you can use the go mutex",
+    "start": "2333050",
+    "end": "2338390"
+  },
+  {
+    "text": "contention profiler if you're running on Linux there are several tools available",
+    "start": "2338390",
+    "end": "2343820"
+  },
+  {
+    "text": "to analyze this the resources are in the slides the spur flock you can read an EB",
+    "start": "2343820",
+    "end": "2349640"
+  },
+  {
+    "text": "PF script you can use D trace or system tab depending on what you like to do but",
+    "start": "2349640",
+    "end": "2355310"
+  },
+  {
+    "text": "yes first profile now if contention is actually the problem a few strategies are one don't",
+    "start": "2355310",
+    "end": "2364190"
+  },
+  {
+    "start": "2363000",
+    "end": "2363000"
+  },
+  {
+    "text": "use a lock this sounds snarky but there are a few but what this really means is try and",
+    "start": "2364190",
+    "end": "2371359"
+  },
+  {
+    "text": "remove the need from synchronization from the hot paths right for example to",
+    "start": "2371359",
+    "end": "2379369"
+  },
+  {
+    "text": "try and do more local more thread-local work so in our producer-consumer example",
+    "start": "2379369",
+    "end": "2386140"
+  },
+  {
+    "text": "try and like copy-on-write or try and buffer work try and batch work another",
+    "start": "2386140",
+    "end": "2395030"
+  },
+  {
+    "text": "way to do this is you can use atomic operations instead so for example the",
+    "start": "2395030",
+    "end": "2400970"
+  },
+  {
+    "text": "the go the go runtime scheduler it has these run queues and the run queues are",
+    "start": "2400970",
+    "end": "2407510"
+  },
+  {
+    "text": "totally lock free so lock free data structures a walk free programming is available to you yeah so those are those",
+    "start": "2407510",
+    "end": "2418550"
+  },
+  {
+    "text": "are some things you can do here the second strategy is if you do have to use",
+    "start": "2418550",
+    "end": "2423830"
+  },
+  {
+    "start": "2421000",
+    "end": "2421000"
+  },
+  {
+    "text": "locks use more granular locks so you're holding the lock for a shorter time for",
+    "start": "2423830",
+    "end": "2430310"
+  },
+  {
+    "text": "example you can partition your data if you're partitioning data make sure",
+    "start": "2430310",
+    "end": "2435320"
+  },
+  {
+    "text": "there's no faults sharing that is the locks don't fall on the same cache line",
+    "start": "2435320",
+    "end": "2440930"
+  },
+  {
+    "text": "or you'll have cache line bouncing and again you can measure whether or not there is fault sharing by using",
+    "start": "2440930",
+    "end": "2446869"
+  },
+  {
+    "text": "something like perf you can use per processor locks the Linux schedule",
+    "start": "2446869",
+    "end": "2454040"
+  },
+  {
+    "text": "the go runtime scheduler do this and then finally you can do less serial work",
+    "start": "2454040",
+    "end": "2460490"
+  },
+  {
+    "start": "2458000",
+    "end": "2458000"
+  },
+  {
+    "text": "the speaks to the same thing you move work out of the critical section so this",
+    "start": "2460490",
+    "end": "2465740"
+  },
+  {
+    "text": "is a graph that we began with in this case we use the go mutex profiler to",
+    "start": "2465740",
+    "end": "2473180"
+  },
+  {
+    "text": "determine that the lock was in fact the problem and we restructured it so we were holding the lock for less time cool",
+    "start": "2473180",
+    "end": "2482570"
+  },
+  {
+    "text": "so with that it is time to say goodbye thank you all for coming out today I",
+    "start": "2482570",
+    "end": "2489560"
+  },
+  {
+    "text": "hope you walk away learning a thing a tool a strategy about locks thank you",
+    "start": "2489560",
+    "end": "2496750"
+  },
+  {
+    "text": "[Applause]",
+    "start": "2496750",
+    "end": "2502730"
+  },
+  {
+    "text": "the neurotic technique used by go runtime to make it",
+    "start": "2502730",
+    "end": "2508200"
+  },
+  {
+    "text": "contact switching very quick why can't operating systems use similar techniques",
+    "start": "2508200",
+    "end": "2514010"
+  },
+  {
+    "text": "well in the case of the operating system like the real thing the real insight",
+    "start": "2514010",
+    "end": "2519630"
+  },
+  {
+    "text": "about what go does is that switching these userspace threads is a lot cheaper",
+    "start": "2519630",
+    "end": "2524940"
+  },
+  {
+    "text": "than switching the operating system thread in the case of the operating system scheduler it has to switch",
+    "start": "2524940",
+    "end": "2530970"
+  },
+  {
+    "text": "between between threads and the reason switching userspace threads are so cheap",
+    "start": "2530970",
+    "end": "2537030"
+  },
+  {
+    "text": "is because it's all in userspace so you're not calling into the kernel if",
+    "start": "2537030",
+    "end": "2543210"
+  },
+  {
+    "text": "you were in the kernel you wouldn't have to do that but you're not switching you're not flushing the page tables",
+    "start": "2543210",
+    "end": "2550190"
+  },
+  {
+    "text": "you're not switching what's in memory cuz you're not switching you like go",
+    "start": "2550190",
+    "end": "2555570"
+  },
+  {
+    "text": "routines run in the same there's no like flushing of state if that makes sense",
+    "start": "2555570",
+    "end": "2563420"
+  },
+  {
+    "text": "hello so how does the lot free algorithms really I mean synchronize the",
+    "start": "2565730",
+    "end": "2572880"
+  },
+  {
+    "text": "data do they use CPU spin I mean what kind of army like smart thing going behind the scene so lock free algorithms",
+    "start": "2572880",
+    "end": "2579960"
+  },
+  {
+    "text": "use atomic operations lock free algorithms are very tricky to get right",
+    "start": "2579960",
+    "end": "2586170"
+  },
+  {
+    "text": "so and and block free data structures",
+    "start": "2586170",
+    "end": "2591840"
+  },
+  {
+    "text": "you can build them out of these atomic primitives but only for certain certain",
+    "start": "2591840",
+    "end": "2598950"
+  },
+  {
+    "text": "types of operations only for certain types of workloads and they're also very",
+    "start": "2598950",
+    "end": "2604050"
+  },
+  {
+    "text": "tricky to get right which is why we don't see them more in practice",
+    "start": "2604050",
+    "end": "2609110"
+  },
+  {
+    "text": "situations like a apartment threading like what's using javascript for taking",
+    "start": "2611990",
+    "end": "2617070"
+  },
+  {
+    "text": "what would normally be places where you have to lock and putting it into a single thread and the queue how does",
+    "start": "2617070",
+    "end": "2623730"
+  },
+  {
+    "text": "that compare performant wise with dealing with the hole locking issue rather than pushing it under the rug",
+    "start": "2623730",
+    "end": "2629220"
+  },
+  {
+    "text": "like JavaScript O's the whole like taking multiple threads",
+    "start": "2629220",
+    "end": "2635890"
+  },
+  {
+    "text": "and converting it to a single threaded thing it obviously works around these",
+    "start": "2635890",
+    "end": "2642850"
+  },
+  {
+    "text": "synchronization problems but you might lose out on parallelism right because at that point you can't have multiple",
+    "start": "2642850",
+    "end": "2649540"
+  },
+  {
+    "text": "threads each running on a CPU core and doing something so you're so the trade-off there is you're giving up on",
+    "start": "2649540",
+    "end": "2655450"
+  },
+  {
+    "text": "some parallelism so at the end you were",
+    "start": "2655450",
+    "end": "2661270"
+  },
+  {
+    "text": "talking about sharding the data and making sure you don't have false sharing yeah",
+    "start": "2661270",
+    "end": "2666850"
+  },
+  {
+    "text": "can you explain the reason for that yeah so because of cache coherency right each",
+    "start": "2666850",
+    "end": "2676900"
+  },
+  {
+    "text": "time a cache line is dirty you have to perform these cache and validations and",
+    "start": "2676900",
+    "end": "2682000"
+  },
+  {
+    "text": "that's expensive because you have all this like traffic on the memory bus you have one CPU telling all the other CPUs",
+    "start": "2682000",
+    "end": "2689260"
+  },
+  {
+    "text": "that might have the cache line you you have to tell them to invalidate it so",
+    "start": "2689260",
+    "end": "2694630"
+  },
+  {
+    "text": "you can perform that right so the whole",
+    "start": "2694630",
+    "end": "2699640"
+  },
+  {
+    "text": "like cache coherency and cache invalidation thing is thank you the whole cache coherency cache invalidation",
+    "start": "2699640",
+    "end": "2705070"
+  },
+  {
+    "text": "thing is is expensive and so you don't want to items to end up on the same",
+    "start": "2705070",
+    "end": "2711280"
+  },
+  {
+    "text": "cache line because then you'll have this problem of cache line bouncing which is why fault sharing should be avoided and",
+    "start": "2711280",
+    "end": "2718180"
+  },
+  {
+    "text": "yeah any more you said that go or a",
+    "start": "2718180",
+    "end": "2725980"
+  },
+  {
+    "text": "routine suspending does not imply system threads suspending so what does its",
+    "start": "2725980",
+    "end": "2733120"
+  },
+  {
+    "text": "system threat threat in this case do and if it should be suspended will it be",
+    "start": "2733120",
+    "end": "2739840"
+  },
+  {
+    "text": "yeah that's a great question and it comes down to the go runtime scheduler",
+    "start": "2739840",
+    "end": "2745750"
+  },
+  {
+    "text": "and how that works so when the go routine is suspended so goes scheduling",
+    "start": "2745750",
+    "end": "2752680"
+  },
+  {
+    "text": "model is called MN scheduling so the same thread the thread that the that the",
+    "start": "2752680",
+    "end": "2759220"
+  },
+  {
+    "text": "girl routine is the the thread that the suspended girl routine was running on",
+    "start": "2759220",
+    "end": "2764380"
+  },
+  {
+    "text": "thread has a local run queue of other guru chains that are waiting to be run",
+    "start": "2764380",
+    "end": "2769660"
+  },
+  {
+    "text": "so just picks up a girl routine from that run Kiran runs it or there's a",
+    "start": "2769660",
+    "end": "2775539"
+  },
+  {
+    "text": "global run queue as well so it might go to the global run queue and pick up a girl routine basically it runs another guru routine there are instances in",
+    "start": "2775539",
+    "end": "2782829"
+  },
+  {
+    "text": "which the underlying operating system thread would be suspended so for example if you perform a blocking system call",
+    "start": "2782829",
+    "end": "2790380"
+  },
+  {
+    "text": "the thread itself will suspend because the system call is blocking in that case",
+    "start": "2790380",
+    "end": "2796059"
+  },
+  {
+    "text": "the run time suspends the thread exactly",
+    "start": "2796059",
+    "end": "2803170"
+  },
+  {
+    "text": "it's it's pretty cool sort of follow on",
+    "start": "2803170",
+    "end": "2812289"
+  },
+  {
+    "text": "with that question so are their performance hits due to the ghost' scheduler competing with the kernel",
+    "start": "2812289",
+    "end": "2819190"
+  },
+  {
+    "text": "scheduler so for example so you've got multiple go routines operating in one",
+    "start": "2819190",
+    "end": "2824229"
+  },
+  {
+    "text": "user space thread so that thread gets back rounded because of other things I want to happen in the operating system",
+    "start": "2824229",
+    "end": "2829599"
+  },
+  {
+    "text": "so do you get performance hits because of there's just one single operating",
+    "start": "2829599",
+    "end": "2835869"
+  },
+  {
+    "text": "system thread in that goes model yeah yeah you totally do like at that point",
+    "start": "2835869",
+    "end": "2841769"
+  },
+  {
+    "text": "from the operating systems point of view it's just to go the thread that the Guru",
+    "start": "2841769",
+    "end": "2847809"
+  },
+  {
+    "text": "jeans are running on are just another thread so they have whatever priority other threads in the program and other",
+    "start": "2847809",
+    "end": "2854680"
+  },
+  {
+    "text": "threads would have and if that thread is back rounded or suspended because if",
+    "start": "2854680",
+    "end": "2860019"
+  },
+  {
+    "text": "other processes running that's totally a thing that happens go runs a number of threads so",
+    "start": "2860019",
+    "end": "2868779"
+  },
+  {
+    "text": "goroutines are scheduled onto a small set of operating system threads it's usually set to the number of CPU cores",
+    "start": "2868779",
+    "end": "2876819"
+  },
+  {
+    "text": "you have to get maximal parallelism any more questions going once twice thank",
+    "start": "2876819",
+    "end": "2887650"
+  },
+  {
+    "text": "you so much that was a great talk thank you you",
+    "start": "2887650",
+    "end": "2892140"
+  }
+]

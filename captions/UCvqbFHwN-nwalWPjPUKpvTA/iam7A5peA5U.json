@@ -1,0 +1,1752 @@
+[
+  {
+    "text": "welcome everyone it's great seeing so many of you this evening uh training",
+    "start": "80",
+    "end": "5200"
+  },
+  {
+    "text": "today's large language models and other deep learning workloads often involves",
+    "start": "5200",
+    "end": "10280"
+  },
+  {
+    "text": "several thousand gpus and can take multiple million GPU hours of",
+    "start": "10280",
+    "end": "15600"
+  },
+  {
+    "text": "time the coordinated nature of training also makes resilience in the system not",
+    "start": "15600",
+    "end": "21359"
+  },
+  {
+    "text": "just a nice to have but an essential quality today we'll share how to detect",
+    "start": "21359",
+    "end": "27519"
+  },
+  {
+    "text": "manage and mitigate GPU network issues for building resilience and while these",
+    "start": "27519",
+    "end": "33600"
+  },
+  {
+    "text": "techniques are critical at large scales they also bring many valuable aspects to",
+    "start": "33600",
+    "end": "39040"
+  },
+  {
+    "text": "running a wide range of smaller",
+    "start": "39040",
+    "end": "42440"
+  },
+  {
+    "text": "workloads I'm Ganesh and I'm a software engineer in the azja kubernetes service team at Microsoft I primarily work on",
+    "start": "45199",
+    "end": "52440"
+  },
+  {
+    "text": "GPU workload management and also pod startup time as part of the node life cycle",
+    "start": "52440",
+    "end": "58039"
+  },
+  {
+    "text": "team we make it easy to run AI training and INF workload along with many other",
+    "start": "58039",
+    "end": "64478"
+  },
+  {
+    "text": "types of workloads on kubernetes I'm Ace I'm a software",
+    "start": "64479",
+    "end": "69880"
+  },
+  {
+    "text": "engineer at cooh here we build large language models uh I work on both our training and serving",
+    "start": "69880",
+    "end": "76720"
+  },
+  {
+    "text": "infrastructure one yeah in today's talk we'll start with a brief background on",
+    "start": "78880",
+    "end": "84400"
+  },
+  {
+    "text": "running AIML workloads on kubernetes talk about why job communication between different nodes and gpus is very",
+    "start": "84400",
+    "end": "91079"
+  },
+  {
+    "text": "critical then discuss about the various types of errors that can happen and show you a demo on how failure can be managed",
+    "start": "91079",
+    "end": "98680"
+  },
+  {
+    "text": "as well uh when this happens at the application layer then from the infr provider perspective we'll talk about",
+    "start": "98680",
+    "end": "105520"
+  },
+  {
+    "text": "how you can both proactively detect and manage errors through uh components like",
+    "start": "105520",
+    "end": "112280"
+  },
+  {
+    "text": "node problem detector and remedy controllers and we'll show a demo of this in",
+    "start": "112280",
+    "end": "117840"
+  },
+  {
+    "text": "action finally we'll touch upon brief briefly about Advanced scenarios and",
+    "start": "117840",
+    "end": "122880"
+  },
+  {
+    "text": "developments in the field around how you can make this more uh native to kubernetes and better from the end user",
+    "start": "122880",
+    "end": "132280"
+  },
+  {
+    "text": "perspective uh so a little bit of backgrounds if you're here you probably know something about llms you probably heard about chat",
+    "start": "133720",
+    "end": "139720"
+  },
+  {
+    "text": "GPT let's go back um so models are getting bigger they're hungrier for more",
+    "start": "139720",
+    "end": "144920"
+  },
+  {
+    "text": "data more compute to train them uh and we use kubernetes to run these jobs uh and these are jobs that span multiple",
+    "start": "144920",
+    "end": "151080"
+  },
+  {
+    "text": "pods multiple nodes likees mentioned it could be thousands of gpus um but these are one unit of work",
+    "start": "151080",
+    "end": "157280"
+  },
+  {
+    "text": "so we want them scheduled as a unit uh we don't want any Deadlocks where where our job is partially scheduled uh you",
+    "start": "157280",
+    "end": "163519"
+  },
+  {
+    "text": "might hear about things like volcano or q that support this kind of behavior today um you'll also hear about",
+    "start": "163519",
+    "end": "170239"
+  },
+  {
+    "text": "framework specific abstractions so if you've heard of cube flow you might hear about like MPI job pytorch job um",
+    "start": "170239",
+    "end": "176920"
+  },
+  {
+    "text": "there's some coordination that's required for these jobs to run across multiple nodes multiple pods often",
+    "start": "176920",
+    "end": "182200"
+  },
+  {
+    "text": "things like a coordinator address uh the Pod index within the job um so many different Frameworks specific",
+    "start": "182200",
+    "end": "188080"
+  },
+  {
+    "text": "abstractions for kubernetes uh provide that kind of wrapping layer um on top of",
+    "start": "188080",
+    "end": "193120"
+  },
+  {
+    "text": "the Frameworks themselves more recently we're seeing kind of generalized approaches so things like job sets",
+    "start": "193120",
+    "end": "199280"
+  },
+  {
+    "text": "leader worker sets uh where they're providing some of the same Primitives from the infrastructure side from the kubernetes side um so that the",
+    "start": "199280",
+    "end": "206120"
+  },
+  {
+    "text": "Frameworks don't need to implement kind of the same thing over and over again",
+    "start": "206120",
+    "end": "211760"
+  },
+  {
+    "text": "um so llm training in general uh we want to Shard our model State and our weights",
+    "start": "211959",
+    "end": "218920"
+  },
+  {
+    "text": "and stuff like that distribute it across all these workers and then we want to pump as much data through all these gpus",
+    "start": "218920",
+    "end": "224360"
+  },
+  {
+    "text": "as quickly as we can basically um we can't do that fully independently between all these different pods uh they",
+    "start": "224360",
+    "end": "231200"
+  },
+  {
+    "text": "do need to coordinate a little bit they need to synchronize gradients and weights between steps um you'll hear a",
+    "start": "231200",
+    "end": "236799"
+  },
+  {
+    "text": "lot about nickel if people are training on Nvidia gpus Andia Collective Communications Library um it's basically",
+    "start": "236799",
+    "end": "242640"
+  },
+  {
+    "text": "used for for all this kind of communication between workers um digging into that a little bit this",
+    "start": "242640",
+    "end": "249680"
+  },
+  {
+    "text": "is kind of an example diagram of what uh we'd call fully sharted data parallel training um this might look a little bit",
+    "start": "249680",
+    "end": "256000"
+  },
+  {
+    "text": "different depending on what your AI training training looks like uh what kind of paralyzation techniques you use",
+    "start": "256000",
+    "end": "261959"
+  },
+  {
+    "text": "um this is an example from meta but if you see those dotted lines kind of in the second fourth and sixth box uh",
+    "start": "261959",
+    "end": "267880"
+  },
+  {
+    "text": "that's the communication that I was talking about um and those are collective communication operations across many",
+    "start": "267880",
+    "end": "273039"
+  },
+  {
+    "text": "nodes again depends how you're charting uh but you can see there's an allgather uh actually two all gathers and a",
+    "start": "273039",
+    "end": "279000"
+  },
+  {
+    "text": "reduced scatter in this example um so what do those actually do um this is",
+    "start": "279000",
+    "end": "285000"
+  },
+  {
+    "text": "kind of what those look like up close uh the reduced scatter is the second one there the all gather is the third one um",
+    "start": "285000",
+    "end": "290479"
+  },
+  {
+    "text": "so really these are just ways of shuffling data around across different gpus um and taking a quick look back at",
+    "start": "290479",
+    "end": "296880"
+  },
+  {
+    "text": "this Loop uh this is one training step this whole diagram and so you would repeat this like many many times over",
+    "start": "296880",
+    "end": "303759"
+  },
+  {
+    "text": "the course of a model training life cycle um so you really want those Collective communication operations to",
+    "start": "303759",
+    "end": "308800"
+  },
+  {
+    "text": "be fast so that you have good step time when you're training so this is kind of the",
+    "start": "308800",
+    "end": "314800"
+  },
+  {
+    "text": "background uh what goes wrong like what kind of failures are we talking about uh I break them down into a couple",
+    "start": "314800",
+    "end": "319919"
+  },
+  {
+    "text": "different categories uh I would say the first category is things that are hard failures uh typically this will",
+    "start": "319919",
+    "end": "325560"
+  },
+  {
+    "text": "immediately fail the job like the job will die naturally you don't really need to do anything to inter intervene to to make forward progress uh this might be",
+    "start": "325560",
+    "end": "333000"
+  },
+  {
+    "text": "stuff like physical GPU memory errors uh ECC errors could also be networking",
+    "start": "333000",
+    "end": "338400"
+  },
+  {
+    "text": "errors or things like driver issues um these are all very common I would say there's also soft failures where the",
+    "start": "338400",
+    "end": "345759"
+  },
+  {
+    "text": "job continues to make progress but maybe it's slower uh the best example of this is something like low network throughput",
+    "start": "345759",
+    "end": "352120"
+  },
+  {
+    "text": "uh where those Collective communication steps might be a lot slower than you would expect from the hardware that you have the last category is kind of",
+    "start": "352120",
+    "end": "358720"
+  },
+  {
+    "text": "somewhere in between um where maybe the application doesn't die naturally like in some of those hard failure cases uh maybe it hangs but uh",
+    "start": "358720",
+    "end": "366440"
+  },
+  {
+    "text": "you know it's not really making forward progress in terms of training um often these could come down to Cuda errors or nickel errors that are not necessarily",
+    "start": "366440",
+    "end": "372639"
+  },
+  {
+    "text": "handled correctly um they're also more Insidious things I would say like silent data corruption um this is kind of a",
+    "start": "372639",
+    "end": "379479"
+  },
+  {
+    "text": "risk that happens with gpus that we don't really see as much as CPUs um and it's something that you need to be aware",
+    "start": "379479",
+    "end": "384639"
+  },
+  {
+    "text": "of at the application Level to handle correctly",
+    "start": "384639",
+    "end": "389080"
+  },
+  {
+    "text": "um just to highlight this is from one of meta's recent papers uh you've probably seen some of these diagrams if you're interested in this kind of stuff um but",
+    "start": "390120",
+    "end": "397120"
+  },
+  {
+    "text": "it just breaks down the types of failures that we see typically in training um and I would say kind of like I mentioned before GPU like network",
+    "start": "397120",
+    "end": "403759"
+  },
+  {
+    "text": "issues uh those definitely dominate in terms of kind of the the scale that we",
+    "start": "403759",
+    "end": "409960"
+  },
+  {
+    "text": "see so kind of take an example of a what I would call a soft failure uh this is something that we saw where we did see",
+    "start": "410080",
+    "end": "416240"
+  },
+  {
+    "text": "step time increased but it only happened at specific job size so you know uh when",
+    "start": "416240",
+    "end": "422120"
+  },
+  {
+    "text": "we're talking about like these large scale jobs we see a degradation performance that we don't see at smaller scales um so Nvidia does have some nice",
+    "start": "422120",
+    "end": "430080"
+  },
+  {
+    "text": "tests that you can do to test these kind of collective communication operations um so you can just run and all ruce on",
+    "start": "430080",
+    "end": "435960"
+  },
+  {
+    "text": "all your gpus and see what the bandwidth is and based on the hardware that you have and based on the algorithm you're running you should know what kind of",
+    "start": "435960",
+    "end": "442039"
+  },
+  {
+    "text": "expected performance uh you hope to get um so in this case it turned out that uh",
+    "start": "442039",
+    "end": "447520"
+  },
+  {
+    "text": "based on the network topology there are many parameters that you can tune with nickel um and in particular we had a",
+    "start": "447520",
+    "end": "452720"
+  },
+  {
+    "text": "rail line topology where gpus are connected to particular Nicks to particular switches uh and the topology",
+    "start": "452720",
+    "end": "459560"
+  },
+  {
+    "text": "detection that nickel uses internally did not work correctly at the scale that we were running at um this screenshot is",
+    "start": "459560",
+    "end": "465479"
+  },
+  {
+    "text": "not exactly the bug that was uh that we hit but this is from the latest release of nickel about two months ago um it's",
+    "start": "465479",
+    "end": "472479"
+  },
+  {
+    "text": "just to highlight that these things are still rapidly evolving Nvidia is still adding features fixing bugs all that",
+    "start": "472479",
+    "end": "477639"
+  },
+  {
+    "text": "kind of stuff um but you do have a lot of rough edges I would say uh just highlighting again like",
+    "start": "477639",
+    "end": "484960"
+  },
+  {
+    "text": "there is kind of a standard so you know what you should get um based on the hardware that you have and again they",
+    "start": "484960",
+    "end": "490400"
+  },
+  {
+    "text": "have these very nice tests that you can run Upstream a great GI repo",
+    "start": "490400",
+    "end": "495919"
+  },
+  {
+    "text": "so so uh this is kind of how we would debug something like this like let's say we know that that step time is slow we",
+    "start": "495919",
+    "end": "502639"
+  },
+  {
+    "text": "think it's a network issue we're trying to debug like where where something is going wrong I mentioned MPI job earlier",
+    "start": "502639",
+    "end": "508240"
+  },
+  {
+    "text": "so you can use MPI job to run those nickel tests across nodes uh so this is an example just with uh eight workers",
+    "start": "508240",
+    "end": "515120"
+  },
+  {
+    "text": "each of those workers has eight gpus so they take a full node uh and then we have a launcher pod uh and that launcher",
+    "start": "515120",
+    "end": "521399"
+  },
+  {
+    "text": "pod basically runs the job across all the actual workers um so this is pretty neat if you're not familiar with MPI run",
+    "start": "521399",
+    "end": "527800"
+  },
+  {
+    "text": "or open MPI um this is actually like your sshing into all these pods and like",
+    "start": "527800",
+    "end": "533120"
+  },
+  {
+    "text": "coordinating um so if you writing this pod spec from scratch you would have to add like all these volumes and secrets yourself",
+    "start": "533120",
+    "end": "539920"
+  },
+  {
+    "text": "and this is kind of what the output of that looks like uh these are nodes with 400 gigabytes per node uh a second um so",
+    "start": "539920",
+    "end": "547360"
+  },
+  {
+    "text": "we're expecting to see kind of close to the line right there and we're getting pretty close so this is reasonable um so far we've been talking",
+    "start": "547360",
+    "end": "554800"
+  },
+  {
+    "text": "about kind of soft failure this nickel uh issue um so what about hard failure",
+    "start": "554800",
+    "end": "561600"
+  },
+  {
+    "text": "like what if we're doing one of these Collective operations and a GPU just dies like it's gone it's not coming back",
+    "start": "561600",
+    "end": "567079"
+  },
+  {
+    "text": "the hardware is busted for whatever reason uh usually the whole job dies and if we're talking about a job with thousands",
+    "start": "567079",
+    "end": "572800"
+  },
+  {
+    "text": "of gpus you know that's thousands of dollars potentially wasted uh depending how long you're running",
+    "start": "572800",
+    "end": "579040"
+  },
+  {
+    "text": "for so what can we do about that um we can do a couple different things in the",
+    "start": "579399",
+    "end": "585320"
+  },
+  {
+    "text": "application layer uh we typically checkpoint progress and restore progress after restarts or failures um so that's",
+    "start": "585320",
+    "end": "591240"
+  },
+  {
+    "text": "very standard that's kind of how all uh AI training works at scale um and then I did mention there's kind of these more",
+    "start": "591240",
+    "end": "597160"
+  },
+  {
+    "text": "Insidious issues that we need to detect in the application layer um I'll wait for ganes to talk more about the infid",
+    "start": "597160",
+    "end": "603560"
+  },
+  {
+    "text": "section but we do need to like triage this Hardware make sure that actually is healthy and then take things out of service uh to prevent pods landing on",
+    "start": "603560",
+    "end": "610440"
+  },
+  {
+    "text": "them again so we'll do a little demo um just going through like a basic job set with",
+    "start": "610440",
+    "end": "617680"
+  },
+  {
+    "text": "a checkpointing uh like training script um if this is going to",
+    "start": "617680",
+    "end": "626399"
+  },
+  {
+    "text": "play so this is is a pretty basic job set spec uh it just has one pod template",
+    "start": "627720",
+    "end": "634120"
+  },
+  {
+    "text": "uh it has 10 retries in the failure policy it has DNS host names so that we can get a nice coordinator address uh",
+    "start": "634120",
+    "end": "641560"
+  },
+  {
+    "text": "and when it Scrolls down a little bit we'll see we're just launching two two pods on two nodes um they're each using",
+    "start": "641560",
+    "end": "647959"
+  },
+  {
+    "text": "eight gpus and they're running a script which we will see in one second but the",
+    "start": "647959",
+    "end": "653639"
+  },
+  {
+    "text": "script is like the hello world of doing a sharded model on two nodes with some checkpointing uh thank you so it's",
+    "start": "653639",
+    "end": "661639"
+  },
+  {
+    "text": "literally like one layer just doing like a DOT product nothing fancy um but you'll see we are doing like uh a",
+    "start": "661639",
+    "end": "668760"
+  },
+  {
+    "text": "sharded model so we're sharting it across two notes uh we are initializing it with that job completion index the",
+    "start": "668760",
+    "end": "674279"
+  },
+  {
+    "text": "job size the coordinator address we're setting up a checkpoint manager to save our progress uh and then at the very",
+    "start": "674279",
+    "end": "681279"
+  },
+  {
+    "text": "end uh you'll see we're just doing a training Loop for 30 steps and we're",
+    "start": "681279",
+    "end": "686320"
+  },
+  {
+    "text": "going to have some bad luck with simulated failures to see what happens uh see if it'll go a little bit",
+    "start": "686320",
+    "end": "695040"
+  },
+  {
+    "text": "ahead cool so we applied that it's starting up so let's see how much",
+    "start": "698720",
+    "end": "704839"
+  },
+  {
+    "text": "progress our job makes we got three steps and it failed so we should have a checkpoint at",
+    "start": "704839",
+    "end": "711200"
+  },
+  {
+    "text": "step two and ideally we should recover that and we found it nice looks like we got almost all the",
+    "start": "711200",
+    "end": "718760"
+  },
+  {
+    "text": "way but we filed",
+    "start": "718760",
+    "end": "721760"
+  },
+  {
+    "text": "again hopefully we make the last couple",
+    "start": "726839",
+    "end": "731160"
+  },
+  {
+    "text": "steps some very bad",
+    "start": "734920",
+    "end": "738600"
+  },
+  {
+    "text": "luck there we go okay so we made our 30 steps we finished our little training job um and if we take a Peak at what is",
+    "start": "741560",
+    "end": "749639"
+  },
+  {
+    "text": "inside this directory we'll see that we have those last it was a little bit cut off but there are three directories so",
+    "start": "749639",
+    "end": "755079"
+  },
+  {
+    "text": "the last three checkpoints that we saved and you can see there's some data inside there with the sharding information and stuff like that so nothing fancy but",
+    "start": "755079",
+    "end": "762399"
+  },
+  {
+    "text": "this is kind of uh like I would say very standard like ml kind of uh loop um so",
+    "start": "762399",
+    "end": "770199"
+  },
+  {
+    "text": "yeah with that I'll hand over to ganes to talk a little bit about the infro provider perspective",
+    "start": "770199",
+    "end": "777600"
+  },
+  {
+    "text": "thanks Ace that was great from the inpr provider perspective we want to minimize the amount of failures that is surfaced",
+    "start": "782079",
+    "end": "789519"
+  },
+  {
+    "text": "to the end user so we want to do as many checks and detections as possible before",
+    "start": "789519",
+    "end": "794959"
+  },
+  {
+    "text": "it actually runs a workload there's different layers in which you can run these health checks",
+    "start": "794959",
+    "end": "801240"
+  },
+  {
+    "text": "starting from initially when you physically get the gpus and configure it on uh your clusters you can run checks",
+    "start": "801240",
+    "end": "808639"
+  },
+  {
+    "text": "and other that the GPU is healthy and you can run performance testing of to make sure that the network connections",
+    "start": "808639",
+    "end": "814800"
+  },
+  {
+    "text": "are appropriate as well after that's done uh many info providers also have a",
+    "start": "814800",
+    "end": "819920"
+  },
+  {
+    "text": "virtual machine deployment layer as well and in this layer you can uh perform",
+    "start": "819920",
+    "end": "826199"
+  },
+  {
+    "text": "checks before your actual orchestrators are allowed to use your GPU nodes these",
+    "start": "826199",
+    "end": "833120"
+  },
+  {
+    "text": "could just actively run checks uh so that any faulty nodes are taken out of",
+    "start": "833120",
+    "end": "838680"
+  },
+  {
+    "text": "circul for inspection or other reasons then there's the orchestrator layer which is",
+    "start": "838680",
+    "end": "844600"
+  },
+  {
+    "text": "the the kubernetes layer or could also be other orchestrators like slum where you want to run regular node health",
+    "start": "844600",
+    "end": "850959"
+  },
+  {
+    "text": "checks for just node and GPU health and then finally at the workload layer you",
+    "start": "850959",
+    "end": "856480"
+  },
+  {
+    "text": "could run things like init containers to check uh the state of the the GPU and",
+    "start": "856480",
+    "end": "862720"
+  },
+  {
+    "text": "the node right before you run your workload uh in this section we'll focus on the orchestrator as aspect of it uh",
+    "start": "862720",
+    "end": "870440"
+  },
+  {
+    "text": "obviously because it's cubec con so we want to talk about what we can do to make it easier from uh that",
+    "start": "870440",
+    "end": "877680"
+  },
+  {
+    "text": "perspective there's two phases in which you can run these heal checks even at the",
+    "start": "877959",
+    "end": "883040"
+  },
+  {
+    "text": "orchestrated one is you run checks initially before running the workload and then the other side is you run",
+    "start": "883040",
+    "end": "890120"
+  },
+  {
+    "text": "health checks during the life cycle of your GPU and node so initialization",
+    "start": "890120",
+    "end": "895480"
+  },
+  {
+    "text": "checks and issues can be detected through components like the device plugin uh which are checking things like the",
+    "start": "895480",
+    "end": "901360"
+  },
+  {
+    "text": "exit errors that are present and uh this is done in things like nvidia's uh GPU",
+    "start": "901360",
+    "end": "909399"
+  },
+  {
+    "text": "device plug-in and then during the life cycle of the node you can uh run monitoring as well on the health of the",
+    "start": "909399",
+    "end": "915440"
+  },
+  {
+    "text": "GPU and look at various metrics that that are being emitted uh that screenshot is from the dcgm exporter but",
+    "start": "915440",
+    "end": "921959"
+  },
+  {
+    "text": "then there's the other aspect during the life cycle where you can run regular checks uh and scripts through components",
+    "start": "921959",
+    "end": "928319"
+  },
+  {
+    "text": "like the node detector from kubernetes NPD is used widely across",
+    "start": "928319",
+    "end": "934360"
+  },
+  {
+    "text": "infrastructure providers and has a variety of heal checks which add node",
+    "start": "934360",
+    "end": "939560"
+  },
+  {
+    "text": "conditions to your node and that can be used by other components to uh take",
+    "start": "939560",
+    "end": "945399"
+  },
+  {
+    "text": "actions as well uh these are sample node conditions",
+    "start": "945399",
+    "end": "952560"
+  },
+  {
+    "text": "that uh show up uh by default and here you'll see examples like node conditions",
+    "start": "952560",
+    "end": "958959"
+  },
+  {
+    "text": "for memory pressure or disc pressure and uh pit pressure but most of these checks",
+    "start": "958959",
+    "end": "964199"
+  },
+  {
+    "text": "are focused on issues at the cubet level or the container d uh level and a few",
+    "start": "964199",
+    "end": "969839"
+  },
+  {
+    "text": "other aspects and none of these are GPU specific so that's a big gap in the open",
+    "start": "969839",
+    "end": "974920"
+  },
+  {
+    "text": "source um node problem detector ecosystem but the advantage of node",
+    "start": "974920",
+    "end": "981560"
+  },
+  {
+    "text": "problem detector is you can extend it with hell checks so some of the hell checks that have been run by many users",
+    "start": "981560",
+    "end": "988680"
+  },
+  {
+    "text": "um for a while both in the HPC world and by more advanced users of kubernetes are",
+    "start": "988680",
+    "end": "994480"
+  },
+  {
+    "text": "custom health checks which might be checking issues uh for particular gpus",
+    "start": "994480",
+    "end": "1000360"
+  },
+  {
+    "text": "that are used widely these could be Crown jobs that are run regularly uh especially between training training",
+    "start": "1000360",
+    "end": "1006560"
+  },
+  {
+    "text": "jobs or it could be running test like Lawrence Berkeley National Labs a node",
+    "start": "1006560",
+    "end": "1012600"
+  },
+  {
+    "text": "health checks which is open source and is known to be quite reliable and is widely used in the HPC world in",
+    "start": "1012600",
+    "end": "1019040"
+  },
+  {
+    "text": "particular there's also other health checks like the Azure HPC heal checks which are also open source and they run",
+    "start": "1019040",
+    "end": "1026400"
+  },
+  {
+    "text": "a specific health checks which extend lbnl uh checks and that are meant for uh",
+    "start": "1026400",
+    "end": "1033120"
+  },
+  {
+    "text": "the gpus that are supported by Azure so these are some of the uh heal",
+    "start": "1033120",
+    "end": "1038918"
+  },
+  {
+    "text": "checks from that e you can see there's checks for things like GPU counts and",
+    "start": "1038919",
+    "end": "1044798"
+  },
+  {
+    "text": "various types of bandwidth tests as well and these can also be categorized into",
+    "start": "1044799",
+    "end": "1051120"
+  },
+  {
+    "text": "tests which are not really impacting the workload and tests which can impact the workload like some of the bandwidth",
+    "start": "1051120",
+    "end": "1057280"
+  },
+  {
+    "text": "related tests we'll see how these tests can actually be used to run with NPD so as I",
+    "start": "1057280",
+    "end": "1065320"
+  },
+  {
+    "text": "mentioned before NPD is very extensible so you can add your own health checks in",
+    "start": "1065320",
+    "end": "1071400"
+  },
+  {
+    "text": "this case uh we are this is a very simple health check for counting the number of gpus that are present on uh on",
+    "start": "1071400",
+    "end": "1079520"
+  },
+  {
+    "text": "your node and here you see a parameter which specifies how frequently this hche",
+    "start": "1079520",
+    "end": "1085440"
+  },
+  {
+    "text": "needs to run and what script to run and that is defined in uh this Json file",
+    "start": "1085440",
+    "end": "1091080"
+  },
+  {
+    "text": "with with the script as well and this is another uh NPD plugin",
+    "start": "1091080",
+    "end": "1097720"
+  },
+  {
+    "text": "for checking xid errors for instance and is a list of xid errors are mentioned",
+    "start": "1097720",
+    "end": "1102960"
+  },
+  {
+    "text": "there maybe it's a bit hard to see for people at the back but then it's looking at the colel log to check whether these",
+    "start": "1102960",
+    "end": "1109120"
+  },
+  {
+    "text": "xid errors are present um and it's run periodically so if these errors are",
+    "start": "1109120",
+    "end": "1114360"
+  },
+  {
+    "text": "present then the node condition will be set to True uh by node problem detector and",
+    "start": "1114360",
+    "end": "1121280"
+  },
+  {
+    "text": "then you have the other component called the remedy controller which can take actions to mitigate and manage uh the",
+    "start": "1121280",
+    "end": "1128640"
+  },
+  {
+    "text": "state of the node and the GPU so there are many uh remedy controllers available",
+    "start": "1128640",
+    "end": "1134760"
+  },
+  {
+    "text": "you could use things like Medicaid which as open source or drino uh to run these remediation actions or",
+    "start": "1134760",
+    "end": "1142080"
+  },
+  {
+    "text": "you could also Define your own components for uh remediation so what kind of actions can",
+    "start": "1142080",
+    "end": "1149159"
+  },
+  {
+    "text": "you take typically it's around rebooting your node or uh resetting your GPU or",
+    "start": "1149159",
+    "end": "1155320"
+  },
+  {
+    "text": "just draining your node and moving your workload to a different node so once you do these actions you can also uh run",
+    "start": "1155320",
+    "end": "1163080"
+  },
+  {
+    "text": "these H checks again and if there is no issue then you can run the workload or move uh mov your workload to a different",
+    "start": "1163080",
+    "end": "1172000"
+  },
+  {
+    "text": "node there's so how do we test whether all of this works you could run Nvidia semi commands to uh to to modify the",
+    "start": "1173200",
+    "end": "1180880"
+  },
+  {
+    "text": "state of your GPU or you could do some simulation with networking by adding",
+    "start": "1180880",
+    "end": "1186520"
+  },
+  {
+    "text": "latency or limiting bandwidth or you could also use tools like kubernetes without cubet which allow you to create",
+    "start": "1186520",
+    "end": "1193559"
+  },
+  {
+    "text": "virtual nodes and uh simulate the life cycle of uh cuet without actually",
+    "start": "1193559",
+    "end": "1199440"
+  },
+  {
+    "text": "spinning up the gpus and setting up all the networking so in this demo we'll see how",
+    "start": "1199440",
+    "end": "1205880"
+  },
+  {
+    "text": "we can put some of these components together and uh see one simple example of a GPU",
+    "start": "1205880",
+    "end": "1213679"
+  },
+  {
+    "text": "issue I'm creating a cluster on Azure kubernetes service this is adding an a100 GPU with",
+    "start": "1215320",
+    "end": "1224120"
+  },
+  {
+    "text": "a100 node with eight gpus on it and I'm skipping the driver installation because I'm going to use uh the GP operator from",
+    "start": "1224120",
+    "end": "1230880"
+  },
+  {
+    "text": "Nvidia to configure the drivers so once that's",
+    "start": "1230880",
+    "end": "1237440"
+  },
+  {
+    "text": "done we can uh see all the various components of the operator and additional metadata that it adds U",
+    "start": "1237440",
+    "end": "1245559"
+  },
+  {
+    "text": "through which which is visible through QBE CDL describe and you'll see the node conditions which are present by default",
+    "start": "1245559",
+    "end": "1252080"
+  },
+  {
+    "text": "uh this is in the earlier screenshot I showed there's nothing GPU specific there I'm adding uh the additional no",
+    "start": "1252080",
+    "end": "1260120"
+  },
+  {
+    "text": "problem detector plugins for GPU related issues along with a couple of infinite",
+    "start": "1260120",
+    "end": "1266080"
+  },
+  {
+    "text": "band ones once I run that uh we'll see that",
+    "start": "1266080",
+    "end": "1271240"
+  },
+  {
+    "text": "there are node conditions which show up for uh which are GPU specific so one",
+    "start": "1271240",
+    "end": "1276559"
+  },
+  {
+    "text": "example you'll see there is the GPU count and it says that the GPU count is",
+    "start": "1276559",
+    "end": "1282360"
+  },
+  {
+    "text": "correct uh and the status is set to false you'll see a few other node",
+    "start": "1282360",
+    "end": "1287440"
+  },
+  {
+    "text": "conditions there as well",
+    "start": "1287440",
+    "end": "1290519"
+  },
+  {
+    "text": "and then now I'm going to be using Dro as the remedy controller and the dro spec is going to just look at these",
+    "start": "1296640",
+    "end": "1304919"
+  },
+  {
+    "text": "specific uh issues related to gpus so I'm specifying what I want to take",
+    "start": "1304919",
+    "end": "1310480"
+  },
+  {
+    "text": "actions on uh for uh for Dro to look at",
+    "start": "1310480",
+    "end": "1317360"
+  },
+  {
+    "text": "so we're running Dro now as well and now I'm going to go inside the",
+    "start": "1319440",
+    "end": "1325120"
+  },
+  {
+    "text": "node and then try to uh remove one GPU",
+    "start": "1325120",
+    "end": "1330279"
+  },
+  {
+    "text": "from that so we run nvd ASI we'll see there",
+    "start": "1330279",
+    "end": "1335400"
+  },
+  {
+    "text": "are eight gpus visible so these are from 0 to 7 and now I'm going to drop one of",
+    "start": "1335400",
+    "end": "1344600"
+  },
+  {
+    "text": "the gpus disable persistent mode first and then drain one GPU now we'll see that there are just seven",
+    "start": "1344600",
+    "end": "1351120"
+  },
+  {
+    "text": "gpus present 0 to six so this can have issues",
+    "start": "1351120",
+    "end": "1357159"
+  },
+  {
+    "text": "uh Downstream where if the application relies on there being eight gpus and if this is just a silent failure that's",
+    "start": "1357159",
+    "end": "1363120"
+  },
+  {
+    "text": "going to impact your workload negatively you'll see some events as",
+    "start": "1363120",
+    "end": "1369320"
+  },
+  {
+    "text": "well that are produced by node problem detector and you'll see the node",
+    "start": "1369320",
+    "end": "1375240"
+  },
+  {
+    "text": "condition which will now be set to True uh for G the GPU count and it says that",
+    "start": "1375240",
+    "end": "1381400"
+  },
+  {
+    "text": "expected eight but found seven gpus so that's a problem and now Dro has",
+    "start": "1381400",
+    "end": "1389159"
+  },
+  {
+    "text": "to take actions to ensure that you don't schedule other workloads on it and you'll see that scheduling's been",
+    "start": "1389159",
+    "end": "1396120"
+  },
+  {
+    "text": "disabled as",
+    "start": "1396120",
+    "end": "1398799"
+  },
+  {
+    "text": "well okay one second okay yeah so just to",
+    "start": "1405440",
+    "end": "1411000"
+  },
+  {
+    "text": "recap from Asus demo we saw that you can you should checkpoint workloads and then",
+    "start": "1411000",
+    "end": "1416919"
+  },
+  {
+    "text": "when there are restarts or issues those can be uh restored easily from those checkpoints but if you just do that it's",
+    "start": "1416919",
+    "end": "1424600"
+  },
+  {
+    "text": "possible that your pod will land on the same bad node again and if there are GPU hardware issues you're going to still",
+    "start": "1424600",
+    "end": "1431120"
+  },
+  {
+    "text": "have to deal with it and it's not really solving the problem but when you use NPD and Rano in",
+    "start": "1431120",
+    "end": "1437640"
+  },
+  {
+    "text": "conjunction with that you can remove the bad Hardware by ensure and ensure that the same part",
+    "start": "1437640",
+    "end": "1443960"
+  },
+  {
+    "text": "does not land on that same bad node so when you have both of these components working together hopefully you'll have",
+    "start": "1443960",
+    "end": "1451400"
+  },
+  {
+    "text": "happy machine learning Engineers definitely a high bar to meet but uh that's the",
+    "start": "1451400",
+    "end": "1457480"
+  },
+  {
+    "text": "hope and yes this is a representation of how AI will be happy on kubernetes if we",
+    "start": "1457480",
+    "end": "1463840"
+  },
+  {
+    "text": "put all of this together and that's certainly a very accurate representation of the type of workloads you're running",
+    "start": "1463840",
+    "end": "1470279"
+  },
+  {
+    "text": "now just",
+    "start": "1470279",
+    "end": "1473480"
+  },
+  {
+    "text": "kidding now we'll talk about some Advanced developments in this field and",
+    "start": "1475440",
+    "end": "1480720"
+  },
+  {
+    "text": "gaps in the ecosystem one of the things is that we",
+    "start": "1480720",
+    "end": "1486640"
+  },
+  {
+    "text": "need to handle uh gpus in many separate ways which makes",
+    "start": "1486640",
+    "end": "1491880"
+  },
+  {
+    "text": "it complicated U we don't usually have to think so much about CPUs and memories",
+    "start": "1491880",
+    "end": "1497480"
+  },
+  {
+    "text": "at this level uh because a lot of it has been solved through Integrations and checks in many different components in",
+    "start": "1497480",
+    "end": "1504279"
+  },
+  {
+    "text": "the ecosystem um one an example of this could be like no problem detector",
+    "start": "1504279",
+    "end": "1509760"
+  },
+  {
+    "text": "Upstream can make it easier to configure uh heal checks for GPU or make it",
+    "start": "1509760",
+    "end": "1515200"
+  },
+  {
+    "text": "standardized to run health checks for single node uh GPU issues and then",
+    "start": "1515200",
+    "end": "1522159"
+  },
+  {
+    "text": "there's other aspects as well when you have a cluster that runs different types of gpus and also gpus AC across",
+    "start": "1522159",
+    "end": "1528600"
+  },
+  {
+    "text": "different vendors like Nvidia and AMD and you might have tpus as well you need to manage all these heal checks and that",
+    "start": "1528600",
+    "end": "1535520"
+  },
+  {
+    "text": "can get pretty complex another very interesting area is",
+    "start": "1535520",
+    "end": "1542840"
+  },
+  {
+    "text": "around checkpoint and restore from the GPU perspective uh there's a project",
+    "start": "1542840",
+    "end": "1548480"
+  },
+  {
+    "text": "with a very fancy logo Creo and that's been there since around 2011 and it's",
+    "start": "1548480",
+    "end": "1554279"
+  },
+  {
+    "text": "been used for live migrating uh CPU based workloads that checkpoints the entire state of the process that's",
+    "start": "1554279",
+    "end": "1561760"
+  },
+  {
+    "text": "running and allows you to migrate it there is uh there are there's work that's going on to support creu for gpus",
+    "start": "1561760",
+    "end": "1570080"
+  },
+  {
+    "text": "and that there's a project from Nvidia called cuda checkpoint which allows you to checkpoint the state of the GPU",
+    "start": "1570080",
+    "end": "1575919"
+  },
+  {
+    "text": "itself and one main difference between this and just model based checkpointing",
+    "start": "1575919",
+    "end": "1581440"
+  },
+  {
+    "text": "is this can lead to transparent checkpointing from the user perspective so if this works uh smoothly and",
+    "start": "1581440",
+    "end": "1589120"
+  },
+  {
+    "text": "reliably then ideally you can manage um like all of this from the infas side and",
+    "start": "1589120",
+    "end": "1595080"
+  },
+  {
+    "text": "you don't have to deal with checkpointing from the user side if you can migrate your workload seamlessly in",
+    "start": "1595080",
+    "end": "1601000"
+  },
+  {
+    "text": "and a transparent manner um but there's lots of challenges and gaps as well in",
+    "start": "1601000",
+    "end": "1606799"
+  },
+  {
+    "text": "this one is how do you efficiently checkpoint the state of uh potentially",
+    "start": "1606799",
+    "end": "1613559"
+  },
+  {
+    "text": "thousands of nodes and how do you properly deal with internode communication when when there are failures and appropriately save and",
+    "start": "1613559",
+    "end": "1620760"
+  },
+  {
+    "text": "restore that state Microsoft has actually used it in production through this project C",
+    "start": "1620760",
+    "end": "1626799"
+  },
+  {
+    "text": "Singularity there's a nice paper describing that approach as well and they also have a component called device",
+    "start": "1626799",
+    "end": "1632559"
+  },
+  {
+    "text": "proxy which intercepts calls to the GPU and eventually uses that for checkpointing and",
+    "start": "1632559",
+    "end": "1638600"
+  },
+  {
+    "text": "restoring but there's still lots more to be done in this space to make it easy for the end user to uh to checkpoint and",
+    "start": "1638600",
+    "end": "1646120"
+  },
+  {
+    "text": "restore uh so this is a very interesting ad cool um so we talked about a bunch of",
+    "start": "1646120",
+    "end": "1652120"
+  },
+  {
+    "text": "things today um what's missing what else do we still need uh so we've talked primarily about failure but I would say",
+    "start": "1652120",
+    "end": "1658679"
+  },
+  {
+    "text": "that maintenance without uh failures or like normal maintenance where you might just want uh node image upgrades driver",
+    "start": "1658679",
+    "end": "1664720"
+  },
+  {
+    "text": "upgrades uh any kind of os tuning uh it's just as important um and I think",
+    "start": "1664720",
+    "end": "1670200"
+  },
+  {
+    "text": "this is something that still in the kubernetes world uh is still kind of lacking I would say um meta has a great",
+    "start": "1670200",
+    "end": "1677240"
+  },
+  {
+    "text": "blog article on they do maintenance trains uh you can also see Peter lank talk from last cucon they talk a lot",
+    "start": "1677240",
+    "end": "1682799"
+  },
+  {
+    "text": "about node life cycle on kubernetes and how they manage it with operators and controllers um we've also mostly been",
+    "start": "1682799",
+    "end": "1688600"
+  },
+  {
+    "text": "talking about single node failures today um I talked a little bit about networking issues with multi- node but I",
+    "start": "1688600",
+    "end": "1694840"
+  },
+  {
+    "text": "think in general multi node testing is still pretty tricky uh especially if you have jobs running um Nvidia does have",
+    "start": "1694840",
+    "end": "1701480"
+  },
+  {
+    "text": "Megatron LM which is like a real training workload that also helps kind of uh highlight some of these failures",
+    "start": "1701480",
+    "end": "1706679"
+  },
+  {
+    "text": "nickel is fairly focused on communication um not so much computation um and then the last thing I would call",
+    "start": "1706679",
+    "end": "1712159"
+  },
+  {
+    "text": "out is the ux for batch is definitely rapidly evolving still I mentioned Q job sets leader worker sets um those are all",
+    "start": "1712159",
+    "end": "1719000"
+  },
+  {
+    "text": "kind of like very active projects uh also relatively young projects I would say um and then just from like the",
+    "start": "1719000",
+    "end": "1724679"
+  },
+  {
+    "text": "device management device plugin cni side uh there's still a lot of work going on there with like Network operator uh as",
+    "start": "1724679",
+    "end": "1730760"
+  },
+  {
+    "text": "well as topology awareness both within the node and across nodes for Network topology so",
+    "start": "1730760",
+    "end": "1738080"
+  },
+  {
+    "text": "so what are the key takeaways from today we learned how GPU failures can be very disruptive particularly for training uh",
+    "start": "1739159",
+    "end": "1745559"
+  },
+  {
+    "text": "because of the synchronous nature of training and all the coordination that takes place then we described about",
+    "start": "1745559",
+    "end": "1751519"
+  },
+  {
+    "text": "health checks at various levels starting from the application layer where you can run innit containers for health checks",
+    "start": "1751519",
+    "end": "1757440"
+  },
+  {
+    "text": "and also some workload specific checks and then from the orchestrator layer while running the GPU you could use",
+    "start": "1757440",
+    "end": "1763960"
+  },
+  {
+    "text": "components like node problem detector for detecting issues proactively and regularly and you also use monitoring",
+    "start": "1763960",
+    "end": "1770880"
+  },
+  {
+    "text": "tools to add another layer of H checks in terms of resolution you do want to do",
+    "start": "1770880",
+    "end": "1776720"
+  },
+  {
+    "text": "checkpointing at the model layer model level so that you can checkpoint and restore weights across restarts and then",
+    "start": "1776720",
+    "end": "1784279"
+  },
+  {
+    "text": "you can combine that with remedy controller systems which look at uh",
+    "start": "1784279",
+    "end": "1789440"
+  },
+  {
+    "text": "conditions like node conditions from NPD and take custom actions to either mitigate the issue or move move the",
+    "start": "1789440",
+    "end": "1795880"
+  },
+  {
+    "text": "workload to a different node and you also want to make sure that you prevent uh no reuse for faulty",
+    "start": "1795880",
+    "end": "1802760"
+  },
+  {
+    "text": "Hardware we touched upon some ongoing work in this space in terms of making GPU heal checks more native to",
+    "start": "1802760",
+    "end": "1809399"
+  },
+  {
+    "text": "kubernetes and transparent GPU checkpointing via Creo and there's also",
+    "start": "1809399",
+    "end": "1814960"
+  },
+  {
+    "text": "work around smoother maintenance of uh GPU upgrades as well that needs to be done so with all of these approaches we",
+    "start": "1814960",
+    "end": "1822120"
+  },
+  {
+    "text": "hope that your AI Training Systems can become significantly more resilient and",
+    "start": "1822120",
+    "end": "1827279"
+  },
+  {
+    "text": "we are now open to questions as well so thank [Applause]",
+    "start": "1827279",
+    "end": "1836120"
+  },
+  {
+    "text": "you do you have any questions yeah there's mic's on both sides as",
+    "start": "1836120",
+    "end": "1842760"
+  },
+  {
+    "text": "well so can you hear me okay awesome so uh",
+    "start": "1844679",
+    "end": "1850360"
+  },
+  {
+    "text": "maybe this is a knife question but like why are we discussing so much on like nv's failures like why cannot that",
+    "start": "1850360",
+    "end": "1856360"
+  },
+  {
+    "text": "cannot be handled at the underlying Hardware level or operating system level why it is",
+    "start": "1856360",
+    "end": "1862039"
+  },
+  {
+    "text": "coming application Level uh because I mean I'm guessing CPS Also may be having",
+    "start": "1862039",
+    "end": "1867880"
+  },
+  {
+    "text": "these issues and we don't notice it so often yeah yeah that's that's a great",
+    "start": "1867880",
+    "end": "1873279"
+  },
+  {
+    "text": "question and I think one is it's there's lots of new gpus that are coming up and",
+    "start": "1873279",
+    "end": "1878519"
+  },
+  {
+    "text": "it's maturing up as well so part of that is around reliability of the hardware",
+    "start": "1878519",
+    "end": "1883960"
+  },
+  {
+    "text": "that is initially provided as well uh and then you know there's additional components as well that are present for",
+    "start": "1883960",
+    "end": "1890639"
+  },
+  {
+    "text": "GPU nodes so that is the first layer in terms of reliability and then there's",
+    "start": "1890639",
+    "end": "1896559"
+  },
+  {
+    "text": "more checks that need to be done from um various layers where you want to",
+    "start": "1896559",
+    "end": "1901600"
+  },
+  {
+    "text": "actively check uh the state of the GPU and many components there's lots of",
+    "start": "1901600",
+    "end": "1907279"
+  },
+  {
+    "text": "checks by different components that are running for CPU specifically but because",
+    "start": "1907279",
+    "end": "1912679"
+  },
+  {
+    "text": "so many of these tools are just adapting for gpus we still need to do these checks but the underlying stuff is the",
+    "start": "1912679",
+    "end": "1918559"
+  },
+  {
+    "text": "hardware quality itself and then some uh other issues that show up during the",
+    "start": "1918559",
+    "end": "1924399"
+  },
+  {
+    "text": "runtime you still need to proactivity check I would say Nvidia probably does want like they don't want to have a",
+    "start": "1924399",
+    "end": "1929639"
+  },
+  {
+    "text": "reputation for bad reliability right so it's definitely something I think they're aware of but I think like the h100s in particular were pretty",
+    "start": "1929639",
+    "end": "1935840"
+  },
+  {
+    "text": "notorious for this um but I know they have some improvements I think they're working on for future Generations",
+    "start": "1935840",
+    "end": "1942518"
+  },
+  {
+    "text": "yeah yeah nice talk uh so your key te we you mentioned the the Proactive or the",
+    "start": "1942600",
+    "end": "1950000"
+  },
+  {
+    "text": "application specific check like Deco check using maybe data containers can",
+    "start": "1950000",
+    "end": "1955399"
+  },
+  {
+    "text": "you comment more and elaborate a little bit more about the proactive approach because it seems to me the most sto",
+    "start": "1955399",
+    "end": "1961559"
+  },
+  {
+    "text": "issue here is re active approach yeah I can take this one yeah so I mean I think uh like no problem",
+    "start": "1961559",
+    "end": "1969120"
+  },
+  {
+    "text": "detector is detecting issues you know after they've happened um but as these nodes like are running workloads like",
+    "start": "1969120",
+    "end": "1974840"
+  },
+  {
+    "text": "failures might happen uh or like something something might happen before the workload is actually running so like",
+    "start": "1974840",
+    "end": "1980159"
+  },
+  {
+    "text": "ideally you know if a node is Idle you want to validate that it is good um I think in the GPU like HPC World things",
+    "start": "1980159",
+    "end": "1986320"
+  },
+  {
+    "text": "are kind of flipped from CPU land I think in CPU land you assume the node is good until you have an issue I think in",
+    "start": "1986320",
+    "end": "1993279"
+  },
+  {
+    "text": "GPU HBC and just kind of flipped like if we get new hardware we assume it's bad until we validated it um and if you know",
+    "start": "1993279",
+    "end": "1999519"
+  },
+  {
+    "text": "there's an issue then we go and fix that first so okay thank you by the way I'm from mvia",
+    "start": "1999519",
+    "end": "2005180"
+  },
+  {
+    "text": "[Laughter] thanks for the talk um on AKs is there a",
+    "start": "2005180",
+    "end": "2011519"
+  },
+  {
+    "text": "way to um share infinite band devices let's if a node has multiple INF devices",
+    "start": "2011519",
+    "end": "2018399"
+  },
+  {
+    "text": "can a pod request for a certain number uh and if there is can we also share a",
+    "start": "2018399",
+    "end": "2025240"
+  },
+  {
+    "text": "given infin band Device between multiple pods could you repat this the last part",
+    "start": "2025240",
+    "end": "2030399"
+  },
+  {
+    "text": "of that sorry um if if there is a way to actually request certain number of infinite band devices can we also share",
+    "start": "2030399",
+    "end": "2037880"
+  },
+  {
+    "text": "device between multiple Parts yeah so I",
+    "start": "2037880",
+    "end": "2043600"
+  },
+  {
+    "text": "mean yes I think the specifics will depend on like your cni device plugin setup um but if you look at what like",
+    "start": "2043600",
+    "end": "2049599"
+  },
+  {
+    "text": "Network operator and like mulus have today um so I mean for sharing devices there's like melox has a shared uh",
+    "start": "2049599",
+    "end": "2055760"
+  },
+  {
+    "text": "shared HCA device plugin I think it's called Uh there's also like a dedicated sov device plugin plus cni so it depends",
+    "start": "2055760",
+    "end": "2062839"
+  },
+  {
+    "text": "like what setup you want but one of those kind of can do either scenario yeah and uh is there there something",
+    "start": "2062839",
+    "end": "2068118"
+  },
+  {
+    "text": "that AKs recommends today uh those will work on AKs yeah I think there's this is Lily Lily's example you should yeah you",
+    "start": "2068119",
+    "end": "2074960"
+  },
+  {
+    "text": "should talk to after yeah we share the repo as well after the talk thank",
+    "start": "2074960",
+    "end": "2080839"
+  },
+  {
+    "text": "you hey thank you for bringing up the Cuda checkpoint project that's pretty fascinating for us in infra uh because",
+    "start": "2080839",
+    "end": "2087919"
+  },
+  {
+    "text": "it seems like it could solve a lot of problems do you know is it like at the idea stage right now or is that",
+    "start": "2087919",
+    "end": "2093839"
+  },
+  {
+    "text": "something you're actively trying to deploy in your so this is a project from Nvidia what I saw was they had the binary on",
+    "start": "2093839",
+    "end": "2100560"
+  },
+  {
+    "text": "the repo and my understanding was that they're working on it but I'd let someone from Nvidia comment on the state",
+    "start": "2100560",
+    "end": "2107680"
+  },
+  {
+    "text": "of of that project yeah there's also another",
+    "start": "2107680",
+    "end": "2112880"
+  },
+  {
+    "text": "project called forensic checkpointing From kubernetes perspective which allows you to checkpoint workloads but I think",
+    "start": "2112880",
+    "end": "2117920"
+  },
+  {
+    "text": "the whole flow still needs to be smoother in terms of checkpoint and then restore yeah so I had an acuda",
+    "start": "2117920",
+    "end": "2124079"
+  },
+  {
+    "text": "checkpoint question as well were you you guys are not using that to do kind of on the Fly repair of a job or have you done",
+    "start": "2124079",
+    "end": "2131280"
+  },
+  {
+    "text": "that so yeah we are not uh right now but the other project that I mentioned from",
+    "start": "2131280",
+    "end": "2136520"
+  },
+  {
+    "text": "Singularity that Microsoft has um Let me show so they have details on how they're",
+    "start": "2136520",
+    "end": "2142760"
+  },
+  {
+    "text": "actually using it and there's also a demo uh by the CTU of azure on how this",
+    "start": "2142760",
+    "end": "2148680"
+  },
+  {
+    "text": "could be used in production for checkpointing and moving the workload from one node to uh another and then",
+    "start": "2148680",
+    "end": "2154680"
+  },
+  {
+    "text": "restoring it so that allows you to preempt uh certain jobs if there's a",
+    "start": "2154680",
+    "end": "2160480"
+  },
+  {
+    "text": "higher priority job coming in it allows you to checkpoint and restore but they're using a different uh different set of tools for for doing that okay",
+    "start": "2160480",
+    "end": "2167920"
+  },
+  {
+    "text": "there's a demo you said yeah yeah there's a demo online and I can share the the link it's called project Forge",
+    "start": "2167920",
+    "end": "2173520"
+  },
+  {
+    "text": "is the name of the the demo of how they're using it and then thank you so much this paper has the details on EX",
+    "start": "2173520",
+    "end": "2180160"
+  },
+  {
+    "text": "what the components involved for super exciting awesome thank you I uh thanks for the good",
+    "start": "2180160",
+    "end": "2186640"
+  },
+  {
+    "text": "presentation so um can you touch upon the effective training uh uh efficiency",
+    "start": "2186640",
+    "end": "2193480"
+  },
+  {
+    "text": "of the cluster um you know we've seen like different numbers today like 90% lava 97% core view so when you have",
+    "start": "2193480",
+    "end": "2201079"
+  },
+  {
+    "text": "these kinds of erors then how do you sort of come up I mean have you guys done like uh I don't think we have a number",
+    "start": "2201079",
+    "end": "2208319"
+  },
+  {
+    "text": "off the top of my head that I could share um those are certainly like good targets I would say the numbers that you've seen today like you generally",
+    "start": "2208319",
+    "end": "2214680"
+  },
+  {
+    "text": "want the cluster to be fully utilized because like you usually you have almost unlimited work effectively so like if",
+    "start": "2214680",
+    "end": "2221000"
+  },
+  {
+    "text": "you're not saturating it something is wrong right um so I would say generally like we don't have a lot of times where",
+    "start": "2221000",
+    "end": "2227200"
+  },
+  {
+    "text": "there's idle capacity because of problems um but it's something that like it's just like an SLA for any service",
+    "start": "2227200",
+    "end": "2232720"
+  },
+  {
+    "text": "right like you want to have basically 100% up time which for ML means you're using your gpus all the time basically",
+    "start": "2232720",
+    "end": "2238000"
+  },
+  {
+    "text": "so",
+    "start": "2238000",
+    "end": "2241000"
+  }
+]
