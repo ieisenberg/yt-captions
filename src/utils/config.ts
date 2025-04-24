@@ -39,11 +39,17 @@ export const getConfig = (): Config => {
 
 export const saveConfig = (config: Config) => {
   const configPath = path.join(__dirname, "..", "config", "config.json");
+  // Sort configurations by channelId, then by channel name
+  const sortedConfig = [...config].sort((a, b) => {
+    const aKey = a.channelId || a.channel;
+    const bKey = b.channelId || b.channel;
+    return aKey.localeCompare(bKey);
+  });
   fs.writeFileSync(
     configPath,
     JSON.stringify(
       {
-        configurations: config,
+        configurations: sortedConfig,
       },
       null,
       2
