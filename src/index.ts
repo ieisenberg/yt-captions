@@ -245,13 +245,13 @@ const getVideosForChannel = async (channelId: string, yt: Innertube): Promise<Vi
 
 	// Check if the cache file exists
 	const cacheFile = path.join(CAPTIONS_FOLDER, channelId, 'videos.json')
-	if (fs.existsSync(cacheFile)) {
-		// Read the cache file
-		const data = fs.readFileSync(cacheFile, 'utf8')
-		const videos: Video[] = JSON.parse(data)
-		logger.warn(`Found ${videos.length} videos in cache.`)
-		return videos
-	}
+	// if (fs.existsSync(cacheFile)) {
+	// 	// Read the cache file
+	// 	const data = fs.readFileSync(cacheFile, 'utf8')
+	// 	const videos: Video[] = JSON.parse(data)
+	// 	logger.warn(`Found ${videos.length} videos in cache.`)
+	// 	return videos
+	// }
 
 	// Fetch the videos from YouTube
 	logger.info(`Fetching videos from channel ${channelId}...`)
@@ -426,10 +426,10 @@ async function main() {
 		await Promise.all(
 			videosWithChannel.map(({ channel, video }) =>
 				captionDownloadLimit(async () => {
-					if (skiplistManager.has(video.id)) {
-						logger.warn(`Skipping video ${video.id} as it is in the skiplist.`)
-						return
-					}
+					// if (skiplistManager.has(video.id)) {
+					// 	logger.warn(`Skipping video ${video.id} as it is in the skiplist.`)
+					// 	return
+					// }
 					const result = await downloadAndSaveCaption(video.id, channel.channelId!, yt, 3)
 					if (result === CaptionDownloadResult.NoCaptions) {
 						skiplistManager.add(video.id)
