@@ -84,10 +84,12 @@ async function getResolvedConfig(concurrency: number = 3, maxRetries: number = 3
 						{
 							retries: maxRetries,
 							onFailedAttempt(error) {
-								logger.error(
-									`Could not find channel ${channel.channel} in search results, There are ${error.retriesLeft} retries left.`
-								)
-								logger.error(`Cause: ${error.message}`)
+								// logger.error(
+								// 	`Could not find channel ${channel.channel} in search results, There are ${error.retriesLeft} retries left.`
+								// )
+								if(error.retriesLeft === 0) {
+									logger.error(`Cause: ${error.message}`)
+								}
 							},
 							randomize: true
 						}
@@ -124,7 +126,10 @@ const getVideoContinuation = async (
 	return pRetry(() => continuation.getContinuation(), {
 		retries: maxRetries,
 		onFailedAttempt: (error) => {
-			logger.error(`Failed to get continuation, There are ${error.retriesLeft} retries left Error: ${error.message}`)
+			// logger.error(`Failed to get continuation, There are ${error.retriesLeft} retries left Error: ${error.message}`)
+			if(error.retriesLeft === 0) {
+				logger.error(`Cause: ${error.message}`)
+			}
 		},
 		randomize: true
 	})
@@ -170,7 +175,10 @@ const recursiveGetAllVideosFromChannel = async (
 		const videosResponse = await pRetry(() => channel.getVideos(), {
 			retries: maxRetries,
 			onFailedAttempt: (error) => {
-				logger.error(`Failed to get videos, There are ${error.retriesLeft} retries left Error : ${error.message}`)
+				// logger.error(`Failed to get videos, There are ${error.retriesLeft} retries left Error : ${error.message}`)
+				if(error.retriesLeft === 0) {
+					logger.error(`Cause: ${error.message}`)
+				}
 			},
 			randomize: true
 		})
@@ -222,9 +230,12 @@ const getAllVideosFromChannel = async (channelId: string, yt: Innertube, maxRetr
 			retries: maxRetries,
 			onFailedAttempt: (error) => {
 				// Log error if failed to fetch channel
-				logger.error(
-					`Failed to get channel ${channelId}, There are ${error.retriesLeft} retries left Error : ${error.message}`
-				)
+				// logger.error(
+				// 	`Failed to get channel ${channelId}, There are ${error.retriesLeft} retries left Error : ${error.message}`
+				// )
+				if(error.retriesLeft === 0) {
+					logger.error(`Cause: ${error.message}`)
+				}
 			},
 			randomize: true
 		}
@@ -281,9 +292,12 @@ const downloadCaptionForVideo = async (videoId: string, yt: Innertube, maxRetrie
 	const info = await pRetry(() => yt.getInfo(videoId), {
 		retries: maxRetries,
 		onFailedAttempt: (error) => {
-			logger.error(
-				`Failed to get video info for video ${videoId}, There are ${error.retriesLeft} retries left Error : ${error.message}`
-			)
+			// logger.error(
+			// 	`Failed to get video info for video ${videoId}, There are ${error.retriesLeft} retries left Error : ${error.message}`
+			// )
+			if(error.retriesLeft === 0) {
+				logger.error(`Cause: ${error.message}`)
+			}
 		},
 		randomize: true
 	})
@@ -292,9 +306,12 @@ const downloadCaptionForVideo = async (videoId: string, yt: Innertube, maxRetrie
 	const defaultTranscriptInfo = await pRetry(() => info.getTranscript(), {
 		retries: maxRetries,
 		onFailedAttempt: (error) => {
-			logger.error(
-				`Failed to get transcript for video ${videoId}, There are ${error.retriesLeft} retries left Error : ${error.message}`
-			)
+			// logger.error(
+			// 	`Failed to get transcript for video ${videoId}, There are ${error.retriesLeft} retries left Error : ${error.message}`
+			// )
+			if(error.retriesLeft === 0) {
+				logger.error(`Cause: ${error.message}`)
+			}
 		},
 		randomize: true
 	}).catch((error) => {
@@ -428,10 +445,10 @@ async function main() {
 		await Promise.all(
 			videosWithChannel.map(({ channel, video }) =>
 				captionDownloadLimit(async () => {
-					// if (skiplistManager.has(video.id)) {
-					// 	logger.warn(`Skipping video ${video.id} as it is in the skiplist.`)
-					// 	return
-					// }
+					if (skiplistManager.has(video.id)) {
+						logger.warn(`Skipping video ${video.id} as it is in the skiplist.`)
+						return
+					}
 					const result = await downloadAndSaveCaption(video.id, channel.channelId!, yt, 3)
 					if (result === CaptionDownloadResult.NoCaptions) {
 						skiplistManager.add(video.id)
