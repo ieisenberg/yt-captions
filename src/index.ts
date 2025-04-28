@@ -6,6 +6,8 @@ import pRetry from 'p-retry'
 import pLimit from 'p-limit'
 import path from 'path'
 
+logger.level = 'error'
+
 const CAPTIONS_FOLDER = './captions'
 const SKIPLIST_FILE = path.join(CAPTIONS_FOLDER, 'skiplist.json')
 
@@ -399,7 +401,7 @@ class SkiplistManager {
 async function main() {
 	try {
 		const resolvedConfig = await getResolvedConfig()
-		const limit = pLimit(3)
+		const limit = pLimit(10)
 		const skiplistManager = new SkiplistManager(SKIPLIST_FILE)
 
 		const videos = await Promise.all(
@@ -421,7 +423,7 @@ async function main() {
 			}))
 		)
 
-		const captionDownloadLimit = pLimit(10)
+		const captionDownloadLimit = pLimit(20)
 
 		await Promise.all(
 			videosWithChannel.map(({ channel, video }) =>
