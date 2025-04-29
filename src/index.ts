@@ -87,7 +87,7 @@ async function getResolvedConfig(concurrency: number = 3, maxRetries: number = 3
 								// logger.error(
 								// 	`Could not find channel ${channel.channel} in search results, There are ${error.retriesLeft} retries left.`
 								// )
-								if(error.retriesLeft === 0) {
+								if (error.retriesLeft === 0) {
 									logger.error(`Cause: ${error.message}`)
 								}
 							},
@@ -127,7 +127,7 @@ const getVideoContinuation = async (
 		retries: maxRetries,
 		onFailedAttempt: (error) => {
 			// logger.error(`Failed to get continuation, There are ${error.retriesLeft} retries left Error: ${error.message}`)
-			if(error.retriesLeft === 0) {
+			if (error.retriesLeft === 0) {
 				logger.error(`Cause: ${error.message}`)
 			}
 		},
@@ -145,7 +145,7 @@ const mapVideo = (video: YTNodes.Video): Video => {
 		id: video.video_id,
 		title: video.title.toString(),
 		duration: video.duration.text,
-		endpoint: video.endpoint?.toURL(),
+		endpoint: `https://www.youtube.com/watch?v=${video.video_id}`,
 		published: video.published?.toString(),
 		description: video.description
 	}
@@ -176,7 +176,7 @@ const recursiveGetAllVideosFromChannel = async (
 			retries: maxRetries,
 			onFailedAttempt: (error) => {
 				// logger.error(`Failed to get videos, There are ${error.retriesLeft} retries left Error : ${error.message}`)
-				if(error.retriesLeft === 0) {
+				if (error.retriesLeft === 0) {
 					logger.error(`Cause: ${error.message}`)
 				}
 			},
@@ -233,7 +233,7 @@ const getAllVideosFromChannel = async (channelId: string, yt: Innertube, maxRetr
 				// logger.error(
 				// 	`Failed to get channel ${channelId}, There are ${error.retriesLeft} retries left Error : ${error.message}`
 				// )
-				if(error.retriesLeft === 0) {
+				if (error.retriesLeft === 0) {
 					logger.error(`Cause: ${error.message}`)
 				}
 			},
@@ -295,7 +295,7 @@ const downloadCaptionForVideo = async (videoId: string, yt: Innertube, maxRetrie
 			// logger.error(
 			// 	`Failed to get video info for video ${videoId}, There are ${error.retriesLeft} retries left Error : ${error.message}`
 			// )
-			if(error.retriesLeft === 0) {
+			if (error.retriesLeft === 0) {
 				logger.error(`Cause: ${error.message}`)
 			}
 		},
@@ -309,7 +309,7 @@ const downloadCaptionForVideo = async (videoId: string, yt: Innertube, maxRetrie
 			// logger.error(
 			// 	`Failed to get transcript for video ${videoId}, There are ${error.retriesLeft} retries left Error : ${error.message}`
 			// )
-			if(error.retriesLeft === 0) {
+			if (error.retriesLeft === 0) {
 				logger.error(`Cause: ${error.message}`)
 			}
 		},
