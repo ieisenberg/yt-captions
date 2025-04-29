@@ -1,0 +1,2128 @@
+[
+  {
+    "start": "0",
+    "end": "120000"
+  },
+  {
+    "text": "on january 4th 2021 slack experienced a global outage that prevented customers",
+    "start": "80",
+    "end": "5440"
+  },
+  {
+    "text": "from using the service for nearly five hours slack has released the root cause analysis incident report which i'm going",
+    "start": "5440",
+    "end": "12320"
+  },
+  {
+    "text": "to summarize in the first part of this video after that i'll provide a lengthy deep dive analysis of the incident so",
+    "start": "12320",
+    "end": "18880"
+  },
+  {
+    "text": "make sure to stick around for that if you're new here i make backend engineering videos and also cover",
+    "start": "18880",
+    "end": "24240"
+  },
+  {
+    "text": "software news so make sure to like comment and subscribe if you would like to see more plus it really helps the",
+    "start": "24240",
+    "end": "30240"
+  },
+  {
+    "text": "channel let's just jump into it so this is an approximation of the slack",
+    "start": "30240",
+    "end": "35280"
+  },
+  {
+    "text": "architecture based on what was described in the reports clients connect to load balancers load balancers distribute",
+    "start": "35280",
+    "end": "42320"
+  },
+  {
+    "text": "requests to the backend servers and finally backend servers make requests to",
+    "start": "42320",
+    "end": "47360"
+  },
+  {
+    "text": "database servers which is powered by mysql through the test sharing all of",
+    "start": "47360",
+    "end": "52399"
+  },
+  {
+    "text": "those are connected by routers in cross boundary network in the cloud provider",
+    "start": "52399",
+    "end": "59440"
+  },
+  {
+    "text": "which i believe it's aws around 6 am january 4th the cross boundary routers",
+    "start": "59440",
+    "end": "65119"
+  },
+  {
+    "text": "sitting between the load balancer and back in and the back into db started to drop packets this led to the load",
+    "start": "65119",
+    "end": "71760"
+  },
+  {
+    "text": "balancer slowly marking back-ends as unhealthy and removing them from the fleet which compounded the amount of",
+    "start": "71760",
+    "end": "78960"
+  },
+  {
+    "text": "requests coming from the client the number of failed requests eventually triggered the provisioning service to",
+    "start": "78960",
+    "end": "84320"
+  },
+  {
+    "text": "start spinning an absurdly large number of back-end servers however the",
+    "start": "84320",
+    "end": "89920"
+  },
+  {
+    "text": "provisioning service could not keep up with the huge demand and shortly started",
+    "start": "89920",
+    "end": "95119"
+  },
+  {
+    "text": "to time out for the same networking reasons and eventually ran out of maximum open file handlers eventually",
+    "start": "95119",
+    "end": "102240"
+  },
+  {
+    "text": "slack cloud provider increased the network capacity and back in servers and everything went back to normal at around",
+    "start": "102240",
+    "end": "109280"
+  },
+  {
+    "text": "11 a.m pst this was a summary of the slack outage now sit back grab your",
+    "start": "109280",
+    "end": "114880"
+  },
+  {
+    "text": "favorite beverage and let's go through the detail incident report guys",
+    "start": "114880",
+    "end": "121600"
+  },
+  {
+    "start": "120000",
+    "end": "320000"
+  },
+  {
+    "text": "all right guys so slack have released the final root cause",
+    "start": "121600",
+    "end": "126840"
+  },
+  {
+    "text": "analysis report and now we know what caused the outage that happened on",
+    "start": "126840",
+    "end": "132720"
+  },
+  {
+    "text": "january 4th 2021 monday people just returning to work i",
+    "start": "132720",
+    "end": "139280"
+  },
+  {
+    "text": "don't envy the the slack engineers that had to kind of suffer this in the beginning of the year",
+    "start": "139280",
+    "end": "146319"
+  },
+  {
+    "text": "man usually at the beginning of the year things are slowing down we don't have much work to do like you",
+    "start": "146319",
+    "end": "151920"
+  },
+  {
+    "text": "know checking emails us i don't envy the slack injuries but they did it pretty good job but guys",
+    "start": "151920",
+    "end": "158160"
+  },
+  {
+    "text": "from the issue somebody here we're going to read it in a minute but whatever happened to that outage",
+    "start": "158160",
+    "end": "164319"
+  },
+  {
+    "text": "unlike the google outage unlike the amazon outage unlike the microstrategy that i talked about",
+    "start": "164319",
+    "end": "171360"
+  },
+  {
+    "text": "slack has no fault here it's all the cloud provider in my opinion if if network if the network just the",
+    "start": "171360",
+    "end": "178640"
+  },
+  {
+    "text": "infrastructure underneath you just started falling apart what could you do you don't have any",
+    "start": "178640",
+    "end": "185200"
+  },
+  {
+    "text": "choice right so the networking infrastructure the routers right uh just like",
+    "start": "185200",
+    "end": "190959"
+  },
+  {
+    "text": "it's this is no fault of slack in my opinion but as i explained in summary however i",
+    "start": "190959",
+    "end": "197680"
+  },
+  {
+    "text": "think they could have done in the in the in the remedy section that we're gonna",
+    "start": "197680",
+    "end": "203280"
+  },
+  {
+    "text": "go through they could have done few things to avoid",
+    "start": "203280",
+    "end": "208319"
+  },
+  {
+    "text": "that problem at least or at least minimize it let's go through this let's go through",
+    "start": "208319",
+    "end": "214080"
+  },
+  {
+    "text": "our report but grab your favorite beverage and let's uh sip and then",
+    "start": "214080",
+    "end": "219680"
+  },
+  {
+    "text": "enjoy issue summary starting around 6am pst on 2021 january 4th some customers",
+    "start": "219680",
+    "end": "226560"
+  },
+  {
+    "text": "started experiencing occasional errors and increased latency while using slack i start getting tweet at the same exact",
+    "start": "226560",
+    "end": "233280"
+  },
+  {
+    "text": "time i wake up around 5 a.m every morning so i started getting tweets actually before that maybe around 5 30 i",
+    "start": "233280",
+    "end": "240400"
+  },
+  {
+    "text": "started getting the tweets right and uh some of you say hey i'm saying talk",
+    "start": "240400",
+    "end": "245519"
+  },
+  {
+    "text": "about the slack outage what's like hours like i don't even use slack i have slack on my phone but i only subscribe to",
+    "start": "245519",
+    "end": "252000"
+  },
+  {
+    "text": "haproxy community that's that's the only thing and i barely look at it as well so",
+    "start": "252000",
+    "end": "258000"
+  },
+  {
+    "text": "yes though so then the tweets started reasoning and they said okay this is a real outage around 7 a.m pst",
+    "start": "258000",
+    "end": "264240"
+  },
+  {
+    "text": "there was a rapid increase in errors and slack was not usable for all customers",
+    "start": "264240",
+    "end": "269520"
+  },
+  {
+    "text": "around 8 45 am pst some customers began to see improvement but others who were",
+    "start": "269520",
+    "end": "275520"
+  },
+  {
+    "text": "trying to launch their slack clients were not able to do so by around 9 15 pst most",
+    "start": "275520",
+    "end": "283280"
+  },
+  {
+    "text": "customers were able to use slack again normally we continued to experience elevated",
+    "start": "283280",
+    "end": "288560"
+  },
+  {
+    "text": "errors until at 10 40 a.m pst after which all customers were able to use",
+    "start": "288560",
+    "end": "294880"
+  },
+  {
+    "text": "slack again normally so around what 4 hours",
+    "start": "294880",
+    "end": "300000"
+  },
+  {
+    "text": "40 minutes so 5 hours almost so yeah that's not so bad if you think",
+    "start": "300000",
+    "end": "305360"
+  },
+  {
+    "text": "about it and i know we made in the early report video that i made i made a lot of",
+    "start": "305360",
+    "end": "310880"
+  },
+  {
+    "text": "i guess assumption and assertions right to the cache because they they ask",
+    "start": "310880",
+    "end": "316080"
+  },
+  {
+    "text": "customers hey do a control f5 whatever that command to do a full refresh or a hard refresh right and that was now it",
+    "start": "316080",
+    "end": "323039"
+  },
+  {
+    "start": "320000",
+    "end": "1800000"
+  },
+  {
+    "text": "makes sense based on the summary right we're going to go and talk about that but what goes around 6 am pst we begin",
+    "start": "323039",
+    "end": "329680"
+  },
+  {
+    "text": "to experience packet loss between servers caused by a routing problem between network boundaries",
+    "start": "329680",
+    "end": "337199"
+  },
+  {
+    "text": "and that that's an interesting name network boundaries on the network for our cloud provider",
+    "start": "337199",
+    "end": "342320"
+  },
+  {
+    "text": "provider so they didn't specify what are the what is their crowd provider but i googled it it's aws i don't know why",
+    "start": "342320",
+    "end": "348240"
+  },
+  {
+    "text": "would wouldn't they mention it here like it but it's clear it's aws looks like it",
+    "start": "348240",
+    "end": "353840"
+  },
+  {
+    "text": "right by 6 30 a.m pst the packet loss began to",
+    "start": "353840",
+    "end": "359039"
+  },
+  {
+    "text": "worsen is that even ward warsong can you say worse than english people orson i guess",
+    "start": "359039",
+    "end": "364400"
+  },
+  {
+    "text": "orson closing increased error rates from our backend servers",
+    "start": "364400",
+    "end": "370240"
+  },
+  {
+    "text": "we were paged at 6 46 a.m pst due to high error rate so that that's when they",
+    "start": "370240",
+    "end": "376800"
+  },
+  {
+    "text": "actually got notified so it started at 6 a.m they were paged 40 minutes later",
+    "start": "376800",
+    "end": "382720"
+  },
+  {
+    "text": "because of the increased amount of error but essentially they didn't get remember guys this is they didn't get paged",
+    "start": "382720",
+    "end": "390000"
+  },
+  {
+    "text": "because of packet loss and that's something they're gonna remedy because if they if they got paid",
+    "start": "390000",
+    "end": "396720"
+  },
+  {
+    "text": "or or they get some monetary says hey there's a lot of packet loss what's",
+    "start": "396720",
+    "end": "401840"
+  },
+  {
+    "text": "going on no the packet loss led to servers being unresponsive and as a result being",
+    "start": "401840",
+    "end": "408160"
+  },
+  {
+    "text": "removed from the fleet and be as a result increased errors and that errors got",
+    "start": "408160",
+    "end": "413919"
+  },
+  {
+    "text": "triggered so that's that's something we see very very very common",
+    "start": "413919",
+    "end": "419440"
+  },
+  {
+    "text": "pattern with google as well the root cause didn't trigger the uh paging right",
+    "start": "419440",
+    "end": "427440"
+  },
+  {
+    "text": "uh to to to the engineers so they didn't know as early as possible",
+    "start": "427440",
+    "end": "432560"
+  },
+  {
+    "text": "the ramification downstream effect is what caused the paging right the",
+    "start": "432560",
+    "end": "439440"
+  },
+  {
+    "text": "notifications to the engineers that hey something is going on right this is a very common pattern and being",
+    "start": "439440",
+    "end": "446479"
+  },
+  {
+    "text": "the same thing with amazon happened i remember google same exact thing they didn't get when their caller went",
+    "start": "446479",
+    "end": "453440"
+  },
+  {
+    "text": "to xero they didn't get notification right they got a notification when actually the users couldn't authenticate",
+    "start": "453440",
+    "end": "459520"
+  },
+  {
+    "text": "which is a downstream effect as a result of this very very common uh things in",
+    "start": "459520",
+    "end": "464639"
+  },
+  {
+    "text": "engineering we see it all the time it's it's not what you think it is it's always something",
+    "start": "464639",
+    "end": "470800"
+  },
+  {
+    "text": "else that caused the problem right and what do you do as engineers so you try to kind of remedy that by trying to",
+    "start": "470800",
+    "end": "478160"
+  },
+  {
+    "text": "understand it better in addition many backend servers were busy servicing high",
+    "start": "478160",
+    "end": "483919"
+  },
+  {
+    "text": "latency requests due to network problems between our backend server because most",
+    "start": "483919",
+    "end": "490479"
+  },
+  {
+    "text": "of these requests are synchronous right the load balancer or or the the backend server will make a request and then just",
+    "start": "490479",
+    "end": "496800"
+  },
+  {
+    "text": "wait wait wait wait wait wait for a response and that doesn't mean necessarily that the back-end is",
+    "start": "496800",
+    "end": "502240"
+  },
+  {
+    "text": "actually chunking or the database is chunking that of course i'm servicing it now it's just the network",
+    "start": "502240",
+    "end": "509759"
+  },
+  {
+    "text": "to to make the tcp packet i don't know if you use tcp but i'm just assuming",
+    "start": "509759",
+    "end": "516000"
+  },
+  {
+    "text": "to make sense of the packets to actually form a logical request",
+    "start": "516000",
+    "end": "521839"
+  },
+  {
+    "text": "that is not even reaching that state to the client which is the backend in this case",
+    "start": "521839",
+    "end": "528320"
+  },
+  {
+    "text": "i am my request is not getting serviced but the packets that assembled the multiple packets that",
+    "start": "528320",
+    "end": "534720"
+  },
+  {
+    "text": "assemble into a logical request is not even service that's the problem here right at least that's what i'm",
+    "start": "534720",
+    "end": "542640"
+  },
+  {
+    "text": "analyzing right here right because once that request reached the server i mean",
+    "start": "542640",
+    "end": "547760"
+  },
+  {
+    "text": "the processing power is there we have that right the problem here is it's just",
+    "start": "547760",
+    "end": "553200"
+  },
+  {
+    "text": "networking man you see this very clearly if you build an app that",
+    "start": "553200",
+    "end": "558720"
+  },
+  {
+    "text": "connects to a database right and the database usually database apps are",
+    "start": "558720",
+    "end": "564080"
+  },
+  {
+    "text": "chatty in general right because you need to start transactions uh create cursors",
+    "start": "564080",
+    "end": "569600"
+  },
+  {
+    "text": "execute queries and you have to execute many queries and there's that the protocol of the communication between",
+    "start": "569600",
+    "end": "575600"
+  },
+  {
+    "text": "the database and the backend is always chatty regardless right that's why i always say keep your servers closed and your",
+    "start": "575600",
+    "end": "582160"
+  },
+  {
+    "text": "database closer right keep your database as close to as possible to the server",
+    "start": "582160",
+    "end": "587440"
+  },
+  {
+    "text": "within the same network to avoid that latency because the the chattier that your app be",
+    "start": "587440",
+    "end": "594880"
+  },
+  {
+    "text": "becomes you know of course you the best thing is just make it less chatty but the chattier becomes",
+    "start": "594880",
+    "end": "601600"
+  },
+  {
+    "text": "the the more the more prone to errors the",
+    "start": "601600",
+    "end": "607040"
+  },
+  {
+    "text": "networking errors it becomes right because every request now",
+    "start": "607040",
+    "end": "612399"
+  },
+  {
+    "text": "it goes to the network and then all this network starts to segment multiple segments right which is packets and then",
+    "start": "612399",
+    "end": "618720"
+  },
+  {
+    "text": "all these packets have to be delivered and one of them if it didn't deliver you have to re-transmit the re-transfer and all this is happening beneath you as a",
+    "start": "618720",
+    "end": "625760"
+  },
+  {
+    "text": "back-end application you can you have no control over this to you the request has not been sent yes",
+    "start": "625760",
+    "end": "632320"
+  },
+  {
+    "text": "yet right but all of this requests man well this high latency request where",
+    "start": "632320",
+    "end": "638240"
+  },
+  {
+    "text": "only one percent of the incoming uh request they used about 40 of the server time right",
+    "start": "638240",
+    "end": "645519"
+  },
+  {
+    "text": "all these requests are just waiting waiting waiting for responses but they can't because of this problem then",
+    "start": "645519",
+    "end": "651760"
+  },
+  {
+    "text": "obviously when you wait for something apparently that tells me they don't have enough time out set up right because if",
+    "start": "651760",
+    "end": "660800"
+  },
+  {
+    "text": "you have enough time out you just like kill it kill it very early and that's a very",
+    "start": "660800",
+    "end": "666640"
+  },
+  {
+    "text": "interesting problem because i can't possibly suggest one",
+    "start": "666640",
+    "end": "672560"
+  },
+  {
+    "text": "timeout that felt all right you have to at that at one point you have to specify",
+    "start": "672560",
+    "end": "678160"
+  },
+  {
+    "text": "if a request is taking so much time that is it's actually overwhelming your server you have to kill it because",
+    "start": "678160",
+    "end": "684399"
+  },
+  {
+    "text": "there's no way you're waiting for this stuff and that's a as to me as i hate to",
+    "start": "684399",
+    "end": "690640"
+  },
+  {
+    "text": "say that but it's a trial and error in my opinion right because you say you have to know like what what",
+    "start": "690640",
+    "end": "697360"
+  },
+  {
+    "text": "what are the parameters to stop or what are the parameters",
+    "start": "697360",
+    "end": "702880"
+  },
+  {
+    "text": "that say okay this request should finish within three millisecond or 500 millisecond or sometimes based on the",
+    "start": "702880",
+    "end": "709200"
+  },
+  {
+    "text": "parameters or the input of the request that can't take up to a second who knows right so timeout is one of the most",
+    "start": "709200",
+    "end": "716480"
+  },
+  {
+    "text": "important things and obviously goes to the circuit breaking if you have a chain of these things",
+    "start": "716480",
+    "end": "722399"
+  },
+  {
+    "text": "very very interesting i don't know if they took this into consideration or not",
+    "start": "722399",
+    "end": "727519"
+  },
+  {
+    "text": "subsequently our service discovery system marked many back-end servers as",
+    "start": "728839",
+    "end": "734720"
+  },
+  {
+    "text": "unhealthy due to the networking problems obviously if the load balancers start",
+    "start": "734720",
+    "end": "740480"
+  },
+  {
+    "text": "making requests to the back end which turn around make requests to the database which is the test by the way i talked about that the other day",
+    "start": "740480",
+    "end": "747680"
+  },
+  {
+    "text": "um which it's not today was not the test the data is my sequel and shorted by the",
+    "start": "747680",
+    "end": "752800"
+  },
+  {
+    "text": "tess which is a sharding layer that's just removes the application logic sharding",
+    "start": "752800",
+    "end": "760480"
+  },
+  {
+    "text": "down to a tablet uh that is controlled by the test yeah",
+    "start": "760480",
+    "end": "765600"
+  },
+  {
+    "text": "so the little balancer at the at the end of the day make a request to the backend and the backend is not responding and it says",
+    "start": "765600",
+    "end": "771279"
+  },
+  {
+    "text": "well i don't know what's wrong with this back end but i'm removing it from my fleet",
+    "start": "771279",
+    "end": "776560"
+  },
+  {
+    "text": "right and we talked about that in a shape proxy right and how much a proxy can mark a back end as unhealthy right",
+    "start": "776560",
+    "end": "784320"
+  },
+  {
+    "text": "or or unusable it just just will drop it from the lead of servers and it will mark it as",
+    "start": "784320",
+    "end": "791040"
+  },
+  {
+    "text": "just essentially uh unhealthy so that it won't send",
+    "start": "791040",
+    "end": "796160"
+  },
+  {
+    "text": "request in the future to that to that back-end the network problems",
+    "start": "796160",
+    "end": "801760"
+  },
+  {
+    "text": "worsen which significantly reduced the number of healthy servers",
+    "start": "801760",
+    "end": "807440"
+  },
+  {
+    "text": "by 7am pst there was an insufficient number of backend servers to meet our",
+    "start": "807440",
+    "end": "813200"
+  },
+  {
+    "text": "capacity needs customers either could not load their slack clients or show",
+    "start": "813200",
+    "end": "819279"
+  },
+  {
+    "text": "error pages directing them to the slack style page because now if you don't have enough backend server to serve all these",
+    "start": "819279",
+    "end": "826480"
+  },
+  {
+    "text": "massive amount of requests the loud bouncer will have only few servers to work with and guess what as a result",
+    "start": "826480",
+    "end": "832399"
+  },
+  {
+    "text": "either again a timeout at the load balancer side not the back end it's just earlier or you're gonna get errors or",
+    "start": "832399",
+    "end": "839360"
+  },
+  {
+    "text": "you're gonna get all sorts of weird things so what happened next our backend server fleet then began to automatically",
+    "start": "839360",
+    "end": "847120"
+  },
+  {
+    "text": "scale up to meet that traffic demand so this is all",
+    "start": "847120",
+    "end": "852240"
+  },
+  {
+    "text": "happening without them right they didn't trigger anything they were paid as 6 40 am by 7 am they started",
+    "start": "852240",
+    "end": "860079"
+  },
+  {
+    "text": "they started automatically scaling up and guess what they almost have no servers at this",
+    "start": "860079",
+    "end": "865440"
+  },
+  {
+    "text": "point so what is the automatic scale up and that comes to the parameter and ai and all that stuff right",
+    "start": "865440",
+    "end": "872079"
+  },
+  {
+    "text": "the automatic parameter said oh whoa you don't have any servers i'm going to spin",
+    "start": "872079",
+    "end": "877440"
+  },
+  {
+    "text": "up 1200 servers which is absurdly unrealistic if you think about it right",
+    "start": "877440",
+    "end": "883440"
+  },
+  {
+    "text": "just what happened what is going on you spend 1200 servers obviously the estimated scale up is based on some",
+    "start": "883440",
+    "end": "890320"
+  },
+  {
+    "text": "human algorithm that someone put there right but between 7 am and 7",
+    "start": "890320",
+    "end": "896800"
+  },
+  {
+    "text": "15 am pst our automation attempt to simultaneously add 1200 servers to the",
+    "start": "896800",
+    "end": "903199"
+  },
+  {
+    "text": "backend fleet a much higher rate of server provisioning than we normally handle",
+    "start": "903199",
+    "end": "910000"
+  },
+  {
+    "text": "who's going to handle that 1200 server ad in a given in 50 minutes",
+    "start": "910000",
+    "end": "915120"
+  },
+  {
+    "text": "that's just ridiculous right i don't know if google does that even our provisioning service which configures",
+    "start": "915120",
+    "end": "920800"
+  },
+  {
+    "text": "new servers in cloud environment had three problems but now the cascading effect comes to the mo it comes to play",
+    "start": "920800",
+    "end": "927760"
+  },
+  {
+    "text": "right that we talked about we have the networking caused the load balancer to drop back in servers which",
+    "start": "927760",
+    "end": "934399"
+  },
+  {
+    "text": "then triggers the provisioning services hey you don't have any servers let me spin up some service for you son",
+    "start": "934399",
+    "end": "942800"
+  },
+  {
+    "text": "so here's the problem that for the provisioning service it was unable to keep up with the multiple tasks of",
+    "start": "942800",
+    "end": "948639"
+  },
+  {
+    "text": "configuring servers at the requested rate because when you spin up a request server you have to configure it put the",
+    "start": "948639",
+    "end": "955440"
+  },
+  {
+    "text": "necessary app version whatever do pull from github or your source repository",
+    "start": "955440",
+    "end": "962959"
+  },
+  {
+    "text": "install the runtime if it's a vm spin up the right vm version whatever they'll learn and",
+    "start": "962959",
+    "end": "970000"
+  },
+  {
+    "text": "install the app run them configure them put their configuration all that stuff",
+    "start": "970000",
+    "end": "975040"
+  },
+  {
+    "text": "plus dns configuration resulting in unhealthy servers in in the fleet",
+    "start": "975040",
+    "end": "980959"
+  },
+  {
+    "text": "right so it couldn't it couldn't even come keep up with the amount of work",
+    "start": "980959",
+    "end": "987519"
+  },
+  {
+    "text": "that it needs to do because the provisioning service is just another service right and if the service is",
+    "start": "987519",
+    "end": "992880"
+  },
+  {
+    "text": "facing another networking problem and the the load of 1200 servers to configure that which they didn't",
+    "start": "992880",
+    "end": "999440"
+  },
+  {
+    "text": "anticipate it's gonna go down provisioning begin to take increasing amount of time until it reached 30",
+    "start": "999440",
+    "end": "1005360"
+  },
+  {
+    "text": "minutes which is when we win the operations timeout so they have a",
+    "start": "1005360",
+    "end": "1010800"
+  },
+  {
+    "text": "timeout of 30 minutes imagine a single server and if you ask this poor service to spin up",
+    "start": "1010800",
+    "end": "1019120"
+  },
+  {
+    "text": "1200 servers eventually it's going to run in parallel right yeah i'm gonna spend one two three",
+    "start": "1019120",
+    "end": "1024400"
+  },
+  {
+    "text": "four four but but at one point it will just slow down right this was like hey i can't handle",
+    "start": "1024400",
+    "end": "1030240"
+  },
+  {
+    "text": "concurrently spending up this much service so it will basically have less and less and less",
+    "start": "1030240",
+    "end": "1035280"
+  },
+  {
+    "text": "resources as a result the provisioning time will go up and up and up and up until it hit the timeout reached 30",
+    "start": "1035280",
+    "end": "1041678"
+  },
+  {
+    "text": "minutes all you have is a bad configuration left you have a server that is bad",
+    "start": "1041679",
+    "end": "1047360"
+  },
+  {
+    "text": "it's unusable the service run out of open file handles because it kept an",
+    "start": "1047360",
+    "end": "1053039"
+  },
+  {
+    "text": "open file handle for each server then it that it attempt to provision",
+    "start": "1053039",
+    "end": "1059919"
+  },
+  {
+    "text": "and it was provisioning more machine at once than we had load tested for so",
+    "start": "1059919",
+    "end": "1066640"
+  },
+  {
+    "text": "is it safe that to say that the maximum file handlers were 1000 i think this is",
+    "start": "1066640",
+    "end": "1072000"
+  },
+  {
+    "text": "a little bit low i didn't understand this i would like someone else who anyone actually can explain",
+    "start": "1072000",
+    "end": "1080080"
+  },
+  {
+    "text": "this better because file handler handles in linux i'm i'm not very proficient in",
+    "start": "1080080",
+    "end": "1085760"
+  },
+  {
+    "text": "linux and unix system but i know that file handlers are opened with networking sockets",
+    "start": "1085760",
+    "end": "1092400"
+  },
+  {
+    "text": "and i know that the limit the the default limit is is 10 000 i think right",
+    "start": "1092400",
+    "end": "1098080"
+  },
+  {
+    "text": "so that is the open file handlers are maximum",
+    "start": "1098080",
+    "end": "1103679"
+  },
+  {
+    "text": "is high so i i don't know why they hid that so early spinning up just 1200 servers",
+    "start": "1103679",
+    "end": "1111280"
+  },
+  {
+    "text": "i might be wrong there's there must be something missing that i don't know about that and i appreciate anyone",
+    "start": "1111280",
+    "end": "1117120"
+  },
+  {
+    "text": "from slack or anywhere else who can explain this i'm just curious",
+    "start": "1117120",
+    "end": "1123679"
+  },
+  {
+    "text": "this service ran into api rate limit from some of our cloud providers api",
+    "start": "1123679",
+    "end": "1130720"
+  },
+  {
+    "text": "which slowed down the provision operation further oh okay so apparently",
+    "start": "1130720",
+    "end": "1136559"
+  },
+  {
+    "text": "aws which they didn't say have to provision these servers they have a",
+    "start": "1136559",
+    "end": "1141919"
+  },
+  {
+    "text": "rate limited you cannot just spin up as much vms or as much ec2 instances i'm just",
+    "start": "1141919",
+    "end": "1149039"
+  },
+  {
+    "text": "assuming there's easy to i'm not sure this you're going to just like spin up willy-nilly right they have a rate",
+    "start": "1149039",
+    "end": "1156000"
+  },
+  {
+    "text": "limiting and they would they that service hit the rate limit to me these",
+    "start": "1156000",
+    "end": "1161200"
+  },
+  {
+    "text": "are not problems in my opinion you should not be worrying about",
+    "start": "1161200",
+    "end": "1168640"
+  },
+  {
+    "text": "provisioning 1200 servers right i think this is wasted engineering",
+    "start": "1168640",
+    "end": "1174400"
+  },
+  {
+    "text": "efforts in my opinion why would you this is over engineering you're going into the",
+    "start": "1174400",
+    "end": "1180080"
+  },
+  {
+    "text": "wrong direction in my opinion slack you're fixing a problem that shouldn't",
+    "start": "1180080",
+    "end": "1185440"
+  },
+  {
+    "text": "happen in the beginning with i don't think if you made this provisioning service",
+    "start": "1185440",
+    "end": "1191200"
+  },
+  {
+    "text": "except higher and higher higher rates yeah you still you just made you just",
+    "start": "1191200",
+    "end": "1197200"
+  },
+  {
+    "text": "you just made the uh the process a little bit faster but the cause of the problem is networking",
+    "start": "1197200",
+    "end": "1203440"
+  },
+  {
+    "text": "and i don't think you could do anything about fix the root cause that that shouldn't reach you shouldn't reach",
+    "start": "1203440",
+    "end": "1210080"
+  },
+  {
+    "text": "a state where you need to spin up a 1200 server in 15 minutes i don't think so so",
+    "start": "1210080",
+    "end": "1216240"
+  },
+  {
+    "text": "spend those resources in my opinion if i wouldn't do this i would spend it on getting a better network capacity",
+    "start": "1216240",
+    "end": "1222880"
+  },
+  {
+    "text": "dedicated uh network capacity 40 years old so you don't even run into this problem",
+    "start": "1222880",
+    "end": "1228400"
+  },
+  {
+    "text": "avoid network cross boundary networks with different sub networks right so",
+    "start": "1228400",
+    "end": "1234159"
+  },
+  {
+    "text": "make sure the back ends and the database are on the same subnet so you avoid routing as much as possible everything",
+    "start": "1234159",
+    "end": "1240400"
+  },
+  {
+    "text": "is within the same network essentially so that minimizes these things this this",
+    "start": "1240400",
+    "end": "1245600"
+  },
+  {
+    "text": "makes sense to me this i'm not sure let me know guys if you disagree with my statement i don't think",
+    "start": "1245600",
+    "end": "1253120"
+  },
+  {
+    "text": "this is a well spent effort spending time to kind of well increase",
+    "start": "1253120",
+    "end": "1258640"
+  },
+  {
+    "text": "the api rate limit for this what would that what would that add you right it's just",
+    "start": "1258640",
+    "end": "1264240"
+  },
+  {
+    "text": "you're gonna spit plus if you're gonna spin up if you the next time you spin up new servers they're gonna go down",
+    "start": "1264240",
+    "end": "1270320"
+  },
+  {
+    "text": "because of the same problem the networking problem so you can't possibly spin up enough servers to keep up with",
+    "start": "1270320",
+    "end": "1277600"
+  },
+  {
+    "text": "the root problem which is this latency which is the dropped packet which is i think this some sort of threshold that",
+    "start": "1277600",
+    "end": "1283840"
+  },
+  {
+    "text": "aws has just hit with you guys this happened in large part because our provisioning",
+    "start": "1283840",
+    "end": "1289919"
+  },
+  {
+    "text": "service failed under the unprecedented load of provisioning request well of course it's",
+    "start": "1289919",
+    "end": "1295600"
+  },
+  {
+    "text": "going to fail it was exactly what the hell is this word what is this word except exacerbated",
+    "start": "1295600",
+    "end": "1306400"
+  },
+  {
+    "text": "uh excuse me guys english is not my first language so",
+    "start": "1306400",
+    "end": "1312400"
+  },
+  {
+    "text": "you can make fun of me but i had to look this up excerpt",
+    "start": "1312400",
+    "end": "1318880"
+  },
+  {
+    "text": "what the heck is exactly bait exacerbate what exacerbate exacerbate okay",
+    "start": "1318880",
+    "end": "1327280"
+  },
+  {
+    "text": "exacerbate make a problem bad situation or negative feeling worse or to make something worse exacerbate",
+    "start": "1327280",
+    "end": "1334000"
+  },
+  {
+    "text": "can't you just say make something worse okay it was exacerbated by the",
+    "start": "1334000",
+    "end": "1340880"
+  },
+  {
+    "text": "i can't say it was exacerbated by the outgoing network problems which caused",
+    "start": "1340880",
+    "end": "1347120"
+  },
+  {
+    "text": "some newly provisioned servers to have problems contacting the provisioning",
+    "start": "1347120",
+    "end": "1353039"
+  },
+  {
+    "text": "service or the configuration service and those machines could not get far enough",
+    "start": "1353039",
+    "end": "1358159"
+  },
+  {
+    "text": "through the provisioning process to start their service we talked about that the timeout 30",
+    "start": "1358159",
+    "end": "1363200"
+  },
+  {
+    "text": "minutes right both of these causes resulted in partially provisioned servers which are useless which could",
+    "start": "1363200",
+    "end": "1369120"
+  },
+  {
+    "text": "not take traffic eventually i'm glad that they didn't accidentally added that because i would",
+    "start": "1369120",
+    "end": "1375280"
+  },
+  {
+    "text": "i would imagine myself doing a bug like that i wouldn't for example i would not anticipate that",
+    "start": "1375280",
+    "end": "1381200"
+  },
+  {
+    "text": "the provisioning will complete successfully right because i wouldn't test for example i would have missed",
+    "start": "1381200",
+    "end": "1386400"
+  },
+  {
+    "text": "that testing of 30 minute timeout so i was like hey provisionally complete let's add it to the fleet half assed",
+    "start": "1386400",
+    "end": "1393039"
+  },
+  {
+    "text": "like that and then the load balancer will say share let me just route traffic to this half ass server",
+    "start": "1393039",
+    "end": "1400640"
+  },
+  {
+    "text": "and i don't want to imagine what would go after that so obviously that they thought this through",
+    "start": "1400640",
+    "end": "1407440"
+  },
+  {
+    "text": "which is awesome to me so you know i would admit if i would make subway miscase and this was this is",
+    "start": "1407440",
+    "end": "1414400"
+  },
+  {
+    "text": "a mistake that i would definitely have make right i would i would not think about",
+    "start": "1414400",
+    "end": "1420000"
+  },
+  {
+    "text": "that oh oh by the way professionally couldn't always be successful because of a timer like how can i think about that",
+    "start": "1420000",
+    "end": "1426640"
+  },
+  {
+    "text": "and you have to get hit once by the problem in order to learn from it and",
+    "start": "1426640",
+    "end": "1431760"
+  },
+  {
+    "text": "now that i know i know in the future if i have even provisioned something i know to think",
+    "start": "1431760",
+    "end": "1437039"
+  },
+  {
+    "text": "about that a half provision server",
+    "start": "1437039",
+    "end": "1441840"
+  },
+  {
+    "text": "our observability platform was also not reachable for most of the incident",
+    "start": "1442559",
+    "end": "1449039"
+  },
+  {
+    "text": "because its connection to the database was subject to the network is instability we",
+    "start": "1449039",
+    "end": "1455840"
+  },
+  {
+    "text": "always always see this amazon outage the google outage",
+    "start": "1455840",
+    "end": "1461919"
+  },
+  {
+    "text": "the microsoft outage hit exactly the same problem because of an infrastructure problem",
+    "start": "1461919",
+    "end": "1468400"
+  },
+  {
+    "text": "the ability to observe was severed you cannot even observe what's going it's",
+    "start": "1468400",
+    "end": "1474799"
+  },
+  {
+    "text": "like it's like a reverse schrodinger's cat right you want to look but if you",
+    "start": "1474799",
+    "end": "1480400"
+  },
+  {
+    "text": "look you're dead you can't even look so it's just done so that's the same thing because they're",
+    "start": "1480400",
+    "end": "1487200"
+  },
+  {
+    "text": "using part of their infrastructure as observability you can even look what's going on",
+    "start": "1487200",
+    "end": "1494320"
+  },
+  {
+    "text": "and uh now that we know about this the observability are really really important to to keep the observability",
+    "start": "1494320",
+    "end": "1501440"
+  },
+  {
+    "text": "fleet as separate as possible and they're going to discuss how they're going to do this",
+    "start": "1501440",
+    "end": "1506960"
+  },
+  {
+    "text": "in the the corrective action this complicated our debugging efforts and extended the time of recovery we",
+    "start": "1506960",
+    "end": "1514480"
+  },
+  {
+    "text": "attempt to pre-provision observability platform servers for troubleshooting but",
+    "start": "1514480",
+    "end": "1519520"
+  },
+  {
+    "text": "we were unable to do so due to the problems with provisioning service why am i talking like south",
+    "start": "1519520",
+    "end": "1525760"
+  },
+  {
+    "text": "african accent we began to do direct queries to our metrics back-end",
+    "start": "1525760",
+    "end": "1533039"
+  },
+  {
+    "text": "around 8 05 a.m pst we diagnosed that our provisioning service had run out of file open file handlers we fixed that by",
+    "start": "1533279",
+    "end": "1540799"
+  },
+  {
+    "text": "increasing the file and the limit at 8 13 am can you share with us what is the file limit i'm just really interested",
+    "start": "1540799",
+    "end": "1548000"
+  },
+  {
+    "text": "we were then able to successfully provision servers which entered service and served traffic",
+    "start": "1548000",
+    "end": "1555120"
+  },
+  {
+    "text": "all right finally they so they increased the provisioning they probably they also increased the timeout from 30 minutes to",
+    "start": "1555120",
+    "end": "1561600"
+  },
+  {
+    "text": "whatever they don't really need to exceed the timeline i guess because the problems were mostly because of the maximum open",
+    "start": "1561600",
+    "end": "1569360"
+  },
+  {
+    "text": "file limit which indicated that our cloud provider network stability have improved all",
+    "start": "1569360",
+    "end": "1574720"
+  },
+  {
+    "text": "right so the network stability which is the root cause which i guess guys it's like i don't think you can do anything",
+    "start": "1574720",
+    "end": "1580559"
+  },
+  {
+    "text": "about us the in the underlinings network is just unstable",
+    "start": "1580559",
+    "end": "1588000"
+  },
+  {
+    "text": "what can you do and just make it makes me think like we're dependent on the things that we take for",
+    "start": "1588000",
+    "end": "1593120"
+  },
+  {
+    "text": "granted right so network engineers guys you have a big job when it comes to back in",
+    "start": "1593120",
+    "end": "1598240"
+  },
+  {
+    "text": "engineering my god look at this like the network engineering is really",
+    "start": "1598240",
+    "end": "1604480"
+  },
+  {
+    "text": "really tough i mean imagine i mean if you're networ and you might",
+    "start": "1604480",
+    "end": "1609919"
+  },
+  {
+    "text": "you come back stays like hussein if your electricity is gone you don't even have anything of course",
+    "start": "1609919",
+    "end": "1616240"
+  },
+  {
+    "text": "yeah the most important thing is electricity if you don't have electricity you don't have any other stuff",
+    "start": "1616240",
+    "end": "1622000"
+  },
+  {
+    "text": "unless we unless elon musk started making batteries for computers",
+    "start": "1622320",
+    "end": "1628400"
+  },
+  {
+    "text": "that'll be awesome we later we're told by our cloud provider that",
+    "start": "1628400",
+    "end": "1634960"
+  },
+  {
+    "text": "during this time period they increased their network capacity in an effort to",
+    "start": "1634960",
+    "end": "1640000"
+  },
+  {
+    "text": "reduce the insub and stability we then provision new backend servers",
+    "start": "1640000",
+    "end": "1645919"
+  },
+  {
+    "text": "and observe them successfully taking production traffic we worked with our cloud providers to",
+    "start": "1645919",
+    "end": "1653279"
+  },
+  {
+    "text": "lift the rate limit which we're restricting how quickly we can provision",
+    "start": "1653279",
+    "end": "1658880"
+  },
+  {
+    "text": "new machines why am i i suffered the access to an iranian accent all of a sudden",
+    "start": "1658880",
+    "end": "1664880"
+  },
+  {
+    "text": "we steadily increased our back-end server fleet size and began to see successful customer traffic by 9 15 pst",
+    "start": "1664880",
+    "end": "1673440"
+  },
+  {
+    "text": "customers were able to use slack again we continued to experience elevated",
+    "start": "1673440",
+    "end": "1678799"
+  },
+  {
+    "text": "error due to network stability until 10 40 am pst",
+    "start": "1678799",
+    "end": "1684960"
+  },
+  {
+    "text": "when our cloud provider had finished increasing their capacity all customers were able to use slack again",
+    "start": "1684960",
+    "end": "1692720"
+  },
+  {
+    "text": "so increase their capacity very interesting it looks like slack had hit some sort of",
+    "start": "1692720",
+    "end": "1699679"
+  },
+  {
+    "text": "a limit they didn't tell us about and that limit the networking limit just",
+    "start": "1699679",
+    "end": "1705600"
+  },
+  {
+    "text": "started it's like hey you had you had your maximum upload or download bandwidth that would be really weird if",
+    "start": "1705600",
+    "end": "1712240"
+  },
+  {
+    "text": "you hit that limit and anybody's why would why wouldn't aws just tell you that hey you hit their limit this again",
+    "start": "1712240",
+    "end": "1719440"
+  },
+  {
+    "text": "slack did not explain what that is and i saw and we're gonna we're gonna read",
+    "start": "1719440",
+    "end": "1725440"
+  },
+  {
+    "text": "about that in a minute there is another root cause analysis that we don't have access to",
+    "start": "1725440",
+    "end": "1731039"
+  },
+  {
+    "text": "poor public that slack asked the cloud provider which i think is aws again they didn't",
+    "start": "1731039",
+    "end": "1737600"
+  },
+  {
+    "text": "mention of what caused the network",
+    "start": "1737600",
+    "end": "1742960"
+  },
+  {
+    "text": "latencies and the instability i need to get my hand into that stinking report",
+    "start": "1742960",
+    "end": "1749120"
+  },
+  {
+    "text": "to know what goes on really because we still don't know what caused it is it is that a threshold",
+    "start": "1749120",
+    "end": "1754720"
+  },
+  {
+    "text": "is it just a because a cross boundary you're going out of",
+    "start": "1754720",
+    "end": "1759919"
+  },
+  {
+    "text": "your network and that has a limit guys if you or i don't use uaws if any of you use aws do you guys have some sort of a",
+    "start": "1759919",
+    "end": "1767840"
+  },
+  {
+    "text": "limit between cross boundaries like if you have a net where you i think it's going to call bp",
+    "start": "1767840",
+    "end": "1773679"
+  },
+  {
+    "text": "virtual in neck virtual network or something like that where you can create multiple",
+    "start": "1773679",
+    "end": "1779520"
+  },
+  {
+    "text": "virtual network and if you go across these v virtual networks",
+    "start": "1779520",
+    "end": "1785120"
+  },
+  {
+    "text": "then you are penalized essentially because you're going cross boundary they charge you something and maybe they put",
+    "start": "1785120",
+    "end": "1791360"
+  },
+  {
+    "text": "a limit there i'd like to know about that architecture i i know nothing about that stuff",
+    "start": "1791360",
+    "end": "1796480"
+  },
+  {
+    "text": "and i'm making assertions here so uh stop me if i said anything stupid i'd",
+    "start": "1796480",
+    "end": "1801520"
+  },
+  {
+    "start": "1800000",
+    "end": "2613000"
+  },
+  {
+    "text": "love to be corrected obviously corrective action so what they did to fix this stuff",
+    "start": "1801520",
+    "end": "1807520"
+  },
+  {
+    "text": "we have completed our detailed investigation and compiled our corrective action to prevent future incidents of this car our cloud provider",
+    "start": "1807520",
+    "end": "1814720"
+  },
+  {
+    "text": "has increased the capacity of their cross boundary network traffic system okay so there",
+    "start": "1814720",
+    "end": "1820840"
+  },
+  {
+    "text": "is a limit capacity to the cross boundary traffic system so between a",
+    "start": "1820840",
+    "end": "1826080"
+  },
+  {
+    "text": "network to another network as well as moving us from shared to identical system",
+    "start": "1826080",
+    "end": "1831760"
+  },
+  {
+    "text": "you guys were shared you were using a shared system so you were moved to a dedicated",
+    "start": "1831760",
+    "end": "1838000"
+  },
+  {
+    "text": "networking so you were sure with others obviously the whole thing is built i'll assume until some sort of uh",
+    "start": "1838000",
+    "end": "1844240"
+  },
+  {
+    "text": "sdn software defined networking right and and encrypted and all that stuff right in order to share the system this",
+    "start": "1844240",
+    "end": "1851760"
+  },
+  {
+    "text": "this is the in the software defined stuff this is the future guys i used to kind of underestimate this",
+    "start": "1851760",
+    "end": "1859200"
+  },
+  {
+    "text": "stuff but man that is very important to cloud our infrastructure because you build one",
+    "start": "1859200",
+    "end": "1864960"
+  },
+  {
+    "text": "network and then you virtualize the networking on top of that right and then you create virtual",
+    "start": "1864960",
+    "end": "1870960"
+  },
+  {
+    "text": "boundary on top of that obviously that adds a little bit of a latency i would assume but i don't know how much",
+    "start": "1870960",
+    "end": "1876399"
+  },
+  {
+    "text": "compared to a bare metal networking i love to know that stuff but again i'm not a network engineer",
+    "start": "1876399",
+    "end": "1883679"
+  },
+  {
+    "text": "they have provided us with a detailed rca root cause analysis can you give it to",
+    "start": "1883679",
+    "end": "1888720"
+  },
+  {
+    "text": "us or is it confidential my friends at slack please give us uh",
+    "start": "1888720",
+    "end": "1896000"
+  },
+  {
+    "text": "root cause analysis yes my friends that's my arab accent by the way that's",
+    "start": "1896000",
+    "end": "1901679"
+  },
+  {
+    "text": "my original accent yes we always i'm gonna talk from now on this line",
+    "start": "1901679",
+    "end": "1906960"
+  },
+  {
+    "text": "we have a new run book uh for uh how to debug our systems through direct queries",
+    "start": "1906960",
+    "end": "1912720"
+  },
+  {
+    "text": "to our metrics back end without our observability platform",
+    "start": "1912720",
+    "end": "1918080"
+  },
+  {
+    "text": "that just that's just greek",
+    "start": "1918080",
+    "end": "1921840"
+  },
+  {
+    "text": "you can't all the middle eastern english is exactly the same right it's like always this thick accent that we have so",
+    "start": "1923200",
+    "end": "1931679"
+  },
+  {
+    "text": "yes my friends let's give us this so they have a new run book for how to debug our systems through direct queries",
+    "start": "1931679",
+    "end": "1938480"
+  },
+  {
+    "text": "to our metrics so that that's the observer observability thing that we talked about so they are hitting the",
+    "start": "1938480",
+    "end": "1943840"
+  },
+  {
+    "text": "database directly i guess or they are ssh into like all of this stuff like i i",
+    "start": "1943840",
+    "end": "1950559"
+  },
+  {
+    "text": "would be surprised like yeah we're just as such into the the thing and we're on our observability right why can't you",
+    "start": "1950559",
+    "end": "1957039"
+  },
+  {
+    "text": "just say that like you have to put it in words that is confusing or direct queries to our metrics back and",
+    "start": "1957039",
+    "end": "1963120"
+  },
+  {
+    "text": "without observability from this yeah we just association to the damn thing",
+    "start": "1963120",
+    "end": "1969039"
+  },
+  {
+    "text": "i don't know i'm just making things out maybe it's more sophisticated than i just",
+    "start": "1969279",
+    "end": "1974399"
+  },
+  {
+    "text": "articulated but companies usually don't don't don't let you know that they're their original methods",
+    "start": "1974399",
+    "end": "1981200"
+  },
+  {
+    "text": "they always try to make it as vague as possible we have prepared methods to configure",
+    "start": "1981200",
+    "end": "1987919"
+  },
+  {
+    "text": "some services to reduce cross-boundary network transit aha that's one of the most important thing why do you have so",
+    "start": "1987919",
+    "end": "1995120"
+  },
+  {
+    "text": "many cross-boundary network can you can you keep those databases and backend",
+    "start": "1995120",
+    "end": "2000320"
+  },
+  {
+    "text": "servers as close as possible within the same next right that would be really awesome right",
+    "start": "2000320",
+    "end": "2007679"
+  },
+  {
+    "text": "because that first of all it's going to give you higher latency where the reverse lower latency because you",
+    "start": "2007679",
+    "end": "2014399"
+  },
+  {
+    "text": "don't have to jump into routers right because i send a request to",
+    "start": "2014399",
+    "end": "2020080"
+  },
+  {
+    "text": "an ips within my same subnet that doesn't go through the router well does go through the switching part of the",
+    "start": "2020080",
+    "end": "2026559"
+  },
+  {
+    "text": "router to point back at me but it doesn't jump and does no there's no netting",
+    "start": "2026559",
+    "end": "2033039"
+  },
+  {
+    "text": "there's no routing there's no inspection of packets there's just it happens at layer two we'll just look",
+    "start": "2033039",
+    "end": "2039600"
+  },
+  {
+    "text": "at layer two the frame and then just move it around right it's way faster obviously",
+    "start": "2039600",
+    "end": "2045519"
+  },
+  {
+    "text": "then going through the switch we have increased our open handle",
+    "start": "2045519",
+    "end": "2051520"
+  },
+  {
+    "text": "provisioning service workers guys i think this is useless i think this is absolutely useless i i don't",
+    "start": "2051520",
+    "end": "2057599"
+  },
+  {
+    "text": "know i really don't think you you guys do have to do this because you will never hit that file limit it's",
+    "start": "2057599",
+    "end": "2064079"
+  },
+  {
+    "text": "unnecessary the problem that happened to you was outside your um",
+    "start": "2064079",
+    "end": "2069919"
+  },
+  {
+    "text": "kind of your restriction that's not the word outside of your control",
+    "start": "2069919",
+    "end": "2075520"
+  },
+  {
+    "text": "it's outside of your control you couldn't control the network latency that's what that what it's like saying",
+    "start": "2075520",
+    "end": "2080720"
+  },
+  {
+    "text": "someone just plugged the electricity just plugged all the wires and you all of a sudden",
+    "start": "2080720",
+    "end": "2087118"
+  },
+  {
+    "text": "lost all your backing what are you gonna do are you gonna provision 1200 servers maybe you just",
+    "start": "2087119",
+    "end": "2093760"
+  },
+  {
+    "text": "turn back those servers on right that's what you can you're going to restart them instead",
+    "start": "2093760",
+    "end": "2100079"
+  },
+  {
+    "text": "so i still don't think there is a use case for provisioning in 10 minutes 1200",
+    "start": "2100079",
+    "end": "2105920"
+  },
+  {
+    "text": "servers it just sounds absurdly high i'd rather just restart my existing",
+    "start": "2105920",
+    "end": "2112079"
+  },
+  {
+    "text": "services if everything went fine right our cloud provider has increased the api",
+    "start": "2112079",
+    "end": "2117359"
+  },
+  {
+    "text": "limit uh on the cloud service api we call as part of the provisioning process",
+    "start": "2117359",
+    "end": "2122560"
+  },
+  {
+    "text": "again i don't think that's necessary sure you guys know your architecture better than i am",
+    "start": "2122560",
+    "end": "2128000"
+  },
+  {
+    "text": "i i don't think it's uh necessary because you should never head that api",
+    "start": "2128000",
+    "end": "2133680"
+  },
+  {
+    "text": "right i mean how long have been slack running uh when one was like uh first uh",
+    "start": "2133680",
+    "end": "2140079"
+  },
+  {
+    "text": "seven years ago 2013 since seven years ago you didn't have to increase that limit until now",
+    "start": "2140079",
+    "end": "2145280"
+  },
+  {
+    "text": "why did you actually need that increased limit maybe yes maybe not",
+    "start": "2145280",
+    "end": "2151760"
+  },
+  {
+    "text": "i still don't think you guys don't need it that might be wrong obviously for anything i say here",
+    "start": "2151760",
+    "end": "2157280"
+  },
+  {
+    "text": "we will create an alert for packet rate limit between bound network boundaries on the network our cloud this work will",
+    "start": "2157280",
+    "end": "2164000"
+  },
+  {
+    "text": "be this is extremely way more important than increasing the stinking api element guys",
+    "start": "2164000",
+    "end": "2170880"
+  },
+  {
+    "text": "this is important because that what caused the back end servers to",
+    "start": "2170880",
+    "end": "2176079"
+  },
+  {
+    "text": "be marked as unhealthy because the request couldn't be it couldn't even reach the server to begin with because",
+    "start": "2176079",
+    "end": "2182000"
+  },
+  {
+    "text": "the packets were falling and dropping right",
+    "start": "2182000",
+    "end": "2188480"
+  },
+  {
+    "text": "that's important we need to know when packets are disappearing the packet rate if the",
+    "start": "2188480",
+    "end": "2193599"
+  },
+  {
+    "text": "packets are starting to drop that's a good idea to fire so",
+    "start": "2193599",
+    "end": "2199040"
+  },
+  {
+    "text": "i don't know if they have access to that though that'll be interesting so",
+    "start": "2199040",
+    "end": "2205680"
+  },
+  {
+    "text": "so what what slack is doing essentially is just like they're they're essentially",
+    "start": "2205760",
+    "end": "2211839"
+  },
+  {
+    "text": "making their software their platform even more stickier with amazon if that's",
+    "start": "2212000",
+    "end": "2217200"
+  },
+  {
+    "text": "that's the case because the routers or those packet limits are all in the in the amazon aws so",
+    "start": "2217200",
+    "end": "2223359"
+  },
+  {
+    "text": "they must have built those apis to interact with those routers which is",
+    "start": "2223359",
+    "end": "2228640"
+  },
+  {
+    "text": "obviously an aws apis so good luck moving out of that platform",
+    "start": "2228640",
+    "end": "2233760"
+  },
+  {
+    "text": "now because now you just like increase the stickiness between the",
+    "start": "2233760",
+    "end": "2239920"
+  },
+  {
+    "text": "slack architecture and the cloud provider because you're doing all that stuff and",
+    "start": "2239920",
+    "end": "2245440"
+  },
+  {
+    "text": "it might might be okay it's not a big problem right but just be aware of that it's just something to be",
+    "start": "2245440",
+    "end": "2252000"
+  },
+  {
+    "text": "interested interesting to think about we will increase the number of",
+    "start": "2252000",
+    "end": "2257040"
+  },
+  {
+    "text": "provisioning service workers to improve our capacity provision this will be complete i don't know why we do that",
+    "start": "2257040",
+    "end": "2263040"
+  },
+  {
+    "text": "again i don't see a value of increasing the service workers again guys service workers is not the",
+    "start": "2263040",
+    "end": "2269280"
+  },
+  {
+    "text": "service worker in the browser that chrome's come up with right this is a completely different thing in the back",
+    "start": "2269280",
+    "end": "2274560"
+  },
+  {
+    "text": "end this wall this work will be done 2012 okay",
+    "start": "2274560",
+    "end": "2279839"
+  },
+  {
+    "text": "uh on february february 12. we will improve observability on our",
+    "start": "2279839",
+    "end": "2286079"
+  },
+  {
+    "text": "provisioning service this work will be done by briar 12.",
+    "start": "2286079",
+    "end": "2292560"
+  },
+  {
+    "text": "i kept saying for briar this is the arabic way of saying february so excuse me because i can only talk for for a",
+    "start": "2292560",
+    "end": "2299359"
+  },
+  {
+    "text": "certain amount of time in english after which i deplete and go back to my original accent and language so",
+    "start": "2299359",
+    "end": "2306079"
+  },
+  {
+    "text": "uh the same thing happened at work so if i am in a long meeting i would speak english but after watching this",
+    "start": "2306079",
+    "end": "2311440"
+  },
+  {
+    "text": "i get depleted because i i do a lot of translation in my mind to translate english to arabic in order to understand",
+    "start": "2311440",
+    "end": "2317839"
+  },
+  {
+    "text": "it and then speak and then after which i just die i start i still i start leaking arabic words left and right so be be",
+    "start": "2317839",
+    "end": "2326000"
+  },
+  {
+    "text": "mind of that the longer the video you should you should have started seeing it by now",
+    "start": "2326000",
+    "end": "2331760"
+  },
+  {
+    "text": "we will not test our provisioning service this work will be done by uh",
+    "start": "2331760",
+    "end": "2336800"
+  },
+  {
+    "text": "april 13th that's a good test just just load test it i mean yeah not that you're going to hit that in my",
+    "start": "2336800",
+    "end": "2343359"
+  },
+  {
+    "text": "opinion we will revisit our back and server scaling automation to ensure we have the",
+    "start": "2343359",
+    "end": "2350800"
+  },
+  {
+    "text": "right setting for predictive scaling rate scaling",
+    "start": "2350800",
+    "end": "2355920"
+  },
+  {
+    "text": "and metric that we have to scale that is way more important than actually increasing the provisioning",
+    "start": "2355920",
+    "end": "2362160"
+  },
+  {
+    "text": "service looks like this is a very knee-jerk reaction it's like hey make it better",
+    "start": "2362160",
+    "end": "2367359"
+  },
+  {
+    "text": "make it bigger make it bigger no make it smarter that's what you're doing this point",
+    "start": "2367359",
+    "end": "2374480"
+  },
+  {
+    "text": "that's dope right there make the scaling automation smart enough to know",
+    "start": "2374720",
+    "end": "2381920"
+  },
+  {
+    "text": "wait a second why the heck am i scaling 1200 servers can i leverage them some of these unhealthy one and maybe",
+    "start": "2381920",
+    "end": "2389040"
+  },
+  {
+    "text": "revive them back we will improve our run books what is a",
+    "start": "2389040",
+    "end": "2394480"
+  },
+  {
+    "text": "run book for debugging network issues is that is that the monitoring system",
+    "start": "2394480",
+    "end": "2400000"
+  },
+  {
+    "text": "this work will be done well is isn't that exactly what you guys mentioned right here the packets",
+    "start": "2400000",
+    "end": "2406079"
+  },
+  {
+    "text": "i guess it's the same thing networking issues yeah networking issue is very important to kind of notify we will",
+    "start": "2406079",
+    "end": "2412000"
+  },
+  {
+    "text": "investigate and test two setting of our backend servers the first is the request timeout",
+    "start": "2412000",
+    "end": "2417760"
+  },
+  {
+    "text": "that's very important i said that and the second is the number of simultaneous request being handled the",
+    "start": "2417760",
+    "end": "2424240"
+  },
+  {
+    "text": "request timer is so important guys right because the most of these requests they've remembered the 40",
+    "start": "2424240",
+    "end": "2430560"
+  },
+  {
+    "text": "of these requests being just waiting for things to happen and the server just spent a lot of time waiting for a",
+    "start": "2430560",
+    "end": "2437119"
+  },
+  {
+    "text": "request to happen and it will never happen right so in not increasing decreasing a timeout so",
+    "start": "2437119",
+    "end": "2443680"
+  },
+  {
+    "text": "that they come out faster so they can break that so they can afraid to serve other stuff is way more important in my",
+    "start": "2443680",
+    "end": "2449520"
+  },
+  {
+    "text": "opinion so they are revisioning this and and again they have to investigate there is",
+    "start": "2449520",
+    "end": "2454880"
+  },
+  {
+    "text": "no one value that helps here you get a try you have to kind of look at the",
+    "start": "2454880",
+    "end": "2460240"
+  },
+  {
+    "text": "request uh what's the nature of this request because i work with these things on a",
+    "start": "2460240",
+    "end": "2466400"
+  },
+  {
+    "text": "daily basis and there are requests that you can you just can't time out why because the input parameter to that",
+    "start": "2466400",
+    "end": "2473599"
+  },
+  {
+    "text": "request kind of changed completely the response and",
+    "start": "2473599",
+    "end": "2478960"
+  },
+  {
+    "text": "the the different different parameter one parameter can give you one minute response the other parameter can give",
+    "start": "2478960",
+    "end": "2484960"
+  },
+  {
+    "text": "you a 300 millisecond response it's unpredictable it's not",
+    "start": "2484960",
+    "end": "2490960"
+  },
+  {
+    "text": "deterministic as as computer science people say by adjusting these values we may be able",
+    "start": "2490960",
+    "end": "2497040"
+  },
+  {
+    "text": "to prevent a small number of requests from using the majority of the resources in the backend that's very important",
+    "start": "2497040",
+    "end": "2502240"
+  },
+  {
+    "text": "very clever people slack people are on it april they're gonna do this work guys",
+    "start": "2502240",
+    "end": "2509119"
+  },
+  {
+    "text": "guys what do you think about this this is very interesting i'm gonna leave",
+    "start": "2509119",
+    "end": "2515520"
+  },
+  {
+    "text": "please leave your opinions and let me know if i said anything that is",
+    "start": "2515520",
+    "end": "2521359"
+  },
+  {
+    "text": "correct and uh we'll just let's have a discussion this is a very interesting one",
+    "start": "2521359",
+    "end": "2527119"
+  },
+  {
+    "text": "this is different than the microsoft outage that i talked about then the google outage that i talked about in the",
+    "start": "2527119",
+    "end": "2532640"
+  },
+  {
+    "text": "amazon outage the three outages were caused by uh",
+    "start": "2532640",
+    "end": "2538800"
+  },
+  {
+    "text": "for the lack of better term bugs in the architecture slack",
+    "start": "2538800",
+    "end": "2544640"
+  },
+  {
+    "text": "they have they have a solid architecture in my opinion apart from the cross-boundary because i",
+    "start": "2544640",
+    "end": "2549839"
+  },
+  {
+    "text": "would fix that but the networking networking latency have they have no control over it it's",
+    "start": "2549839",
+    "end": "2555599"
+  },
+  {
+    "text": "like it's like pulling the electricity underneath you it's like powering off the whole thing just like",
+    "start": "2555599",
+    "end": "2561440"
+  },
+  {
+    "text": "remove the outlet what can you do you don't have electricity it's like you don't have networking",
+    "start": "2561440",
+    "end": "2568560"
+  },
+  {
+    "text": "you can't do anything right so yeah but but the lessons that slack i i love",
+    "start": "2568560",
+    "end": "2574480"
+  },
+  {
+    "text": "their messaging here they're the way they wrote the paper they didn't blame anyone they said hey we're making we're",
+    "start": "2574480",
+    "end": "2580000"
+  },
+  {
+    "text": "gonna we're gonna do better they said hey it's not their fault but they didn't be",
+    "start": "2580000",
+    "end": "2586480"
+  },
+  {
+    "text": "they didn't become defensive and that's the real engineering that's elite cool engineering thank you",
+    "start": "2586480",
+    "end": "2594560"
+  },
+  {
+    "text": "so much for watching guys and listening for those who are listening to this in the podcast um subscribe for more",
+    "start": "2594560",
+    "end": "2600560"
+  },
+  {
+    "text": "back endish uh discussions topics news and my name is hussein i'm signing out",
+    "start": "2600560",
+    "end": "2607280"
+  },
+  {
+    "text": "thank you so much stay awesome i'm gonna see you on the next one you guys awesome goodbye",
+    "start": "2607280",
+    "end": "2614000"
+  }
+]

@@ -1,0 +1,3213 @@
+[
+  {
+    "start": "0",
+    "end": "110000"
+  },
+  {
+    "text": "Discord has posted a new blog a few days ago",
+    "start": "120",
+    "end": "5160"
+  },
+  {
+    "text": "about a very interesting problem they ran into how they store",
+    "start": "5160",
+    "end": "12540"
+  },
+  {
+    "text": "trillions of their messages if you don't know Discord is this client messaging app that has become really",
+    "start": "12540",
+    "end": "21480"
+  },
+  {
+    "text": "popular especially in the live streaming I think a space where most of the gaming",
+    "start": "21480",
+    "end": "28080"
+  },
+  {
+    "text": "and live streamers use Discord as their you know de facto Communication channel",
+    "start": "28080",
+    "end": "33300"
+  },
+  {
+    "text": "so for chatting or audio calls and I've seen sometimes I watch YouTube podcasts",
+    "start": "33300",
+    "end": "39780"
+  },
+  {
+    "text": "that use Discord as calls to receive calls so they have discussions there so it's a very popular",
+    "start": "39780",
+    "end": "46140"
+  },
+  {
+    "text": "app and I think 2017 I covered how they moved from mongodb as their",
+    "start": "46140",
+    "end": "54000"
+  },
+  {
+    "text": "primary storage to Cassandra and it was a very interesting blog that",
+    "start": "54000",
+    "end": "60180"
+  },
+  {
+    "text": "they wrote back then and just few days ago they wrote another",
+    "start": "60180",
+    "end": "66119"
+  },
+  {
+    "text": "blog how they storing trillions of messages they move from billions now to",
+    "start": "66119",
+    "end": "71340"
+  },
+  {
+    "text": "trillions and they are moving essentially from Cassandra as their main",
+    "start": "71340",
+    "end": "77180"
+  },
+  {
+    "text": "uh storage in Gin and database",
+    "start": "77180",
+    "end": "82220"
+  },
+  {
+    "text": "2 seller DB in this blog what I want to go go through is I want to go through",
+    "start": "82220",
+    "end": "87960"
+  },
+  {
+    "text": "the the section that I talk about they talk about the problems of the Cassandra they",
+    "start": "87960",
+    "end": "94259"
+  },
+  {
+    "text": "talk about the challenges they face they talk about many other things and then they talk about what they did",
+    "start": "94259",
+    "end": "100680"
+  },
+  {
+    "text": "to solve these problems and migrate everything from casadra to",
+    "start": "100680",
+    "end": "106979"
+  },
+  {
+    "text": "sell a DB so let's analyze this let's get started how Discord stores trillions of messages in 2017 we wrote a blog post",
+    "start": "106979",
+    "end": "114600"
+  },
+  {
+    "start": "110000",
+    "end": "420000"
+  },
+  {
+    "text": "on how we store billions of messages I talked about that I'm gonna reference",
+    "start": "114600",
+    "end": "119640"
+  },
+  {
+    "text": "the video below and the podcast as well for those listening we shared our",
+    "start": "119640",
+    "end": "124920"
+  },
+  {
+    "text": "journey of how we started out with using mongodb but migrated our data to Cassandra because we were looking for a",
+    "start": "124920",
+    "end": "132239"
+  },
+  {
+    "text": "database that was scalable fault tolerant and relatively low maintenance so those are the things they were",
+    "start": "132239",
+    "end": "138660"
+  },
+  {
+    "text": "looking at the reason they didn't start with the relational databases they wanted a distributed",
+    "start": "138660",
+    "end": "146940"
+  },
+  {
+    "text": "database to start with scalable that's the word they used I want to talk about this a little bit as relational",
+    "start": "146940",
+    "end": "154140"
+  },
+  {
+    "text": "databases while you can Shard them you can definitely partition",
+    "start": "154140",
+    "end": "161760"
+  },
+  {
+    "text": "relational data into multiple instances it is commonly the case where",
+    "start": "161760",
+    "end": "168180"
+  },
+  {
+    "text": "that is causes you more problems the reason is",
+    "start": "168180",
+    "end": "175200"
+  },
+  {
+    "text": "simple reasons just transaction you can't do transactions across short effectively right because transactions",
+    "start": "175200",
+    "end": "181860"
+  },
+  {
+    "text": "are by Design the multiversion concurrency control aspects of it and acidity and all these",
+    "start": "181860",
+    "end": "190260"
+  },
+  {
+    "text": "nice Properties or just at the instance level it can't just spread them",
+    "start": "190260",
+    "end": "196620"
+  },
+  {
+    "text": "now I know people will ask me yeah you can two face commands three phase command",
+    "start": "196620",
+    "end": "202860"
+  },
+  {
+    "text": "s of course there's always a way but",
+    "start": "202860",
+    "end": "208920"
+  },
+  {
+    "text": "as at its Simplicity and we are so predictability as a single instance",
+    "start": "208920",
+    "end": "216120"
+  },
+  {
+    "text": "all the data is in one instance now that doesn't mean you you have to use",
+    "start": "216120",
+    "end": "221580"
+  },
+  {
+    "text": "one instance for relational database you can scale horizontally by having",
+    "start": "221580",
+    "end": "227280"
+  },
+  {
+    "text": "replication you know have one Master Rider that receives rights and then have",
+    "start": "227280",
+    "end": "235140"
+  },
+  {
+    "text": "many read replicas and as the master node receives writes the wall",
+    "start": "235140",
+    "end": "243840"
+  },
+  {
+    "text": "changes or the transaction log changes will be pushed down to the replicas",
+    "start": "243840",
+    "end": "251700"
+  },
+  {
+    "text": "and the replicas will have the essentially eventual consistencies of sort of speak and they will catch up so",
+    "start": "251700",
+    "end": "259380"
+  },
+  {
+    "text": "that's the state of the hour that we have it and you can go further than that and",
+    "start": "259380",
+    "end": "264419"
+  },
+  {
+    "text": "Shard if you want by actually splitting the data into multiple",
+    "start": "264419",
+    "end": "270479"
+  },
+  {
+    "text": "databases and that model in the original model everything isn't those replicas",
+    "start": "270479",
+    "end": "275820"
+  },
+  {
+    "text": "all the data is there and there is no oh this database has only half of the data",
+    "start": "275820",
+    "end": "280919"
+  },
+  {
+    "text": "and this database has the other half now if you want you can short that by partitioning and put the data based on a",
+    "start": "280919",
+    "end": "288360"
+  },
+  {
+    "text": "certain sharding key and if you hit that shortening key you hit that instance and",
+    "start": "288360",
+    "end": "293820"
+  },
+  {
+    "text": "you read the data that you want right mongodb by default",
+    "start": "293820",
+    "end": "299840"
+  },
+  {
+    "text": "and Cassandra and seller they start with that model that sharding model where",
+    "start": "299940",
+    "end": "305460"
+  },
+  {
+    "text": "things are partitioned things are fault to around things are scalable and as",
+    "start": "305460",
+    "end": "312780"
+  },
+  {
+    "text": "they call it and this way you have the database that knows will have fuel and fewer data as a",
+    "start": "312780",
+    "end": "319199"
+  },
+  {
+    "text": "result your queries are faster when you when you hit that the reason is as I always say the goal of all these queries",
+    "start": "319199",
+    "end": "326639"
+  },
+  {
+    "text": "is to work with as few fewer data as possible that's the goal yeah instead",
+    "start": "326639",
+    "end": "334320"
+  },
+  {
+    "text": "of searching trillions right you search submillions that and of course if you",
+    "start": "334320",
+    "end": "341820"
+  },
+  {
+    "text": "work with fewer data and you have beautiful indexes you can even further reduce that result set into exactly what",
+    "start": "341820",
+    "end": "349680"
+  },
+  {
+    "text": "you want that that's the whole trick behind databases right work with as",
+    "start": "349680",
+    "end": "356100"
+  },
+  {
+    "text": "fewer data as possible how do you get there indexes partitioning sharding",
+    "start": "356100",
+    "end": "361500"
+  },
+  {
+    "text": "all these trucks so mongodb Cassandra does that by default you have a partition key and this on the partition",
+    "start": "361500",
+    "end": "367740"
+  },
+  {
+    "text": "key you hit the node and that node has the data and the node of course uh this becomes of course dangerous right just",
+    "start": "367740",
+    "end": "374400"
+  },
+  {
+    "text": "one node have part of the data what if that node dies that's why you have a quorum of this data should be duplicated",
+    "start": "374400",
+    "end": "382139"
+  },
+  {
+    "text": "in multiple nodes usually three and of course that's basically the the state of",
+    "start": "382139",
+    "end": "387720"
+  },
+  {
+    "text": "the art as we have it all right with that said we wanted the database to grow alongside us but hopefully its",
+    "start": "387720",
+    "end": "393539"
+  },
+  {
+    "text": "maintenance needs wouldn't grow uh alongside our storage needs unfortunately we found that that not to",
+    "start": "393539",
+    "end": "400740"
+  },
+  {
+    "text": "be the case our Cassandra cluster exhibited serious performance issues that required increasing amounts of",
+    "start": "400740",
+    "end": "408600"
+  },
+  {
+    "text": "effort to just maintain not to prove not to improve right so let's",
+    "start": "408600",
+    "end": "413819"
+  },
+  {
+    "text": "unpack that we store our messages in a database called Cassandra messages this is their database that stores all the",
+    "start": "413819",
+    "end": "421500"
+  },
+  {
+    "start": "420000",
+    "end": "660000"
+  },
+  {
+    "text": "messages in 2017 we run 12 Cassandra nodes storing billions of messages that's when we discussed this article",
+    "start": "421500",
+    "end": "429240"
+  },
+  {
+    "text": "back then right at the beginning of 22 we had 177 no so they increased a lot right to",
+    "start": "429240",
+    "end": "437340"
+  },
+  {
+    "text": "store trillions of messages that there is we're talking about multi-billion no multi thousand billions",
+    "start": "437340",
+    "end": "444660"
+  },
+  {
+    "text": "right that's nuts to our Chagrin is this even a word what",
+    "start": "444660",
+    "end": "450539"
+  },
+  {
+    "text": "the heck is Chagrin distress okay I don't know",
+    "start": "450539",
+    "end": "457380"
+  },
+  {
+    "text": "to our stress it was a high toil system our uncle team was frequently paged for",
+    "start": "457380",
+    "end": "464819"
+  },
+  {
+    "text": "issues with the database latency was unpredictable and we were having to cut",
+    "start": "464819",
+    "end": "470220"
+  },
+  {
+    "text": "down maintenance operation that become too expensive why why is latency",
+    "start": "470220",
+    "end": "475860"
+  },
+  {
+    "text": "unpredictable well stickler there is a sequel statement here cql statement that has",
+    "start": "475860",
+    "end": "483120"
+  },
+  {
+    "text": "been chopped I think by by the Safari reader so I'm gonna show",
+    "start": "483120",
+    "end": "488940"
+  },
+  {
+    "text": "it here instead and then go back there I prefer that view is better but here we're looking at the messages table",
+    "start": "488940",
+    "end": "494639"
+  },
+  {
+    "text": "their message table includes the channel ID which is a unique identifier for the channel and the server",
+    "start": "494639",
+    "end": "501500"
+  },
+  {
+    "text": "bucket a bucket is literally an integer that represents a",
+    "start": "501500",
+    "end": "507780"
+  },
+  {
+    "text": "a Time window very critical to let you know that this message",
+    "start": "507780",
+    "end": "514560"
+  },
+  {
+    "text": "lived in this time window because you're gonna have a lot of messages in the same time Melinda and you want them next to",
+    "start": "514560",
+    "end": "521940"
+  },
+  {
+    "text": "each other usually right especially if they are belonging to the same channel why if you do a read",
+    "start": "521940",
+    "end": "528839"
+  },
+  {
+    "text": "to read certain message a certain time most probably you want to read those",
+    "start": "528839",
+    "end": "535019"
+  },
+  {
+    "text": "messages that are came after and before it right unless it's like direct",
+    "start": "535019",
+    "end": "541380"
+  },
+  {
+    "text": "messages that should be in a different system right but if it's a public Channel and that I mean just a channel",
+    "start": "541380",
+    "end": "548459"
+  },
+  {
+    "text": "messages from that channel should live together why especially in time because",
+    "start": "548459",
+    "end": "554040"
+  },
+  {
+    "text": "a read if I do an i o and that's true for both b3s or LSM that Cassandra uses",
+    "start": "554040",
+    "end": "560880"
+  },
+  {
+    "text": "or celadi before that matter you want to do an i o and you want to get as much",
+    "start": "560880",
+    "end": "567839"
+  },
+  {
+    "text": "as from your IO as possible right you don't want to do multiple iOS to read 10",
+    "start": "567839",
+    "end": "573600"
+  },
+  {
+    "text": "messages you want to do do a single audio and get a thousand messages 20 000",
+    "start": "573600",
+    "end": "579000"
+  },
+  {
+    "text": "messages if possible just all compacting nice into a single page that's the goal",
+    "start": "579000",
+    "end": "584459"
+  },
+  {
+    "text": "of databases if you manage to do that you won right and that's what they're",
+    "start": "584459",
+    "end": "589860"
+  },
+  {
+    "text": "doing they're doing it the data modeling is beautiful here and they have also a",
+    "start": "589860",
+    "end": "595019"
+  },
+  {
+    "text": "message ID which we're going to talk about in a minute that this ID this is a",
+    "start": "595019",
+    "end": "600120"
+  },
+  {
+    "text": "unique identifier that identify this message and the author and the content of the message and notice that the",
+    "start": "600120",
+    "end": "605940"
+  },
+  {
+    "text": "primary key is on the channel ID sorted by the bucket and then the message ID",
+    "start": "605940",
+    "end": "611880"
+  },
+  {
+    "text": "all of three or all of the three are the unique primary key which is then defines",
+    "start": "611880",
+    "end": "618480"
+  },
+  {
+    "text": "the clustering of that table and the clustering is very critical because that's how the data is stored on",
+    "start": "618480",
+    "end": "625440"
+  },
+  {
+    "text": "disk based on this ordering the channel pack bucket and message ID sweet",
+    "start": "625440",
+    "end": "632399"
+  },
+  {
+    "text": "all right uh now we can go back to the to the better view here so the SQL cql",
+    "start": "632399",
+    "end": "640500"
+  },
+  {
+    "text": "the Cassandra query language statement above is a minimal version of our message schema every ID we use is a",
+    "start": "640500",
+    "end": "647220"
+  },
+  {
+    "text": "snowflake all the sequence is not it's just so it's all just monotomically",
+    "start": "647220",
+    "end": "652260"
+  },
+  {
+    "text": "increasing they you don't you don't get a lot with it you don't do much with it you want more data in your messages so",
+    "start": "652260",
+    "end": "659940"
+  },
+  {
+    "text": "let's adjust time and other information right and that's what",
+    "start": "659940",
+    "end": "665760"
+  },
+  {
+    "start": "660000",
+    "end": "870000"
+  },
+  {
+    "text": "a snowflake gives you here so what do they do with the snowflake why don't we just use euids grids right",
+    "start": "665760",
+    "end": "672360"
+  },
+  {
+    "text": "quits are unique which is nice but they're random random is not good in",
+    "start": "672360",
+    "end": "678779"
+  },
+  {
+    "text": "storage because if you Generate random messages they have no relation to each other and as a result the database if",
+    "start": "678779",
+    "end": "686459"
+  },
+  {
+    "text": "you clustered on that uuid it will try to sort it and the Sorting",
+    "start": "686459",
+    "end": "691680"
+  },
+  {
+    "text": "does not make any sense because the thing is random so if you turn around and start to read these you ID you'll be",
+    "start": "691680",
+    "end": "699120"
+  },
+  {
+    "text": "going all over the place so there is a a better version of uuid",
+    "start": "699120",
+    "end": "704519"
+  },
+  {
+    "text": "which is called the UL idea Luxor lexographically sorted gweds",
+    "start": "704519",
+    "end": "713700"
+  },
+  {
+    "text": "that is used Now by Shopify and I covered that that it gives you like an ordered",
+    "start": "713700",
+    "end": "719820"
+  },
+  {
+    "text": "list that are unique uuid is beautiful so if you generate uuids that are next",
+    "start": "719820",
+    "end": "725579"
+  },
+  {
+    "text": "to each other they are technically ordered and if you have ordered things that are relative to each other a query",
+    "start": "725579",
+    "end": "732899"
+  },
+  {
+    "text": "to give you one one uuid will give you all anything related",
+    "start": "732899",
+    "end": "740640"
+  },
+  {
+    "text": "to it also in the same page and if you do that things that are next to each other will",
+    "start": "740640",
+    "end": "747360"
+  },
+  {
+    "text": "make sense right and that's what Shopify did Shopify use this to ensure item",
+    "start": "747360",
+    "end": "753420"
+  },
+  {
+    "text": "potency in their ordering every order request will get a unique UL ID and",
+    "start": "753420",
+    "end": "760260"
+  },
+  {
+    "text": "because we know that orders will be absolutely next to each other right one after the other right",
+    "start": "760260",
+    "end": "767519"
+  },
+  {
+    "text": "they are storing these orders on this request and if they want to check if The UU UL ID is a duplicate if the order is",
+    "start": "767519",
+    "end": "775139"
+  },
+  {
+    "text": "a duplicate they just read that and guess what they're gonna always hit that",
+    "start": "775139",
+    "end": "780420"
+  },
+  {
+    "text": "neat tail page where where all the uuids must live and",
+    "start": "780420",
+    "end": "788519"
+  },
+  {
+    "text": "this page will be cached right it's almost impossible that you're gonna hit",
+    "start": "788519",
+    "end": "795000"
+  },
+  {
+    "text": "a request order that is has been submitted uh three days ago right",
+    "start": "795000",
+    "end": "801120"
+  },
+  {
+    "text": "because orders to check duplicates you only check within few seconds or even",
+    "start": "801120",
+    "end": "807660"
+  },
+  {
+    "text": "minutes right and those will be guaranteed to be next to each other and that's the beauty here so they're using",
+    "start": "807660",
+    "end": "813240"
+  },
+  {
+    "text": "something similar here they are trying to Cluster they're trying to group things together we partition our",
+    "start": "813240",
+    "end": "818339"
+  },
+  {
+    "text": "messages by Channel they are sent in so that's the first key they use to partition along with the bucket which is",
+    "start": "818339",
+    "end": "826500"
+  },
+  {
+    "text": "a static time window this partitioning means that in Cassandra all messages for a given",
+    "start": "826500",
+    "end": "832320"
+  },
+  {
+    "text": "Channel and Bug it bucket will be stored together and replicated across three",
+    "start": "832320",
+    "end": "838680"
+  },
+  {
+    "text": "nodes this is the column right the replication Factor every every message within the same channel and bucket if",
+    "start": "838680",
+    "end": "846480"
+  },
+  {
+    "text": "you send a lot of messages in the same time window all of these nice messages will go to the same",
+    "start": "846480",
+    "end": "853620"
+  },
+  {
+    "text": "nodes effectively right within this partitioning lies a",
+    "start": "853620",
+    "end": "858720"
+  },
+  {
+    "text": "potential performance for pitfall a server with just a small groups of friend tend to send orders of",
+    "start": "858720",
+    "end": "864959"
+  },
+  {
+    "text": "magnitude's fewer messages of course than a server with hundreds of thousands of people and and it's in the same time",
+    "start": "864959",
+    "end": "873440"
+  },
+  {
+    "start": "870000",
+    "end": "1160000"
+  },
+  {
+    "text": "same channel right in the same channel same group of time you will get a burst",
+    "start": "873440",
+    "end": "879480"
+  },
+  {
+    "text": "of massive amount of messages from one server compared to another so you'll see",
+    "start": "879480",
+    "end": "884940"
+  },
+  {
+    "text": "this they call hotspots like one bucket of time especially like maybe at",
+    "start": "884940",
+    "end": "893100"
+  },
+  {
+    "text": "night ish right you would see this flood of queries into these areas and right right",
+    "start": "893100",
+    "end": "900480"
+  },
+  {
+    "text": "and if this happens this will create this hot spot so why is this a problem",
+    "start": "900480",
+    "end": "906000"
+  },
+  {
+    "text": "let's continue reading in Cassandra reads are more expensive than right so in order to talk about this we need to",
+    "start": "906000",
+    "end": "912660"
+  },
+  {
+    "text": "understand uh the difference between what Cassandra uses which is a log",
+    "start": "912660",
+    "end": "918360"
+  },
+  {
+    "text": "structured merge tree versus uh which most all relational",
+    "start": "918360",
+    "end": "925820"
+  },
+  {
+    "text": "databases use which is B plus trees B plus trees or data structure that is",
+    "start": "925820",
+    "end": "931680"
+  },
+  {
+    "text": "used to index your table and they can also be used to store the raw data as",
+    "start": "931680",
+    "end": "939180"
+  },
+  {
+    "text": "well sorted into what we call Leaf pages so each page will have",
+    "start": "939180",
+    "end": "945060"
+  },
+  {
+    "text": "based on your primary key and assuming a clustered index primary key here all your",
+    "start": "945060",
+    "end": "952199"
+  },
+  {
+    "text": "primary key and of the full row will be stored in these Pages ordered so row",
+    "start": "952199",
+    "end": "958560"
+  },
+  {
+    "text": "number one and all its columns round number two all it's column three all of almost come right and it's gonna be",
+    "start": "958560",
+    "end": "965339"
+  },
+  {
+    "text": "ordered until the fixed page is full and that becomes one leave page and Then",
+    "start": "965339",
+    "end": "971220"
+  },
+  {
+    "text": "followed by the next one and these Leaf pages are linked and changed together so you can Traverse back and forth so in",
+    "start": "971220",
+    "end": "978360"
+  },
+  {
+    "text": "the list stages then you have the root node an intermediate node that is allowed to be used to index to quickly",
+    "start": "978360",
+    "end": "987480"
+  },
+  {
+    "text": "go to the page which has the row you're looking for and very simple if you're",
+    "start": "987480",
+    "end": "994380"
+  },
+  {
+    "text": "looking for row number 55 you'll start with the root node and the root node",
+    "start": "994380",
+    "end": "1000019"
+  },
+  {
+    "text": "will tell you oh if you want row 0 to 10 go to this page from 11 to 20 go to this",
+    "start": "1000019",
+    "end": "1007940"
+  },
+  {
+    "text": "page and so on so 55 is between this and this you hit that page and then you do",
+    "start": "1007940",
+    "end": "1013279"
+  },
+  {
+    "text": "on the internal node you do the same thing until you hit the leave page that you want that's how B plus 3 Works in a",
+    "start": "1013279",
+    "end": "1019880"
+  },
+  {
+    "text": "nutshell in an unclustered indexes the leaf pages",
+    "start": "1019880",
+    "end": "1025579"
+  },
+  {
+    "text": "will not have actual data they will have simple pointers to the actual table like",
+    "start": "1025579",
+    "end": "1032298"
+  },
+  {
+    "text": "in postgres it's the Tuple ID which is a page ID and the index of the Tuple but",
+    "start": "1032299",
+    "end": "1038839"
+  },
+  {
+    "text": "in Prior in an MI sequel or other databases it's a pointer to the",
+    "start": "1038839",
+    "end": "1045918"
+  },
+  {
+    "text": "primary key it's actual the primary key value in and and how do you do an insert very",
+    "start": "1045919",
+    "end": "1053059"
+  },
+  {
+    "text": "simple you want to insert a row you need to find which page that row needs to go in",
+    "start": "1053059",
+    "end": "1058640"
+  },
+  {
+    "text": "in that index and then insert it right into that page and your you will update",
+    "start": "1058640",
+    "end": "1066260"
+  },
+  {
+    "text": "it in memory of course that leave page right if there's hopefully there's a space in your page and you're going to",
+    "start": "1066260",
+    "end": "1072200"
+  },
+  {
+    "text": "write it right there in the correct order so let's say the values are one two seven right and then you want to",
+    "start": "1072200",
+    "end": "1080299"
+  },
+  {
+    "text": "insert the value of three three has to be right after the two and right before the seven you have to order them as you",
+    "start": "1080299",
+    "end": "1087860"
+  },
+  {
+    "text": "insert the order is critical right because it's clustered indexes or the end of the day they are",
+    "start": "1087860",
+    "end": "1094520"
+  },
+  {
+    "text": "they have to be ordered and when you do that you also use",
+    "start": "1094520",
+    "end": "1100400"
+  },
+  {
+    "text": "a persistent model such as the write ahead log or the commit log they call it",
+    "start": "1100400",
+    "end": "1105919"
+  },
+  {
+    "text": "transaction log to persist these changes only into that and then you commit that",
+    "start": "1105919",
+    "end": "1112520"
+  },
+  {
+    "text": "it's enough to commit just that you don't have to flush the page to disk right but eventually you will have to",
+    "start": "1112520",
+    "end": "1117919"
+  },
+  {
+    "text": "and B plus three if you flush the page it's an update it's an actual physical",
+    "start": "1117919",
+    "end": "1123820"
+  },
+  {
+    "text": "update to the OS he said hey this page go and update it and what does that mean",
+    "start": "1123820",
+    "end": "1130760"
+  },
+  {
+    "text": "well the page is a fixed size it lives on disk on a file and it lives really in",
+    "start": "1130760",
+    "end": "1138440"
+  },
+  {
+    "text": "a particular offset and it ends at a particular offset so you would issue a",
+    "start": "1138440",
+    "end": "1144320"
+  },
+  {
+    "text": "right and say hey write this content this new content on position number",
+    "start": "1144320",
+    "end": "1151960"
+  },
+  {
+    "text": "2000 for 8 kilowatts that's like an example of a fixed page right or 16k in",
+    "start": "1151960",
+    "end": "1158480"
+  },
+  {
+    "text": "case of my Sequel and that's an update right so what's wrong with updates updates are in place updates in the days",
+    "start": "1158480",
+    "end": "1166880"
+  },
+  {
+    "start": "1160000",
+    "end": "1530000"
+  },
+  {
+    "text": "of hard drives this is an actual in place so you when you do that the hard",
+    "start": "1166880",
+    "end": "1171919"
+  },
+  {
+    "text": "drive will second and will find the location sector and then write it back",
+    "start": "1171919",
+    "end": "1178340"
+  },
+  {
+    "text": "overwrite whatever you had in ssds unfortunately there is nothing else",
+    "start": "1178340",
+    "end": "1183679"
+  },
+  {
+    "text": "called in place update you don't you don't just overwrite things unfortunately that's because of all the",
+    "start": "1183679",
+    "end": "1190880"
+  },
+  {
+    "text": "nand the way nand works 99 cells you invalidate to write something to the SSD",
+    "start": "1190880",
+    "end": "1198919"
+  },
+  {
+    "text": "to update something to the SSD you know the logical block address",
+    "start": "1198919",
+    "end": "1205460"
+  },
+  {
+    "text": "right which is basically what Maps the file system offset down to an array if",
+    "start": "1205460",
+    "end": "1213440"
+  },
+  {
+    "text": "you will a list of logical block address and those will be flush to disk right this is what I want to update",
+    "start": "1213440",
+    "end": "1220760"
+  },
+  {
+    "text": "that's will translate into whatever technology in the driver whether this is",
+    "start": "1220760",
+    "end": "1226160"
+  },
+  {
+    "text": "nvme or normal SATA stuff so yeah in ssds though when you do",
+    "start": "1226160",
+    "end": "1234620"
+  },
+  {
+    "text": "an update do you want to update a certain LBA",
+    "start": "1234620",
+    "end": "1240440"
+  },
+  {
+    "text": "what happens is you can't overwrite existing things so",
+    "start": "1240440",
+    "end": "1245480"
+  },
+  {
+    "text": "what this is the controller does is actually takes you right right to a new",
+    "start": "1245480",
+    "end": "1252320"
+  },
+  {
+    "text": "place find the new block and a list of pages",
+    "start": "1252320",
+    "end": "1257360"
+  },
+  {
+    "text": "where this fits and then write your data the second step is it invalidates the",
+    "start": "1257360",
+    "end": "1264140"
+  },
+  {
+    "text": "old data that's what it does says hey this is no longer a valid there so that's another",
+    "start": "1264140",
+    "end": "1270980"
+  },
+  {
+    "text": "right so one right two rights one right to actually write the thing the second",
+    "start": "1270980",
+    "end": "1276380"
+  },
+  {
+    "text": "right to invalidate it and the third one is in in memory dram change which now",
+    "start": "1276380",
+    "end": "1281780"
+  },
+  {
+    "text": "points your logical block address on the OS that the OS uses down to the new",
+    "start": "1281780",
+    "end": "1289100"
+  },
+  {
+    "text": "physical location that's what we change in the SSD we change the pointer the pointer is now this this is your new",
+    "start": "1289100",
+    "end": "1295820"
+  },
+  {
+    "text": "pointer this way the OS can continue working with the same LBA The Logical block address but the physical block",
+    "start": "1295820",
+    "end": "1302659"
+  },
+  {
+    "text": "continues to change and that's what happens every time you update it moves to a new place it moves",
+    "start": "1302659",
+    "end": "1308659"
+  },
+  {
+    "text": "to a new place near the rivers this is a disaster if you keeps doing it a lot why because now you're left with",
+    "start": "1308659",
+    "end": "1317140"
+  },
+  {
+    "text": "stale invalid Pages eventually if you do it a lot",
+    "start": "1317140",
+    "end": "1322880"
+  },
+  {
+    "text": "then you will fill up your SSD very quickly to the invalid data",
+    "start": "1322880",
+    "end": "1328900"
+  },
+  {
+    "text": "especially if you update a lot of stuff so you'll have active and invalid active and valid so now what happens",
+    "start": "1328940",
+    "end": "1335480"
+  },
+  {
+    "text": "this invalid data to be used it has to be cleared and guess what to be cleared",
+    "start": "1335480",
+    "end": "1343760"
+  },
+  {
+    "text": "the whole erasable unit has to be erased to be written to you can't just use it",
+    "start": "1343760",
+    "end": "1352220"
+  },
+  {
+    "text": "and that in itself is an expensive operation called the garbage collection so as you want all of",
+    "start": "1352220",
+    "end": "1359299"
+  },
+  {
+    "text": "a sudden you want to do a new update or a new ride you have no place so the",
+    "start": "1359299",
+    "end": "1365120"
+  },
+  {
+    "text": "control will say wait a minute let me find an a a stale block erase it that's",
+    "start": "1365120",
+    "end": "1373039"
+  },
+  {
+    "text": "one right and write your stuff to it so that's you're gonna do two i o in this case not",
+    "start": "1373039",
+    "end": "1381200"
+  },
+  {
+    "text": "bad right but here's where it goes really bad when you have an erasable unit",
+    "start": "1381200",
+    "end": "1386900"
+  },
+  {
+    "text": "and I know I'm going all over the place but it's all related guys believe me it's already that's why we do these deep",
+    "start": "1386900",
+    "end": "1392600"
+  },
+  {
+    "text": "Dives like well if you're gonna do like a summary why why would we be here even right let's talk seriously about these",
+    "start": "1392600",
+    "end": "1399440"
+  },
+  {
+    "text": "things and if we have this erasable unit and if it",
+    "start": "1399440",
+    "end": "1406280"
+  },
+  {
+    "text": "has mixed valid data and invalid data this is where it gets really bad because",
+    "start": "1406280",
+    "end": "1411679"
+  },
+  {
+    "text": "now I can't just erase it it has valid data so the controller has to garbage",
+    "start": "1411679",
+    "end": "1417860"
+  },
+  {
+    "text": "collect and this garbage collector has nothing to do with Java or Cassandra's",
+    "start": "1417860",
+    "end": "1423740"
+  },
+  {
+    "text": "jar garbage collector has nothing to do this is the SSD garbage collector",
+    "start": "1423740",
+    "end": "1430658"
+  },
+  {
+    "text": "stumbling by my words there so now the garbage collector have to move the valid data to a new block",
+    "start": "1431919",
+    "end": "1438440"
+  },
+  {
+    "text": "that's one i o it has to erase the block a second I O",
+    "start": "1438440",
+    "end": "1444380"
+  },
+  {
+    "text": "it has to write three iOS your",
+    "start": "1444380",
+    "end": "1449440"
+  },
+  {
+    "text": "right throughput and as they call it the right amplification",
+    "start": "1449440",
+    "end": "1456820"
+  },
+  {
+    "text": "is tremendously increased your one IO that you think it's a single update it's",
+    "start": "1456820",
+    "end": "1462799"
+  },
+  {
+    "text": "now four update 404 iOS which now of course this",
+    "start": "1462799",
+    "end": "1468500"
+  },
+  {
+    "text": "sticks space from first of all it takes",
+    "start": "1468500",
+    "end": "1473799"
+  },
+  {
+    "text": "bandwidth the iOS now being used for things that you didn't really it's not",
+    "start": "1473799",
+    "end": "1479480"
+  },
+  {
+    "text": "your things it's the system things and then you also need a space to store this",
+    "start": "1479480",
+    "end": "1484940"
+  },
+  {
+    "text": "temporary data right that's the over provisioning so that's kind of a quick lesson on ssds and how updates are",
+    "start": "1484940",
+    "end": "1493460"
+  },
+  {
+    "text": "really not quite good on the long runs that's why B plus 3s and ssds",
+    "start": "1493460",
+    "end": "1500539"
+  },
+  {
+    "text": "especially like if you have like page splits this become exacerbated and as you grow the tree the three",
+    "start": "1500539",
+    "end": "1509720"
+  },
+  {
+    "text": "splits and Pages splits and all of these splits are just updates right it's like",
+    "start": "1509720",
+    "end": "1514880"
+  },
+  {
+    "text": "more rights and updates and deletes and updates so like that's our things go really bad when it comes to",
+    "start": "1514880",
+    "end": "1522140"
+  },
+  {
+    "text": "ssdn and when I say really bad you're talking about years until this",
+    "start": "1522140",
+    "end": "1527659"
+  },
+  {
+    "text": "can you you see the difference you know so people invented this concept of log",
+    "start": "1527659",
+    "end": "1534080"
+  },
+  {
+    "start": "1530000",
+    "end": "1860000"
+  },
+  {
+    "text": "structured merge trees or or LSM which is Cassandra it's used by default and",
+    "start": "1534080",
+    "end": "1540980"
+  },
+  {
+    "text": "cell ADB right and now what what the main goal of ss the LSM is everything is",
+    "start": "1540980",
+    "end": "1549620"
+  },
+  {
+    "text": "a right immutable you rarely do an update you're gonna do an update but very rare",
+    "start": "1549620",
+    "end": "1556400"
+  },
+  {
+    "text": "it's called a step called compaction right so always write in memory write to",
+    "start": "1556400",
+    "end": "1561860"
+  },
+  {
+    "text": "the commit log right to this transaction log as you do changes everything is all right right right right and as you're in",
+    "start": "1561860",
+    "end": "1568760"
+  },
+  {
+    "text": "memory the mem table is filled up you flush the mem table",
+    "start": "1568760",
+    "end": "1573860"
+  },
+  {
+    "text": "to desk as a called the no you don't flush it directly you sorted and then you flush it as as a",
+    "start": "1573860",
+    "end": "1581179"
+  },
+  {
+    "text": "table and this is called the sorted strength tables or SS tables so you sort and flush so when you flush you write",
+    "start": "1581179",
+    "end": "1588980"
+  },
+  {
+    "text": "you never ever update this table never it's always an insert so now this as you",
+    "start": "1588980",
+    "end": "1595279"
+  },
+  {
+    "text": "create more and more and more SS tables this first level gets filled up",
+    "start": "1595279",
+    "end": "1601159"
+  },
+  {
+    "text": "so what you do is the next step you read a bunch of these Stables based on",
+    "start": "1601159",
+    "end": "1607220"
+  },
+  {
+    "text": "certain criteria and write them to another larger sets of tables right and",
+    "start": "1607220",
+    "end": "1613340"
+  },
+  {
+    "text": "then you do the same thing and always everything is an insert everything is an insert",
+    "start": "1613340",
+    "end": "1620240"
+  },
+  {
+    "text": "what this creates is now problem with this is the the good up one",
+    "start": "1620240",
+    "end": "1626240"
+  },
+  {
+    "text": "let's talk about the good the good about this is as you write rights are extremely fast the SSD doesn't have to",
+    "start": "1626240",
+    "end": "1633860"
+  },
+  {
+    "text": "do this right all everything you're writing is actually your data you're not really invalidating anything right",
+    "start": "1633860",
+    "end": "1640820"
+  },
+  {
+    "text": "like you're always writing in a new place which is a nice thing especially if you're writing in sequence database",
+    "start": "1640820",
+    "end": "1648039"
+  },
+  {
+    "text": "ssds love this right it's a very nice sequential right",
+    "start": "1648039",
+    "end": "1654440"
+  },
+  {
+    "text": "if you do it sequentially but like think about what do we do we insert we update",
+    "start": "1654440",
+    "end": "1660860"
+  },
+  {
+    "text": "like actual the users do an insert and update and delete all of these will be translated to inserts",
+    "start": "1660860",
+    "end": "1667580"
+  },
+  {
+    "text": "all of them an insert is an insert and an SS table and an LSM an update is an insert a",
+    "start": "1667580",
+    "end": "1674900"
+  },
+  {
+    "text": "delete is also an insert it's called a tombstone you create a tombstone so if you",
+    "start": "1674900",
+    "end": "1680779"
+  },
+  {
+    "text": "if you keep inserting and updating a message and delete updating the same",
+    "start": "1680779",
+    "end": "1686419"
+  },
+  {
+    "text": "message like everything the same message update update what you do is like you create new records effectively right and",
+    "start": "1686419",
+    "end": "1693559"
+  },
+  {
+    "text": "you persist them in new SS tables and Snus tables so now to look for the thing",
+    "start": "1693559",
+    "end": "1699380"
+  },
+  {
+    "text": "you actually want reads have become very very slow",
+    "start": "1699380",
+    "end": "1706220"
+  },
+  {
+    "text": "because they have to First Look up and the meme in the mem table and then you look up in",
+    "start": "1706220",
+    "end": "1711919"
+  },
+  {
+    "text": "the first layer of this is able to look for your stuff you go if you didn't find it you go to the another stable and you",
+    "start": "1711919",
+    "end": "1718279"
+  },
+  {
+    "text": "go to another as a stable you got another step until you find what you were looking for right",
+    "start": "1718279",
+    "end": "1723559"
+  },
+  {
+    "text": "or you found a tombstone that you know this this thing has actually deleted I have to stop",
+    "start": "1723559",
+    "end": "1728980"
+  },
+  {
+    "text": "while both Cassandra and seller uses a technique called Bloom filters so say",
+    "start": "1728980",
+    "end": "1735140"
+  },
+  {
+    "text": "okay your record is actually is is impossible to be here so it's like",
+    "start": "1735140",
+    "end": "1741260"
+  },
+  {
+    "text": "a nice bitmap that is stored that you can quickly check to use to see before",
+    "start": "1741260",
+    "end": "1748340"
+  },
+  {
+    "text": "you actually open the SS table to check if this thing is actually there or not",
+    "start": "1748340",
+    "end": "1754220"
+  },
+  {
+    "text": "right so these are like kind nice trick with those explained now that we know the benefits of LSM versus the detriment",
+    "start": "1754220",
+    "end": "1764419"
+  },
+  {
+    "text": "now reads have become slow right so what",
+    "start": "1764419",
+    "end": "1769520"
+  },
+  {
+    "text": "we do with the SS LSM is we do something called compaction and this is where",
+    "start": "1769520",
+    "end": "1774620"
+  },
+  {
+    "text": "updates and deletes happens where we can group things together and then delete",
+    "start": "1774620",
+    "end": "1780020"
+  },
+  {
+    "text": "the Tombstones uh delete duplicate records have one record of the same",
+    "start": "1780020",
+    "end": "1786679"
+  },
+  {
+    "text": "thing we don't need the old stuff anymore I remove it you have compact",
+    "start": "1786679",
+    "end": "1792200"
+  },
+  {
+    "text": "things so a thousand version of the same thing are no longer the Thousand it's",
+    "start": "1792200",
+    "end": "1798080"
+  },
+  {
+    "text": "just one you delete this stuff and of course in that process what you do is you create a new thing and you just",
+    "start": "1798080",
+    "end": "1804140"
+  },
+  {
+    "text": "delete right the old stuff and you create it's always a create a new one right so a delete technically is is a",
+    "start": "1804140",
+    "end": "1811880"
+  },
+  {
+    "text": "marking and that lbn the SSD as deleted but it's not as you do it very is you",
+    "start": "1811880",
+    "end": "1819679"
+  },
+  {
+    "text": "don't do it as often as as an update to a B3 does that make sense that's that's the goal of it SSD I personally can't",
+    "start": "1819679",
+    "end": "1826700"
+  },
+  {
+    "text": "speak to how how bad B plus 3 can affect your ssds",
+    "start": "1826700",
+    "end": "1833000"
+  },
+  {
+    "text": "you know or LSM like I only hear things and I I don't believe anything I hear",
+    "start": "1833000",
+    "end": "1838700"
+  },
+  {
+    "text": "unless I actually see it myself you know so that's we always",
+    "start": "1838700",
+    "end": "1845120"
+  },
+  {
+    "text": "human beings we create we we have a problem we create a solution but that solution almost always",
+    "start": "1845120",
+    "end": "1852799"
+  },
+  {
+    "text": "creates other problems and that's what we have here all right with that rant",
+    "start": "1852799",
+    "end": "1858039"
+  },
+  {
+    "text": "now let's jump into it again in Cassandra reads are more expensive than rights rights are appended to a commit",
+    "start": "1858039",
+    "end": "1865340"
+  },
+  {
+    "start": "1860000",
+    "end": "2160000"
+  },
+  {
+    "text": "log as I talked about it and written to an in-memory structure called a mem table that is eventually flush to disk",
+    "start": "1865340",
+    "end": "1871940"
+  },
+  {
+    "text": "reads however need to query the MIM table to potentially and potentially",
+    "start": "1871940",
+    "end": "1877399"
+  },
+  {
+    "text": "multiple SS tables on this file to find what you're looking for so this is a",
+    "start": "1877399",
+    "end": "1882620"
+  },
+  {
+    "text": "more expensive operation lots of concurrent reads as users interact with servers can hot spot a",
+    "start": "1882620",
+    "end": "1890000"
+  },
+  {
+    "text": "partition okay which we refer to as imaginatively",
+    "start": "1890000",
+    "end": "1895399"
+  },
+  {
+    "text": "as a hot partition the size of our dances when combined with these access patterns led to struggle for our cluster",
+    "start": "1895399",
+    "end": "1903980"
+  },
+  {
+    "text": "so what happens here is because most queries go to almost the same",
+    "start": "1903980",
+    "end": "1911360"
+  },
+  {
+    "text": "partition almost to the same uh bucket Channel ID",
+    "start": "1911360",
+    "end": "1917860"
+  },
+  {
+    "text": "will create this hot partitions like the Nord becomes so busy because all the",
+    "start": "1917860",
+    "end": "1923659"
+  },
+  {
+    "text": "queries will go to it and this is the same tail problem that we talked about where things that are",
+    "start": "1923659",
+    "end": "1929960"
+  },
+  {
+    "text": "which is a good thing when it comes if the database has a good caching you know in place",
+    "start": "1929960",
+    "end": "1936500"
+  },
+  {
+    "text": "it should just serve you from the memory because this should be in memory but",
+    "start": "1936500",
+    "end": "1942740"
+  },
+  {
+    "text": "because this is LSM it has to go to desk because nothing is",
+    "start": "1942740",
+    "end": "1948740"
+  },
+  {
+    "text": "in memory can't put this as a set tables as a stables in memory right they have to be 11 desk",
+    "start": "1948740",
+    "end": "1955100"
+  },
+  {
+    "text": "apparently right I don't know much about USM but if this was B3",
+    "start": "1955100",
+    "end": "1960320"
+  },
+  {
+    "text": "the page will be just right there alive for you the page will have everything there's no walking to get",
+    "start": "1960320",
+    "end": "1968539"
+  },
+  {
+    "text": "multiple things it's just one thing you know you get the page and that that page will give you everything so it's",
+    "start": "1968539",
+    "end": "1975799"
+  },
+  {
+    "text": "actually a better design if you have this hot spot because all this hotspot",
+    "start": "1975799",
+    "end": "1980960"
+  },
+  {
+    "text": "will hit that cache right versus in this case you're doing more iOS because",
+    "start": "1980960",
+    "end": "1986179"
+  },
+  {
+    "text": "you're doing as a stable now you might say I'm saying let's just come back you",
+    "start": "1986179",
+    "end": "1991520"
+  },
+  {
+    "text": "can't compact fast enough to to go with the deal because these are brand new things as they are written",
+    "start": "1991520",
+    "end": "1999019"
+  },
+  {
+    "text": "people want to read right because if you write new things what the moment you write a message what",
+    "start": "1999019",
+    "end": "2006399"
+  },
+  {
+    "text": "do what is the first thing you're gonna do other clients want to read that same",
+    "start": "2006399",
+    "end": "2011679"
+  },
+  {
+    "text": "message in a relational database this is the best case scenario right because you",
+    "start": "2011679",
+    "end": "2018220"
+  },
+  {
+    "text": "just wrote something it's hot in memory it's sure it's dirty but we're gonna",
+    "start": "2018220",
+    "end": "2023799"
+  },
+  {
+    "text": "serve you that read off of that from the buffer pool it's right there take it we don't even",
+    "start": "2023799",
+    "end": "2030940"
+  },
+  {
+    "text": "need to see the disk not the power right of B plus trees that essentially here in this case okay",
+    "start": "2030940",
+    "end": "2038559"
+  },
+  {
+    "text": "but in that case what we have I know I'm repeating myself but in this case what's happening is because we're doing this",
+    "start": "2038559",
+    "end": "2046179"
+  },
+  {
+    "text": "SS stables and writing to another sustainables and taking just just to save make rides fast",
+    "start": "2046179",
+    "end": "2055300"
+  },
+  {
+    "text": "we significantly slowed down rates and that's the main problem here",
+    "start": "2055300",
+    "end": "2060599"
+  },
+  {
+    "text": "when we encounter the hot partitioners frequently affected latency across our",
+    "start": "2060599",
+    "end": "2065740"
+  },
+  {
+    "text": "entire database our Channel and bucket pair received large amount of traffic and the latency in the node would",
+    "start": "2065740",
+    "end": "2072460"
+  },
+  {
+    "text": "increase as the node tried harder and harder to serve traffic and fill further",
+    "start": "2072460",
+    "end": "2077618"
+  },
+  {
+    "text": "and further Beyond I just can't keep up one note can't keep up if all the traffic goes to one node and the node",
+    "start": "2077619",
+    "end": "2083378"
+  },
+  {
+    "text": "has to do IO the node is cache if it's like serving from the cache sure and",
+    "start": "2083379",
+    "end": "2089440"
+  },
+  {
+    "text": "even that is Allah but go doing IO and serving",
+    "start": "2089440",
+    "end": "2095378"
+  },
+  {
+    "text": "and doing compaction good luck",
+    "start": "2095379",
+    "end": "2100380"
+  },
+  {
+    "text": "so so far this is a problem with boss seller and Cassandra this is not a",
+    "start": "2100380",
+    "end": "2107140"
+  },
+  {
+    "text": "unique problem for Cassandra since weary didn't perform read and write with Quorum consistencies all queries to the",
+    "start": "2107140",
+    "end": "2113980"
+  },
+  {
+    "text": "nodes that serve the hot partitions suffer latency increases resulting in a broader",
+    "start": "2113980",
+    "end": "2120520"
+  },
+  {
+    "text": "end user impactor at the end of the day users feel it",
+    "start": "2120520",
+    "end": "2125619"
+  },
+  {
+    "text": "cluster maintenance task also frequently caused trouble all right so there's a maintenance",
+    "start": "2125619",
+    "end": "2131500"
+  },
+  {
+    "text": "operation also causes some more trouble we were prone to falling behind on compactions that's the problem right I",
+    "start": "2131500",
+    "end": "2139540"
+  },
+  {
+    "text": "told you human beings we always introduce a solution but the solution has problems compaction when did we ever",
+    "start": "2139540",
+    "end": "2146859"
+  },
+  {
+    "text": "had to do compaction with with b-plus trees never right where Cassandra would",
+    "start": "2146859",
+    "end": "2153040"
+  },
+  {
+    "text": "compact SS Stables on desk for more performant reads not only we were uh we",
+    "start": "2153040",
+    "end": "2161440"
+  },
+  {
+    "start": "2160000",
+    "end": "2400000"
+  },
+  {
+    "text": "not only were our reads than more expensive but we'd also see cascading",
+    "start": "2161440",
+    "end": "2167020"
+  },
+  {
+    "text": "latency as the note tried to come back I talked about that a little bit man and here as they talk about the garbage",
+    "start": "2167020",
+    "end": "2173500"
+  },
+  {
+    "text": "collection of Cassandra which is which is a valid point right let's talk about that a little bit we",
+    "start": "2173500",
+    "end": "2179680"
+  },
+  {
+    "text": "frequently performed an operation we called the gossip dance where we'd take a node out of rotation and let uh let it",
+    "start": "2179680",
+    "end": "2188380"
+  },
+  {
+    "text": "compact without taking traffic and so they took it out of the rotation so it",
+    "start": "2188380",
+    "end": "2194020"
+  },
+  {
+    "text": "can't receive any rights anymore let it come back right",
+    "start": "2194020",
+    "end": "2199500"
+  },
+  {
+    "text": "uh I don't know what happened with Quorum now like do you add other nodes I",
+    "start": "2199500",
+    "end": "2205060"
+  },
+  {
+    "text": "suppose for the column right bring it back in to pick up hints from",
+    "start": "2205060",
+    "end": "2210760"
+  },
+  {
+    "text": "the Cassandra hinted handoff and then repeat until the compaction backlog was empty right so so it can start",
+    "start": "2210760",
+    "end": "2217920"
+  },
+  {
+    "text": "compacting so that's kind of a a way uh to speed up compaction because the",
+    "start": "2217920",
+    "end": "2224619"
+  },
+  {
+    "text": "compaction can't keep up all this isn't stable or just being written we also spent a large amount of time tuning the",
+    "start": "2224619",
+    "end": "2231700"
+  },
+  {
+    "text": "jvm garbage collector and hip setting because GC poses",
+    "start": "2231700",
+    "end": "2237280"
+  },
+  {
+    "text": "would cause significant latency spikes that's understandable as you write to",
+    "start": "2237280",
+    "end": "2242859"
+  },
+  {
+    "text": "because Cassandra is written with Javan Java is a garbage collection language and as you write new things to create",
+    "start": "2242859",
+    "end": "2251140"
+  },
+  {
+    "text": "memory entries in the HEB especially those large MIM tables",
+    "start": "2251140",
+    "end": "2257560"
+  },
+  {
+    "text": "if you go out if null if there if there are no pointers to this",
+    "start": "2257560",
+    "end": "2263619"
+  },
+  {
+    "text": "uh no stack pointers pointing to this Heap at all",
+    "start": "2263619",
+    "end": "2268960"
+  },
+  {
+    "text": "then the garbage collection wakes up and start removing all this entries all the memory",
+    "start": "2268960",
+    "end": "2277660"
+  },
+  {
+    "text": "the all the unused memory right so it can be released back to the operating system and those garbage poses it has to",
+    "start": "2277660",
+    "end": "2286839"
+  },
+  {
+    "text": "pose because technically what is the garbage collection has to acquire a mutex I suppose I don't know much about",
+    "start": "2286839",
+    "end": "2293020"
+  },
+  {
+    "text": "garbage collection but I think that's what I know dazing thing about that memory and operating system right has to",
+    "start": "2293020",
+    "end": "2300579"
+  },
+  {
+    "text": "acquire mutex to release anything in memory and that poses as you want to allocate more memory can",
+    "start": "2300579",
+    "end": "2309099"
+  },
+  {
+    "text": "hit an a page that you're about to write to and that's when the pauses happen",
+    "start": "2309099",
+    "end": "2315220"
+  },
+  {
+    "text": "a memory page that is and that's the garbage collection poses is what caused a Linker d right",
+    "start": "2315220",
+    "end": "2322900"
+  },
+  {
+    "text": "to move from Java is the that's the service measure",
+    "start": "2322900",
+    "end": "2329920"
+  },
+  {
+    "text": "reverse proxy to rust they move to rust because they say hey we want just a a",
+    "start": "2329920",
+    "end": "2335520"
+  },
+  {
+    "text": "garbage collection flea because we want predictability right so they moved away from java and Russian",
+    "start": "2335520",
+    "end": "2342220"
+  },
+  {
+    "text": "they saw significant performance and that's so that's a valid criticism of crooks Cassandra and I totally",
+    "start": "2342220",
+    "end": "2349300"
+  },
+  {
+    "text": "understand that the rest of the i o stuff I don't see how cell is better well you",
+    "start": "2349300",
+    "end": "2356079"
+  },
+  {
+    "text": "can you can argue that okay changing our character to seller well we're gonna use C plus plus because still has written",
+    "start": "2356079",
+    "end": "2362500"
+  },
+  {
+    "text": "with C plus plus and there is no garbage collection C plus plus that's nice",
+    "start": "2362500",
+    "end": "2368200"
+  },
+  {
+    "text": "that's fast but how is it better",
+    "start": "2368200",
+    "end": "2373300"
+  },
+  {
+    "text": "right how's Cassandra house seller DB better and I don't know",
+    "start": "2373300",
+    "end": "2378940"
+  },
+  {
+    "text": "the answer until I actually research both of them and see how exactly they",
+    "start": "2378940",
+    "end": "2383980"
+  },
+  {
+    "text": "are to me maybe the compaction strategies are different maybe the there is a specific Enterprise level in Cellar",
+    "start": "2383980",
+    "end": "2392020"
+  },
+  {
+    "text": "that is having certain features that is not available in Cassandra that might be the case but it's not mentioned here so",
+    "start": "2392020",
+    "end": "2399579"
+  },
+  {
+    "text": "let's continue reading changing our architecture our messages cluster wasn't only wasn't",
+    "start": "2399579",
+    "end": "2406060"
+  },
+  {
+    "start": "2400000",
+    "end": "2700000"
+  },
+  {
+    "text": "our only Cassandra database we had several other clusters and each inhabited similar",
+    "start": "2406060",
+    "end": "2411940"
+  },
+  {
+    "text": "though perhaps not as severe fault in our previous iteration of this post we",
+    "start": "2411940",
+    "end": "2417099"
+  },
+  {
+    "text": "mentioned being intrigued by celadibi a Cassandra compatible database written C plus plus it's a it's promise of better",
+    "start": "2417099",
+    "end": "2424480"
+  },
+  {
+    "text": "performance faster repairs stronger workload isolation via its short pair",
+    "start": "2424480",
+    "end": "2429940"
+  },
+  {
+    "text": "core architecture so that's an interesting thing so that each Shard live in its own CPU core that works and",
+    "start": "2429940",
+    "end": "2438880"
+  },
+  {
+    "text": "a garbage collection free life sounded quite appealing although celadiv is most",
+    "start": "2438880",
+    "end": "2443920"
+  },
+  {
+    "text": "definitely not avoid of issues I love that they mentioned this right it's not really defensive here it's a void it's a",
+    "start": "2443920",
+    "end": "2450940"
+  },
+  {
+    "text": "void of garbage collection since it's written C plus rather than Java historically our team had many issues",
+    "start": "2450940",
+    "end": "2456940"
+  },
+  {
+    "text": "with garbage collection with Cassandra from GC poses affecting latency all the way to super long consecutive GC poses",
+    "start": "2456940",
+    "end": "2464079"
+  },
+  {
+    "text": "that got so bad that an operator would manually reboot and babysit the node",
+    "start": "2464079",
+    "end": "2469599"
+  },
+  {
+    "text": "back to health wow that is that is really bad if a node",
+    "start": "2469599",
+    "end": "2475240"
+  },
+  {
+    "text": "just dies because the garbage collection can keep up oh that's really bad I understand that right these issues where",
+    "start": "2475240",
+    "end": "2482500"
+  },
+  {
+    "text": "a huge source of an uncalled oil and the root of many stability issues with our",
+    "start": "2482500",
+    "end": "2487599"
+  },
+  {
+    "text": "our messages clusters okay after experimenting with Sila DB and observing",
+    "start": "2487599",
+    "end": "2493900"
+  },
+  {
+    "text": "Improvement in testing we made the decision to migrate all our databases while this decision could be a blog post",
+    "start": "2493900",
+    "end": "2500560"
+  },
+  {
+    "text": "in itself the short version is that by 2020 we had migrated every database but one to sell idb okay so everything they",
+    "start": "2500560",
+    "end": "2509200"
+  },
+  {
+    "text": "migrated except they can't send their message is the actual core database",
+    "start": "2509200",
+    "end": "2514780"
+  },
+  {
+    "text": "why had we migrated yet to start with it's a big cluster with trillions of messages and nearly 200 Norwich 177 in",
+    "start": "2514780",
+    "end": "2523180"
+  },
+  {
+    "text": "particular and migration was going to be an involved effort additionally we",
+    "start": "2523180",
+    "end": "2528460"
+  },
+  {
+    "text": "wanted to make sure our new database could be the best it could be as we",
+    "start": "2528460",
+    "end": "2534099"
+  },
+  {
+    "text": "worked to to tune its performance we will also wanted to gain more experience with Sila in production using its using",
+    "start": "2534099",
+    "end": "2542619"
+  },
+  {
+    "text": "it in anger and learning it's Pitfall we also worked in improved seller DB",
+    "start": "2542619",
+    "end": "2548920"
+  },
+  {
+    "text": "performance for our use cases in our okay so there they talk about that how they are actually improving seller",
+    "start": "2548920",
+    "end": "2554140"
+  },
+  {
+    "text": "itself because again seller by itself you can if you just didn't do anything and you just Implement Cilla I suppose",
+    "start": "2554140",
+    "end": "2561820"
+  },
+  {
+    "text": "you're gonna get slightly better performance but the hotspot thing is identical cilla's still gonna can't compete you",
+    "start": "2561820",
+    "end": "2569680"
+  },
+  {
+    "text": "can't can what's the word can't keep up with the amount of Rights and the tail",
+    "start": "2569680",
+    "end": "2576339"
+  },
+  {
+    "text": "or and all these rights are going to multiple SS tables that you will turn",
+    "start": "2576339",
+    "end": "2582880"
+  },
+  {
+    "text": "around and issue many reads because that's the what the clients do Discord what do you do you write a bunch of",
+    "start": "2582880",
+    "end": "2588520"
+  },
+  {
+    "text": "messages and you turn on read the same messages that's how this code works because you're reading at the tail the",
+    "start": "2588520",
+    "end": "2595720"
+  },
+  {
+    "text": "tale is dirty the tail is spread all over the place it's not just an in",
+    "start": "2595720",
+    "end": "2601960"
+  },
+  {
+    "text": "memory it's in this table and this table and the table behind it right so you",
+    "start": "2601960",
+    "end": "2607300"
+  },
+  {
+    "text": "have to do many reads so the S7 and that's what they did not mention",
+    "start": "2607300",
+    "end": "2612579"
+  },
+  {
+    "text": "if they just blindly replace seller with Cassandra that will not give them",
+    "start": "2612579",
+    "end": "2621180"
+  },
+  {
+    "text": "much performance that's my opinion I think",
+    "start": "2621180",
+    "end": "2626920"
+  },
+  {
+    "text": "but they didn't do that they actually did more work what is that",
+    "start": "2626920",
+    "end": "2633780"
+  },
+  {
+    "text": "and they mentioned that hot hot partition can still be a thing insteadibia and and so we also wanted to",
+    "start": "2634720",
+    "end": "2642400"
+  },
+  {
+    "text": "invest in improving our system Upstream of the database to help shield and facilitate better database so they",
+    "start": "2642400",
+    "end": "2650260"
+  },
+  {
+    "text": "knew right so I take that back they knew replacing Cilla blindly with from from",
+    "start": "2650260",
+    "end": "2658240"
+  },
+  {
+    "text": "Cassandra to sella they're not they're still gonna be the same problem right",
+    "start": "2658240",
+    "end": "2663280"
+  },
+  {
+    "text": "we're still gonna have this hot partition at the tail so that's not no we're gonna need to",
+    "start": "2663280",
+    "end": "2670720"
+  },
+  {
+    "text": "change our architecture so what did they do they introduce an API I think data services serving data",
+    "start": "2670720",
+    "end": "2678040"
+  },
+  {
+    "text": "so now that is an interesting thing",
+    "start": "2678040",
+    "end": "2683980"
+  },
+  {
+    "text": "how do you actually read they didn't we don't know much about that so let's talk",
+    "start": "2683980",
+    "end": "2689500"
+  },
+  {
+    "text": "about that a little bit how does this code read from Cassandra orcilla there's an API right",
+    "start": "2689500",
+    "end": "2696280"
+  },
+  {
+    "text": "does the API has any caching whatsoever no",
+    "start": "2696280",
+    "end": "2701619"
+  },
+  {
+    "start": "2700000",
+    "end": "3300000"
+  },
+  {
+    "text": "what they did here is absolutely brilliant and I absolutely love it let's let's talk about it with Cassandra we",
+    "start": "2701619",
+    "end": "2709240"
+  },
+  {
+    "text": "struggled with hot partitions and you're gonna struggle with Cilla let's be honest right even if you did so are you",
+    "start": "2709240",
+    "end": "2715599"
+  },
+  {
+    "text": "gonna have a hot partition it's the same identical problems the same architecture at the end of the day right high traffic",
+    "start": "2715599",
+    "end": "2721000"
+  },
+  {
+    "text": "to given partition resulted in an unbounded current concurrency concurrency leading to a cascading",
+    "start": "2721000",
+    "end": "2728260"
+  },
+  {
+    "text": "latency in which subsequent queries would continue to grow on latency because like you just can't keep up",
+    "start": "2728260",
+    "end": "2733839"
+  },
+  {
+    "text": "because that note is busy reading 700 SS tables and the read after that is just",
+    "start": "2733839",
+    "end": "2740079"
+  },
+  {
+    "text": "queued in and the OS will have to do the read and they always will try as much as",
+    "start": "2740079",
+    "end": "2745180"
+  },
+  {
+    "text": "possible to combine these reads that's how the file system started to work as",
+    "start": "2745180",
+    "end": "2750520"
+  },
+  {
+    "text": "much as possible to combine these iOS but it's still Kanki keep up the",
+    "start": "2750520",
+    "end": "2756099"
+  },
+  {
+    "text": "bandwidth of SSD will be just you know completely saturated",
+    "start": "2756099",
+    "end": "2762640"
+  },
+  {
+    "text": "if we could control the amount of concurrent traffic to hot partitions we",
+    "start": "2762640",
+    "end": "2768099"
+  },
+  {
+    "text": "could protect the database from being overwhelmed how to accomplish this task we wrote what we refer to as data",
+    "start": "2768099",
+    "end": "2774760"
+  },
+  {
+    "text": "services nice intermediate intermediary services that sit between our API",
+    "start": "2774760",
+    "end": "2780760"
+  },
+  {
+    "text": "monolith and our database cluster interesting so now they have something called data services they didn't have",
+    "start": "2780760",
+    "end": "2787119"
+  },
+  {
+    "text": "that before what does the data service do when writing our data service we chose a language that we've been using",
+    "start": "2787119",
+    "end": "2793240"
+  },
+  {
+    "text": "more at Discord rust okay we get it rust we everybody loved us right the language",
+    "start": "2793240",
+    "end": "2799839"
+  },
+  {
+    "text": "should make it easy to write save concurrent code its Library also where a",
+    "start": "2799839",
+    "end": "2805660"
+  },
+  {
+    "text": "great match for what we were intending to accomplish right and then the concurrency here is that most",
+    "start": "2805660",
+    "end": "2811780"
+  },
+  {
+    "text": "importantly they want building building as an O asynchronous IO and the language",
+    "start": "2811780",
+    "end": "2816880"
+  },
+  {
+    "text": "has a driver support for both Cassandra and celadivi our data services sit between an API and our cell DB clusters",
+    "start": "2816880",
+    "end": "2823720"
+  },
+  {
+    "text": "they contain roughly one grpc input per",
+    "start": "2823720",
+    "end": "2828880"
+  },
+  {
+    "text": "database query and intentionally contain no business logic good the big feature",
+    "start": "2828880",
+    "end": "2835480"
+  },
+  {
+    "text": "our database Services provide is request cool lesson coalescing which is",
+    "start": "2835480",
+    "end": "2841119"
+  },
+  {
+    "text": "basically think of it like grouping and that is the key here",
+    "start": "2841119",
+    "end": "2847180"
+  },
+  {
+    "text": "look at this beautiful diagram for those listening we're looking at a four request or n number of requests to",
+    "start": "2847180",
+    "end": "2854140"
+  },
+  {
+    "text": "the same identical message right or not message like yeah message I same message",
+    "start": "2854140",
+    "end": "2859720"
+  },
+  {
+    "text": "ID same bucket same channel so all of these usually they used to be four concurrent",
+    "start": "2859720",
+    "end": "2867220"
+  },
+  {
+    "text": "different read request to Cassandra",
+    "start": "2867220",
+    "end": "2873060"
+  },
+  {
+    "text": "now they built this intermediate layer that receives all these requests and",
+    "start": "2873060",
+    "end": "2879460"
+  },
+  {
+    "text": "they coalesce them so if multiple users are requesting the same row at the same time will only query the database once",
+    "start": "2879460",
+    "end": "2886540"
+  },
+  {
+    "text": "the first user that makes the request causes a work worker task to spin up the",
+    "start": "2886540",
+    "end": "2892300"
+  },
+  {
+    "text": "service subsequent requests will check for the existing of that test and subscribe to it wow that is a beautiful",
+    "start": "2892300",
+    "end": "2898540"
+  },
+  {
+    "text": "design that's like amazing I like Kudos absolutely love it that's pretty",
+    "start": "2898540",
+    "end": "2906040"
+  },
+  {
+    "text": "cool so if they here's my point I wonder what happens if they did",
+    "start": "2906040",
+    "end": "2913300"
+  },
+  {
+    "text": "implement this with Cassandra and I'm saying I'm not saying just don't move from Cassandra sure destroy and",
+    "start": "2913300",
+    "end": "2920079"
+  },
+  {
+    "text": "move it how much would you guys would have saved and",
+    "start": "2920079",
+    "end": "2926500"
+  },
+  {
+    "text": "would Cassandra hold up or will the garbage collection",
+    "start": "2926500",
+    "end": "2933099"
+  },
+  {
+    "text": "poses will still kill us and that's the question I couldn't answer right and that's that's all right I",
+    "start": "2933099",
+    "end": "2939640"
+  },
+  {
+    "text": "suppose that will remain unanswered right I suppose of course now their",
+    "start": "2939640",
+    "end": "2945040"
+  },
+  {
+    "text": "configuration is way more optimal because they they went all the way right they changed the architecture to include",
+    "start": "2945040",
+    "end": "2952300"
+  },
+  {
+    "text": "this intermediate layer to Cache almost like you can use this as a cache they",
+    "start": "2952300",
+    "end": "2958540"
+  },
+  {
+    "text": "didn't talk about that I think but you can coalesce requests so you can group and send one request but then",
+    "start": "2958540",
+    "end": "2966099"
+  },
+  {
+    "text": "at the same time you can cache results right",
+    "start": "2966099",
+    "end": "2972700"
+  },
+  {
+    "text": "this is a this worker task is so brilliant this idea of a worker task",
+    "start": "2972700",
+    "end": "2977859"
+  },
+  {
+    "text": "because it will be in memory and you can as long as it's alive that means someone has just made the request right here's",
+    "start": "2977859",
+    "end": "2984640"
+  },
+  {
+    "text": "another example let's imagine a big announcement on a large server that notifies everyone at everyone right",
+    "start": "2984640",
+    "end": "2990420"
+  },
+  {
+    "text": "users are going to open the app and read the message because now someone just write writes one message",
+    "start": "2990420",
+    "end": "2999160"
+  },
+  {
+    "text": "100 000 people reads the same message everyone sends the same request right so all of these",
+    "start": "2999160",
+    "end": "3007020"
+  },
+  {
+    "text": "requests to the same single message right how do you they know the message I",
+    "start": "3007020",
+    "end": "3013500"
+  },
+  {
+    "text": "suppose it's going to be a notification you get the mystification ID and then you send a request to get that message right okay and then now you have the",
+    "start": "3013500",
+    "end": "3020460"
+  },
+  {
+    "text": "message ID and now everybody's sending flood of queries in the old system those",
+    "start": "3020460",
+    "end": "3025859"
+  },
+  {
+    "text": "were hundred thousand queries in the new system it's a it's a single I",
+    "start": "3025859",
+    "end": "3031800"
+  },
+  {
+    "text": "don't think it's just going to be single still going to be multiple probably right previously this might have a hot",
+    "start": "3031800",
+    "end": "3038339"
+  },
+  {
+    "text": "partition and on-call would potentially need to be paged to help the system recover with our data servers were able",
+    "start": "3038339",
+    "end": "3045240"
+  },
+  {
+    "text": "to significantly reduce traffic spikes yeah it's not going to be a single one like 100 million because it's a it's a",
+    "start": "3045240",
+    "end": "3051420"
+  },
+  {
+    "text": "it's a worker right it's a worker subscriber thing where one the first person who made the request will create",
+    "start": "3051420",
+    "end": "3059280"
+  },
+  {
+    "text": "this worker and then send a message while all of these queries at the same time concurrently we're gonna look up",
+    "start": "3059280",
+    "end": "3065520"
+  },
+  {
+    "text": "this worker and as long as the worker is executing you can hook to it right but",
+    "start": "3065520",
+    "end": "3071099"
+  },
+  {
+    "text": "what happened if the workers get the response and rights is the worker dead do we cash the worker result for",
+    "start": "3071099",
+    "end": "3078300"
+  },
+  {
+    "text": "subsequent queries or do we create new workers every time the if the time the old worker is dead even if the same if",
+    "start": "3078300",
+    "end": "3085319"
+  },
+  {
+    "text": "it's the same request the second part of the magic here and this is truly magic I absolutely love it it's Upstream of our",
+    "start": "3085319",
+    "end": "3091920"
+  },
+  {
+    "text": "data services what do you guys do we implemented consistent hash based routing to our data service",
+    "start": "3091920",
+    "end": "3098940"
+  },
+  {
+    "text": "to enable more effective Coalition ah",
+    "start": "3098940",
+    "end": "3103920"
+  },
+  {
+    "text": "whoa right because remember load balancing if you want to like",
+    "start": "3104420",
+    "end": "3113160"
+  },
+  {
+    "text": "that's a problem right I didn't think about that see if you have like a",
+    "start": "3113160",
+    "end": "3120020"
+  },
+  {
+    "text": "if you upload balancing in place then this data services will you'll have multiple data services right",
+    "start": "3121380",
+    "end": "3127380"
+  },
+  {
+    "text": "requests from different clients across the world will go to different data services and",
+    "start": "3127380",
+    "end": "3134460"
+  },
+  {
+    "text": "in this particular case you will not hit the chances you're",
+    "start": "3134460",
+    "end": "3139920"
+  },
+  {
+    "text": "gonna hit a data service that happened to Cache at a coalist request are very",
+    "start": "3139920",
+    "end": "3146880"
+  },
+  {
+    "text": "low so how do you then this is genius it's absolutely genius I love it so what",
+    "start": "3146880",
+    "end": "3154380"
+  },
+  {
+    "text": "they did is they took and the load balancer and you know I didn't read this",
+    "start": "3154380",
+    "end": "3159960"
+  },
+  {
+    "text": "part I just I think I skipped about it now I'm just reading it for the first time now the load balancer they have a",
+    "start": "3159960",
+    "end": "3166740"
+  },
+  {
+    "text": "hash based to take the request and says okay you're going to channel X on this",
+    "start": "3166740",
+    "end": "3172440"
+  },
+  {
+    "text": "server I'm gonna hash you to this data service yeah I was gonna it's gonna create more",
+    "start": "3172440",
+    "end": "3178619"
+  },
+  {
+    "text": "load on this particular data server but it's good you're gonna you're gonna you're gonna hit that cash you're gonna",
+    "start": "3178619",
+    "end": "3183900"
+  },
+  {
+    "text": "the chances of request courses are higher",
+    "start": "3183900",
+    "end": "3188660"
+  },
+  {
+    "text": "brilliant just brilliant I love it the Improvement helped a lot but they don't solve all the problems okay oh they have",
+    "start": "3189480",
+    "end": "3195900"
+  },
+  {
+    "text": "more problems we're still seeing hot partition and increased latency on our Cassandra cluster just not quite as",
+    "start": "3195900",
+    "end": "3202619"
+  },
+  {
+    "text": "frequent wait a minute Cassandra cluster I thought you moved to seller why does",
+    "start": "3202619",
+    "end": "3207839"
+  },
+  {
+    "text": "it say seller here that's so confusing just not as quite as frequently it buys us sometimes so that",
+    "start": "3207839",
+    "end": "3215160"
+  },
+  {
+    "text": "we can prepare our new optimal seller DB cluster and executable so",
+    "start": "3215160",
+    "end": "3220619"
+  },
+  {
+    "text": "so that's what confused me all right so I take I take everything back so it",
+    "start": "3220619",
+    "end": "3226380"
+  },
+  {
+    "text": "seems like they they did the data service before moving to Cassandra again",
+    "start": "3226380",
+    "end": "3234300"
+  },
+  {
+    "text": "as I'm reading this I'm discovering new things again right I and I apologize if",
+    "start": "3234300",
+    "end": "3240119"
+  },
+  {
+    "text": "I made a mistake it's not clear because the the graphics shows seller messages yet the the way they are talking about",
+    "start": "3240119",
+    "end": "3247260"
+  },
+  {
+    "text": "is they say okay we're still hitting Cassandra okay all right so the data services are heading Cassandra and and",
+    "start": "3247260",
+    "end": "3253440"
+  },
+  {
+    "text": "still they did a lot of good things they have problems we're still seeing",
+    "start": "3253440",
+    "end": "3260099"
+  },
+  {
+    "text": "hot partition and increased latency on our Cassandra just not as quite as frequently nice it buys us time",
+    "start": "3260099",
+    "end": "3266700"
+  },
+  {
+    "text": "so they can move okay so they still saw the increased latency and hot partition even with all",
+    "start": "3266700",
+    "end": "3274619"
+  },
+  {
+    "text": "of this right even with request coalescing even with hash based grouping",
+    "start": "3274619",
+    "end": "3281400"
+  },
+  {
+    "text": "of the request so they hit the same data services so they can take advantage of",
+    "start": "3281400",
+    "end": "3288059"
+  },
+  {
+    "text": "this request called listing right a very big migration now they're into the migration our requirement for our",
+    "start": "3288059",
+    "end": "3295020"
+  },
+  {
+    "text": "migration are quite straightforward we need to migrate trillions of messages with no down there and we need to do it",
+    "start": "3295020",
+    "end": "3302520"
+  },
+  {
+    "start": "3300000",
+    "end": "3720000"
+  },
+  {
+    "text": "quickly because while the Cassandra situation has some what improved we're",
+    "start": "3302520",
+    "end": "3307619"
+  },
+  {
+    "text": "frequently firefighting okay so that is the case so they did do the data",
+    "start": "3307619",
+    "end": "3312900"
+  },
+  {
+    "text": "services they do they did they did do the request Coalition and all this on the Cassandra and that the screenshots",
+    "start": "3312900",
+    "end": "3320280"
+  },
+  {
+    "text": "confused me that's what that's what confused me because it says silly messages and I assume they moved to",
+    "start": "3320280",
+    "end": "3325680"
+  },
+  {
+    "text": "seller already by that time okay so that that's actually good so what are the remaining hot partitioning",
+    "start": "3325680",
+    "end": "3337680"
+  },
+  {
+    "text": "and latency are all of the remaining problems or all the garbage collection",
+    "start": "3337680",
+    "end": "3345300"
+  },
+  {
+    "text": "really that's it or let's take a look Step One is easy we provision",
+    "start": "3345300",
+    "end": "3352619"
+  },
+  {
+    "text": "a new cell ADB cluster using our super desk storage topology by using local",
+    "start": "3352619",
+    "end": "3358680"
+  },
+  {
+    "text": "ssds for Speed and leveraging rate to mirror our data to persistent disk we",
+    "start": "3358680",
+    "end": "3364920"
+  },
+  {
+    "text": "get the speed of attached locals disk with the durability of a persistent disk with our cluster stood up we can begin",
+    "start": "3364920",
+    "end": "3373460"
+  },
+  {
+    "text": "migrating data into it okay so they built a brand new cluster with a",
+    "start": "3373460",
+    "end": "3379500"
+  },
+  {
+    "text": "completely different architecture than they had with Cassandra maybe that helped a little bit with the i o I",
+    "start": "3379500",
+    "end": "3385920"
+  },
+  {
+    "text": "suppose our first draft because it's still even with",
+    "start": "3385920",
+    "end": "3393059"
+  },
+  {
+    "text": "with request caressing you're just what are you doing you're minimizing a number of requests I",
+    "start": "3393059",
+    "end": "3398940"
+  },
+  {
+    "text": "I wonder what will happen if they cache the datas that they cache the messages",
+    "start": "3398940",
+    "end": "3404240"
+  },
+  {
+    "text": "or even at least the pages I don't know if the concept of pages",
+    "start": "3404240",
+    "end": "3409440"
+  },
+  {
+    "text": "exist and Cassandra better be it's the same cons as the database at the end of the day right and why not cache the",
+    "start": "3409440",
+    "end": "3417300"
+  },
+  {
+    "text": "problem I think clearly is like editing if you edit a message then you have to invalidate all that cash right and",
+    "start": "3417300",
+    "end": "3424619"
+  },
+  {
+    "text": "that's the big problem and I think Twitter I know a lot of people disagree with me I think Twitter didn't implement",
+    "start": "3424619",
+    "end": "3431520"
+  },
+  {
+    "text": "the edit feature because they don't want to deal with in cash invalidation to be honest that's because they cash",
+    "start": "3431520",
+    "end": "3438119"
+  },
+  {
+    "text": "everything everywhere and an edit will really destroy them you know that's why",
+    "start": "3438119",
+    "end": "3443579"
+  },
+  {
+    "text": "they didn't add it in the future but I might be wrong I don't know much about their architecture right I know they",
+    "start": "3443579",
+    "end": "3449460"
+  },
+  {
+    "text": "edited like within the 13 minutes and my guess is that in the first 30 minutes they don't cash as much",
+    "start": "3449460",
+    "end": "3455640"
+  },
+  {
+    "text": "I don't know our first draft of our migration was designed to get value quickly",
+    "start": "3455640",
+    "end": "3462240"
+  },
+  {
+    "text": "we'd start using our shiny new cluster uh cut over and then migrate historical",
+    "start": "3462240",
+    "end": "3469140"
+  },
+  {
+    "text": "data behind it it adds more complexity but what every large project needs is",
+    "start": "3469140",
+    "end": "3474599"
+  },
+  {
+    "text": "added complexity okay we begin do a writing that's if you even when you do",
+    "start": "3474599",
+    "end": "3480119"
+  },
+  {
+    "text": "when you do migration you all have to do this dual writing right because now both clusters are alive every right to",
+    "start": "3480119",
+    "end": "3486960"
+  },
+  {
+    "text": "Cassandra must go to a seller DB so they wrote up I suppose some scrap that does that right duplicate the rights and in",
+    "start": "3486960",
+    "end": "3495000"
+  },
+  {
+    "text": "the back end they are also migrating the old data it requires a lot of here and once we get a setup we have an estimated",
+    "start": "3495000",
+    "end": "3501420"
+  },
+  {
+    "text": "it's gonna finish in three months to migrate everything it's a lot of time all right here's what they did",
+    "start": "3501420",
+    "end": "3508020"
+  },
+  {
+    "text": "interesting the time frame doesn't make us firm warm fuzzy inside I love how they write this",
+    "start": "3508020",
+    "end": "3515040"
+  },
+  {
+    "text": "it's a beautiful and we prefer to get value faster we sit down as a team and",
+    "start": "3515040",
+    "end": "3520260"
+  },
+  {
+    "text": "brainstorm ways we can speed things up until we remember that we've written a fast and performant database library",
+    "start": "3520260",
+    "end": "3526680"
+  },
+  {
+    "text": "that we could potentially extend we elect to engage in some meme driven",
+    "start": "3526680",
+    "end": "3532319"
+  },
+  {
+    "text": "and grainy and rewrite everything in rest oh God oh God you're on rust in an",
+    "start": "3532319",
+    "end": "3539640"
+  },
+  {
+    "text": "afternoon we extended our data service library to perform large-scale data",
+    "start": "3539640",
+    "end": "3545640"
+  },
+  {
+    "text": "migration it reads token ranges from a database checkpoint uh checkpoint them locally via sqlite",
+    "start": "3545640",
+    "end": "3553079"
+  },
+  {
+    "text": "clever so they they write everything to a instead of writing it directly write",
+    "start": "3553079",
+    "end": "3558420"
+  },
+  {
+    "text": "it everything to a local SQL light and then fire hose that SQL light I suppose",
+    "start": "3558420",
+    "end": "3563520"
+  },
+  {
+    "text": "you can compress and upload that SQL light and then locally write SQL light back to seller",
+    "start": "3563520",
+    "end": "3570780"
+  },
+  {
+    "text": "that's a nice batching approach I love it no because now you see you save on on",
+    "start": "3570780",
+    "end": "3576000"
+  },
+  {
+    "text": "network I suppose right because there's a new insert you have to go through the network so what they cut in is like",
+    "start": "3576000",
+    "end": "3582000"
+  },
+  {
+    "text": "everything becomes local at one point you just you have all these rights and",
+    "start": "3582000",
+    "end": "3587160"
+  },
+  {
+    "text": "all of them millions of Rights go to sqlite you move the sqlite with one",
+    "start": "3587160",
+    "end": "3592440"
+  },
+  {
+    "text": "network i o they have a good bandwidth and now they take that SQL light and then firehose it",
+    "start": "3592440",
+    "end": "3600140"
+  },
+  {
+    "text": "brilliant right as opposed to sending millions of requests across the world",
+    "start": "3600140",
+    "end": "3608599"
+  },
+  {
+    "text": "right we hook up our new improved migrator nine days wow three months",
+    "start": "3608900",
+    "end": "3615599"
+  },
+  {
+    "text": "three months to nine days that's amazing right if we can migrate data this quickly then",
+    "start": "3615599",
+    "end": "3620819"
+  },
+  {
+    "text": "we can forget our complicated time-based approach blah blah blah we can flap all right so they they turn this up now",
+    "start": "3620819",
+    "end": "3627359"
+  },
+  {
+    "text": "they're moving 3.2 million per second that is nuts",
+    "start": "3627359",
+    "end": "3633420"
+  },
+  {
+    "text": "right several days later they are gathered right they're looking at the hundred percent it's not really 100",
+    "start": "3633420",
+    "end": "3640400"
+  },
+  {
+    "text": "99.99999 why I'll give you the cliff note hits uh they hit a partition that",
+    "start": "3640400",
+    "end": "3647640"
+  },
+  {
+    "text": "is filled with Tombstone tombstones and Tombstone are deleted messages basically",
+    "start": "3647640",
+    "end": "3653579"
+  },
+  {
+    "text": "right anything that's deleted right it's a tombstone and because as I",
+    "start": "3653579",
+    "end": "3658799"
+  },
+  {
+    "text": "told you a log structure Mastery you never you never delete you never update",
+    "start": "3658799",
+    "end": "3664020"
+  },
+  {
+    "text": "you always insert so a delete it's technically an insert with a tombstone so there's a few if you especially if",
+    "start": "3664020",
+    "end": "3670500"
+  },
+  {
+    "text": "you like to delete a server of all the all their messages then you massively insert a bunch of tombstones",
+    "start": "3670500",
+    "end": "3677520"
+  },
+  {
+    "text": "and that's what they hit they hit a bunch of tombstones that they the the compaction will just die there right it",
+    "start": "3677520",
+    "end": "3684299"
+  },
+  {
+    "text": "was never compacted so they just like they stopped come back to this got rid of all the uh tombstones flipped over",
+    "start": "3684299",
+    "end": "3692400"
+  },
+  {
+    "text": "done in May 2022 it's been quite well behaved they're happy everything is good and",
+    "start": "3692400",
+    "end": "3700079"
+  },
+  {
+    "text": "it's a much more efficient database we're going from running 177 Cassandra",
+    "start": "3700079",
+    "end": "3705599"
+  },
+  {
+    "text": "nose down to 72 seller DB nodes of course these Cellar divinos are larger in size compared to the 77 177 Cassandra",
+    "start": "3705599",
+    "end": "3714599"
+  },
+  {
+    "text": "nodes right now seller has nine terabyte compared to Cassandra which has four",
+    "start": "3714599",
+    "end": "3720299"
+  },
+  {
+    "start": "3720000",
+    "end": "3840000"
+  },
+  {
+    "text": "terabyte nodes and nice our tail latency improved from 40 to 125 millisecond down",
+    "start": "3720299",
+    "end": "3729059"
+  },
+  {
+    "text": "to 15 millisecond from 125 to 15 that is so",
+    "start": "3729059",
+    "end": "3736319"
+  },
+  {
+    "text": "chill that is so cool and insert performance went from 5 millisecond to",
+    "start": "3736319",
+    "end": "3742020"
+  },
+  {
+    "text": "70 down to a steady five it was it was it was the the event that wasn't as much",
+    "start": "3742020",
+    "end": "3748920"
+  },
+  {
+    "text": "this tells me that they did something with the discs the I they speed up they sped up their i o themselves right you",
+    "start": "3748920",
+    "end": "3756780"
+  },
+  {
+    "text": "know what if they moved their ssds to zoned namespaces because",
+    "start": "3756780",
+    "end": "3763319"
+  },
+  {
+    "text": "this this is just a perfect implementation for them like just move",
+    "start": "3763319",
+    "end": "3768599"
+  },
+  {
+    "text": "everything to Zone namespace this is the new nvme technology right",
+    "start": "3768599",
+    "end": "3774020"
+  },
+  {
+    "text": "they don't have no they again they're going to have more they don't have they want not going to have the uh what is",
+    "start": "3774020",
+    "end": "3781500"
+  },
+  {
+    "text": "called the over provisioning they don't have over provision anymore they don't have garbage collection The Zone",
+    "start": "3781500",
+    "end": "3787440"
+  },
+  {
+    "text": "namespace basically the zone is the erasable unit",
+    "start": "3787440",
+    "end": "3792599"
+  },
+  {
+    "text": "and it's it's gonna be controlled by the operating system so of course this has",
+    "start": "3792599",
+    "end": "3798540"
+  },
+  {
+    "text": "to be a huge rewrite right and the SS tables and all of these things will be",
+    "start": "3798540",
+    "end": "3804059"
+  },
+  {
+    "text": "just naturally goes into a zone right and then if they want to come back they",
+    "start": "3804059",
+    "end": "3809700"
+  },
+  {
+    "text": "just flush the Zone just erase the whole Zone and then create a new zone so",
+    "start": "3809700",
+    "end": "3815220"
+  },
+  {
+    "text": "definitely moving to Zone name space it will bring this number down to even lower than that right but they already",
+    "start": "3815220",
+    "end": "3822960"
+  },
+  {
+    "text": "did some tricks that sounds like it from there using local cached ssds and stuff",
+    "start": "3822960",
+    "end": "3828240"
+  },
+  {
+    "text": "like that so it's interesting that they're doing that I wonder how much that will give them",
+    "start": "3828240",
+    "end": "3833660"
+  },
+  {
+    "text": "with uh Zone namespaces especially with compacting and stuff like that because",
+    "start": "3833660",
+    "end": "3839220"
+  },
+  {
+    "text": "it's just it's a perfect thing and I think rocksdb with Western Digital they did some experiments with zoned",
+    "start": "3839220",
+    "end": "3846000"
+  },
+  {
+    "start": "3840000",
+    "end": "4113000"
+  },
+  {
+    "text": "namespace zns and there's like a lot of stuff that I'm I'm trying to understand and learn about",
+    "start": "3846000",
+    "end": "3851760"
+  },
+  {
+    "text": "but this is a this is and I think this is a good thing uh if they if they consider that and here I talk they talk",
+    "start": "3851760",
+    "end": "3858720"
+  },
+  {
+    "text": "about the final game the word soccer and said okay this is our cluster like these these Peaks are the goals right",
+    "start": "3858720",
+    "end": "3866160"
+  },
+  {
+    "text": "and all that stuff and they're happy and they left their uh they lived happily ever after so",
+    "start": "3866160",
+    "end": "3875160"
+  },
+  {
+    "text": "so it's a it's a fantastic I absolutely love this blog and I as I read it",
+    "start": "3875160",
+    "end": "3880680"
+  },
+  {
+    "text": "multiple times I I'm learning um as I really get again with you I learned new things apparently like every time you",
+    "start": "3880680",
+    "end": "3887339"
+  },
+  {
+    "text": "leave it and you learn new things and then I I I take some of the messages",
+    "start": "3887339",
+    "end": "3892920"
+  },
+  {
+    "text": "and some of the criticism I started back because they did everything they did they",
+    "start": "3892920",
+    "end": "3899040"
+  },
+  {
+    "text": "I don't I think Chris and law is not right for them anymore um",
+    "start": "3899040",
+    "end": "3904319"
+  },
+  {
+    "text": "the garbage collection is is kind of a deal breaker there uh",
+    "start": "3904319",
+    "end": "3910559"
+  },
+  {
+    "text": "one thing is they did so much with so they they invested in seller",
+    "start": "3910559",
+    "end": "3916200"
+  },
+  {
+    "text": "right but they did so much other things to improve right they first added the",
+    "start": "3916200",
+    "end": "3923400"
+  },
+  {
+    "text": "data services which didn't exist before they played it with casana and it saw",
+    "start": "3923400",
+    "end": "3928619"
+  },
+  {
+    "text": "Improvement so that's a good thing but there's still so hot partition so what they did with Cellar they we switched to",
+    "start": "3928619",
+    "end": "3934920"
+  },
+  {
+    "text": "seller and they did that also that request Coalition with load balancing and hash based uh you know request grouping they",
+    "start": "3934920",
+    "end": "3943260"
+  },
+  {
+    "text": "also did this ssds grouping thing right this is",
+    "start": "3943260",
+    "end": "3949799"
+  },
+  {
+    "text": "something I need to read more about because I have no idea what that means local ssds for Speed and leveraging rate",
+    "start": "3949799",
+    "end": "3957540"
+  },
+  {
+    "text": "to mirror our data to persistent disk right so they add local SSD that does",
+    "start": "3957540",
+    "end": "3962760"
+  },
+  {
+    "text": "that indicate they didn't have local ssds with Cassandra maybe of course if you don't have",
+    "start": "3962760",
+    "end": "3968579"
+  },
+  {
+    "text": "localizes digital Cassandra you're gonna you're gonna suffer and again guys I'm",
+    "start": "3968579",
+    "end": "3973619"
+  },
+  {
+    "text": "not defending Cassandra I'm just questioning things here I'm",
+    "start": "3973619",
+    "end": "3980280"
+  },
+  {
+    "text": "wonder if they did this with Cassandra they will be left with one problem right",
+    "start": "3980280",
+    "end": "3985859"
+  },
+  {
+    "text": "which is the the garbage collection poses that's the",
+    "start": "3985859",
+    "end": "3992579"
+  },
+  {
+    "text": "only problem left with Cassandra as far as we know I know that celadibi has certain compaction strategies that might",
+    "start": "3992579",
+    "end": "4000799"
+  },
+  {
+    "text": "not be available in in Cassandra but how much really is the difference",
+    "start": "4000799",
+    "end": "4006260"
+  },
+  {
+    "text": "that's what makes me think now that's the I'll leave you with the final thought that's one thing that they",
+    "start": "4006260",
+    "end": "4014119"
+  },
+  {
+    "text": "didn't try and I'm not saying that they should have tried this or not no",
+    "start": "4014119",
+    "end": "4020299"
+  },
+  {
+    "text": "at the end of the day this this is a better architecture cleaner uh of course if you can get rid of the garbage",
+    "start": "4020299",
+    "end": "4027020"
+  },
+  {
+    "text": "collection and it was causing you trouble get rid of it by all means but",
+    "start": "4027020",
+    "end": "4032119"
+  },
+  {
+    "text": "it's it's interesting what they did to achieve this right we learned a lot from this blog I absolutely enjoy enjoyed",
+    "start": "4032119",
+    "end": "4040220"
+  },
+  {
+    "text": "reading it I absolutely enjoyed analyzing it I hope you did as well what",
+    "start": "4040220",
+    "end": "4045440"
+  },
+  {
+    "text": "do you think about this let me know in the comment section below and uh gonna see in the next one",
+    "start": "4045440",
+    "end": "4051920"
+  },
+  {
+    "text": "and uh quick plug if you're interested in this stuff",
+    "start": "4051920",
+    "end": "4057819"
+  },
+  {
+    "text": "check out my database course I talk about databases and stuff like that link",
+    "start": "4057819",
+    "end": "4063859"
+  },
+  {
+    "text": "redirect switch to udemy the udemy course it's around like 24 hours right now actual 24 hours worth of content you",
+    "start": "4063859",
+    "end": "4071780"
+  },
+  {
+    "text": "know talk about all things databases fundamentals database engineering so check it out if you're interested head",
+    "start": "4071780",
+    "end": "4077720"
+  },
+  {
+    "text": "to database.hose.com to learn more thank you so much okay see you next one",
+    "start": "4077720",
+    "end": "4083000"
+  },
+  {
+    "text": "fantastic fantastic article the shout out of the author again and everybody in",
+    "start": "4083000",
+    "end": "4088339"
+  },
+  {
+    "text": "the engineering team Bo a Graham and everybody in the Discord team fantastic",
+    "start": "4088339",
+    "end": "4095500"
+  },
+  {
+    "text": "engineering brilliant engineering work uh Kudos great fantastic well-written",
+    "start": "4095500",
+    "end": "4102738"
+  },
+  {
+    "text": "technical details I don't have any complaints uh happy I'm really happy with this vlog",
+    "start": "4102739",
+    "end": "4108560"
+  },
+  {
+    "text": "I enjoyed it and I'll see you in the next one thank you guys bye",
+    "start": "4108560",
+    "end": "4114160"
+  }
+]
