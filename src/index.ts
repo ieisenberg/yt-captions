@@ -146,7 +146,6 @@ const mapVideo = (video: YTNodes.Video): Video => {
 		title: video.title.toString(),
 		duration: video.duration.text,
 		endpoint: `https://www.youtube.com/watch?v=${video.video_id}`,
-		published: video.published?.toString(),
 		description: video.description
 	}
 }
