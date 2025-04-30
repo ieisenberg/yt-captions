@@ -1,0 +1,3343 @@
+[
+  {
+    "text": " OK, so last lecture, I gave\nan overview of language models",
+    "start": "0",
+    "end": "9485"
+  },
+  {
+    "text": "and what it means to\nbuild them from scratch, and why we want to do that. I also talked\nabout tokenization, which is going to be the first\nhalf of the first assignment.",
+    "start": "9485",
+    "end": "17930"
+  },
+  {
+    "text": "Today's lecture, we'll\nbe going through actually building a model.",
+    "start": "17930",
+    "end": "24170"
+  },
+  {
+    "text": "We'll discuss the primitives\nin PyTorch that are needed. We're going to\nstart with tensors,",
+    "start": "24170",
+    "end": "30780"
+  },
+  {
+    "text": "build models, optimizers,\nand training loop. And we're going to place\nclose attention to efficiency,",
+    "start": "30780",
+    "end": "37559"
+  },
+  {
+    "text": "in particular, how we're\nusing resources both memory and compute.",
+    "start": "37560",
+    "end": "43160"
+  },
+  {
+    "text": "So to motivate things a\nbit, here's some questions.",
+    "start": "43160",
+    "end": "48800"
+  },
+  {
+    "text": "These questions are going to\nbe answerable by napkin math. So get your napkins out.",
+    "start": "48800",
+    "end": "55010"
+  },
+  {
+    "text": "So how long would it take to\ntrain a 70 billion parameter dense transformer model on 15\ntrillion tokens on 1,024 H100s?",
+    "start": "55010",
+    "end": "64580"
+  },
+  {
+    "text": "OK, so I'm just\ngoing to sketch out the-- give you a flavor\nof the type of things",
+    "start": "64580",
+    "end": "69950"
+  },
+  {
+    "text": "that we want to do. So here's how you go\nabout reasoning it. You count the total number\nof flops needed to train.",
+    "start": "69950",
+    "end": "82230"
+  },
+  {
+    "text": "So that's 6 times the\nnumber of parameters, times the number of tokens. And where does that come from?",
+    "start": "82230",
+    "end": "88590"
+  },
+  {
+    "text": "That will be what we'll\ntalk about in this lecture. You can look at the promise,\nthe number of flops per second",
+    "start": "88590",
+    "end": "95570"
+  },
+  {
+    "text": "that H100 gives you. The MFU, which is\nsomething we'll see later.",
+    "start": "95570",
+    "end": "101160"
+  },
+  {
+    "text": "Let's just set it to 0.5. And you can look at the\nnumber of flops per day",
+    "start": "101160",
+    "end": "108560"
+  },
+  {
+    "text": "that your hardware is going to\ngive you at this particular MFU. So 1,024 of them for one\nday, and then you just divide",
+    "start": "108560",
+    "end": "121312"
+  },
+  {
+    "text": "the total number of flops\nyou need to train the model by the number of flops that\nyou're supposed to get.",
+    "start": "121312",
+    "end": "127399"
+  },
+  {
+    "text": "And that gives you about 144. So this is very\nsimple calculations.",
+    "start": "127400",
+    "end": "135590"
+  },
+  {
+    "text": "At the end of the\nday, we're going to go through a bit more\nwhere these numbers come from.",
+    "start": "135590",
+    "end": "142288"
+  },
+  {
+    "text": "And in particular\nwhere the six times number of parameters times\nnumber of tokens comes from.",
+    "start": "142288",
+    "end": "149620"
+  },
+  {
+    "text": "So here's a question,\nwhat is the largest model you can train\non 8 H100s using AdamW",
+    "start": "149620",
+    "end": "155050"
+  },
+  {
+    "text": "if you're not being too clever? So H100 has 80\ngigabytes of HBM memory.",
+    "start": "155050",
+    "end": "165670"
+  },
+  {
+    "text": "The number of\nbytes per parameter that you need for the\nparameters, the gradients, optimizer, state is 16.",
+    "start": "165670",
+    "end": "173180"
+  },
+  {
+    "text": "And we'll talk more about\nwhere that comes from. And the number of\nparameters is basically,",
+    "start": "173180",
+    "end": "179103"
+  },
+  {
+    "text": "the total amount\nof memory divided by number of bytes you\nneed per parameter. And that gives you about\n40 billion parameters.",
+    "start": "179103",
+    "end": "189430"
+  },
+  {
+    "text": "And this is very\nrough because it doesn't take you into\nactivations which",
+    "start": "189430",
+    "end": "195400"
+  },
+  {
+    "text": "depends on batch size and\nsequence length, which I'm not really going to talk\nabout but will be important for assignment one.",
+    "start": "195400",
+    "end": "202584"
+  },
+  {
+    "text": "So this is a rough back\nenvelope calculation. And this is something\nthat you're probably not used to doing.",
+    "start": "202585",
+    "end": "208520"
+  },
+  {
+    "text": "You just implement a model,\nyou train it and what happens happens. But remember that efficiency\nis the name of the game.",
+    "start": "208520",
+    "end": "214280"
+  },
+  {
+    "text": "And to be efficient, you have\nto know exactly how many flops you're actually expending. Because when these\nnumbers get large,",
+    "start": "214280",
+    "end": "220430"
+  },
+  {
+    "text": "these directly\ntranslate into dollars, and you want that to be\nas small as possible.",
+    "start": "220430",
+    "end": "226150"
+  },
+  {
+    "text": "So we'll talk more\nabout the details of how these numbers arise. ",
+    "start": "226150",
+    "end": "234500"
+  },
+  {
+    "text": "We will not actually go\nover the transformer. So Tatsu is going to talk\nover the conceptual overview",
+    "start": "234500",
+    "end": "242220"
+  },
+  {
+    "text": "of that next time. And there's many ways you can\nlearn about transformer if you haven't already looked at it.",
+    "start": "242220",
+    "end": "248920"
+  },
+  {
+    "text": "There's assignment 1\nIf you do assignment 1, you'll definitely know\nwhat a transformer is. And the handout actually\ndoes a pretty good job",
+    "start": "248920",
+    "end": "255240"
+  },
+  {
+    "text": "of walking through all\nthe different pieces. There's a mathematical\ndescription if you like pictures,\nthere's pictures.",
+    "start": "255240",
+    "end": "260470"
+  },
+  {
+    "text": "There's a lot of stuff\nyou can look on online. But instead I'm going to\nwork with simpler models",
+    "start": "260470",
+    "end": "267120"
+  },
+  {
+    "text": "and really talk about the\nprimitives and the resource accounting piece. So remember, last time I\nsaid what kinds of knowledge",
+    "start": "267120",
+    "end": "274379"
+  },
+  {
+    "text": "can you learn? So mechanics. In this lecture, it's\ngoing to be just PyTorch",
+    "start": "274380",
+    "end": "280500"
+  },
+  {
+    "text": "and understanding\nhow PyTorch works at a fairly primitive level. So that will be pretty\nstraightforward.",
+    "start": "280500",
+    "end": "287110"
+  },
+  {
+    "text": "Mindset is about\nresource accounting. And it's not hard, you\njust have to do it.",
+    "start": "287110",
+    "end": "292740"
+  },
+  {
+    "text": "And intuitions,\nunfortunately this is just going to be\nbroad strokes for now.",
+    "start": "292740",
+    "end": "298358"
+  },
+  {
+    "text": "Actually, there's not\nreally much intuition that I'm going to\ntalk about in terms of how anything we're doing\ntranslates to good models.",
+    "start": "298358",
+    "end": "305470"
+  },
+  {
+    "text": "This is more about the\nmechanics and mindset. So let's start with\nmemory accounting.",
+    "start": "305470",
+    "end": "314790"
+  },
+  {
+    "text": "And then I'll talk about\ncompute accounting. And then we'll\nbuild up bottom up. OK.",
+    "start": "314790",
+    "end": "320890"
+  },
+  {
+    "text": "So the best place to\nstart is a tensor. So tensors are the building\nblock for storing everything",
+    "start": "320890",
+    "end": "327510"
+  },
+  {
+    "text": "in deep learning. Parameters, gradients, optimizer\nstate, data, activations. There's these atoms.",
+    "start": "327510",
+    "end": "334050"
+  },
+  {
+    "text": "You can read lots of\ndocumentation about them. You're probably very familiar\nwith how to create tensors.",
+    "start": "334050",
+    "end": "340960"
+  },
+  {
+    "text": "There's creating\ntensors different ways. You can also create a\ntensor and not initialize it",
+    "start": "340960",
+    "end": "347070"
+  },
+  {
+    "text": "and use some special\ninitialization for the parameters, if you want.",
+    "start": "347070",
+    "end": "355910"
+  },
+  {
+    "text": "So those are tensors.  So let's talk about memory and\nhow much memory tensors take up.",
+    "start": "355910",
+    "end": "366000"
+  },
+  {
+    "text": "So every tensor that will\nprobably be interested in is as a floating point number.",
+    "start": "366000",
+    "end": "372539"
+  },
+  {
+    "text": "And so there's many ways to\nrepresent floating point. So the most default\nway is float32.",
+    "start": "372540",
+    "end": "380450"
+  },
+  {
+    "text": "And float32 has 32 bits. They're allocated one for\nsign, eight for exponent,",
+    "start": "380450",
+    "end": "387020"
+  },
+  {
+    "text": "and 23 for the fraction. So exponent gives\nyou dynamic range, and fraction gives you\ndifferent basically specifies",
+    "start": "387020",
+    "end": "395660"
+  },
+  {
+    "text": "different values. So float32 is also known\nas FP32 or single precision",
+    "start": "395660",
+    "end": "403550"
+  },
+  {
+    "text": "is the gold standard\non computing.",
+    "start": "403550",
+    "end": "408960"
+  },
+  {
+    "text": "Some people also refer to\nfloat32 as full precision. That's a little bit confusing\nbecause full is really depending",
+    "start": "408960",
+    "end": "415670"
+  },
+  {
+    "text": "on who you're talking to. If you're talking to a\nscientific computing person, they will laugh at\nwhen you say float32",
+    "start": "415670",
+    "end": "422090"
+  },
+  {
+    "text": "is really full because they'll\nuse float64 or even more. But if you're talking to\na machine learning person,",
+    "start": "422090",
+    "end": "429210"
+  },
+  {
+    "text": "float32 is the max you'll\never probably need to go. Because deep learning\nis sloppy like that.",
+    "start": "429210",
+    "end": "437240"
+  },
+  {
+    "text": "OK, so let's look at the memory. So the memory is\nit's very simple. It's determined by\nthe number of values",
+    "start": "437240",
+    "end": "443600"
+  },
+  {
+    "text": "you have in your tensor and\nthe data type of each value OK, so if you create\na Torch tensor of 4",
+    "start": "443600",
+    "end": "449060"
+  },
+  {
+    "text": "by 8 matrix, the default it\nwill give you a type of float32.",
+    "start": "449060",
+    "end": "455900"
+  },
+  {
+    "text": "The size is 4 by 8 and the\nnumber of elements is 32.",
+    "start": "455900",
+    "end": "462210"
+  },
+  {
+    "text": "Each element size is 4\nbytes, 32 bits is 4 bytes.",
+    "start": "462210",
+    "end": "467840"
+  },
+  {
+    "text": "And the memory usage\nis simply the number of elements times the number\nof size of each element,",
+    "start": "467840",
+    "end": "475169"
+  },
+  {
+    "text": "and that will give\nyou 128 bytes. OK, so this should\nbe pretty easy.",
+    "start": "475170",
+    "end": "480330"
+  },
+  {
+    "text": "And just to give some\nintuition, if you get the one matrix in the\nfeed forward layer of GPT-3",
+    "start": "480330",
+    "end": "486349"
+  },
+  {
+    "text": "is this number by this\nnumber, and that gives you 2.3 gigabytes.",
+    "start": "486350",
+    "end": "491610"
+  },
+  {
+    "text": "So that's one matrix is-- these matrices\ncan be pretty big.",
+    "start": "491610",
+    "end": "498470"
+  },
+  {
+    "text": "So float32 is the default.\nBut of course, these matrices",
+    "start": "498470",
+    "end": "504770"
+  },
+  {
+    "text": "get big. So you naturally you want\nto make them smaller, so you use less memory.",
+    "start": "504770",
+    "end": "510323"
+  },
+  {
+    "text": "And also it turns out\nif you make them smaller you also make it go faster too.",
+    "start": "510323",
+    "end": "516656"
+  },
+  {
+    "text": "So another type\nof representation is called float16.",
+    "start": "516656",
+    "end": "522750"
+  },
+  {
+    "text": "And as the name\nsuggests, it's 16 bits where both the exponent\nand the fraction",
+    "start": "522750",
+    "end": "529089"
+  },
+  {
+    "text": "are shrunk down from\n8 to 5 and 23 to 10.",
+    "start": "529090",
+    "end": "536710"
+  },
+  {
+    "text": "So this is known\nas half precision and it cuts down\nhalf the memory.",
+    "start": "536710",
+    "end": "542230"
+  },
+  {
+    "text": "And that's all great,\nexcept for the dynamic range",
+    "start": "542230",
+    "end": "548079"
+  },
+  {
+    "text": "for these float16 isn't great. So for example, if you try to\nmake a number like 1e minus 8",
+    "start": "548080",
+    "end": "557620"
+  },
+  {
+    "text": "in float16, it basically\nrounds down to zero and you get",
+    "start": "557620",
+    "end": "564339"
+  },
+  {
+    "text": "underflow. OK, so the float16 is not\ngreat for representing",
+    "start": "564340",
+    "end": "569650"
+  },
+  {
+    "text": "very small numbers or very big\nnumbers, as a matter of fact. So if you use float16 for\ntraining, for small models",
+    "start": "569650",
+    "end": "579110"
+  },
+  {
+    "text": "it's probably going to be OK,\nbut for large models when you're having lots of\nmatrices and you can",
+    "start": "579110",
+    "end": "585440"
+  },
+  {
+    "text": "get instability or underflow or\noverflow and bad things happen.",
+    "start": "585440",
+    "end": "591200"
+  },
+  {
+    "text": "So one thing that has\nhappened, which is nice,",
+    "start": "591200",
+    "end": "596730"
+  },
+  {
+    "text": "is there's been another\nrepresentation of bfloat16, which stands for brain float.",
+    "start": "596730",
+    "end": "602930"
+  },
+  {
+    "text": "This was developed in\n2018 to address the issue that for deep\nlearning, we actually",
+    "start": "602930",
+    "end": "609980"
+  },
+  {
+    "text": "care about dynamic\nrange more than we care about this fraction. So basically bf16 allocates\nmore to the exponent",
+    "start": "609980",
+    "end": "618170"
+  },
+  {
+    "text": "and less to the fraction. So it uses the same memory\nas floating point 16,",
+    "start": "618170",
+    "end": "624570"
+  },
+  {
+    "text": "but it has a dynamic\nrange of float 32. So that sounds really good.",
+    "start": "624570",
+    "end": "630500"
+  },
+  {
+    "text": "And it actually-- the catch\nis that this resolution, which is determined by\nthe fraction is worse.",
+    "start": "630500",
+    "end": "636240"
+  },
+  {
+    "text": "But this doesn't matter\nas much for deep learning. So now if you try to create a\ntensor with 1e minus 8 and bf16,",
+    "start": "636240",
+    "end": "646000"
+  },
+  {
+    "text": "then you get something\nthat's not zero. ",
+    "start": "646000",
+    "end": "651240"
+  },
+  {
+    "text": "So you can-- till I\ndive into the details, I'm not going to go\ninto this, but you can stare at the\nactual full specs",
+    "start": "651240",
+    "end": "657750"
+  },
+  {
+    "text": "of all the different\nfloating point operations. So bf16 is basically\nwhat you will typically",
+    "start": "657750",
+    "end": "666270"
+  },
+  {
+    "text": "use to do computations\nbecause it's good enough",
+    "start": "666270",
+    "end": "671280"
+  },
+  {
+    "text": "for feedforward computations. It turns out that for storing\noptimizer states and parameters,",
+    "start": "671280",
+    "end": "677769"
+  },
+  {
+    "text": "you still need\nfloat32, otherwise your training will go haywire.",
+    "start": "677770",
+    "end": "686040"
+  },
+  {
+    "text": "So if you're bald. So now we have something\ncalled FP8 or 8-bit.",
+    "start": "686040",
+    "end": "693310"
+  },
+  {
+    "text": "And as the name suggests, this\nwas developed in 2022 by NVIDIA.",
+    "start": "693310",
+    "end": "700510"
+  },
+  {
+    "text": "So now they have essentially\nif you look at FP and bf16",
+    "start": "700510",
+    "end": "706920"
+  },
+  {
+    "text": "it's like this. And FP-- Wow, you really don't have that\nmany bits to store stuff right.",
+    "start": "706920",
+    "end": "712600"
+  },
+  {
+    "text": "So it's very crude. There's two variants\ndepending on if you want to have more resolution\nor more dynamic range.",
+    "start": "712600",
+    "end": "722579"
+  },
+  {
+    "text": "And I'm not going to\nsay too much about this, but FP8 is supported by H100.",
+    "start": "722580",
+    "end": "728080"
+  },
+  {
+    "text": "It's not really available\non previous generation, but at a high level, training\nwith float32, which is, I think",
+    "start": "728080",
+    "end": "738060"
+  },
+  {
+    "text": "is what you would do if you're\nnot trying to optimize too much",
+    "start": "738060",
+    "end": "743490"
+  },
+  {
+    "text": "and it's safe. It requires more memory. You can go down to\nFP8 or bf16, but you",
+    "start": "743490",
+    "end": "754350"
+  },
+  {
+    "text": "can get some instability. Basically, I don't\nthink you would probably want to use a float16 at\nthis point for deep learning.",
+    "start": "754350",
+    "end": "762085"
+  },
+  {
+    "text": " And you can become more\nsophisticated by looking",
+    "start": "762085",
+    "end": "769910"
+  },
+  {
+    "text": "at particular places\nin your pipeline, either forward pass or backward\npass or optimizers or gradient",
+    "start": "769910",
+    "end": "777950"
+  },
+  {
+    "text": "accumulation, and\nreally figure out what the minimum precision you need\nat this particular places.",
+    "start": "777950",
+    "end": "784350"
+  },
+  {
+    "text": "And that's called-- gets into\nmixed precision training. So for example, some\npeople like to use",
+    "start": "784350",
+    "end": "790100"
+  },
+  {
+    "text": "float32 for the\nattention to make sure that doesn't get messed up.",
+    "start": "790100",
+    "end": "796850"
+  },
+  {
+    "text": "But for simple feedforward\npasses with matmuls, bf16 is fine.",
+    "start": "796850",
+    "end": "803690"
+  },
+  {
+    "text": "OK, pause a bit for questions. So we talked about\ntensors and we looked at",
+    "start": "803690",
+    "end": "811070"
+  },
+  {
+    "text": "depending on what\nrepresentation, how much storage they take.",
+    "start": "811070",
+    "end": "817100"
+  },
+  {
+    "text": "Yeah. Can you just clarify\nabout the mixed position. When you would use\nthe 32 and the b4?",
+    "start": "817100",
+    "end": "822200"
+  },
+  {
+    "text": "Yeah so the question is, when\nwould you use float32 or bf16?",
+    "start": "822200",
+    "end": "830090"
+  },
+  {
+    "text": "I don't have time to get\ninto the exact details, and it varies depending on\nthe model size and everything.",
+    "start": "830090",
+    "end": "836010"
+  },
+  {
+    "text": "But generally for the\nparameters and optimizer states, you use float32.",
+    "start": "836010",
+    "end": "841920"
+  },
+  {
+    "text": "You can think about\nbf16 as something that's more transitory. You basically take your\nparameters, you cast it to bf16",
+    "start": "841920",
+    "end": "849680"
+  },
+  {
+    "text": "and you run ahead\nwith that model. But then the thing that you're\ngoing to accumulate over time,",
+    "start": "849680",
+    "end": "854910"
+  },
+  {
+    "text": "you want to have\nhigher precision. Yeah.",
+    "start": "854910",
+    "end": "860870"
+  },
+  {
+    "text": "OK, so now let's\ntalk about compute. So that was memory.",
+    "start": "860870",
+    "end": "867980"
+  },
+  {
+    "text": "So compute obviously depends\non what the hardware is.",
+    "start": "867980",
+    "end": "874769"
+  },
+  {
+    "text": "By default, tensors\nare stored in CPU. So for example if\nyou just in PyTorch, say x equals Torch 0 is 3232,\nthen it'll put it on your CPU,",
+    "start": "874770",
+    "end": "884130"
+  },
+  {
+    "text": "it'll be in the CPU memory. Now of course, that's no\ngood because if you're not",
+    "start": "884130",
+    "end": "890665"
+  },
+  {
+    "text": "using your GPU,\nthen you're going to be orders of\nmagnitude too slow. So you need to explicitly\nsay in PyTorch that you",
+    "start": "890665",
+    "end": "897440"
+  },
+  {
+    "text": "need to move it to the GPU. And this is it's\nactually just to make",
+    "start": "897440",
+    "end": "903920"
+  },
+  {
+    "text": "it very clear in pictures,\nthere's a CPU, it has RAM, and that has to be\nmoved over to the GPU.",
+    "start": "903920",
+    "end": "912120"
+  },
+  {
+    "text": "There's a data transfer,\nwhich takes some work,",
+    "start": "912120",
+    "end": "918830"
+  },
+  {
+    "text": "takes some time. So whenever you have\na tensor in PyTorch,",
+    "start": "918830",
+    "end": "924149"
+  },
+  {
+    "text": "you should always\nkeep in your mind. Where is this residing. Because just looking\nat the variable or just looking at the code.",
+    "start": "924150",
+    "end": "930167"
+  },
+  {
+    "text": "You can't always tell. And if you want to be careful\nabout computation and data",
+    "start": "930167",
+    "end": "935350"
+  },
+  {
+    "text": "movement, you have to\nreally know where it is. You can probably do\nthings like assert",
+    "start": "935350",
+    "end": "941950"
+  },
+  {
+    "text": "where it is in various places\nin the code just to document or be sure.",
+    "start": "941950",
+    "end": "948370"
+  },
+  {
+    "text": "OK, so let's look at\nwhat hardware we have.",
+    "start": "948370",
+    "end": "955760"
+  },
+  {
+    "text": "So we have, in this\ncase, we have one GPU. This was run on\nthe H100 clusters",
+    "start": "955760",
+    "end": "962230"
+  },
+  {
+    "text": "that you guys have access to. And this GPU is\nH100 80 gigabytes",
+    "start": "962230",
+    "end": "971320"
+  },
+  {
+    "text": "of high bandwidth memory. And there's it gives you\nthe cache size and so on.",
+    "start": "971320",
+    "end": "978790"
+  },
+  {
+    "text": "So, if you have remember\nthe x is on CPU,",
+    "start": "978790",
+    "end": "987639"
+  },
+  {
+    "text": "you can move it just\nby specifying 2, which is a general PyTorch function.",
+    "start": "987640",
+    "end": "994300"
+  },
+  {
+    "text": "You can also create a\ntensor directly on the GPU, so you don't have\nto move it at all.",
+    "start": "994300",
+    "end": "999370"
+  },
+  {
+    "text": "And if everything goes well, I'm\nlooking at the memory allocated before and after.",
+    "start": "999370",
+    "end": "1005940"
+  },
+  {
+    "text": "The difference should be exactly\n2 by 32 by 32 matrices of 4",
+    "start": "1005940",
+    "end": "1015510"
+  },
+  {
+    "text": "by floats. So it's 8192.",
+    "start": "1015510",
+    "end": "1021360"
+  },
+  {
+    "text": "So this is just a sanity\ncheck that the code is doing what is advertised.",
+    "start": "1021360",
+    "end": "1029909"
+  },
+  {
+    "text": "So now you have your\nanswers on the GPU. What do you do?",
+    "start": "1029910",
+    "end": "1036250"
+  },
+  {
+    "text": "So there's many\noperations that you'll be needing for assignment\none, and in general to do any deep\nlearning application.",
+    "start": "1036250",
+    "end": "1043920"
+  },
+  {
+    "text": "And most tensors you just\ncreate by performing operations on other tensors,\nand each operations",
+    "start": "1043920",
+    "end": "1049340"
+  },
+  {
+    "text": "has some memory and\ncompute footprint. So let's make sure\nwe understand that.",
+    "start": "1049340",
+    "end": "1056030"
+  },
+  {
+    "text": "So first of all, what is\nactually a tensor in PyTorch.",
+    "start": "1056030",
+    "end": "1061520"
+  },
+  {
+    "text": "Tensors are a\nmathematical object. In PyTorch, they're\nactually pointers",
+    "start": "1061520",
+    "end": "1067279"
+  },
+  {
+    "text": "into some allocated memory. So if you have,\nlet's say, a matrix 4",
+    "start": "1067280",
+    "end": "1074925"
+  },
+  {
+    "text": "by 4 matrix, what it actually\nlooks like is a long array.",
+    "start": "1074925",
+    "end": "1081380"
+  },
+  {
+    "text": "And what the tensor\nhas is metadata that specifies how to get\nto address into that array.",
+    "start": "1081380",
+    "end": "1088050"
+  },
+  {
+    "text": "And the metadata is going to be,\ntwo numbers a stride for each",
+    "start": "1088050",
+    "end": "1093230"
+  },
+  {
+    "text": "or actually one number per\ndimension of the tensor.",
+    "start": "1093230",
+    "end": "1098270"
+  },
+  {
+    "text": "In this case, because\nthere's two dimensions, stride zero and stride one.",
+    "start": "1098270",
+    "end": "1105710"
+  },
+  {
+    "text": "Stride zero specifies if\nyou were in dimension zero,",
+    "start": "1105710",
+    "end": "1111990"
+  },
+  {
+    "text": "to get to the next row\nto increment that index, how many do you have to skip?",
+    "start": "1111990",
+    "end": "1118290"
+  },
+  {
+    "text": "And so going down the\nrows you skip four. So stride zero is four.",
+    "start": "1118290",
+    "end": "1124680"
+  },
+  {
+    "text": "And to go to the next\ncolumn, you skip one. So stride one is one.",
+    "start": "1124680",
+    "end": "1133010"
+  },
+  {
+    "text": "So with that, you find an\nelement let's say 1, 2.",
+    "start": "1133010",
+    "end": "1138620"
+  },
+  {
+    "text": "It's simply just multiply\nthe indexes by the stride and you get to your\nindex which is six here.",
+    "start": "1138620",
+    "end": "1147500"
+  },
+  {
+    "text": "So that would be here or here. So that's basically what's going\nunderneath the hood for tensors.",
+    "start": "1147500",
+    "end": "1157650"
+  },
+  {
+    "text": "So this is relevant because you\ncan have multiple tensors that",
+    "start": "1157650",
+    "end": "1164800"
+  },
+  {
+    "text": "use the same storage. And this is useful\nbecause you don't want to copy the tensor\nall over the place.",
+    "start": "1164800",
+    "end": "1170180"
+  },
+  {
+    "text": "So imagine you have\na 2 by 3 matrix here. Many operations don't\nactually create a new tensor,",
+    "start": "1170180",
+    "end": "1178113"
+  },
+  {
+    "text": "they just create\na different view. And it doesn't\nmake a copy, so you have to make sure that, if\nyou start mutating one tensor",
+    "start": "1178113",
+    "end": "1187930"
+  },
+  {
+    "text": "it's going to cause the\nother one to mutate. So for example, if\nyou just get row 0--",
+    "start": "1187930",
+    "end": "1198590"
+  },
+  {
+    "text": "So remember y is this tensor-- sorry x is 123456, and y is x0\nwhich is just the first row OK,",
+    "start": "1198590",
+    "end": "1209960"
+  },
+  {
+    "text": "and you can double check there's\nthis function in row that says if you look at\nthe underlying storage",
+    "start": "1209960",
+    "end": "1216670"
+  },
+  {
+    "text": "whether these two tensors have\nthe same storage or not, OK. So this definitely\ndoesn't copy the tensor,",
+    "start": "1216670",
+    "end": "1223340"
+  },
+  {
+    "text": "it just creates a view. You can get column 1.",
+    "start": "1223340",
+    "end": "1229150"
+  },
+  {
+    "text": "This also doesn't\ncopy the tensor. Oops I don't need to do that.",
+    "start": "1229150",
+    "end": "1235420"
+  },
+  {
+    "text": "You can call a view function,\nwhich can take any tensor and look at it in terms of\ndifferent dimensions, 2 by 3.",
+    "start": "1235420",
+    "end": "1247720"
+  },
+  {
+    "text": "Actually this should be maybe\nthe other way around as a 3 by 2 tensor.",
+    "start": "1247720",
+    "end": "1253300"
+  },
+  {
+    "text": "So that also doesn't\nchange, do any copying.",
+    "start": "1253300",
+    "end": "1258430"
+  },
+  {
+    "text": "You can transpose,\nthat also doesn't copy. And then, like I said, if you\nstart mutating x then y actually",
+    "start": "1258430",
+    "end": "1269260"
+  },
+  {
+    "text": "gets mutated as well\nbecause x and y are just pointers into the same\nunderlying storage.",
+    "start": "1269260",
+    "end": "1275559"
+  },
+  {
+    "text": "So one thing that you\nhave to be careful of",
+    "start": "1275560",
+    "end": "1280900"
+  },
+  {
+    "text": "is that some views\nare contiguous, which means that if you\nrun through the tensor,",
+    "start": "1280900",
+    "end": "1286220"
+  },
+  {
+    "text": "it's like just going through\nthis array in your storage,",
+    "start": "1286220",
+    "end": "1292270"
+  },
+  {
+    "text": "but some are not. So in particular, if\nyou transpose it, now",
+    "start": "1292270",
+    "end": "1298150"
+  },
+  {
+    "text": "what does it mean when\nyou're transposing it? You're going down now. So if you imagine going\nthrough the tensor,",
+    "start": "1298150",
+    "end": "1305330"
+  },
+  {
+    "text": "you're skipping around. And if you have a\nnon-contiguous tensor, then if you try to further\nview it in a different way,",
+    "start": "1305330",
+    "end": "1314060"
+  },
+  {
+    "text": "then this is not going to work. So in some cases, if you\nhave a non-contiguous tensor",
+    "start": "1314060",
+    "end": "1321700"
+  },
+  {
+    "text": "you can make it\ncontiguous first. And then you can apply\nwhatever viewing operation",
+    "start": "1321700",
+    "end": "1326799"
+  },
+  {
+    "text": "you want to it. And then in this\ncase x and y do not",
+    "start": "1326800",
+    "end": "1332860"
+  },
+  {
+    "text": "have the same storage because\ncontiguous in this case makes a copy.",
+    "start": "1332860",
+    "end": "1339900"
+  },
+  {
+    "text": "So this is just ways of\nslicing and dicing a tensor.",
+    "start": "1339900",
+    "end": "1346950"
+  },
+  {
+    "text": "Views are free so\nfeel free to use them. Define different variables\nto make it easier",
+    "start": "1346950",
+    "end": "1353730"
+  },
+  {
+    "text": "to read your code\nbecause they're not allocating any memory.",
+    "start": "1353730",
+    "end": "1359280"
+  },
+  {
+    "text": "But remember that\ncontiguous or reshape which is basically\ncontiguous.view",
+    "start": "1359280",
+    "end": "1366120"
+  },
+  {
+    "text": "can create a copy, and so just\nbe careful what you're doing OK.",
+    "start": "1366120",
+    "end": "1372880"
+  },
+  {
+    "text": "questions before moving on? ",
+    "start": "1372880",
+    "end": "1379409"
+  },
+  {
+    "text": "All right. So hopefully a lot of this\nwill be review for those of you",
+    "start": "1379410",
+    "end": "1384690"
+  },
+  {
+    "text": "who have done a lot\nof PyTorch before, but it's helpful to just do\nit systematically and make",
+    "start": "1384690",
+    "end": "1390929"
+  },
+  {
+    "text": "sure we're on the same page. So here are some operations\nthat do create new tensors",
+    "start": "1390930",
+    "end": "1398280"
+  },
+  {
+    "text": "and in particular\nelement wise operations all create new\ntensors, obviously, because you need somewhere\nelse to store the new value.",
+    "start": "1398280",
+    "end": "1406769"
+  },
+  {
+    "text": "There's a triangular u is\nalso an element operation that",
+    "start": "1406770",
+    "end": "1412380"
+  },
+  {
+    "text": "comes in handy when you want\nto create a causal attention mask, which you'll need\nfor your assignment,",
+    "start": "1412380",
+    "end": "1419970"
+  },
+  {
+    "text": "but nothing is that\ninteresting here. ",
+    "start": "1419970",
+    "end": "1426540"
+  },
+  {
+    "text": "So let's talk about matmuls. So the bread and\nbutter of deep learning is matrix multiplications.",
+    "start": "1426540",
+    "end": "1433059"
+  },
+  {
+    "text": "And I'm sure all of you have\ndone a matrix multiplication, but just in case\nthis is what it looks like, you take 16 by 32\ntimes a 32 by 2 matrix,",
+    "start": "1433060",
+    "end": "1441700"
+  },
+  {
+    "text": "you get a 16 by 2 matrix. But in general when we do our\nmachine learning application,",
+    "start": "1441700",
+    "end": "1453260"
+  },
+  {
+    "text": "all operations are you\nwant to do in a batch. And in the case of\nlanguage models,",
+    "start": "1453260",
+    "end": "1458820"
+  },
+  {
+    "text": "this usually means for\nevery example in a batch and for every sequence in a\nbatch, you want to do something.",
+    "start": "1458820",
+    "end": "1465200"
+  },
+  {
+    "text": "So generally what you're going\nto have instead of just a matrix is you're going to have a\ntensor where the dimensions are",
+    "start": "1465200",
+    "end": "1471770"
+  },
+  {
+    "text": "typically batch sequence. And then whatever thing you're\ntrying to do, in this case,",
+    "start": "1471770",
+    "end": "1476909"
+  },
+  {
+    "text": "it's a matrix for every\ntoken in your data set.",
+    "start": "1476910",
+    "end": "1482000"
+  },
+  {
+    "text": "And so PyTorch is nice enough\nto make this work well for you.",
+    "start": "1482000",
+    "end": "1487710"
+  },
+  {
+    "text": "So when you take this\nfour dimensional tensor,",
+    "start": "1487710",
+    "end": "1492870"
+  },
+  {
+    "text": "and this matrix, what\nactually ends up happening is that for every batch,\nevery example and every token,",
+    "start": "1492870",
+    "end": "1501030"
+  },
+  {
+    "text": "you're multiplying\nthese two matrices. And then the result is that\nyou get your resulting matrix",
+    "start": "1501030",
+    "end": "1509450"
+  },
+  {
+    "text": "for each of the\nfirst two elements. There's nothing fancy\ngoing on, but this",
+    "start": "1509450",
+    "end": "1515059"
+  },
+  {
+    "text": "is just a pattern that I think\nis helpful to think about.",
+    "start": "1515060",
+    "end": "1520315"
+  },
+  {
+    "text": " So I'm going to take a\nlittle bit of a digression",
+    "start": "1520315",
+    "end": "1528289"
+  },
+  {
+    "text": "and talk about inops. And so the motivation for\ninops is the following.",
+    "start": "1528290",
+    "end": "1535740"
+  },
+  {
+    "text": "So normally in PyTorch\nyou define some tensors.",
+    "start": "1535740",
+    "end": "1541290"
+  },
+  {
+    "text": "And then you see\nstuff like this, where you take x and multiply\nby y transpose minus 2 minus 1.",
+    "start": "1541290",
+    "end": "1547680"
+  },
+  {
+    "text": "And you look at this and you\nsay, OK, what is minus 2?",
+    "start": "1547680",
+    "end": "1552830"
+  },
+  {
+    "text": "Well, I think that's\nthis sequence. And then minus 1 is this\nhidden because you're indexing backwards.",
+    "start": "1552830",
+    "end": "1559039"
+  },
+  {
+    "text": "And it's really\neasy to mess this up because if you look at your code\nand you see minus 1 minus 2,",
+    "start": "1559040",
+    "end": "1566240"
+  },
+  {
+    "text": "if you're good, you write\na bunch of comments. But then the comments can\nget out of date with the code",
+    "start": "1566240",
+    "end": "1572080"
+  },
+  {
+    "text": "and then you have a\nbad time debugging. So the solution is\nto use Einops here.",
+    "start": "1572080",
+    "end": "1580460"
+  },
+  {
+    "text": "So this is inspired by\nEinstein summation notation. And the idea is that\nwe're just going",
+    "start": "1580460",
+    "end": "1586330"
+  },
+  {
+    "text": "to name all the dimensions\ninstead of relying on indices",
+    "start": "1586330",
+    "end": "1592990"
+  },
+  {
+    "text": "essentially. So there's a library\ncalled Jax typing, which is helpful\nas a way to specify",
+    "start": "1592990",
+    "end": "1604120"
+  },
+  {
+    "text": "the dimensions in the types. So normally in PyTorch you would\njust define, write your code,",
+    "start": "1604120",
+    "end": "1611000"
+  },
+  {
+    "text": "and then you would\ncomment Oh, here's what the dimensions would be. So if you use Jax\ntyping then you",
+    "start": "1611000",
+    "end": "1616810"
+  },
+  {
+    "text": "have this notation\nwhere as a string you just write down\nwhat the dimensions are. So this is a slightly more\nnatural way of documenting.",
+    "start": "1616810",
+    "end": "1626769"
+  },
+  {
+    "text": "Now notice that\nthere's no enforcement here because PyTorch\ntypes are of a little bit",
+    "start": "1626770",
+    "end": "1632200"
+  },
+  {
+    "text": "of a liam in PyTorch. So-- It can be enforced? You can use a checker?",
+    "start": "1632200",
+    "end": "1639049"
+  },
+  {
+    "text": "Yeah. You can write a check, but\nnot by default, yeah OK,",
+    "start": "1639050",
+    "end": "1647480"
+  },
+  {
+    "text": "so let's look at the einsum. So einsum is basically matrix\nmultiplication on steroids",
+    "start": "1647480",
+    "end": "1654760"
+  },
+  {
+    "text": "with good bookkeeping. So here's our example. Here we have x which is-- let's\njust think about this as you",
+    "start": "1654760",
+    "end": "1662980"
+  },
+  {
+    "text": "have a batch dimension. You have a sequence dimension,\nand you have four hit ends, and y is the same size.",
+    "start": "1662980",
+    "end": "1670630"
+  },
+  {
+    "text": "You originally had\nto do this thing. And now what you do\ninstead is you basically",
+    "start": "1670630",
+    "end": "1678760"
+  },
+  {
+    "text": "write down the dimensions, names\nof the dimensions of the two",
+    "start": "1678760",
+    "end": "1684490"
+  },
+  {
+    "text": "tensors. So batch sequence 1 hidden,\nbatch sequence 2 hidden, and you just write\nwhat your dimension",
+    "start": "1684490",
+    "end": "1691810"
+  },
+  {
+    "text": "should appear in the output. So I write batch here\nbecause I just want to basically carry that over.",
+    "start": "1691810",
+    "end": "1700940"
+  },
+  {
+    "text": "And then I write seq1\nand seq2, and notice that I don't write hidden.",
+    "start": "1700940",
+    "end": "1706549"
+  },
+  {
+    "text": "And any dimension that is\nnot named in the output is just summed over. And any dimension that is\nnamed is just iterated over.",
+    "start": "1706550",
+    "end": "1716110"
+  },
+  {
+    "text": "So once you get used to this\nis actually very, very helpful.",
+    "start": "1716110",
+    "end": "1723290"
+  },
+  {
+    "text": "I mean, if you're seeing\nthis for the first time, it might seem a bit strange\nand long, but trust me,",
+    "start": "1723290",
+    "end": "1728600"
+  },
+  {
+    "text": "once you get used to it, it'll\nbe better than doing minus 2 minus 1.",
+    "start": "1728600",
+    "end": "1733900"
+  },
+  {
+    "text": "If you're a little bit,\nslicker, you can use dot dot, dot to represent broadcasting\nover any number of dimensions.",
+    "start": "1733900",
+    "end": "1741770"
+  },
+  {
+    "text": "So in this case, instead\nof writing batch, I can just write dot dot dot,\nand this would handle the case",
+    "start": "1741770",
+    "end": "1749220"
+  },
+  {
+    "text": "where instead of\nmaybe batch I have batch 1 batch 2 or some other\narbitrary long sequence.",
+    "start": "1749220",
+    "end": "1757560"
+  },
+  {
+    "text": "Yeah, question? Does Torch compile this? Is it guaranteed to compile\nto a condition, I guess?",
+    "start": "1757560",
+    "end": "1765930"
+  },
+  {
+    "text": "So the question is it\nguaranteed to compile to something efficient?",
+    "start": "1765930",
+    "end": "1772125"
+  },
+  {
+    "text": "I think the short answer is yes. I don't know if you any nuances.",
+    "start": "1772125",
+    "end": "1777720"
+  },
+  {
+    "text": "Oh, to figure out the\nbest way to reduce, the best order of dimensions\nto reduce, and then use that.",
+    "start": "1777720",
+    "end": "1782850"
+  },
+  {
+    "text": "If you're using\nwithin Torch compile, it'll only do that\none time and then reuse the same implementation\nover and over again.",
+    "start": "1782850",
+    "end": "1788190"
+  },
+  {
+    "text": "It's usually better than\nanything designed by hand? Yeah, OK.",
+    "start": "1788190",
+    "end": "1794535"
+  },
+  {
+    "text": " So let's look at reduce.",
+    "start": "1794535",
+    "end": "1800110"
+  },
+  {
+    "text": "So reduce operates\non one tensor, and it basically aggregates\nsome dimension or dimensions",
+    "start": "1800110",
+    "end": "1806220"
+  },
+  {
+    "text": "of the tensor. So you have this\ntensor, before you would write mean to sum\nover the final dimension.",
+    "start": "1806220",
+    "end": "1813760"
+  },
+  {
+    "text": "And now you basically\nsay actually, OK, so this replaces with sum.",
+    "start": "1813760",
+    "end": "1819490"
+  },
+  {
+    "text": "So reduce and again you\nsay hidden and hidden",
+    "start": "1819490",
+    "end": "1825570"
+  },
+  {
+    "text": "has disappeared, so which\nmeans that you are aggregating over that dimension OK, so\nyou can check that this indeed",
+    "start": "1825570",
+    "end": "1834900"
+  },
+  {
+    "text": "works over here.  So maybe one final\nexample of this",
+    "start": "1834900",
+    "end": "1844470"
+  },
+  {
+    "text": "is sometimes tensor\n1 dimensio, actually",
+    "start": "1844470",
+    "end": "1850350"
+  },
+  {
+    "text": "represents multiple\ndimensions, and you want to unpack that and\noperate over one of them and pack it back.",
+    "start": "1850350",
+    "end": "1856419"
+  },
+  {
+    "text": "So in this case, let's say\nyou have batch sequence and then this eight\ndimensional vector is actually",
+    "start": "1856420",
+    "end": "1865100"
+  },
+  {
+    "text": "a flattened representation\nof number of heads times some hidden dimension",
+    "start": "1865100",
+    "end": "1870560"
+  },
+  {
+    "text": "OK, so and then you\nhave a weight vector that needs to operate on\nthat hidden dimension.",
+    "start": "1870560",
+    "end": "1877470"
+  },
+  {
+    "text": "So you can do this very\nelegantly using einops by calling rearrange.",
+    "start": "1877470",
+    "end": "1886230"
+  },
+  {
+    "text": "And this basically,\nyou can think about it, we saw view before\nit's a fancier",
+    "start": "1886230",
+    "end": "1894049"
+  },
+  {
+    "text": "version, which basically\nlooks at the same data but differently.",
+    "start": "1894050",
+    "end": "1899780"
+  },
+  {
+    "text": "So here it basically says\nthis dimension is actually heads in hidden1, I'm\ngoing to explode that",
+    "start": "1899780",
+    "end": "1906170"
+  },
+  {
+    "text": "into two dimensions. And you have to specify\nthe number of heads",
+    "start": "1906170",
+    "end": "1914420"
+  },
+  {
+    "text": "here because there's multiple\nways to split a number into two.",
+    "start": "1914420",
+    "end": "1919500"
+  },
+  {
+    "text": "Let's see, this might\nbe a little bit long. OK, maybe it's not worth\nlooking at right now.",
+    "start": "1919500",
+    "end": "1926700"
+  },
+  {
+    "text": "And given that x you can\nperform your transformation",
+    "start": "1926700",
+    "end": "1933179"
+  },
+  {
+    "text": "using einsum. So this is something\nhidden1 which",
+    "start": "1933180",
+    "end": "1939090"
+  },
+  {
+    "text": "corresponds to x\nand then hidden1, hidden2 which corresponds\nto w, and that gives you something hidden2.",
+    "start": "1939090",
+    "end": "1947580"
+  },
+  {
+    "text": "OK, and then you\ncan rearrange back.",
+    "start": "1947580",
+    "end": "1952779"
+  },
+  {
+    "text": "So this is just the\ninverse of breaking up. So you have your two dimensions\nand you group it into one.",
+    "start": "1952780",
+    "end": "1959760"
+  },
+  {
+    "text": "So that's just a\nflattening operation that's with everything all the\nother dimensions left alone.",
+    "start": "1959760",
+    "end": "1967280"
+  },
+  {
+    "text": " So there is a tutorial\nfor this that I",
+    "start": "1967280",
+    "end": "1975670"
+  },
+  {
+    "text": "would recommend you go through\nand it gives you a bit more. You don't have to use this\nbecause you're building it",
+    "start": "1975670",
+    "end": "1982539"
+  },
+  {
+    "text": "from scratch, so you can\ndo anything you want, but in the assignment 1,\nwe do give you guidance",
+    "start": "1982540",
+    "end": "1987760"
+  },
+  {
+    "text": "and it's something\nprobably to invest in. ",
+    "start": "1987760",
+    "end": "1995916"
+  },
+  {
+    "text": "OK, so now let's talk\nabout computation",
+    "start": "1995916",
+    "end": "2004860"
+  },
+  {
+    "text": "no cost, of tensor operations. So we introduce a\nbunch of operations,",
+    "start": "2004860",
+    "end": "2011520"
+  },
+  {
+    "text": "and how much do they cost? So a floating point operation\nis any operation floating point",
+    "start": "2011520",
+    "end": "2020669"
+  },
+  {
+    "text": "like addition or multiplication. These are them, and\nthese are the main ones",
+    "start": "2020670",
+    "end": "2027510"
+  },
+  {
+    "text": "that are going to I think\nmatter in terms of FLOP count.",
+    "start": "2027510",
+    "end": "2032640"
+  },
+  {
+    "text": "One thing that is a pet peeve of\nmine is that when you say FLOPs,",
+    "start": "2032640",
+    "end": "2037660"
+  },
+  {
+    "text": "it's actually unclear\nwhat you mean. So you could mean FLOPs\nwith a lowercase s, which stands for number\nof floating operations.",
+    "start": "2037660",
+    "end": "2046210"
+  },
+  {
+    "text": "This measures amount of\ncomputation that you've done. Or you could mean FLOPS also\nwritten with an uppercase S",
+    "start": "2046210",
+    "end": "2054030"
+  },
+  {
+    "text": "which means floating\npoints per second, which is used to measure\nthe speed of hardware.",
+    "start": "2054030",
+    "end": "2059260"
+  },
+  {
+    "text": "So we're not going to in this\nclass use uppercase S because I",
+    "start": "2059260",
+    "end": "2064830"
+  },
+  {
+    "text": "find that very confusing, and\njust write /s to denote that this is floating\npoint per second, OK?",
+    "start": "2064830",
+    "end": "2073812"
+  },
+  {
+    "text": "OK, so just to give you\nsome intuition about FLOPs, GPT 3 took about 323 FLOPs, GPT\n4 was 2025 FLOPs speculation.",
+    "start": "2073812",
+    "end": "2087100"
+  },
+  {
+    "text": "And there was a US executive\norder that any foundation model with over 126 FLOPs had to\nbe reported to government,",
+    "start": "2087100",
+    "end": "2094500"
+  },
+  {
+    "text": "which now has been revoked, but\nthe EU still has something that",
+    "start": "2094500",
+    "end": "2102900"
+  },
+  {
+    "text": "hasn't-- the EU AI act, which is\n1e25 which hasn't been revoked.",
+    "start": "2102900",
+    "end": "2109319"
+  },
+  {
+    "text": "So some intuitions, A100\nhas a peak performance",
+    "start": "2109320",
+    "end": "2115650"
+  },
+  {
+    "text": "of 312 teraFLOP per second. And H100 has a peak\nperformance of 1979 teraFLOP",
+    "start": "2115650",
+    "end": "2126900"
+  },
+  {
+    "text": "per second with sparsity and\napproximately 50% without.",
+    "start": "2126900",
+    "end": "2132420"
+  },
+  {
+    "text": "And if you look the NVIDIA has\nthese specification sheets.",
+    "start": "2132420",
+    "end": "2138510"
+  },
+  {
+    "text": "So you can see that the\nFLOPs actually depends on what you're trying to do.",
+    "start": "2138510",
+    "end": "2144430"
+  },
+  {
+    "text": "So if you're using\nBF or FP32, it's actually really, really bad.",
+    "start": "2144430",
+    "end": "2151279"
+  },
+  {
+    "text": "If you run FP32 on H100,\nyou're not getting-- it's orders of magnitude worse\nthan if you're doing FP16,",
+    "start": "2151280",
+    "end": "2162830"
+  },
+  {
+    "text": "and if you're willing\nto go down to FP8, then it can be even faster. And for my first read\nthat I didn't realize,",
+    "start": "2162830",
+    "end": "2170762"
+  },
+  {
+    "text": "but there's an asterisk here,\nand this means with sparsity. So usually in a lot of the\nmatrices we have in this class",
+    "start": "2170762",
+    "end": "2178280"
+  },
+  {
+    "text": "are dense, so you don't\nactually get this, you get something like-- It's exactly half that number.",
+    "start": "2178280",
+    "end": "2183780"
+  },
+  {
+    "text": "Exactly half, OK. ",
+    "start": "2183780",
+    "end": "2189740"
+  },
+  {
+    "text": "So now you can do a back\nof envelope calculations.",
+    "start": "2189740",
+    "end": "2196590"
+  },
+  {
+    "text": "Eight H100s for two weeks is\njust 8 times the number of FLOPs",
+    "start": "2196590",
+    "end": "2203870"
+  },
+  {
+    "text": "per second times the number\nof seconds in a week. Actually, this\nmight be one week.",
+    "start": "2203870",
+    "end": "2210540"
+  },
+  {
+    "text": "So that's one week and\nthat's 4.7 times e to the 21",
+    "start": "2210540",
+    "end": "2217400"
+  },
+  {
+    "text": "which is some number. And you can contextualize the\nFLOP counts with the other model",
+    "start": "2217400",
+    "end": "2225110"
+  },
+  {
+    "text": "counts, yeah. Absolutely. So that means if-- so\nwhat is sparsity mean?",
+    "start": "2225110",
+    "end": "2231420"
+  },
+  {
+    "text": "That means if your\nmatrices are sparse. Is it specific for\nstructured sparsity? It's like two out of four\nelements in each group of four",
+    "start": "2231420",
+    "end": "2239480"
+  },
+  {
+    "text": "elements is 0. That's the only case where\nyou get that, no one uses it.",
+    "start": "2239480",
+    "end": "2246200"
+  },
+  {
+    "text": "Yeah, a marketing\ndepartment uses it. ",
+    "start": "2246200",
+    "end": "2252881"
+  },
+  {
+    "text": "OK, so let's go through\na simple example. So remember we're not going\nto touch the transformer,",
+    "start": "2252881",
+    "end": "2259710"
+  },
+  {
+    "text": "but I think even a linear model\ngives us a lot of the building blocks, and intuitions. So suppose we have end points.",
+    "start": "2259710",
+    "end": "2266990"
+  },
+  {
+    "text": "Each point is D dimensional,\nand the linear model is just going to map each\nD dimensional vector to a K",
+    "start": "2266990",
+    "end": "2273700"
+  },
+  {
+    "text": "dimensional vector. So let's set some\nnumber of points, is B",
+    "start": "2273700",
+    "end": "2280360"
+  },
+  {
+    "text": "dimension is D K is\nthe number of outputs. And let's create\nour data matrix x.",
+    "start": "2280360",
+    "end": "2288580"
+  },
+  {
+    "text": "Our weight matrix w,\nand the linear model",
+    "start": "2288580",
+    "end": "2294460"
+  },
+  {
+    "text": "is just a map model. So nothing too\ninteresting going on,",
+    "start": "2294460",
+    "end": "2300290"
+  },
+  {
+    "text": "and the question is how\nmany FLOPs was that?",
+    "start": "2300290",
+    "end": "2308350"
+  },
+  {
+    "text": "And the way you look\nat this is you say,",
+    "start": "2308350",
+    "end": "2313820"
+  },
+  {
+    "text": "well when you do the\nmatrix multiplication, basically for every\ni, j, k triple,",
+    "start": "2313820",
+    "end": "2322150"
+  },
+  {
+    "text": "I have to multiply\ntwo numbers together, And I also have to add\nthat number to the total.",
+    "start": "2322150",
+    "end": "2332350"
+  },
+  {
+    "text": "OK, so the answer is 2\ntimes basically the product",
+    "start": "2332350",
+    "end": "2339160"
+  },
+  {
+    "text": "of all the dimensions involved. So the left dimension,\nthe middle dimension and the right dimension.",
+    "start": "2339160",
+    "end": "2347250"
+  },
+  {
+    "text": "So this is something that\nyou should just remember. If you're doing a\nmatrix multiplication, the number of FLOPs\nis 2 times the product",
+    "start": "2347250",
+    "end": "2355930"
+  },
+  {
+    "text": "of the three dimensions. ",
+    "start": "2355930",
+    "end": "2361079"
+  },
+  {
+    "text": "OK, so the flops\nof other operations are usually linear in the\nsize of the matrix or tensor.",
+    "start": "2361080",
+    "end": "2371110"
+  },
+  {
+    "text": "And in general,\nno other operation you'll encounter\nin deep learning is expensive as\nmatrix multiplication",
+    "start": "2371110",
+    "end": "2376870"
+  },
+  {
+    "text": "for large enough matrices. So this is why I think\na lot of the napkin math",
+    "start": "2376870",
+    "end": "2382090"
+  },
+  {
+    "text": "is very simple\nbecause we're only looking at the matrix\nmultiplications that",
+    "start": "2382090",
+    "end": "2388090"
+  },
+  {
+    "text": "are performed by the model. Now of course, there\nare regimes where if your matrices\nare small enough,",
+    "start": "2388090",
+    "end": "2395810"
+  },
+  {
+    "text": "then the cost of other\nthings starts to dominate. But generally, that's\nnot a good regime you want to be in because\nthe hardware is designed",
+    "start": "2395810",
+    "end": "2402670"
+  },
+  {
+    "text": "for big matrix multiplication,\nso it's a little bit circular,",
+    "start": "2402670",
+    "end": "2408319"
+  },
+  {
+    "text": "but we end up in this regime\nwhere we only consider models where the map models\nare the dominant cost.",
+    "start": "2408320",
+    "end": "2419410"
+  },
+  {
+    "text": "Any questions about this\nnumber, 2 times the product",
+    "start": "2419410",
+    "end": "2424930"
+  },
+  {
+    "text": "of the three dimensions. This is just a useful thing. Should the algorithm of\nmatrix multiplication always",
+    "start": "2424930",
+    "end": "2430330"
+  },
+  {
+    "text": "be the same because the chip\nmight have optimized it? Always only for the same.",
+    "start": "2430330",
+    "end": "2439020"
+  },
+  {
+    "text": "Yeah, so the question\nis essentially does this depend on the matrix\nmultiplication algorithm?",
+    "start": "2439020",
+    "end": "2448619"
+  },
+  {
+    "text": "In general, I guess we'll\nlook at this the next week",
+    "start": "2448620",
+    "end": "2454470"
+  },
+  {
+    "text": "or the week after when\nwe look at kernels. I mean actually there's a\nlot of optimization that goes underneath under\nthe hood when it comes",
+    "start": "2454470",
+    "end": "2461460"
+  },
+  {
+    "text": "to matrix multiplications. And there's a lot\nof specialization depending on the shape.",
+    "start": "2461460",
+    "end": "2469590"
+  },
+  {
+    "text": "I would say this is just a\ncrude estimate that is basically",
+    "start": "2469590",
+    "end": "2477360"
+  },
+  {
+    "text": "the right order of magnitude.  OK, so yeah?",
+    "start": "2477360",
+    "end": "2485610"
+  },
+  {
+    "text": "Additions and multiplications\nare considered equivalent? Yeah, additions\nand multiplications are considered equivalent.",
+    "start": "2485610",
+    "end": "2493770"
+  },
+  {
+    "text": "So one way I find helpful\nto interpret this. So at the end of the day, this\nis just a matrix multiplication,",
+    "start": "2493770",
+    "end": "2500529"
+  },
+  {
+    "text": "but I'm going to try to give a\nlittle bit of meaning to this, which is why I've set up\nthis as a little toy machine",
+    "start": "2500530",
+    "end": "2507900"
+  },
+  {
+    "text": "learning problem. So B really stands for\nthe number of data points,",
+    "start": "2507900",
+    "end": "2513430"
+  },
+  {
+    "text": "and D K is the\nnumber of parameters. So for this particular\nmodel, the number",
+    "start": "2513430",
+    "end": "2519270"
+  },
+  {
+    "text": "of flops that's required\nfor a forward pass is 2 times the number\nof tokens or number of data points times the\nnumber of parameters.",
+    "start": "2519270",
+    "end": "2527010"
+  },
+  {
+    "text": "OK, so this turns out\nto actually generalize to transformers. There's an asterisk\nthere because there's",
+    "start": "2527010",
+    "end": "2536550"
+  },
+  {
+    "text": "the sequence length\nand other stuff, but this is roughly\nright if your sequence",
+    "start": "2536550",
+    "end": "2543180"
+  },
+  {
+    "text": "length isn't too large. ",
+    "start": "2543180",
+    "end": "2550350"
+  },
+  {
+    "text": "OK, so now this\nis just the number of floating point operations.",
+    "start": "2550350",
+    "end": "2558140"
+  },
+  {
+    "text": "So how does this\nactually translate to wall clock time, which\nis presumably the thing you",
+    "start": "2558140",
+    "end": "2563600"
+  },
+  {
+    "text": "actually care about? How long do you have\nto wait for your run? So let's time this.",
+    "start": "2563600",
+    "end": "2570330"
+  },
+  {
+    "text": "So I have this function that is\njust going to do it five times,",
+    "start": "2570330",
+    "end": "2580400"
+  },
+  {
+    "text": "and I'm going to perform the\nmatrix multiply operation. We'll talk a little\nbit later about this,",
+    "start": "2580400",
+    "end": "2588140"
+  },
+  {
+    "text": "two weeks from now why\nthe other code is here. But for now we get\nan actual time,",
+    "start": "2588140",
+    "end": "2595170"
+  },
+  {
+    "text": "so that matrix\ntook 0.16 seconds,",
+    "start": "2595170",
+    "end": "2600740"
+  },
+  {
+    "text": "and the actual FLOPs per second,\nwhich is how many flops did it",
+    "start": "2600740",
+    "end": "2605990"
+  },
+  {
+    "text": "do per second is 5.4e13.",
+    "start": "2605990",
+    "end": "2611750"
+  },
+  {
+    "text": "So now you can compare this\nwith the marketing materials,",
+    "start": "2611750",
+    "end": "2617420"
+  },
+  {
+    "text": "and for the A100 and H100, and\nas we look at the spec sheet,",
+    "start": "2617420",
+    "end": "2625559"
+  },
+  {
+    "text": "the flops depends\non the data type. And we see that the\npromise of flops",
+    "start": "2625560",
+    "end": "2632780"
+  },
+  {
+    "text": "per second, which for H100, for\nI guess this is for float 32",
+    "start": "2632780",
+    "end": "2641180"
+  },
+  {
+    "text": "is 67 teraflops as we looked.",
+    "start": "2641180",
+    "end": "2646980"
+  },
+  {
+    "text": "And so that is the number\nof promised FLOPs per second",
+    "start": "2646980",
+    "end": "2652800"
+  },
+  {
+    "text": "we had. And now if you look at the--",
+    "start": "2652800",
+    "end": "2659510"
+  },
+  {
+    "text": "there's a helpful notion\ncalled model FLOPs utilization or MFU, which is\nthe actual number of flops",
+    "start": "2659510",
+    "end": "2666319"
+  },
+  {
+    "text": "divided by the promised FLOPs. So you take the actual\nnumber of FLOPs,",
+    "start": "2666320",
+    "end": "2671390"
+  },
+  {
+    "text": "remember, which is what\nyou actually witnessed, the number of floating\npoint operations",
+    "start": "2671390",
+    "end": "2677500"
+  },
+  {
+    "text": "that are useful for\nyour model, divided",
+    "start": "2677500",
+    "end": "2683170"
+  },
+  {
+    "text": "by the actual time it took\ndivided by this promise flops per second, which is\nfrom the glossy brochure.",
+    "start": "2683170",
+    "end": "2690070"
+  },
+  {
+    "text": "You can get a MFU of 0.8.",
+    "start": "2690070",
+    "end": "2695170"
+  },
+  {
+    "text": "OK, so usually you see people\ntalking about their MFUs,",
+    "start": "2695170",
+    "end": "2700329"
+  },
+  {
+    "text": "and something greater\nthan 0.5 is usually considered to be good.",
+    "start": "2700330",
+    "end": "2706609"
+  },
+  {
+    "text": "And if you're 5% MFU that's\nconsidered to be really bad. Usually it can't get\nthat close to 90 or 100",
+    "start": "2706610",
+    "end": "2718720"
+  },
+  {
+    "text": "because this is ignoring all\ncommunication and overhead, it's just the literal\ncomputation of the FLOPs.",
+    "start": "2718720",
+    "end": "2728260"
+  },
+  {
+    "text": "And usually MFU is much higher\nif the matrix multiplication is dominate.",
+    "start": "2728260",
+    "end": "2735190"
+  },
+  {
+    "text": "So that's MFU, any\nquestions about this, yeah?",
+    "start": "2735190",
+    "end": "2741010"
+  },
+  {
+    "text": "You're using the\npromise flop per sec, not considering the sparsity.",
+    "start": "2741010",
+    "end": "2746320"
+  },
+  {
+    "text": "So this promise flop per sec is\nnot considering this mismatch,",
+    "start": "2746320",
+    "end": "2752230"
+  },
+  {
+    "text": "yeah A note is like\nthis is actually--",
+    "start": "2752230",
+    "end": "2758140"
+  },
+  {
+    "text": "there's also something called\nhardware to FLOPs utilization,",
+    "start": "2758140",
+    "end": "2763460"
+  },
+  {
+    "text": "and the motivation here is that\nwe're trying to look at the--",
+    "start": "2763460",
+    "end": "2773800"
+  },
+  {
+    "text": "it's called model\nbecause we're looking at the number of effective\nuseful operations",
+    "start": "2773800",
+    "end": "2779230"
+  },
+  {
+    "text": "that the model is\nperforming, and so it's a way of standardizing.",
+    "start": "2779230",
+    "end": "2785330"
+  },
+  {
+    "text": "It's not the actual\nnumber of flops that are done because you\ncould have optimization",
+    "start": "2785330",
+    "end": "2791650"
+  },
+  {
+    "text": "in your code that\ncache a few things or redo recomputation of some\nthings, and in some sense",
+    "start": "2791650",
+    "end": "2800380"
+  },
+  {
+    "text": "you're still computing\nthe same model. So what matters is\nthat this is trying to look at the model\ncomplexity, and you",
+    "start": "2800380",
+    "end": "2806740"
+  },
+  {
+    "text": "shouldn't be penalized\njust because you were clever in your\nMFU if you were clever and you didn't actually do the\nFLOPs, but you said you did.",
+    "start": "2806740",
+    "end": "2817089"
+  },
+  {
+    "text": "OK, so you can also\ndo the same with bf16. ",
+    "start": "2817090",
+    "end": "2822970"
+  },
+  {
+    "text": "Oops, and here we\nsee that for a bf",
+    "start": "2822970",
+    "end": "2830090"
+  },
+  {
+    "text": "the time is actually much\nbetter, so 0.03 instead of 0.16.",
+    "start": "2830090",
+    "end": "2839240"
+  },
+  {
+    "text": "So the actual FLOPs\nper second is higher. Even accounting\nfor its sparsity,",
+    "start": "2839240",
+    "end": "2846100"
+  },
+  {
+    "text": "the promise FLOPs\nis still quite high, so the MFU is actually\nlower for bf16.",
+    "start": "2846100",
+    "end": "2852960"
+  },
+  {
+    "text": " This is maybe surprisingly low,\nbut sometimes the promise FLOPs",
+    "start": "2852960",
+    "end": "2863430"
+  },
+  {
+    "text": "is a bit of optimistic.  So always benchmark your\ncode, and don't just",
+    "start": "2863430",
+    "end": "2872190"
+  },
+  {
+    "text": "assume that you're going to get\ncertain levels of performance. So just to summarize,\nmatrix multiplications",
+    "start": "2872190",
+    "end": "2882329"
+  },
+  {
+    "text": "dominate the compute, and\nthe general rule of thumb is that it's 2 times the product\nof the dimensions, FLOPs.",
+    "start": "2882330",
+    "end": "2892920"
+  },
+  {
+    "text": "The FLOPs per second,\nFloating Points per second",
+    "start": "2892920",
+    "end": "2897930"
+  },
+  {
+    "text": "depends on the hardware\nand also the data type. So the fancier the hardware\nyou have, the higher it is.",
+    "start": "2897930",
+    "end": "2906130"
+  },
+  {
+    "text": "The smaller the data type,\nusually the faster it is.",
+    "start": "2906130",
+    "end": "2912029"
+  },
+  {
+    "text": "And MFU is a useful\nnotion to look at how well you're essentially\nsqueezing your hardware, yeah?",
+    "start": "2912030",
+    "end": "2925080"
+  },
+  {
+    "text": "I've heard that often in order\nto get the maximum utilization, you want to use these\ntensor cores on the machine.",
+    "start": "2925080",
+    "end": "2931390"
+  },
+  {
+    "text": "And so this PyTorch by\ndefault use these tensor cores and are these calculations\naccounting for that?",
+    "start": "2931390",
+    "end": "2938530"
+  },
+  {
+    "text": "Yeah, So the question is, what\nabout those tensor cores? So if you go to this\nspec sheet, you'll",
+    "start": "2938530",
+    "end": "2947940"
+  },
+  {
+    "text": "see that these are all\non the tensor core.",
+    "start": "2947940",
+    "end": "2953800"
+  },
+  {
+    "text": "So the tensor core is basically\na specialized hardware to do matmuls.",
+    "start": "2953800",
+    "end": "2958882"
+  },
+  {
+    "start": "2958883",
+    "end": "2966860"
+  },
+  {
+    "text": "So by default it should use it. And especially if you're\nusing PyTorch in your compile, it will generate the code that\nwill use the hardware properly.",
+    "start": "2966860",
+    "end": "2976795"
+  },
+  {
+    "start": "2976795",
+    "end": "2983900"
+  },
+  {
+    "text": "So let's talk a little\nbit about gradients. And the reason is\nthat we've only",
+    "start": "2983900",
+    "end": "2991640"
+  },
+  {
+    "text": "looked at matrix multiplication\nor in other words, basically feedforward forward passes\nand the number of flops,",
+    "start": "2991640",
+    "end": "2999740"
+  },
+  {
+    "text": "but there's also\na computation that comes from computing\ngradients, and we want to track down how much that is.",
+    "start": "2999740",
+    "end": "3007390"
+  },
+  {
+    "text": "OK, so just to consider\na simple example,",
+    "start": "3007390",
+    "end": "3012410"
+  },
+  {
+    "text": "a simple linear\nmodel where you take the prediction of a\nlinear model and you",
+    "start": "3012410",
+    "end": "3021190"
+  },
+  {
+    "text": "look at the MSC with\nrespect to five. So not a very\ninteresting loss, but I think it's illustrative for\nlooking at the gradients.",
+    "start": "3021190",
+    "end": "3031180"
+  },
+  {
+    "text": "OK. So remember, in the forward\npass you have your X, you have your W, which\nyou want to compute",
+    "start": "3031180",
+    "end": "3038950"
+  },
+  {
+    "text": "the gradient with\nrespect to-- you make a prediction by\ntaking the linear product.",
+    "start": "3038950",
+    "end": "3044660"
+  },
+  {
+    "text": "And then you have your loss. OK. And in the backward pass,\nyou just call loss backwards.",
+    "start": "3044660",
+    "end": "3053509"
+  },
+  {
+    "text": "And in this case,\nthe gradient, which is this variable\nattached to the tensor",
+    "start": "3053510",
+    "end": "3062154"
+  },
+  {
+    "text": "turns out to be what you want. So everyone has done,\ngradients in PyTorch before.",
+    "start": "3062155",
+    "end": "3072820"
+  },
+  {
+    "text": "So let's look at how\nmany flops are required for computing gradients.",
+    "start": "3072820",
+    "end": "3080562"
+  },
+  {
+    "text": "OK. So let's look at a slightly\nmore complicated model.",
+    "start": "3080562",
+    "end": "3089800"
+  },
+  {
+    "text": "So now, it's a\ntwo-layer linear model,",
+    "start": "3089800",
+    "end": "3094860"
+  },
+  {
+    "text": "where you have x which is B by\nD, times W1 which is D by D.",
+    "start": "3094860",
+    "end": "3103020"
+  },
+  {
+    "text": "So that's the first layer. And then, you take your\nhidden activations H1",
+    "start": "3103020",
+    "end": "3109290"
+  },
+  {
+    "text": "and you pass it through\nanother linear layer W2. And to get a K dimensional\nvector and you do some--",
+    "start": "3109290",
+    "end": "3116610"
+  },
+  {
+    "text": "compute some loss.  So this is a two\nlayer linear network.",
+    "start": "3116610",
+    "end": "3123340"
+  },
+  {
+    "text": "And just as a\nreview, if you look at the number of forward\nflops, what you had to do",
+    "start": "3123340",
+    "end": "3130170"
+  },
+  {
+    "text": "was you have to multiply-- look at W1. You have to multiply x by\nW1 and add it to your H1,",
+    "start": "3130170",
+    "end": "3141940"
+  },
+  {
+    "text": "and you have to take\nH1 and W2 and you have to add it to your H2.",
+    "start": "3141940",
+    "end": "3149369"
+  },
+  {
+    "text": "So the total number\nof flops again, is 2 times the product of all\nthe dimensions in your matmul",
+    "start": "3149370",
+    "end": "3156330"
+  },
+  {
+    "text": "plus 2 times the product\ndimensions of your matmul for the second matrix.",
+    "start": "3156330",
+    "end": "3161400"
+  },
+  {
+    "text": "In other words, 2 times the\ntotal number of parameters, in this case.",
+    "start": "3161400",
+    "end": "3166560"
+  },
+  {
+    "text": "OK, so what about\nthe backward pass. So this part will be a\nlittle bit more involved.",
+    "start": "3166560",
+    "end": "3174960"
+  },
+  {
+    "text": "So we can recall the Model\nx to H1 to H2 and the loss.",
+    "start": "3174960",
+    "end": "3180730"
+  },
+  {
+    "text": "So in the backward\npass, you have to compute a bunch of gradients. And the gradients\nthat are relevant",
+    "start": "3180730",
+    "end": "3186780"
+  },
+  {
+    "text": "is you have to compute the\ngradient with respect to H1, H2,",
+    "start": "3186780",
+    "end": "3196420"
+  },
+  {
+    "text": "W1 and W2 of the loss. So d loss each of\nthese variables.",
+    "start": "3196420",
+    "end": "3204670"
+  },
+  {
+    "text": "OK, so how long does it\ntake to compute that? Let's just look\nat W2, for now OK.",
+    "start": "3204670",
+    "end": "3211360"
+  },
+  {
+    "text": "So the things that touch\nW2, you can compute by looking at the chain rule.",
+    "start": "3211360",
+    "end": "3218970"
+  },
+  {
+    "text": "So W2 grad. So the gradient of\nd loss, D W2, is",
+    "start": "3218970",
+    "end": "3230410"
+  },
+  {
+    "text": "you sum H1 times the gradient\nof the loss with respect to H2.",
+    "start": "3230410",
+    "end": "3239880"
+  },
+  {
+    "text": "OK. So that's just the\nchain rule for W2. ",
+    "start": "3239880",
+    "end": "3247830"
+  },
+  {
+    "text": "So all the gradients\nare the same size as the underlying of vectors.",
+    "start": "3247830",
+    "end": "3255560"
+  },
+  {
+    "text": "So this turns out to be-- essentially, looks like\na matrix multiplication.",
+    "start": "3255560",
+    "end": "3264240"
+  },
+  {
+    "text": "And so the same\ncalculus holds, which is that it's 2 times the\nnumber of the product of all",
+    "start": "3264240",
+    "end": "3272840"
+  },
+  {
+    "text": "the dimensions B\ntimes D, times K. OK.",
+    "start": "3272840",
+    "end": "3278070"
+  },
+  {
+    "text": "But this is only the\ngradient with respect to W2.",
+    "start": "3278070",
+    "end": "3283460"
+  },
+  {
+    "text": "We also need to compute\nthe gradient with respect to H1, because we have to keep\non back propagating to W1 and so",
+    "start": "3283460",
+    "end": "3292280"
+  },
+  {
+    "text": "on. So that is going to be the\nproduct of W2 times H2.",
+    "start": "3292280",
+    "end": "3307790"
+  },
+  {
+    "text": "Sorry, I think this should\nbe a grad of H2, H2 grad.",
+    "start": "3307790",
+    "end": "3313910"
+  },
+  {
+    "text": "So that turns out to\nalso be essentially,",
+    "start": "3313910",
+    "end": "3319160"
+  },
+  {
+    "text": "looks like the matrix\nmultiplication. And it's the same number\nof flops for computing",
+    "start": "3319160",
+    "end": "3326960"
+  },
+  {
+    "text": "the gradient of H1. So when you add the two\nso that's just for W2",
+    "start": "3326960",
+    "end": "3336230"
+  },
+  {
+    "text": "you do the same thing for W1. And that's which has\nD times D parameters.",
+    "start": "3336230",
+    "end": "3341430"
+  },
+  {
+    "text": "And when you add\nit all up, it's-- so for this-- for W2 the\namount of computation",
+    "start": "3341430",
+    "end": "3351230"
+  },
+  {
+    "text": "was four times B,\ntimes D, times K. And for W1 it's also 4\ntimes B, times D, times D,",
+    "start": "3351230",
+    "end": "3361940"
+  },
+  {
+    "text": "because W1 is D by D. OK.",
+    "start": "3361940",
+    "end": "3369520"
+  },
+  {
+    "text": "So I know there's a\nlot of symbols here. I'm going to try also to give\nyou a visual account for this.",
+    "start": "3369520",
+    "end": "3377630"
+  },
+  {
+    "text": "So this is from a blog post\nthat, I think, may work better.",
+    "start": "3377630",
+    "end": "3383119"
+  },
+  {
+    "text": "We'll see. OK, I have to wait for the\nanimation to loop back. So basically, this is one\nlayer of the neural net",
+    "start": "3383120",
+    "end": "3390040"
+  },
+  {
+    "text": "where it has the\nhiddens and then the weights to the next layer.",
+    "start": "3390040",
+    "end": "3395510"
+  },
+  {
+    "text": "And so I have to-- OK. Problem with this animation\nis I have to wait. [LAUGHTER]",
+    "start": "3395510",
+    "end": "3401680"
+  },
+  {
+    "text": "OK. Ready, set, OK. So first, I have to\nmultiply w and a,",
+    "start": "3401680",
+    "end": "3408280"
+  },
+  {
+    "text": "and I have to add it to this. That's a forward pass. And now, I'm going\nto multiply these two and then add it to that.",
+    "start": "3408280",
+    "end": "3415040"
+  },
+  {
+    "text": "And I'm going to multiply\nand then add it to that, OK. [LAUGHTER]",
+    "start": "3415040",
+    "end": "3420670"
+  },
+  {
+    "text": "Any questions? [LAUGHTER] I wish there's way\nto slow this down.",
+    "start": "3420670",
+    "end": "3426340"
+  },
+  {
+    "text": "But the details-- maybe\nI'll let you ruminate on,",
+    "start": "3426340",
+    "end": "3431600"
+  },
+  {
+    "text": "but the high level\nis that there's two times the number of\nparameters for the forward pass",
+    "start": "3431600",
+    "end": "3437045"
+  },
+  {
+    "text": "and four times the\nnumber of parameters for the backward pass. And we can just work it out\nvia the chain rule here.",
+    "start": "3437045",
+    "end": "3444230"
+  },
+  {
+    "text": "Yeah. For the homeworks, are\nwe also using the-- you said some PyTorch\nimplementation as well as some--",
+    "start": "3444230",
+    "end": "3451160"
+  },
+  {
+    "text": "are we allowed to use\ngrad or we are doing the-- entirely by hand\ndoing the gradient?",
+    "start": "3451160",
+    "end": "3458980"
+  },
+  {
+    "text": "So the question is,\nin the homework, are you going to compute\ngradients by hand, and the answer is no.",
+    "start": "3458980",
+    "end": "3464600"
+  },
+  {
+    "text": "You're going to just\nuse PyTorch gradient. This is just to break it down\nso we can do the counting flops.",
+    "start": "3464600",
+    "end": "3472244"
+  },
+  {
+    "text": " Any questions about\nthis before I move on?",
+    "start": "3472245",
+    "end": "3478140"
+  },
+  {
+    "start": "3478140",
+    "end": "3485099"
+  },
+  {
+    "text": "OK. Just to summarize,\nthe forward pass is, for this particular model\nis 2 times the number of data",
+    "start": "3485100",
+    "end": "3492900"
+  },
+  {
+    "text": "points, times the\nnumber of parameters, and backward is 4 times\nthe number of data points, times the number of parameters,\nwhich means that total,",
+    "start": "3492900",
+    "end": "3499710"
+  },
+  {
+    "text": "it's six times the number of\ndata points, times parameters. And that's explains\nwhy there was",
+    "start": "3499710",
+    "end": "3506579"
+  },
+  {
+    "text": "that 6 in the beginning when I\nasked the motivating question. So now, this is for a\nsimple linear model.",
+    "start": "3506580",
+    "end": "3516089"
+  },
+  {
+    "text": "But it turns out that many\nmodels, this is basically, the bulk of the computation,\nwhen essentially",
+    "start": "3516090",
+    "end": "3524099"
+  },
+  {
+    "text": "every computation you do touches\nessentially new parameters,",
+    "start": "3524100",
+    "end": "3531330"
+  },
+  {
+    "text": "roughly. And obviously,\nthis doesn't hold. You can find models\nwhere this doesn't",
+    "start": "3531330",
+    "end": "3537600"
+  },
+  {
+    "text": "hold because you can have one\nparameter through parameter sharing and have\na billion flops,",
+    "start": "3537600",
+    "end": "3543010"
+  },
+  {
+    "text": "but that's generally what,\nnot what models look like. ",
+    "start": "3543010",
+    "end": "3549300"
+  },
+  {
+    "text": "OK, so let me move on.",
+    "start": "3549300",
+    "end": "3556140"
+  },
+  {
+    "text": "So far, I've basically finished\ntalking about the resource",
+    "start": "3556140",
+    "end": "3561480"
+  },
+  {
+    "text": "accounting. So we looked at tensors. We looked at some\ncomputation on tensors. We looked at how\nmuch tensors take",
+    "start": "3561480",
+    "end": "3568950"
+  },
+  {
+    "text": "to store and also how\nmany flops tensors take when you do various\noperations on them.",
+    "start": "3568950",
+    "end": "3576180"
+  },
+  {
+    "text": "Now, let's start building\nup different models. I think this part isn't\nnecessarily going to be,",
+    "start": "3576180",
+    "end": "3584940"
+  },
+  {
+    "text": "that conceptually\ninteresting or challenging, but it's more for maybe\nthis completeness.",
+    "start": "3584940",
+    "end": "3593400"
+  },
+  {
+    "text": "So parameters in\nPyTorch are stored",
+    "start": "3593400",
+    "end": "3599190"
+  },
+  {
+    "text": "is as these\nnn.parameter objects.",
+    "start": "3599190",
+    "end": "3604319"
+  },
+  {
+    "text": "Let's talk a little bit about\nparameter initialization. So if you have, let's say,\na parameter that has--",
+    "start": "3604320",
+    "end": "3619010"
+  },
+  {
+    "text": "OK. So you generate a-- sorry. Your w parameter is\nan input dimension",
+    "start": "3619010",
+    "end": "3625590"
+  },
+  {
+    "text": "by hidden dimension matrix. You're still in the\nlinear model case. So let's just say an input and\nlet's feed it through the output",
+    "start": "3625590",
+    "end": "3633800"
+  },
+  {
+    "text": "OK. So Rand and unit\nGaussian seems innocuous.",
+    "start": "3633800",
+    "end": "3641370"
+  },
+  {
+    "text": "What happens when you do this is\nthat if you look at the output, you get some pretty\nlarge numbers.",
+    "start": "3641370",
+    "end": "3648070"
+  },
+  {
+    "text": "And this is because\nwhen you have the number of rows as\nessentially the square root",
+    "start": "3648070",
+    "end": "3656160"
+  },
+  {
+    "text": "of the hidden dimension. And so when you have large\nmodels this is going to blow up.",
+    "start": "3656160",
+    "end": "3663119"
+  },
+  {
+    "text": "And training can\nbe a very unstable.",
+    "start": "3663120",
+    "end": "3668210"
+  },
+  {
+    "text": "So typically, what you want\nto do is initialize in a way",
+    "start": "3668210",
+    "end": "3673849"
+  },
+  {
+    "text": "that's invariant to\nhidden, or at least when you're guaranteed that\nit's not going to blow up.",
+    "start": "3673850",
+    "end": "3680220"
+  },
+  {
+    "text": "And one simple way to do\nthis is just rescale by the 1 over square root of\nnumber of inputs.",
+    "start": "3680220",
+    "end": "3688970"
+  },
+  {
+    "text": "So basically, let's redo this\nw equals a parameter where",
+    "start": "3688970",
+    "end": "3694640"
+  },
+  {
+    "text": "I simply divide by the square\nroot of the input dimension.",
+    "start": "3694640",
+    "end": "3700160"
+  },
+  {
+    "text": "And then now, when you feed\nit through the output now, you get things that\nare stable around--",
+    "start": "3700160",
+    "end": "3706430"
+  },
+  {
+    "text": "this actually concentrate to\nsomething like normal zero, one.",
+    "start": "3706430",
+    "end": "3711444"
+  },
+  {
+    "text": " So this is basically-- this has\nbeen explored pretty extensively",
+    "start": "3711445",
+    "end": "3718760"
+  },
+  {
+    "text": "in deep learning literatures\nknown up to a constant, this is Xavier initialization.",
+    "start": "3718760",
+    "end": "3723930"
+  },
+  {
+    "text": "And typically, I gets\nit's fairly common if you want to be extra safe. You don't trust the normal\nbecause that doesn't",
+    "start": "3723930",
+    "end": "3730820"
+  },
+  {
+    "text": "have it has unbounded tails. And you just say I'm\ngoing to truncate to -3, 3 so I don't get\nany large values,",
+    "start": "3730820",
+    "end": "3737520"
+  },
+  {
+    "text": "and I don't want any\nto mess with that. OK. ",
+    "start": "3737520",
+    "end": "3750710"
+  },
+  {
+    "text": "So let's build just\na simple model.",
+    "start": "3750710",
+    "end": "3755720"
+  },
+  {
+    "text": "It's going to have D\ndimensions and two layers.",
+    "start": "3755720",
+    "end": "3761070"
+  },
+  {
+    "text": "There's this-- I just made\nup this name, cruncher, it's a custom model, which is\na deep linear network, which",
+    "start": "3761070",
+    "end": "3767930"
+  },
+  {
+    "text": "has n num layers layers. And each layer is\na linear model,",
+    "start": "3767930",
+    "end": "3776810"
+  },
+  {
+    "text": "which has essentially, it's\njust a matrix multiplication. ",
+    "start": "3776810",
+    "end": "3784780"
+  },
+  {
+    "text": "So the parameters\nof this model looks like I have layers for--\nthe first layer, which",
+    "start": "3784780",
+    "end": "3797829"
+  },
+  {
+    "text": "is a D by D matrix. The second layer, which\nis also D by D matrix. And then I have a\nhead or a final layer.",
+    "start": "3797830",
+    "end": "3807670"
+  },
+  {
+    "text": "So if I get the number of\nparameters of this model",
+    "start": "3807670",
+    "end": "3813819"
+  },
+  {
+    "text": "then it's going to be D squared\nplus D squared, plus D. So",
+    "start": "3813820",
+    "end": "3820000"
+  },
+  {
+    "text": "nothing too surprising there. And I'm going to\nmove it to the GPU",
+    "start": "3820000",
+    "end": "3825250"
+  },
+  {
+    "text": "because I want this to run fast. And I'm going to\ngenerate some random data",
+    "start": "3825250",
+    "end": "3831430"
+  },
+  {
+    "text": "and feed it through the\ndata, and the forward pass is just going through\nthe layers and then,",
+    "start": "3831430",
+    "end": "3838660"
+  },
+  {
+    "text": "finally applying the head. ",
+    "start": "3838660",
+    "end": "3844210"
+  },
+  {
+    "text": "So with that model\nlet's try to-- I'm going to use this model\nand do some stuff with it.",
+    "start": "3844210",
+    "end": "3851440"
+  },
+  {
+    "text": "But just one general digression. Randomness is something that\ncan be annoying in some cases,",
+    "start": "3851440",
+    "end": "3862330"
+  },
+  {
+    "text": "be it if you're trying to\nreproduce a bug, for example. It shows up in many places\ninitialization, dropout,",
+    "start": "3862330",
+    "end": "3867620"
+  },
+  {
+    "text": "data ordering, and\njust a best practices. We recommend you always\npass a fixed random seed.",
+    "start": "3867620",
+    "end": "3877150"
+  },
+  {
+    "text": "So you can reproduce your model,\nor at least, as well as you can.",
+    "start": "3877150",
+    "end": "3883059"
+  },
+  {
+    "text": "And in particular, having\na different random seed for every source of\nrandomness is nice",
+    "start": "3883060",
+    "end": "3889920"
+  },
+  {
+    "text": "because then you can, for\nexample, fix the initialization or fix the data ordering,\nbut very other things.",
+    "start": "3889920",
+    "end": "3896670"
+  },
+  {
+    "text": "Determinism is your friend when\nyou're debugging and encode.",
+    "start": "3896670",
+    "end": "3902829"
+  },
+  {
+    "text": "Unfortunately,\nthere's many places where you can use randomness and\njust be cognizant of which one",
+    "start": "3902830",
+    "end": "3911040"
+  },
+  {
+    "text": "you're using. And just if you want\nto be safe, just set the seed for all of them.",
+    "start": "3911040",
+    "end": "3916355"
+  },
+  {
+    "text": " Data loading.",
+    "start": "3916355",
+    "end": "3921450"
+  },
+  {
+    "text": "I guess I'll go\nthrough this quickly.  it'll be useful for\nyour assignment.",
+    "start": "3921450",
+    "end": "3929400"
+  },
+  {
+    "text": "So in language modeling,\ndata is typically just a sequence of integers. Because this is remember\noutput by the tokenizer.",
+    "start": "3929400",
+    "end": "3937440"
+  },
+  {
+    "text": "And you serialize them into-- you can serialize them\ninto numpy arrays.",
+    "start": "3937440",
+    "end": "3944220"
+  },
+  {
+    "text": "And one thing that's maybe\nuseful is that you don't want",
+    "start": "3944220",
+    "end": "3951840"
+  },
+  {
+    "text": "to load all your data\ninto memory at once because for example,\nthe LLaMA data is 2.8TB,",
+    "start": "3951840",
+    "end": "3959160"
+  },
+  {
+    "text": "but you can pretend to load it\nby using this handy function called mmemap, which gives you\nessentially a variable that is",
+    "start": "3959160",
+    "end": "3968790"
+  },
+  {
+    "text": "mapped to a file. So when you try to access the\ndata, it actually on demand",
+    "start": "3968790",
+    "end": "3976079"
+  },
+  {
+    "text": "loads the file. And then using that\nyou can create a data",
+    "start": "3976080",
+    "end": "3981300"
+  },
+  {
+    "text": "loader that sample of\ndata from your batch.",
+    "start": "3981300",
+    "end": "3988510"
+  },
+  {
+    "text": "So I'm going to skip over that,\njust in the interest of time. Let's talk a little\nbit about optimizers.",
+    "start": "3988510",
+    "end": "3995800"
+  },
+  {
+    "text": "So we've defined our model. ",
+    "start": "3995800",
+    "end": "4001130"
+  },
+  {
+    "text": "So there's many\noptimizers just maybe",
+    "start": "4001130",
+    "end": "4007309"
+  },
+  {
+    "text": "going through the intuitions\nbehind some of them. So of course, there's\nstochastic gradient descent. You compute the\ngradient of your batch,",
+    "start": "4007310",
+    "end": "4013980"
+  },
+  {
+    "text": "you take a step in that\ndirection, no questions asked. There's a idea called momentum\nwhich dates back to Classic",
+    "start": "4013980",
+    "end": "4021380"
+  },
+  {
+    "text": "optimization, Nesterov , where\nyou have a running average",
+    "start": "4021380",
+    "end": "4027140"
+  },
+  {
+    "text": "of your gradients. And you update against the\nrunning average instead",
+    "start": "4027140",
+    "end": "4033109"
+  },
+  {
+    "text": "of your instantaneous gradient. And then you have AdaGrad,\nwhich you scale the gradients",
+    "start": "4033110",
+    "end": "4043370"
+  },
+  {
+    "text": "by the average over\nthe norms of your,",
+    "start": "4043370",
+    "end": "4050600"
+  },
+  {
+    "text": "or I guess not the norms,\nthe square of the gradients. You also have RMSProp, which is\nan improved version of AdaGrad,",
+    "start": "4050600",
+    "end": "4059390"
+  },
+  {
+    "text": "which uses an exponential\naveraging rather than just a flat average.",
+    "start": "4059390",
+    "end": "4064460"
+  },
+  {
+    "text": "And then finally,\nAdam, which appeared in 2014, which is essentially\ncombining RMSProp and momentum.",
+    "start": "4064460",
+    "end": "4070970"
+  },
+  {
+    "text": "So that's why you're maintaining\nboth your running average",
+    "start": "4070970",
+    "end": "4076240"
+  },
+  {
+    "text": "of your gradients, but\nalso running average of your gradient squared. So since you're going to\nimplement Adam in homework 1,",
+    "start": "4076240",
+    "end": "4086330"
+  },
+  {
+    "text": "I'm not going to do that. Instead, I'm going\nto implement AdaGrad. So the way you implement\nthe optimizer in PyTorch",
+    "start": "4086330",
+    "end": "4097870"
+  },
+  {
+    "text": "is that you override\nthe optimizer class. And you have to, let's\nsee, maybe I'll and then",
+    "start": "4097870",
+    "end": "4107560"
+  },
+  {
+    "text": "I'll get to the implementation\nonce we step through it. So let's define some data,\ncompute the forward pass",
+    "start": "4107560",
+    "end": "4117068"
+  },
+  {
+    "text": "on the loss. And then you compute\nthe gradients,",
+    "start": "4117069",
+    "end": "4122189"
+  },
+  {
+    "text": "and then, when you\ncall optimizer.step,",
+    "start": "4122189",
+    "end": "4127239"
+  },
+  {
+    "text": "this is where the optimizer\nactually is active.",
+    "start": "4127240",
+    "end": "4132500"
+  },
+  {
+    "text": "So what this looks like is,\nyour parameters are grouped by,",
+    "start": "4132500",
+    "end": "4138830"
+  },
+  {
+    "text": "for example, you have one for\nthe layer 0, layer 1, and then the final weights.",
+    "start": "4138830",
+    "end": "4145089"
+  },
+  {
+    "text": "And you can access a state which\nis a dictionary from parameters",
+    "start": "4145090",
+    "end": "4153489"
+  },
+  {
+    "text": "to whatever you want to store. As the optimizer\nstate, the gradient",
+    "start": "4153490",
+    "end": "4161139"
+  },
+  {
+    "text": "of that parameter\nyou assume is already calculated by the backward pass.",
+    "start": "4161140",
+    "end": "4168850"
+  },
+  {
+    "text": "And now, you can do\nthings like in AdaGrad,",
+    "start": "4168850",
+    "end": "4175420"
+  },
+  {
+    "text": "you're storing the sum\nof the gradient squared. So you can get that g2 variable\nand you can update that",
+    "start": "4175420",
+    "end": "4184410"
+  },
+  {
+    "text": "based on the square\nof the gradient. So this is the element wise\nsquaring of the gradient.",
+    "start": "4184410",
+    "end": "4190000"
+  },
+  {
+    "text": "And you put it back\ninto the state. So then your, obviously,\nyour optimizer",
+    "start": "4190000",
+    "end": "4195450"
+  },
+  {
+    "text": "is responsible for\nupdating the parameters. And this is just you\nupdate the learning",
+    "start": "4195450",
+    "end": "4201420"
+  },
+  {
+    "text": "rate times the gradient,\ndivided by this scaling. So now, this state is kept over\nacross multiple invocations",
+    "start": "4201420",
+    "end": "4211080"
+  },
+  {
+    "text": "of the optimizer. ",
+    "start": "4211080",
+    "end": "4220422"
+  },
+  {
+    "text": "And then at the end\nof your optimizer step you can free up the\nmemory just to--",
+    "start": "4220422",
+    "end": "4227730"
+  },
+  {
+    "text": "which is, I think,\ngoing to actually be more important\nwhen you look when we",
+    "start": "4227730",
+    "end": "4233010"
+  },
+  {
+    "text": "talk about model parallelism. So let's talk about the memory\nrequirements of the optimizer",
+    "start": "4233010",
+    "end": "4241380"
+  },
+  {
+    "text": "states. And actually basically,\nat this point, everything. So you need the number of\nparameters in this model",
+    "start": "4241380",
+    "end": "4250679"
+  },
+  {
+    "text": "is D squared times\nthe number of layers plus D for the final head.",
+    "start": "4250680",
+    "end": "4256800"
+  },
+  {
+    "text": "OK.  The number of\nactivations, so this",
+    "start": "4256800",
+    "end": "4263400"
+  },
+  {
+    "text": "is something we didn't\ndo before, but now, for this simple model,\nit's fairly easy to do. It's just B times\nD, times the number",
+    "start": "4263400",
+    "end": "4274200"
+  },
+  {
+    "text": "of layers you have for every\nlayer, for every data point, for every dimension. You have to hold\nthe activations.",
+    "start": "4274200",
+    "end": "4281580"
+  },
+  {
+    "text": "For the gradients, this is the\nsame as the number of parameters",
+    "start": "4281580",
+    "end": "4287100"
+  },
+  {
+    "text": "and the number of\noptimizer states, for AdaGrad, it's\nremember, we had",
+    "start": "4287100",
+    "end": "4294360"
+  },
+  {
+    "text": "to store the gradient squared.",
+    "start": "4294360",
+    "end": "4299639"
+  },
+  {
+    "text": "So that's another copy\nof the parameters. So putting it all together,\nwe have the total memory",
+    "start": "4299640",
+    "end": "4308330"
+  },
+  {
+    "text": "is assuming FP32, which means\nfour bytes, times the number",
+    "start": "4308330",
+    "end": "4315080"
+  },
+  {
+    "text": "of parameters, number of\nactivations, number of gradients and number of optimizer states.",
+    "start": "4315080",
+    "end": "4320500"
+  },
+  {
+    "text": "OK. And that gives us some\nnumber, which is 496 here.",
+    "start": "4320500",
+    "end": "4329930"
+  },
+  {
+    "text": "So this is a fairly\nsimple calculation, in the assignment\n1, you're going",
+    "start": "4329930",
+    "end": "4336170"
+  },
+  {
+    "text": "to do this for the\ntransformer, which is a little bit more\ninvolved because you have to-- there's not just\nmatrix multiplications,",
+    "start": "4336170",
+    "end": "4342720"
+  },
+  {
+    "text": "but there's many matrices. There is attention and there's\nall these other things. But the general form of the\ncalculation is the same.",
+    "start": "4342720",
+    "end": "4351780"
+  },
+  {
+    "text": "You have parameters,\nactivations, gradients and optimizer states. ",
+    "start": "4351780",
+    "end": "4364410"
+  },
+  {
+    "text": "And the flops required,\nagain, for this model is six times the\nnumber of tokens",
+    "start": "4364410",
+    "end": "4372230"
+  },
+  {
+    "text": "or the number of data points,\ntimes the number of parameters. And that's basically concludes\nthe resource accounting",
+    "start": "4372230",
+    "end": "4380750"
+  },
+  {
+    "text": "for this particular model. And if for reference, if you're\ncurious about working this out",
+    "start": "4380750",
+    "end": "4388579"
+  },
+  {
+    "text": "for transformers, you can\nconsult some of these articles. ",
+    "start": "4388580",
+    "end": "4395861"
+  },
+  {
+    "text": "So in the remaining\ntime, I think maybe I'll pause for questions.",
+    "start": "4395861",
+    "end": "4402200"
+  },
+  {
+    "text": "And we talked about\nbuilding up the tensors. And then we built\na very small model.",
+    "start": "4402200",
+    "end": "4407310"
+  },
+  {
+    "text": "And we talked about\noptimization and how much",
+    "start": "4407310",
+    "end": "4412670"
+  },
+  {
+    "text": "memory and how much\ncompute was required. ",
+    "start": "4412670",
+    "end": "4418530"
+  },
+  {
+    "text": "Yeah. Do we really need\nto store activation? So the question is, why do you\nneed to store the activations.",
+    "start": "4418530",
+    "end": "4425070"
+  },
+  {
+    "text": "So naively, you need to\nstore the activations because when you're\ndoing the backward pass,",
+    "start": "4425070",
+    "end": "4432660"
+  },
+  {
+    "text": "the gradients of let's\nsay the first layer depend on the activation. So the gradients of the Ith\nlayer depends on the activation",
+    "start": "4432660",
+    "end": "4439789"
+  },
+  {
+    "text": "there. Now, if you're\nsmarter, you don't have to store the\nactivations or you don't",
+    "start": "4439790",
+    "end": "4446390"
+  },
+  {
+    "text": "have to store all of them. You can recompute them. And that's something\na technique will called activation checkpointing,\nwhich we can talk about later.",
+    "start": "4446390",
+    "end": "4454405"
+  },
+  {
+    "text": " So let's just do this quick--",
+    "start": "4454405",
+    "end": "4462290"
+  },
+  {
+    "text": "actually, there's\nnot much to say here. But here's your typical training\nloop where you define the model,",
+    "start": "4462290",
+    "end": "4471320"
+  },
+  {
+    "text": "define the optimizer\nand you get the data. Feed forward, backward and\ntake a step in parameter space.",
+    "start": "4471320",
+    "end": "4483070"
+  },
+  {
+    "text": "And I guess it'll be\nmore interesting--",
+    "start": "4483070",
+    "end": "4489909"
+  },
+  {
+    "text": "I guess next time I should\nshow like an actual 1D plot, which isn't available\non this version.",
+    "start": "4489910",
+    "end": "4496125"
+  },
+  {
+    "text": " So one note about checkpointing.",
+    "start": "4496125",
+    "end": "4504640"
+  },
+  {
+    "text": "So training language\nmodels takes a long time and you certainly will\ncrash at some point.",
+    "start": "4504640",
+    "end": "4511190"
+  },
+  {
+    "text": "So you don't want to\nlose all your progress. So you want to periodically\nsave your model to disk.",
+    "start": "4511190",
+    "end": "4516290"
+  },
+  {
+    "text": "And just to be very clear,\nthe thing you want to save is both the model,\nand the optimizer",
+    "start": "4516290",
+    "end": "4524620"
+  },
+  {
+    "text": "and probably which iteration\nyou're on, you should add that. And then you can\njust load it up.",
+    "start": "4524620",
+    "end": "4532660"
+  },
+  {
+    "text": "One, maybe final\nnote and I'll end is, I alluded to mix\nprecision training.",
+    "start": "4532660",
+    "end": "4540300"
+  },
+  {
+    "text": " Choice of the data type\nhas different trade-offs.",
+    "start": "4540300",
+    "end": "4546620"
+  },
+  {
+    "text": "If you have higher precision\nit's more accurate and stable, but it's more expensive and\nlow precision is vice versa.",
+    "start": "4546620",
+    "end": "4555969"
+  },
+  {
+    "text": "And as we mentioned\nbefore, by default, the recommendation\nis use float32,",
+    "start": "4555970",
+    "end": "4563079"
+  },
+  {
+    "text": "but try to use bf16, or\neven FP8 whenever possible.",
+    "start": "4563080",
+    "end": "4568160"
+  },
+  {
+    "text": "So you can use lower precision\nfor the feed forward pass, but float32 for the rest.",
+    "start": "4568160",
+    "end": "4575710"
+  },
+  {
+    "text": "And this is an idea that\ngoes back to the 2017. There's exploring mixed\nprecision training.",
+    "start": "4575710",
+    "end": "4581710"
+  },
+  {
+    "text": "Pytorch has some tools\nthat automatically allow you to do mixed\nprecision training,",
+    "start": "4581710",
+    "end": "4588660"
+  },
+  {
+    "text": "because it can be\nannoying to have to specify which\nparts of your model",
+    "start": "4588660",
+    "end": "4594090"
+  },
+  {
+    "text": "it needs to be what precision. Generally, you define your model\nas this clean, modular thing",
+    "start": "4594090",
+    "end": "4601390"
+  },
+  {
+    "text": "and specifying the\nprecision is something that needs to cut across that.",
+    "start": "4601390",
+    "end": "4607925"
+  },
+  {
+    "text": " And I guess, maybe\none general comment",
+    "start": "4607925",
+    "end": "4614670"
+  },
+  {
+    "text": "is that people are\npushing the envelope on what precision is needed.",
+    "start": "4614670",
+    "end": "4620200"
+  },
+  {
+    "text": "There's some papers that\nshow you can actually use FP8 all the way through.",
+    "start": "4620200",
+    "end": "4626600"
+  },
+  {
+    "text": " I guess one of the\nchallenges is, of course,",
+    "start": "4626600",
+    "end": "4632465"
+  },
+  {
+    "text": "when you have\nlower precision, it gets very numerically unstable. But then you can\ndo various tricks",
+    "start": "4632465",
+    "end": "4638460"
+  },
+  {
+    "text": "to control the\nnumerics of your model during training\nso that you don't",
+    "start": "4638460",
+    "end": "4644010"
+  },
+  {
+    "text": "get into these bad regimes. So this is where I think\nthe systems and the model",
+    "start": "4644010",
+    "end": "4650910"
+  },
+  {
+    "text": "architecture design\nare synergistic, because you want to design\nmodels now that we have--",
+    "start": "4650910",
+    "end": "4659610"
+  },
+  {
+    "text": "a lot of model design is\njust governed by hardware. So even the transformer,\nas we mentioned last time,",
+    "start": "4659610",
+    "end": "4665200"
+  },
+  {
+    "text": "is governed by having GPUs. And now, if we notice\nthat NVIDIA chips have",
+    "start": "4665200",
+    "end": "4671190"
+  },
+  {
+    "text": "the property that if lower\nprecision, even like int4 for example, is one thing.",
+    "start": "4671190",
+    "end": "4677860"
+  },
+  {
+    "text": "Now, if you can make your\nmodel training actually work on int4, which\nis I think quite hard,",
+    "start": "4677860",
+    "end": "4685929"
+  },
+  {
+    "text": "then you can get\nmassive speedups and your model will\nbe more efficient.",
+    "start": "4685930",
+    "end": "4691980"
+  },
+  {
+    "text": "Now, there's\nanother thing, which we'll talk about\nlater, which is often",
+    "start": "4691980",
+    "end": "4698219"
+  },
+  {
+    "text": "you'll train your model using\nmore sane floating point. But when it comes to\ninference, you can go crazy",
+    "start": "4698220",
+    "end": "4705380"
+  },
+  {
+    "text": "and you take your\nmodel, and then you can quantize it and\nget a lot of the gains",
+    "start": "4705380",
+    "end": "4710690"
+  },
+  {
+    "text": "from very, very\naggressive quantization. So somehow training\nis a lot more",
+    "start": "4710690",
+    "end": "4717080"
+  },
+  {
+    "text": "difficult to do\nwith low precision. But once you have\na trained model, it's much easier to\nmake it low precision.",
+    "start": "4717080",
+    "end": "4724160"
+  },
+  {
+    "text": "OK, so I will wrap up there. Just to conclude, we have talked\nabout the different primitives",
+    "start": "4724160",
+    "end": "4732920"
+  },
+  {
+    "text": "to use to train a model\nbuilding up from tensors all the way to the training loop. We talked about memory\naccounting and flops accounting",
+    "start": "4732920",
+    "end": "4741170"
+  },
+  {
+    "text": "for these simple models. Hopefully, once you go\nthrough assignment 1,",
+    "start": "4741170",
+    "end": "4746190"
+  },
+  {
+    "text": "all of these concepts\nwill be really solid because you'll be\napplying these ideas",
+    "start": "4746190",
+    "end": "4751610"
+  },
+  {
+    "text": "for the actual transformer. OK. See you next time.",
+    "start": "4751610",
+    "end": "4757150"
+  },
+  {
+    "start": "4757150",
+    "end": "4762000"
+  }
+]

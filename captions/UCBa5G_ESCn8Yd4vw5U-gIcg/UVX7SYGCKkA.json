@@ -1,0 +1,2722 @@
+[
+  {
+    "start": "0",
+    "end": "5960"
+  },
+  {
+    "text": "OK, cool. Let's just get started. Welcome, everyone,\nto lecture 12.",
+    "start": "5960",
+    "end": "12620"
+  },
+  {
+    "text": "So, so far, we've learned a\nlot about how we convert words",
+    "start": "12620",
+    "end": "19580"
+  },
+  {
+    "text": "into vectors, how we convert\nsentences into vectors and basically take actions\nin the real world using",
+    "start": "19580",
+    "end": "27860"
+  },
+  {
+    "text": "that to classify documents. We learned about transformers,\nwe learned about pre-training.",
+    "start": "27860",
+    "end": "34737"
+  },
+  {
+    "text": "Today is going to be a\nlittle bit different. I'm going to be\ntalking about how you can train large models\non GPUs and a few basics",
+    "start": "34737",
+    "end": "43610"
+  },
+  {
+    "text": "about how these NL systems work. And it has nothing to do\nwith natural language at all,",
+    "start": "43610",
+    "end": "49379"
+  },
+  {
+    "text": "but hopefully it's going to\nbe useful for final projects. So I'm going to spend some time\non mixed precision training,",
+    "start": "49380",
+    "end": "56660"
+  },
+  {
+    "text": "some time on multi-GPU\ntraining with DDP and FSDP-- and hopefully, by the\nend of the lecture,",
+    "start": "56660",
+    "end": "62090"
+  },
+  {
+    "text": "these terms will make sense-- and some time on parameter\nefficient fine tuning.",
+    "start": "62090",
+    "end": "68040"
+  },
+  {
+    "text": "But before we get\ninto the lecture, just some announcements--",
+    "start": "68040",
+    "end": "73950"
+  },
+  {
+    "text": "proposal grades are going\nto be coming out shortly. Hopefully, by the\nend of the day.",
+    "start": "73950",
+    "end": "79493"
+  },
+  {
+    "text": "Thank you so much for\nall the hard work. I know it's kind of getting\na little bit crammed with a lot of deadlines for\nassignment 4 and the project",
+    "start": "79493",
+    "end": "87869"
+  },
+  {
+    "text": "proposal. So thank you so much\nfor all your hard work. The other thing is the\nproject milestone details",
+    "start": "87870",
+    "end": "95400"
+  },
+  {
+    "text": "should be out shortly, if not\nalready out on the website.",
+    "start": "95400",
+    "end": "100410"
+  },
+  {
+    "text": "So it's worth 5% of\nthe overall grade. It's due 12 days from now and\nit's a maximum of two pages.",
+    "start": "100410",
+    "end": "107830"
+  },
+  {
+    "text": "And really, the way to\nthink about the milestone is to use this as\na forcing function to get work done for\nyour final project.",
+    "start": "107830",
+    "end": "115380"
+  },
+  {
+    "text": "And yeah, with that\nout of the way, let's just jump\ninto the material.",
+    "start": "115380",
+    "end": "121620"
+  },
+  {
+    "text": "So I'm going to\nstart by thinking about how parameters and\ngradients and generally numbers",
+    "start": "121620",
+    "end": "127380"
+  },
+  {
+    "text": "are represented in computers. And I promise this is going to\nbe relevant to deep learning",
+    "start": "127380",
+    "end": "132630"
+  },
+  {
+    "text": "pretty soon. So let's start with\nfloating point. How many people here are\nfamiliar with this cartoon",
+    "start": "132630",
+    "end": "139980"
+  },
+  {
+    "text": "depiction of FP32? Can we just get-- OK, so some of you. So yeah, let's recap how\nfloating points are represented",
+    "start": "139980",
+    "end": "148140"
+  },
+  {
+    "text": "in computers. So firstly, FP32,\nthat's like 32 bytes. So the memory\nrequirement is 32 bits.",
+    "start": "148140",
+    "end": "155890"
+  },
+  {
+    "text": "So the memory\nrequirement is 4 bytes. And so if you think\nabout neural networks, then for every single\nneural net parameters,",
+    "start": "155890",
+    "end": "162480"
+  },
+  {
+    "text": "you need 4 bytes of GPU memory. And the way to convert this\ncartoon into a real number is something like this.",
+    "start": "162480",
+    "end": "169290"
+  },
+  {
+    "text": "So the first bit\nthere is the sign, and then the stuff in\ngreen represents the range,",
+    "start": "169290",
+    "end": "174640"
+  },
+  {
+    "text": "and then the stuff in\nblue represents precision. ",
+    "start": "174640",
+    "end": "180530"
+  },
+  {
+    "text": "Yeah. And so for FP32, you can\nrepresent a pretty large range",
+    "start": "180530",
+    "end": "186660"
+  },
+  {
+    "text": "and it's fairly precise. And so the larger the\nstuff in green is,",
+    "start": "186660",
+    "end": "192310"
+  },
+  {
+    "text": "the more numbers\nyou can represent, which means more smaller\nnumbers and also larger numbers.",
+    "start": "192310",
+    "end": "199090"
+  },
+  {
+    "text": "And the more stuff in blue we\nhave, the greater a precision",
+    "start": "199090",
+    "end": "204390"
+  },
+  {
+    "text": "in representing actual numbers. So another popular\ndata type that",
+    "start": "204390",
+    "end": "211050"
+  },
+  {
+    "text": "takes half the memory\nof FP32 is FP16. And the way we reduce\nmemory is we're",
+    "start": "211050",
+    "end": "218970"
+  },
+  {
+    "text": "going to reduce\nthe stuff in green. So there's going to be less\nrange, less dynamic range,",
+    "start": "218970",
+    "end": "224350"
+  },
+  {
+    "text": "and also the stuff in\nblue, which means there's going to be less precision. But the good thing is\nthat we can save memory.",
+    "start": "224350",
+    "end": "232630"
+  },
+  {
+    "text": "So we slashed memory\nrequirements in half. So let's think of\na scenario where",
+    "start": "232630",
+    "end": "240099"
+  },
+  {
+    "text": "you're trying to train\na big neural network and your model\nparameters and gradients are represented in FP32.",
+    "start": "240100",
+    "end": "246890"
+  },
+  {
+    "text": "You start training, and suddenly\nyou get an out-of-memory CUDA error.",
+    "start": "246890",
+    "end": "252140"
+  },
+  {
+    "text": "And so just based on\nwhat we've seen so far, one possible solution is you\ncast everything into FP16.",
+    "start": "252140",
+    "end": "260450"
+  },
+  {
+    "text": "And if you do that reduce\nmemory usage by half. So let's work through what\nare some possible problems",
+    "start": "260450",
+    "end": "268150"
+  },
+  {
+    "text": "with doing something like that. So like I said, because\nthere's less stuff in green,",
+    "start": "268150",
+    "end": "273800"
+  },
+  {
+    "text": "there's going to be less range. And so that means a lot\nof very small numbers",
+    "start": "273800",
+    "end": "279880"
+  },
+  {
+    "text": "will get converted to 0 and\na lot of really large numbers will get converted into NaNs.",
+    "start": "279880",
+    "end": "287531"
+  },
+  {
+    "text": "And there's also less\nprecision because you have less bits in blue,\nwhich means you're",
+    "start": "287532",
+    "end": "293259"
+  },
+  {
+    "text": "going to get rounding errors. For example, 1.0001 gets\nconverted to 1 and 1/2",
+    "start": "293260",
+    "end": "301849"
+  },
+  {
+    "text": "precision. And I have a little\nscreenshot of how you can test various\nproperties of data types.",
+    "start": "301850",
+    "end": "309230"
+  },
+  {
+    "text": "So basically, the things\nto look at are the epsilon.",
+    "start": "309230",
+    "end": "315060"
+  },
+  {
+    "text": "The epsilon is like the\nsmallest number such that if you add that to 1,\nyou don't lose any precision.",
+    "start": "315060",
+    "end": "321240"
+  },
+  {
+    "text": "If you add a number that's\nsmaller than epsilon to 1, that gets just\nrounded down to 1. And the smallest normal is\nthe smallest number that",
+    "start": "321240",
+    "end": "329270"
+  },
+  {
+    "text": "can be represented in FP16. Anything smaller than that,\nit goes straight to 0.",
+    "start": "329270",
+    "end": "336770"
+  },
+  {
+    "text": "And for neural network training,\nif a lot of small numbers get rounded down to 0,\nthat's actually not good.",
+    "start": "336770",
+    "end": "343440"
+  },
+  {
+    "text": "So here is a diagram that I took\nfrom an NVIDIA blog post that's just showing just some gradients\nduring the course of training.",
+    "start": "343440",
+    "end": "352710"
+  },
+  {
+    "text": "And more than half\nof these gradients will literally just\nget set to 0 in FP16,",
+    "start": "352710",
+    "end": "359190"
+  },
+  {
+    "text": "which is kind of a problem. And that has to do\nwith the range of FP16.",
+    "start": "359190",
+    "end": "364740"
+  },
+  {
+    "text": "And the second problem\nis with precision. So we have basically\nless precision.",
+    "start": "364740",
+    "end": "371130"
+  },
+  {
+    "text": "And so our updates are\nnot going to be precise. ",
+    "start": "371130",
+    "end": "376550"
+  },
+  {
+    "text": "So here's one possible solution. So we're going to use FP16, but\nwe're also going to use FP32.",
+    "start": "376550",
+    "end": "385400"
+  },
+  {
+    "text": "So that's the high level idea. And what we're\ngoing to do is we're going to maintain a copy\nof the model in FP32,",
+    "start": "385400",
+    "end": "393259"
+  },
+  {
+    "text": "and let's call those\nmaster weights. And then you get a little bit\nof data, you run a forward pass.",
+    "start": "393260",
+    "end": "399583"
+  },
+  {
+    "text": "And then when you run\nyour forward pass, you run it by converting\nfrom FP32 into FP16.",
+    "start": "399583",
+    "end": "406102"
+  },
+  {
+    "text": "And then you get a\ngradient on a backward pass and then get your\ngradient in FP16.",
+    "start": "406102",
+    "end": "411810"
+  },
+  {
+    "text": "So everything so far\nhas happened in FP16. Then you take your gradients,\nup cast them into FP32,",
+    "start": "411810",
+    "end": "418490"
+  },
+  {
+    "text": "and then update\nyour master weights. And then once you update\nyour master weights, you copy them into the FP16\nversion of the neural network.",
+    "start": "418490",
+    "end": "427100"
+  },
+  {
+    "text": "So this seems like\na reasonable scheme. I'm using FP16 on my GPU, but\nI have the full sort of 32-bit",
+    "start": "427100",
+    "end": "435000"
+  },
+  {
+    "text": "precision also lying around\nsomewhere so I can have more precise updates.",
+    "start": "435000",
+    "end": "440759"
+  },
+  {
+    "text": "Can someone tell me why\nthis is still problematic?",
+    "start": "440760",
+    "end": "446280"
+  },
+  {
+    "text": "Any guesses? Yeah. Won't it be really slow because\nyou have to copy the 32-bit",
+    "start": "446280",
+    "end": "455280"
+  },
+  {
+    "text": "versions from my GPU until I\nhave some disk memory developed? Yeah, so that's a good point.",
+    "start": "455280",
+    "end": "461230"
+  },
+  {
+    "text": "So you can often overlap IO with\nforward and backward passes.",
+    "start": "461230",
+    "end": "467740"
+  },
+  {
+    "text": "So practically, this\nis not a problem. But yeah, that's a good point. Potentially, if your\nnetwork is very, very small,",
+    "start": "467740",
+    "end": "473260"
+  },
+  {
+    "text": "this could be a problem. Yeah. Gradients are\nusually fairly small. Individual gradients are\nusually fairly small.",
+    "start": "473260",
+    "end": "479900"
+  },
+  {
+    "text": "And when you copy the FP16\ncomputed gradients onto FP32, you may be sending your\nnetwork somewhere else where",
+    "start": "479900",
+    "end": "485509"
+  },
+  {
+    "text": "you don't want it to be. So yeah, so that's pretty\nmuch the right answer.",
+    "start": "485510",
+    "end": "491100"
+  },
+  {
+    "text": "So let's go back to this\ndiagram that we had. So this shows gradients\nin the backward pass.",
+    "start": "491100",
+    "end": "498120"
+  },
+  {
+    "text": "And I said that we're going\nto compute all our gradient's in FP16. What's going to happen?",
+    "start": "498120",
+    "end": "503270"
+  },
+  {
+    "text": "Most of them will\njust get converted to 0, which is something that\nwe really would like to avoid.",
+    "start": "503270",
+    "end": "509180"
+  },
+  {
+    "text": "So here's a possible solution. So what you can do is you\nget your batch of data,",
+    "start": "509180",
+    "end": "515159"
+  },
+  {
+    "text": "you run your forward pass in\nFP16, you compute your gradient, but then when you have the--",
+    "start": "515159",
+    "end": "523039"
+  },
+  {
+    "text": "sorry, so we're here. So you get a batch of data, you\ncompute a forward pass in FP16,",
+    "start": "523039",
+    "end": "529889"
+  },
+  {
+    "text": "you get your loss, you scale\nthe loss by some large value. Let's say 100, let's say 1,000.",
+    "start": "529890",
+    "end": "535800"
+  },
+  {
+    "text": "And then you compute gradients. And now you've just scaled your\ngradient by a large number. And so everything that\nwe had on the left hand",
+    "start": "535800",
+    "end": "542880"
+  },
+  {
+    "text": "side of this red line just\ngets shifted to the right. And hopefully, there's\nless stuff that will get rounded down to zero.",
+    "start": "542880",
+    "end": "551106"
+  },
+  {
+    "text": "And then compute your gradient\nin FP16, copy it into FP32, and then divide it by\nthe scaling factor,",
+    "start": "551106",
+    "end": "558030"
+  },
+  {
+    "text": "and then you update\nyour master weights. So this will solve both the\nproblems that we talked about.",
+    "start": "558030",
+    "end": "566140"
+  },
+  {
+    "text": "And so this is basically what we\ncall mixed precision training.",
+    "start": "566140",
+    "end": "571300"
+  },
+  {
+    "text": "And it's relatively simple\nto implement this in PyTorch. All you have to do is you need\nto instantiate this grad scaler",
+    "start": "571300",
+    "end": "581639"
+  },
+  {
+    "text": "object. And then within the\ncontext of this autocast,",
+    "start": "581640",
+    "end": "588130"
+  },
+  {
+    "text": "you want to run your\nforward and backward passes and then scale\ndown your gradient",
+    "start": "588130",
+    "end": "594180"
+  },
+  {
+    "text": "and then update your\nmodel parameters. But then this seems\na little complex.",
+    "start": "594180",
+    "end": "600960"
+  },
+  {
+    "text": "We have to deal with\nscaling the loss and then scaling it back down.",
+    "start": "600960",
+    "end": "606029"
+  },
+  {
+    "text": "What if you multiplied it by\n10,000 and that leads to NaNs, and so then you have\nto update your scaler,",
+    "start": "606030",
+    "end": "613260"
+  },
+  {
+    "text": "you have to, in\nthe next iteration, multiply by 1,000 and you have\nto adjust to network dynamics?",
+    "start": "613260",
+    "end": "619889"
+  },
+  {
+    "text": "So we'd like to not\ndo gradient scaling. So can we do something better?",
+    "start": "619890",
+    "end": "626003"
+  },
+  {
+    "text": "So the reason why we have\nto do the scaling is just recall the role of\nthe bits in green.",
+    "start": "626004",
+    "end": "636140"
+  },
+  {
+    "text": "That tells you what is the\ndynamic range of the data type. And we needed scaling because\nFP16 has a much smaller range",
+    "start": "636140",
+    "end": "644570"
+  },
+  {
+    "text": "compared to FP32. And so because of that, FP16\ncannot represent very small",
+    "start": "644570",
+    "end": "650990"
+  },
+  {
+    "text": "numbers. So how do we solve this? Any ideas? ",
+    "start": "650990",
+    "end": "660830"
+  },
+  {
+    "text": "[INAUDIBLE] Yeah. So here's the problem. So in FP16, because you have\nfewer bits for the exponent,",
+    "start": "660830",
+    "end": "668905"
+  },
+  {
+    "text": "you can't represent\nvery small numbers. So if you have something that's\nsmaller than, I don't know, 6e minus 5, it gets sort\nof rounded down to 0.",
+    "start": "668905",
+    "end": "680490"
+  },
+  {
+    "text": "And that's because of the\ndynamic range of FP16. So how do you solve that? Sacrifice precision so\nthat more [INAUDIBLE].",
+    "start": "680490",
+    "end": "689030"
+  },
+  {
+    "text": "Absolutely. Yeah, so that's\nthe right answer. So what we're going\nto do is we're going to sacrifice precision.",
+    "start": "689030",
+    "end": "696120"
+  },
+  {
+    "text": "So that's the idea for BFloat16,\nwhich stands for brain float 16.",
+    "start": "696120",
+    "end": "703550"
+  },
+  {
+    "text": "So you're going to have\nexactly the same number of bits for representing the range. So that's going to be 8 bits.",
+    "start": "703550",
+    "end": "709800"
+  },
+  {
+    "text": "So it has the same dynamic\nrange as FP32, but a lot less precision.",
+    "start": "709800",
+    "end": "715310"
+  },
+  {
+    "text": "And it turns out that this is\nOK for neural network training. And now if you use\nBFloat16, you don't need",
+    "start": "715310",
+    "end": "723120"
+  },
+  {
+    "text": "to use grad scalers anymore. It's as simple as wrapping your\nmodel forward pass and backward",
+    "start": "723120",
+    "end": "728370"
+  },
+  {
+    "text": "pass within the right context. The one caveat about\nBFloat16 is that it's not",
+    "start": "728370",
+    "end": "735780"
+  },
+  {
+    "text": "available on all\nGPUs, so you need to have the latest sort of\nAmpere NVIDIA architectures",
+    "start": "735780",
+    "end": "741630"
+  },
+  {
+    "text": "which the H100s, the\nA100s, the A6000s have. But if you have a\nolder GPU, then you",
+    "start": "741630",
+    "end": "748590"
+  },
+  {
+    "text": "might not be able\nto utilize BFloat16. Sorry. Can you further why having less\nprecision for the same amount",
+    "start": "748590",
+    "end": "754172"
+  },
+  {
+    "text": "[INAUDIBLE]? Yeah, so it's BFloat16\nand-- oh, nevermind. Sorry, I'm looking\nat the wrong thing.",
+    "start": "754172",
+    "end": "759970"
+  },
+  {
+    "text": " So here are some\nkind of results.",
+    "start": "759970",
+    "end": "767230"
+  },
+  {
+    "text": "So someone fine tuned DistilBERT\nfor sentiment classification on a single A100.",
+    "start": "767230",
+    "end": "774600"
+  },
+  {
+    "text": "At the very top is\nFloat64, which is really, really rich 64-bit representing\nof floating points.",
+    "start": "774600",
+    "end": "782730"
+  },
+  {
+    "text": "It takes about 25 minutes, and\nyou get a pretty high accuracy,",
+    "start": "782730",
+    "end": "788339"
+  },
+  {
+    "text": "but it also takes\na lot more memory. And all the way down, we're\nusing mixed precision training",
+    "start": "788340",
+    "end": "793850"
+  },
+  {
+    "text": "with BFloat16. And now we have reduced training\ntime by roughly a third,",
+    "start": "793850",
+    "end": "799610"
+  },
+  {
+    "text": "more or less have the same\naccuracy-- a little bit better actually because there's\nsome regularizing",
+    "start": "799610",
+    "end": "804950"
+  },
+  {
+    "text": "effect from the half precision\nrepresentatio-- and then",
+    "start": "804950",
+    "end": "811790"
+  },
+  {
+    "text": "a lot less memory.  And the reason we see\nspeedups for training",
+    "start": "811790",
+    "end": "818029"
+  },
+  {
+    "text": "is because matrix\nmultiplies tend to be faster when you are\nmultiplying in half precision.",
+    "start": "818030",
+    "end": "825460"
+  },
+  {
+    "text": "So before we move on, are\nthere any questions about this? ",
+    "start": "825460",
+    "end": "833660"
+  },
+  {
+    "text": "OK, cool. So let's keep going and\nlet's change the setting.",
+    "start": "833660",
+    "end": "840470"
+  },
+  {
+    "text": "So now we have\nmore than one GPU. Now we have multiple\nGPUs and we want to train a network over all of\nthe multiple GPUs that we have.",
+    "start": "840470",
+    "end": "849912"
+  },
+  {
+    "text": "So let's start with some basics. So here's a cartoon\nshowing basically",
+    "start": "849912",
+    "end": "857329"
+  },
+  {
+    "text": "a model and an optimizer\nreceiving some data from a data set.",
+    "start": "857330",
+    "end": "862380"
+  },
+  {
+    "text": "And let's work through\nwhat's stored on GPU VRAM. And this is going to\nbe somewhat of a lie,",
+    "start": "862380",
+    "end": "869910"
+  },
+  {
+    "text": "and I will point out\nwhat my lie is soon. But just to keep\nthings simple, we",
+    "start": "869910",
+    "end": "876770"
+  },
+  {
+    "text": "have the neural net parameters. So let's say we're doing\nmixed precision training. And so it's stored in FP16,\nand then we have an optimizer.",
+    "start": "876770",
+    "end": "886313"
+  },
+  {
+    "text": "And when I first saw\nthis few years back,",
+    "start": "886314",
+    "end": "893100"
+  },
+  {
+    "text": "I was very surprised to see that\noptimizers also need memory. But if you're using\nsomething like Adam,",
+    "start": "893100",
+    "end": "899490"
+  },
+  {
+    "text": "then you need to store the\nAdam momentum term and the Adam variance. And every time you\nget a gradient,",
+    "start": "899490",
+    "end": "905470"
+  },
+  {
+    "text": "you have to update Adam\nmomentum and variance. And that's what you use for\nupdating your parameters.",
+    "start": "905470",
+    "end": "911139"
+  },
+  {
+    "text": "And because you're using\nmixed precision training, these have to be\nrepresented in FP32. ",
+    "start": "911140",
+    "end": "919930"
+  },
+  {
+    "text": "So that's what the picture looks\nlike if you have a single GPU. Now let's say we have\nmultiple GPUs, OK.",
+    "start": "919930",
+    "end": "927190"
+  },
+  {
+    "text": "And what we'd like to do is\nfirst divide our data set into-- let's say we have four GPUs.",
+    "start": "927190",
+    "end": "932520"
+  },
+  {
+    "text": "So we'll divide our data\nset into four parts, and we'll maintain a\nsynchronized copy of the model.",
+    "start": "932520",
+    "end": "940019"
+  },
+  {
+    "text": "And every model receives its\nown slice of the data set.",
+    "start": "940020",
+    "end": "945212"
+  },
+  {
+    "text": "In the beginning, we have a\nsynchronized model and everyone has their own copy.",
+    "start": "945212",
+    "end": "950320"
+  },
+  {
+    "text": "We run a forward pass. So this forward pass receives\ndifferent data points.",
+    "start": "950320",
+    "end": "956709"
+  },
+  {
+    "text": "And so every model is going\nto have different activations. And correspondingly,\nevery model is going",
+    "start": "956710",
+    "end": "962430"
+  },
+  {
+    "text": "to have different gradients. So you run a backward pass. Every model has a different\ngradient because there's",
+    "start": "962430",
+    "end": "968700"
+  },
+  {
+    "text": "different data points. And then we're going to\nrun a synchronization step. And what synchronization\nis going to do",
+    "start": "968700",
+    "end": "975420"
+  },
+  {
+    "text": "is communicate gradients\nbetween different workers. And so I'm going to introduce\nthe first sort of MPI",
+    "start": "975420",
+    "end": "983040"
+  },
+  {
+    "text": "primitive in this lecture. And that primitive is called\nthe all reduce operation.",
+    "start": "983040",
+    "end": "988660"
+  },
+  {
+    "text": "What all reduce does is it\ntakes four pieces of information",
+    "start": "988660",
+    "end": "996000"
+  },
+  {
+    "text": "in this example on\nfour different GPUs, it sort of merges everything\ntogether and then distributes it",
+    "start": "996000",
+    "end": "1002330"
+  },
+  {
+    "text": "to all of the GPUs. And the communication\noverhead of doing that",
+    "start": "1002330",
+    "end": "1008069"
+  },
+  {
+    "text": "is two bytes per parameter\nbecause, remember, we have FP16 gradients. So two bytes per\ngradient, and then this",
+    "start": "1008070",
+    "end": "1016650"
+  },
+  {
+    "text": "needs to be communicated. And so the overhead is\ntwo bytes per parameter.",
+    "start": "1016650",
+    "end": "1022290"
+  },
+  {
+    "text": "So that's the all\nreduce operation. And then once gradients\nhave been communicated--",
+    "start": "1022290",
+    "end": "1027939"
+  },
+  {
+    "text": "so they have to be communicated\nby sort of gathering on one worker and just\nsort of distributing the cumulative gradient.",
+    "start": "1027940",
+    "end": "1034230"
+  },
+  {
+    "text": "At that point, every optimizer\nhas the full gradient, and then the optimizer can\nupdate the model so that you",
+    "start": "1034230",
+    "end": "1042420"
+  },
+  {
+    "text": "maintain synchronization. So that's the basic. That's known as\ndistributed data parallel.",
+    "start": "1042420",
+    "end": "1052135"
+  },
+  {
+    "text": "That's good. But it turns out that it has\nreally poor memory scaling. So let's go through our math\nfor how much memory is needed.",
+    "start": "1052135",
+    "end": "1062490"
+  },
+  {
+    "text": "So we have the model parameters. That's FP16 because we're\ndoing mixed precision training.",
+    "start": "1062490",
+    "end": "1069029"
+  },
+  {
+    "text": "And then for the gradient, we\nalso have the gradient in FP16. So 2 bytes for the gradient.",
+    "start": "1069030",
+    "end": "1076149"
+  },
+  {
+    "text": "And then we have\nthis stuff in green. The stuff in green is--\nlet's say we're doing Adam. So we need to--",
+    "start": "1076150",
+    "end": "1081872"
+  },
+  {
+    "text": "well, we need to store\nthe master weights regardless of whether\nwe're doing Adam or not. And then we need to store the\nmomentum and the variance.",
+    "start": "1081872",
+    "end": "1088540"
+  },
+  {
+    "text": "So that's 12 extra\nbytes per parameter. And this needs to be\nstored on every single GPU.",
+    "start": "1088540",
+    "end": "1097424"
+  },
+  {
+    "text": "And so the question is,\ncan we do better than this. And so now things are going to\nget a little bit more tricky.",
+    "start": "1097424",
+    "end": "1104620"
+  },
+  {
+    "text": "So if you have\nquestions, just stop me, and we can go from there.",
+    "start": "1104620",
+    "end": "1111030"
+  },
+  {
+    "text": "So the way we're going\nto improve our memory",
+    "start": "1111030",
+    "end": "1116760"
+  },
+  {
+    "text": "sort of scaling is\na set of techniques that are together known\nas ZeRO that stands",
+    "start": "1116760",
+    "end": "1123750"
+  },
+  {
+    "text": "for zero redundancy optimizer. So this was a set of techniques\nreleased by Microsoft as part",
+    "start": "1123750",
+    "end": "1130950"
+  },
+  {
+    "text": "of their deepspeed project. And the idea is\ngoing to be that we are going to instead of\nhaving every GPU maintain",
+    "start": "1130950",
+    "end": "1139350"
+  },
+  {
+    "text": "all of this state-- so by state, I mean, the stuff\nin blue, the stuff in orange, and the stuff in green--",
+    "start": "1139350",
+    "end": "1145090"
+  },
+  {
+    "text": "we're going to shard it. So there's going to be shards\nso that not every GPU has",
+    "start": "1145090",
+    "end": "1152760"
+  },
+  {
+    "text": "all of the parameters\nor all of the gradient, but by communication,\nthey can synchronize. So that's pretty much\nwhat the sketch for this",
+    "start": "1152760",
+    "end": "1161820"
+  },
+  {
+    "text": "is going to look like. So let's look at stage one. So ZeRO has multiple stages.",
+    "start": "1161820",
+    "end": "1168100"
+  },
+  {
+    "text": "So there's stage 1, 2, 3. In stage 1, we're going to\nshard the stuff in green.",
+    "start": "1168100",
+    "end": "1173360"
+  },
+  {
+    "text": "So stuff in green was\nthe optimizer state. And so the way we're going\nto shard and still maintain",
+    "start": "1173360",
+    "end": "1180130"
+  },
+  {
+    "text": "synchronization is\nsomething like this-- so every GPU has the full\nset of parameters and FP16,",
+    "start": "1180130",
+    "end": "1188049"
+  },
+  {
+    "text": "and every GPU has its\ngradient for its data. But it only has a sharded copy\nof the full optimizer state.",
+    "start": "1188050",
+    "end": "1197440"
+  },
+  {
+    "text": "And the other requirement\nis that every GPU is responsible for updating\nthe parameters corresponding",
+    "start": "1197440",
+    "end": "1205330"
+  },
+  {
+    "text": "to its own shard. So if we go step by step,\nthis is what it looks like.",
+    "start": "1205330",
+    "end": "1211330"
+  },
+  {
+    "text": "Every GPU has its own data. Every GPU gets a gradient\non its subset of the data.",
+    "start": "1211330",
+    "end": "1218810"
+  },
+  {
+    "text": "Then we perform\na reduce scatter. So now this is the second\nMPI operation of the lecture.",
+    "start": "1218810",
+    "end": "1224990"
+  },
+  {
+    "text": "So we've done all reduce. This is the second one. This is called reduce scatter. What a reduce scatter\ndoes is every GPU",
+    "start": "1224990",
+    "end": "1232750"
+  },
+  {
+    "text": "has the full\ngradient on its data. And what you want\nto do is you want",
+    "start": "1232750",
+    "end": "1239049"
+  },
+  {
+    "text": "to take the chunk corresponding\nto, let's say, GPU 1. So let's say your\nGPU 0, and you've",
+    "start": "1239050",
+    "end": "1244450"
+  },
+  {
+    "text": "computed the full gradient\nfor all the parameters, and you want to communicate\nthe chunk for GPU 1 to GPU 1.",
+    "start": "1244450",
+    "end": "1253550"
+  },
+  {
+    "text": "And same for GPU 2 and 3. So what you're going to do\nis from the full gradient,",
+    "start": "1253550",
+    "end": "1259250"
+  },
+  {
+    "text": "just communicate the bits\nthat a different worker wants to that worker. And every GPU has to do that.",
+    "start": "1259250",
+    "end": "1265490"
+  },
+  {
+    "text": "So that's called\na reduce scatter. And then once every worker\ngets the gradient corresponding",
+    "start": "1265490",
+    "end": "1273040"
+  },
+  {
+    "text": "to its shard, they're going\nto update its parameters. And then once they have\nupdated their shard,",
+    "start": "1273040",
+    "end": "1280280"
+  },
+  {
+    "text": "they're going to\nperform an all gather. So what that means is let's\nsay you have a neural network",
+    "start": "1280280",
+    "end": "1285400"
+  },
+  {
+    "text": "with just, let's say,\neight parameters, two parameters on each GPU. At the end of this, each\nGPU has updated their subset",
+    "start": "1285400",
+    "end": "1293837"
+  },
+  {
+    "text": "of parameters, and\nthen they're going to do an all gather to just\nmaintain synchronization. So every GPU gets the\nfull set of parameters",
+    "start": "1293838",
+    "end": "1301530"
+  },
+  {
+    "text": "that are all updated.  Yeah. [INAUDIBLE] maintaining\nthis and you're not",
+    "start": "1301530",
+    "end": "1307987"
+  },
+  {
+    "text": "[INAUDIBLE] them together. So in that way, what\nmakes this more efficient?",
+    "start": "1307987",
+    "end": "1313340"
+  },
+  {
+    "text": " I'm sorry.",
+    "start": "1313340",
+    "end": "1318808"
+  },
+  {
+    "text": "Could you repeat your question? Can you go over why this\nis better than doing the previous approach? Right. So what we're going to do is\nshard the optimizer state.",
+    "start": "1318808",
+    "end": "1329190"
+  },
+  {
+    "text": "So let's say in our\nrunning example, we have a neural network\nwith eight parameters. Earlier, we needed\nthe optimizer state",
+    "start": "1329190",
+    "end": "1336480"
+  },
+  {
+    "text": "for all of the eight parameters. Now every GPU has to\nmaintain optimizer state for only two parameters.",
+    "start": "1336480",
+    "end": "1343900"
+  },
+  {
+    "text": "So after the reduce\nscatters are done, you have the full\ngradient correspond",
+    "start": "1343900",
+    "end": "1350250"
+  },
+  {
+    "text": "to just two parameters. So the optimizer state is just\nthe gradient for two parameters.",
+    "start": "1350250",
+    "end": "1357570"
+  },
+  {
+    "text": "The model is going to\nupdate only two parameters",
+    "start": "1357570",
+    "end": "1362899"
+  },
+  {
+    "text": "using the partial sort\nof optimizer state. But you have to have the entire\nset of parameters [INAUDIBLE].",
+    "start": "1362900",
+    "end": "1370020"
+  },
+  {
+    "text": "So you will eventually get the\nrest of the parameters back. So you have the entire\nset of parameters, you have all the stuff in blue,\nand you have the full gradient",
+    "start": "1370020",
+    "end": "1378590"
+  },
+  {
+    "text": "for your subset, but you don't\nhave the full optimizer state. So what you can do is\nyou can only update",
+    "start": "1378590",
+    "end": "1385160"
+  },
+  {
+    "text": "the parameters for the bits\nof optimizer state you have.",
+    "start": "1385160",
+    "end": "1390821"
+  },
+  {
+    "text": "So in our running example\nthat I just made up, GPU 0 updates two parameters.",
+    "start": "1390821",
+    "end": "1396540"
+  },
+  {
+    "text": "GPU 1 updates two\nparameters, and so on. And then they communicate\nupdated parameters",
+    "start": "1396540",
+    "end": "1402169"
+  },
+  {
+    "text": "to maintain synchronization.  more questions about this.",
+    "start": "1402170",
+    "end": "1407980"
+  },
+  {
+    "start": "1407980",
+    "end": "1413179"
+  },
+  {
+    "text": "So let's keep going. So so far, we have looked\nat three MPI operations. We looked at all gather, we\nlooked at reduce scatter,",
+    "start": "1413180",
+    "end": "1422190"
+  },
+  {
+    "text": "and we looked at all reduce. So turns out that all\nreduce is actually",
+    "start": "1422190",
+    "end": "1431250"
+  },
+  {
+    "text": "equivalent to running a\nreduce scatter followed by an all gather operation. And just recall that for\nDDP, all we had to do",
+    "start": "1431250",
+    "end": "1439530"
+  },
+  {
+    "text": "was this all reduce operation. And we computed what's the\ncommunication overhead of that.",
+    "start": "1439530",
+    "end": "1445810"
+  },
+  {
+    "text": "And turns out that when you're\ndoing this optimizer state sharding, you have to do exactly\nthe same amount of communication",
+    "start": "1445810",
+    "end": "1452940"
+  },
+  {
+    "text": "overhead just\nbecause an all reduce is equivalent to\na reduce scatter followed by an all gather.",
+    "start": "1452940",
+    "end": "1458370"
+  },
+  {
+    "text": "And so we basically\nsaved memory for free. So I mean, you should\njust always use this",
+    "start": "1458370",
+    "end": "1467630"
+  },
+  {
+    "text": "because you're going\nto get memory savings and you don't have any\nadditional communication overhead.",
+    "start": "1467630",
+    "end": "1473870"
+  },
+  {
+    "text": "So we are happy we saved memory. And now we want to\nshard even more things.",
+    "start": "1473870",
+    "end": "1479690"
+  },
+  {
+    "text": "So let's start\ndoing ZeRO stage 2. And now, along with sharding\nthis stuff in green,",
+    "start": "1479690",
+    "end": "1486680"
+  },
+  {
+    "text": "which was my\noptimizer state, I'm also going to shard gradients.",
+    "start": "1486680",
+    "end": "1492445"
+  },
+  {
+    "text": "And now this is going\nto be a little bit more complex because we still\nneed the full gradient",
+    "start": "1492445",
+    "end": "1499000"
+  },
+  {
+    "text": "for the workers data slice. But each GPU only\nhas enough memory",
+    "start": "1499000",
+    "end": "1504910"
+  },
+  {
+    "text": "for instantiating the\ngradient for a small subset of parameters.",
+    "start": "1504910",
+    "end": "1510350"
+  },
+  {
+    "text": "So how are we going\nto deal with that? So we are actually never going\nto instantiate the full gradient",
+    "start": "1510350",
+    "end": "1516860"
+  },
+  {
+    "text": "vector. And then whenever a GPU gets a\ngradient in the backward pass,",
+    "start": "1516860",
+    "end": "1524250"
+  },
+  {
+    "text": "you instantiate a vector\nsort of temporarily for the parameter for which\nyou just received a gradient",
+    "start": "1524250",
+    "end": "1530630"
+  },
+  {
+    "text": "and then compute the gradient\nand then just send it to the right worker. And then you destroy the\nmemory that you just created.",
+    "start": "1530630",
+    "end": "1536980"
+  },
+  {
+    "text": "So that's the sketch, and let's\ngo through this step by step.",
+    "start": "1536980",
+    "end": "1542720"
+  },
+  {
+    "text": "So we have four workers. Each worker performs\na backward pass.",
+    "start": "1542720",
+    "end": "1548750"
+  },
+  {
+    "text": "And the backward pass\nhappens layer by layer. So recall the\nlecture on autodiff.",
+    "start": "1548750",
+    "end": "1555640"
+  },
+  {
+    "text": "So you have the loss, and\nthen you have this backward pass where, layer by layer,\nyou compute gradients. So now let's say\nyou're at layer-j.",
+    "start": "1555640",
+    "end": "1563150"
+  },
+  {
+    "text": "You take the upstream gradient,\nyou compute the gradient for the parameters at layer-j.",
+    "start": "1563150",
+    "end": "1569690"
+  },
+  {
+    "text": "Immediately, the moment you\ncompute those gradients, send it to the right worker.",
+    "start": "1569690",
+    "end": "1574720"
+  },
+  {
+    "text": "So there exists some worker\nthat is responsible for layer-j. And what's going to\nhappen is every GPU",
+    "start": "1574720",
+    "end": "1582840"
+  },
+  {
+    "text": "that's just computed\nthe gradient for layer-j for its data slice sends\nit to the right worker.",
+    "start": "1582840",
+    "end": "1590020"
+  },
+  {
+    "text": "And then the moment you've done\nthat, you deallocate this memory that you just created.",
+    "start": "1590020",
+    "end": "1597390"
+  },
+  {
+    "text": "And so this is kind of\na fourth MPI operation,",
+    "start": "1597390",
+    "end": "1602830"
+  },
+  {
+    "text": "but really not very different\nfrom a reduce scatter. This is just a reduce. So there are four GPUs\nthat have a gradient,",
+    "start": "1602830",
+    "end": "1609540"
+  },
+  {
+    "text": "and then they just\nhave to communicate it to whoever is responsible\nfor maintaining gradient for that layer.",
+    "start": "1609540",
+    "end": "1615335"
+  },
+  {
+    "text": " And then, yeah, so there\nexists some worker that is",
+    "start": "1615335",
+    "end": "1622110"
+  },
+  {
+    "text": "responsible for a given layer. They're going to update\nits parameter shard",
+    "start": "1622110",
+    "end": "1629039"
+  },
+  {
+    "text": "using the full gradient that it\nreceived via this communication along with the optimizer state.",
+    "start": "1629040",
+    "end": "1635880"
+  },
+  {
+    "text": "And then at the end, to\nsynchronize everything, you have to perform an\nall gather as before.",
+    "start": "1635880",
+    "end": "1642120"
+  },
+  {
+    "text": "Any questions about\nthis high level sketch?",
+    "start": "1642120",
+    "end": "1648155"
+  },
+  {
+    "start": "1648155",
+    "end": "1655520"
+  },
+  {
+    "text": "So let's keep moving. So recall that for\nZeRO stage 1, it",
+    "start": "1655520",
+    "end": "1662020"
+  },
+  {
+    "text": "was basically free because\nturns out that an all reduce is equivalent to a reduce\nscatter plus an all gather.",
+    "start": "1662020",
+    "end": "1668990"
+  },
+  {
+    "text": "And we're kind of doing\nthe same thing here. We have a reduce followed\nby an all gather.",
+    "start": "1668990",
+    "end": "1674630"
+  },
+  {
+    "text": "So this is practically\nalso for free. So we've gotten away with saving\nmemory without any communication",
+    "start": "1674630",
+    "end": "1683020"
+  },
+  {
+    "text": "overhead compared to DDP so far. So let's keep going. Let's try and see if we\ncan shard even more things.",
+    "start": "1683020",
+    "end": "1690900"
+  },
+  {
+    "text": "And I think someone sort of\nalluded to this in the audience early on-- so what happens if you shard\neven your model parameters.",
+    "start": "1690900",
+    "end": "1699290"
+  },
+  {
+    "text": "So let's say you run\ninto a situation where-- forget about the\noptimizer state. Even your model wouldn't\nfit on a single GPU.",
+    "start": "1699290",
+    "end": "1707290"
+  },
+  {
+    "text": "And so in that case, what you\ndo is you split up your model. So you split up your model\nacross all the different GPUs.",
+    "start": "1707290",
+    "end": "1713690"
+  },
+  {
+    "text": "So you shard your\nmodel parameters, which is the stuff in blue.",
+    "start": "1713690",
+    "end": "1718910"
+  },
+  {
+    "text": "But the caveat is that now we're\nnot going to get this for free. We're not going to get\nmemory savings for free.",
+    "start": "1718910",
+    "end": "1724470"
+  },
+  {
+    "text": "There's going to be some\ncommunication overhead. And this is 0 stage three.",
+    "start": "1724470",
+    "end": "1729870"
+  },
+  {
+    "text": "This is the final stage of 0. This is also known as\nFSDP, fully sharded data",
+    "start": "1729870",
+    "end": "1735410"
+  },
+  {
+    "text": "parallel for anyone who's\nheard that term before. ",
+    "start": "1735410",
+    "end": "1740929"
+  },
+  {
+    "text": "And here's the\nhigh level sketch. And I feel like this is kind\nof the easiest to understand",
+    "start": "1740930",
+    "end": "1747980"
+  },
+  {
+    "text": "compared to ZeRO\nstage 1 and 2 just because there needs\nto be communication",
+    "start": "1747980",
+    "end": "1753710"
+  },
+  {
+    "text": "at every step of the way. You can't get away\nwithout communicating. So the first thing\nwe're going to do",
+    "start": "1753710",
+    "end": "1760190"
+  },
+  {
+    "text": "is we're going to take\nour model and we're going to convert the entire\nmodel into FSDP units.",
+    "start": "1760190",
+    "end": "1767400"
+  },
+  {
+    "text": "So here's a sketch, a\nsimple deep neural network. I'm going to convert that into\nmultiple FSDP units, three FSDP",
+    "start": "1767400",
+    "end": "1776090"
+  },
+  {
+    "text": "units here. So that's just a data\nstructure, an FSDP unit.",
+    "start": "1776090",
+    "end": "1781490"
+  },
+  {
+    "text": "We've not done anything so far. And then I have this FSDP unit. I'm going to convert this into\nanother data structure called",
+    "start": "1781490",
+    "end": "1788990"
+  },
+  {
+    "text": "a flat parameter,\nand then I'm going to assign a subset of these\nparameters to every single GPU.",
+    "start": "1788990",
+    "end": "1796910"
+  },
+  {
+    "text": "So here we have 16 GPUs and\na flat parameter consisting of 14 parameters plus\nsome extra padding",
+    "start": "1796910",
+    "end": "1804210"
+  },
+  {
+    "text": "so that things divide properly. And I'm going to assign each\nparameter to a distinct GPU.",
+    "start": "1804210",
+    "end": "1814132"
+  },
+  {
+    "text": "And so that's basically\njust a complex way of saying that we created\nsome data structures, and we just like divided up\nmodel parameters to every GPU.",
+    "start": "1814132",
+    "end": "1822940"
+  },
+  {
+    "text": "So every GPU gets a subset\nof model parameters. ",
+    "start": "1822940",
+    "end": "1828195"
+  },
+  {
+    "text": "Now let's start thinking about\nwhat my forward pass would look like. So there is no GPU that has\nthe full set of parameters.",
+    "start": "1828195",
+    "end": "1834380"
+  },
+  {
+    "text": "So you're running\na forward pass. Let's say you're at layer 4. And there's no GPU that\nhas all of layer 4,",
+    "start": "1834380",
+    "end": "1840269"
+  },
+  {
+    "text": "so you have to communicate. So we need to do an\nall gather operation. That's the operation that we did\nto cumulate multiple things that",
+    "start": "1840270",
+    "end": "1851210"
+  },
+  {
+    "text": "are on multiple GPUs so that\nevery GPU has the full thing. So you perform an all\ngather so that all,",
+    "start": "1851210",
+    "end": "1858240"
+  },
+  {
+    "text": "so you have all pieces of layer\n4, you run a forward pass, and now you don't need layer 4.",
+    "start": "1858240",
+    "end": "1863790"
+  },
+  {
+    "text": "So you now discard\nyour parameter shards. ",
+    "start": "1863790",
+    "end": "1868985"
+  },
+  {
+    "text": "And now you have to\nrun your backward pass. So you computed your\nloss, and now you have to do a backward pass.",
+    "start": "1868985",
+    "end": "1875440"
+  },
+  {
+    "text": "Again, let's say you\nare back at layer 4. You have your upstream gradient. You don't have layer 4.",
+    "start": "1875440",
+    "end": "1881510"
+  },
+  {
+    "text": "So you need to do another\nall gather so you get all the parameters of layer 4. ",
+    "start": "1881510",
+    "end": "1887270"
+  },
+  {
+    "text": "And then you run a\nbackward pass for layer 4. So you compute the gradient\nfor your subset of parameters.",
+    "start": "1887270",
+    "end": "1894300"
+  },
+  {
+    "text": "So recall that every GPU\nhas different data points. So there's going to be different\ngradients for every GPU.",
+    "start": "1894300",
+    "end": "1901230"
+  },
+  {
+    "text": "So then for layer 4, you do an\nall gather, get all parameters,",
+    "start": "1901230",
+    "end": "1906780"
+  },
+  {
+    "text": "compute a gradient. Every GPU has\ndifferent gradients. And then you have to\ndo a reduce scatter",
+    "start": "1906780",
+    "end": "1911840"
+  },
+  {
+    "text": "so that you can send the full\ngradient to the GPU that's responsible for whatever parts\nof layer 4 that you're sending.",
+    "start": "1911840",
+    "end": "1923400"
+  },
+  {
+    "text": "So yeah, so that's\nbasically full FSDP.",
+    "start": "1923400",
+    "end": "1929220"
+  },
+  {
+    "text": "And then once you run the\nforward and backward pass, then each GPU will update\nits own parameter shard",
+    "start": "1929220",
+    "end": "1936540"
+  },
+  {
+    "text": "using the full gradient\nthat it received just now, and then you do a\nsynchronization.",
+    "start": "1936540",
+    "end": "1944559"
+  },
+  {
+    "text": "So let's do a quick\nreview of everything we've looked at so far.",
+    "start": "1944560",
+    "end": "1952060"
+  },
+  {
+    "text": "So there was GDP, which\nwas don't charge anything,",
+    "start": "1952060",
+    "end": "1957380"
+  },
+  {
+    "text": "you have the full model,\nthe full gradient, the full optimizer state\non every single GPU.",
+    "start": "1957380",
+    "end": "1962900"
+  },
+  {
+    "text": "And all you're going to divide\nup is the full data set. So you have a big data\nset of 1,000 examples.",
+    "start": "1962900",
+    "end": "1969049"
+  },
+  {
+    "text": "Every GPU gets 250 examples. And then you compute a forward\npass and a backward pass.",
+    "start": "1969050",
+    "end": "1974809"
+  },
+  {
+    "text": "Every GPU has a\ndifferent gradient. You need to communicate\nthat gradient and then you synchronize.",
+    "start": "1974810",
+    "end": "1980289"
+  },
+  {
+    "text": "And so that was called an all\nreduce operation in MPI terms.",
+    "start": "1980290",
+    "end": "1986170"
+  },
+  {
+    "text": "And then we looked\nat ZeRO which is now we want to save some memory. We don't want the full\nsort of memory requirements",
+    "start": "1986170",
+    "end": "1993490"
+  },
+  {
+    "text": "of models, gradients,\nand optimizer state on every single GPU. And in ZeRO stage 1, we\nsharded the optimizer state",
+    "start": "1993490",
+    "end": "2001020"
+  },
+  {
+    "text": "so that there is\nso that you don't have to maintain the full\noptimizer state for every GPU.",
+    "start": "2001020",
+    "end": "2006980"
+  },
+  {
+    "text": "You kind of break that down\nbetween all the different GPUs that you have. And we saw that the\ncommunication overhead",
+    "start": "2006980",
+    "end": "2013180"
+  },
+  {
+    "text": "of maintaining synchronization\nin ZeRO stage 1 boiled down to basically just\ndoing an all reduce",
+    "start": "2013180",
+    "end": "2019480"
+  },
+  {
+    "text": "through this identity that\nsays that an all reduce is a reduce scatter\nplus an all gather.",
+    "start": "2019480",
+    "end": "2025400"
+  },
+  {
+    "text": "And we save memory for free\nwith ZeRO stage 1 and 2. So you should just do it. ",
+    "start": "2025400",
+    "end": "2033010"
+  },
+  {
+    "text": "And then with ZeRO\nstage 3, things got a little bit more\ncomplex because you",
+    "start": "2033010",
+    "end": "2038170"
+  },
+  {
+    "text": "have to divide up your model\nparameters, the optimizer state, and the gradient.",
+    "start": "2038170",
+    "end": "2044030"
+  },
+  {
+    "text": "And so while you're\nrunning your forward pass, you kind have to do\nsome communication to get the full\nparameters for any layer,",
+    "start": "2044030",
+    "end": "2051350"
+  },
+  {
+    "text": "for layer 4 in our\nexample, and then also have to do an all gather\nin the backward pass",
+    "start": "2051350",
+    "end": "2057408"
+  },
+  {
+    "text": "so you get the full\ngradient, and then you have to do a reduce\nscatter so that you can send the full gradient for\nwhatever chunk of the parameter",
+    "start": "2057409",
+    "end": "2064599"
+  },
+  {
+    "text": "to the right GPU. And overall, that's like to all\ngathers plus a reduce scatter.",
+    "start": "2064600",
+    "end": "2071359"
+  },
+  {
+    "text": "So that's a lot more\noverhead than stages 1 and 2. But if you don't have enough\nGPU VRAM so that you can even",
+    "start": "2071360",
+    "end": "2080199"
+  },
+  {
+    "text": "logit model onto\na GPU, then this is kind of what you have to do. ",
+    "start": "2080199",
+    "end": "2086679"
+  },
+  {
+    "text": "Any questions about MPI\nprimitives or stages of ZeRO or FSDP?",
+    "start": "2086679",
+    "end": "2091995"
+  },
+  {
+    "start": "2091995",
+    "end": "2099030"
+  },
+  {
+    "text": "OK, cool. So I'm going to fix the\nlie that I said earlier",
+    "start": "2099030",
+    "end": "2104790"
+  },
+  {
+    "text": "about the GPU VRAM calculation. So I said that this is just like\nmodel parameters and gradients",
+    "start": "2104790",
+    "end": "2113070"
+  },
+  {
+    "text": "and the optimizer state. But there is this thing, there's\nthis final thing, the model activation. So we've all seen that as you\nwant to increase the batch size,",
+    "start": "2113070",
+    "end": "2124740"
+  },
+  {
+    "text": "there is a point\nwhen the GPU says that it can't fit more stuff.",
+    "start": "2124740",
+    "end": "2129930"
+  },
+  {
+    "text": "And that's because you also\nneed to store model activations in the backward pass. And that scales linearly\nwith the batch size.",
+    "start": "2129930",
+    "end": "2138300"
+  },
+  {
+    "text": "So the larger the\nbatch size, the more the number of model activations\nthat need to be stored. And by the way, if you're\ndoing mixed precision,",
+    "start": "2138300",
+    "end": "2144880"
+  },
+  {
+    "text": "this is in FP16 or BF16, but\nit scales with the batch size. And so that's the other thing\nthat you have to think about.",
+    "start": "2144880",
+    "end": "2154270"
+  },
+  {
+    "text": "And none of the techniques\nthat we've looked at so far help with of sharding\nmodel activations.",
+    "start": "2154270",
+    "end": "2161505"
+  },
+  {
+    "text": " So we looked at a bunch of\nbasics of multi GPU training",
+    "start": "2161506",
+    "end": "2170440"
+  },
+  {
+    "text": "and floating point. But it kind of boils down to\nthis very simple flow chart",
+    "start": "2170440",
+    "end": "2176560"
+  },
+  {
+    "text": "which you can use for\nyour final projects when you're fine tuning models. So the first thing is always\nuse mixed precision training.",
+    "start": "2176560",
+    "end": "2184130"
+  },
+  {
+    "text": "You barely ever see\na hit in performance. By performance, I\nmean generalization",
+    "start": "2184130",
+    "end": "2191680"
+  },
+  {
+    "text": "or F1 or accuracy. And if you're using the\nnewer ampere architectures,",
+    "start": "2191680",
+    "end": "2197420"
+  },
+  {
+    "text": "the H100s or the A100s or the\nA6000s always use BFloat16.",
+    "start": "2197420",
+    "end": "2202900"
+  },
+  {
+    "text": "It's just better. And you can check that\nwith that torch command.",
+    "start": "2202900",
+    "end": "2209290"
+  },
+  {
+    "text": "So always use mixed\nprecision training. Now ask yourself this\nquestion-- does batch size",
+    "start": "2209290",
+    "end": "2216190"
+  },
+  {
+    "text": "1 fit on a single GPU. If it fits-- and try\nlarger batch size.",
+    "start": "2216190",
+    "end": "2223490"
+  },
+  {
+    "text": "Batch size 1 is too small,\ntry a larger batch size and/or use ZeRO stage 2.",
+    "start": "2223490",
+    "end": "2229670"
+  },
+  {
+    "text": "ZeRO stage 2 is for free. Just use ZeRO stage 2 and\nincrease your batch size.",
+    "start": "2229670",
+    "end": "2234720"
+  },
+  {
+    "text": "If you can't fit\neven batch size 1, then you have to\nsee if ZeRO stage",
+    "start": "2234720",
+    "end": "2240890"
+  },
+  {
+    "text": "3 fixes your out-of-memory\nissues because now you're going to shard your model parameters.",
+    "start": "2240890",
+    "end": "2246680"
+  },
+  {
+    "text": "And all of this is in the\ncontext of full fine tuning. So I'm fine tuning all\nof my model parameters.",
+    "start": "2246680",
+    "end": "2252750"
+  },
+  {
+    "text": " Sometimes the answer to\nthat question is also no.",
+    "start": "2252750",
+    "end": "2259390"
+  },
+  {
+    "text": "So you can't fine\ntune your model on 4 whatever A100s or A6000s,\nand you've tried ZeRO stage 3,",
+    "start": "2259390",
+    "end": "2271050"
+  },
+  {
+    "text": "you've tried mixed\nprecision training. You have a batch size of 1. Maybe you did gradient\ncheckpointing,",
+    "start": "2271050",
+    "end": "2277890"
+  },
+  {
+    "text": "activation checkpointing,\nand nothing works. And so now, basically, you\ncan't do full fine tuning.",
+    "start": "2277890",
+    "end": "2284500"
+  },
+  {
+    "text": "And so the thing to do is to try\nparameter efficient fine tuning. And that's going to give you\na lot more memory savings.",
+    "start": "2284500",
+    "end": "2293274"
+  },
+  {
+    "text": "So let's talk about parameter\nefficient fine tuning. ",
+    "start": "2293274",
+    "end": "2300015"
+  },
+  {
+    "text": "So why is it called parameter\nefficient fine tuning? So in full fine tuning,\nyou run a forward pass",
+    "start": "2300015",
+    "end": "2306290"
+  },
+  {
+    "text": "and a backward pass and you\nupdate every single model parameter. And in parameter\nefficient fine tuning,",
+    "start": "2306290",
+    "end": "2312630"
+  },
+  {
+    "text": "you're only going to\nupdate a small subset of the full set of parameters.",
+    "start": "2312630",
+    "end": "2319672"
+  },
+  {
+    "text": "And why would you\nwant to do that? So maybe you're in a setting\nwhere you cannot fully fine tune",
+    "start": "2319672",
+    "end": "2326819"
+  },
+  {
+    "text": "even with batch size 1. You've tried all the tricks\npossible, it just wouldn't fit.",
+    "start": "2326820",
+    "end": "2331849"
+  },
+  {
+    "text": "And so maybe you have to do\nparameter efficient fine tuning.",
+    "start": "2331850",
+    "end": "2337010"
+  },
+  {
+    "text": "Maybe the other possible\nreason why you want to do it is kind of slightly\nmore scientific.",
+    "start": "2337010",
+    "end": "2344660"
+  },
+  {
+    "text": "Models these days are\nheavily over parameterized, and you have a small data set.",
+    "start": "2344660",
+    "end": "2350359"
+  },
+  {
+    "text": "And you believe that if you do\nparameter efficient fine tuning, then you can get a\nbetter generalization,",
+    "start": "2350360",
+    "end": "2360084"
+  },
+  {
+    "text": "or you believe that it's\ngoing to match fine tuning. Sort of a second\nreason for wanting",
+    "start": "2360084",
+    "end": "2366830"
+  },
+  {
+    "text": "to do efficient adaptation-- so the plot on the\nright here shows--",
+    "start": "2366830",
+    "end": "2374000"
+  },
+  {
+    "text": "in red, it's the estimated\ngrowth in training compute for training the\nlargest AI models.",
+    "start": "2374000",
+    "end": "2381230"
+  },
+  {
+    "text": "And the line in blue is the\nglobal compute capacity.",
+    "start": "2381230",
+    "end": "2386450"
+  },
+  {
+    "text": "So very soon, we are\ngoing to overshoot the global compute\ncapacity and going to need a lot more compute\nthan the global capacity.",
+    "start": "2386450",
+    "end": "2395069"
+  },
+  {
+    "text": "And so this is kind\nof not sustainable. And there are\narguments to be made",
+    "start": "2395070",
+    "end": "2401360"
+  },
+  {
+    "text": "about how if we keep\ngoing down this route, then AI development becomes\nconcentrated in only",
+    "start": "2401360",
+    "end": "2409730"
+  },
+  {
+    "text": "the hands of a few\nwell-funded organizations. And as students, we can't do it.",
+    "start": "2409730",
+    "end": "2416240"
+  },
+  {
+    "text": "And so that's a problem. And then also, if there's\nonly a small number of players",
+    "start": "2416240",
+    "end": "2421440"
+  },
+  {
+    "text": "that are training and\nfine tuning models, then they may bias the\nmodel in specific ways",
+    "start": "2421440",
+    "end": "2426900"
+  },
+  {
+    "text": "that reflect their value systems\nand not the broader public.",
+    "start": "2426900",
+    "end": "2432900"
+  },
+  {
+    "text": "And so that's another\nreason to think about efficient adaptation.",
+    "start": "2432900",
+    "end": "2439020"
+  },
+  {
+    "text": "And there's this paradigm\nin machine learning in general [INAUDIBLE]\nspecifically",
+    "start": "2439020",
+    "end": "2446309"
+  },
+  {
+    "text": "to focus a lot on accuracy\ninstead of efficiency.",
+    "start": "2446310",
+    "end": "2451540"
+  },
+  {
+    "text": "And so the plot\non the right here shows the percentage of papers\nwhere the main contribution is",
+    "start": "2451540",
+    "end": "2459600"
+  },
+  {
+    "text": "a method that produces just more\naccurate models versus methods",
+    "start": "2459600",
+    "end": "2465420"
+  },
+  {
+    "text": "that produce same accuracy\nfor more efficiency. And so we can see that\nfor most conferences,",
+    "start": "2465420",
+    "end": "2473400"
+  },
+  {
+    "text": "the vast majority of\npapers are about accuracy, and there's very few\npapers about efficiency.",
+    "start": "2473400",
+    "end": "2481795"
+  },
+  {
+    "text": "And so maybe this is kind of\nleading to this like monoculture and maybe that's why we\nwant to focus on efficiency.",
+    "start": "2481795",
+    "end": "2488210"
+  },
+  {
+    "text": "Second, maybe bigger\nsort of concern is that there's this huge hidden\nenvironmental cost of training",
+    "start": "2488210",
+    "end": "2495530"
+  },
+  {
+    "text": "and fine tuning large\nlanguage models. So I was just\nreading some report where they said that the\ncost of training GPT 3",
+    "start": "2495530",
+    "end": "2503390"
+  },
+  {
+    "text": "was equivalent to 1.1\nmillion tons of carbon emission or some such number.",
+    "start": "2503390",
+    "end": "2510477"
+  },
+  {
+    "text": "And they kind of\nestimated that that's the cost of running a coal power\nplant for 10 hours straight. ",
+    "start": "2510477",
+    "end": "2518930"
+  },
+  {
+    "text": "And for an example\ncloser to home, in the reinforcement\nlearning class,",
+    "start": "2518930",
+    "end": "2526970"
+  },
+  {
+    "text": "there was the final project-- not the final project--\na homework assignment.",
+    "start": "2526970",
+    "end": "2532200"
+  },
+  {
+    "text": "And a lot of students\nimplemented a common algorithm.",
+    "start": "2532200",
+    "end": "2538790"
+  },
+  {
+    "text": "One or two algorithms that sort\nof outperformed everything else, it used a lot more power.",
+    "start": "2538790",
+    "end": "2544540"
+  },
+  {
+    "text": "And someone did this\ncalculation that if everyone had used the most efficient\nalgorithm, that would have--",
+    "start": "2544540",
+    "end": "2554519"
+  },
+  {
+    "text": "sorry, if everyone had used\nthe more efficient algorithm, that would have reduced the\npower consumption of the class",
+    "start": "2554520",
+    "end": "2560549"
+  },
+  {
+    "text": "by about 880\nkilowatt hours, which is what an American\nhousehold uses in a month.",
+    "start": "2560550",
+    "end": "2567180"
+  },
+  {
+    "text": "So these are all reasons to\nthink about efficiency and how you can fine tune your\nmodels with less resources.",
+    "start": "2567180",
+    "end": "2576580"
+  },
+  {
+    "text": "So let's jump back into\nparameter efficient fine tuning.",
+    "start": "2576580",
+    "end": "2581890"
+  },
+  {
+    "text": "And let's start by recapping\nwhat full fine tuning is.",
+    "start": "2581890",
+    "end": "2587849"
+  },
+  {
+    "text": "Any questions so far\nabout any of this? ",
+    "start": "2587850",
+    "end": "2594470"
+  },
+  {
+    "text": "So yeah, so let's\nrecap for fine tuning. So let's say we have some large\npre-trained autoregressive",
+    "start": "2594470",
+    "end": "2600860"
+  },
+  {
+    "text": "language model. Let's say it's a GPT.",
+    "start": "2600860",
+    "end": "2605900"
+  },
+  {
+    "text": "And maybe we want to use\nit for summarization, maybe we want it for\nsemantic parsing.",
+    "start": "2605900",
+    "end": "2610980"
+  },
+  {
+    "text": "So converting natural\nlanguage to SQL commands. Or maybe we want it to answer\nquestions about paragraphs.",
+    "start": "2610980",
+    "end": "2617904"
+  },
+  {
+    "text": "And what do we do? We collect a data\nset of x y pairs",
+    "start": "2617904",
+    "end": "2623030"
+  },
+  {
+    "text": "and then we do full fine tuning. In full fine\ntuning, we are going to update all of\nthe model parameters",
+    "start": "2623030",
+    "end": "2629210"
+  },
+  {
+    "text": "based on the gradient\nfor some loss function. ",
+    "start": "2629210",
+    "end": "2634365"
+  },
+  {
+    "text": "And maybe that's not feasible. GPT 3 has 175\nbillion parameters.",
+    "start": "2634365",
+    "end": "2639619"
+  },
+  {
+    "text": "And so there's just a lot\nmore parameters to learn. And even once you have\ndone full fine tuning,",
+    "start": "2639620",
+    "end": "2646010"
+  },
+  {
+    "text": "you kind of have to store\nall of the parameters. And if you're doing\nseveral tasks, you have to store\nparameters for every task.",
+    "start": "2646010",
+    "end": "2654077"
+  },
+  {
+    "text": "So can we do better. ",
+    "start": "2654077",
+    "end": "2659390"
+  },
+  {
+    "text": "So the main idea is instead of\nupdating all of the parameters,",
+    "start": "2659390",
+    "end": "2665480"
+  },
+  {
+    "text": "I am going to update a much\nsmaller number of parameters.",
+    "start": "2665480",
+    "end": "2672526"
+  },
+  {
+    "text": "And then instead of finding\na delta theta, which is the same size as the\nentire set of parameters,",
+    "start": "2672526",
+    "end": "2680680"
+  },
+  {
+    "text": "I have to search over\na much smaller space. And then the added benefit is\nI can store this much smaller",
+    "start": "2680680",
+    "end": "2688810"
+  },
+  {
+    "text": "delta pretty easily on\ndisk and hopefully it's going to require less\ncompute and hopefully it's",
+    "start": "2688810",
+    "end": "2696070"
+  },
+  {
+    "text": "going to generalize almost\nas well as full fine tuning.",
+    "start": "2696070",
+    "end": "2701854"
+  },
+  {
+    "text": "So there's many different\nways of operationalizing",
+    "start": "2701854",
+    "end": "2706930"
+  },
+  {
+    "text": "this high level idea of\nparameter efficient fine tuning. The one I'm going to\ntalk about today is LoRA.",
+    "start": "2706930",
+    "end": "2716290"
+  },
+  {
+    "text": "So that stands for\nlow rank adaptation. And that basically comes\nfrom this observation",
+    "start": "2716290",
+    "end": "2725230"
+  },
+  {
+    "text": "that when you have big language\nmodels that you fine tune, oftentimes when you look\nat the geometric structure",
+    "start": "2725230",
+    "end": "2736060"
+  },
+  {
+    "text": "of the gradients, they tend\nto have a low intrinsic rank. ",
+    "start": "2736060",
+    "end": "2742720"
+  },
+  {
+    "text": "Do people remember rank and SVD? All right. So these parameters,\nso the gradients",
+    "start": "2742720",
+    "end": "2751450"
+  },
+  {
+    "text": "tend to have a low\nintrinsic rank. And so what the authors\nrealized is instead of fine",
+    "start": "2751450",
+    "end": "2760300"
+  },
+  {
+    "text": "tuning the entire\nset of parameters, you could instead fine tune\na much smaller, let's say,",
+    "start": "2760300",
+    "end": "2766440"
+  },
+  {
+    "text": "rank R matrix for every\nfull rank matrix that exists in the model.",
+    "start": "2766440",
+    "end": "2773202"
+  },
+  {
+    "text": "So let's say we have some\npre-trained weight matrix W naught.",
+    "start": "2773202",
+    "end": "2778720"
+  },
+  {
+    "text": "And what I'm going to do\nis instead of applying some kind of\narbitrary update, I'm",
+    "start": "2778720",
+    "end": "2785720"
+  },
+  {
+    "text": "going to make sure that the\nupdate has this following form. So it's going to be the\nproduct of two low rank",
+    "start": "2785720",
+    "end": "2792230"
+  },
+  {
+    "text": "matrices B and A. A is an R\ncross K matrix and B is a D",
+    "start": "2792230",
+    "end": "2802820"
+  },
+  {
+    "text": "cross R matrix. And R is the rank\nmuch, much smaller than either the sort\nof incoming dimension",
+    "start": "2802820",
+    "end": "2813530"
+  },
+  {
+    "text": "and much, much smaller than\nthe outgoing dimension. And the term alpha,\nyou can think",
+    "start": "2813530",
+    "end": "2819710"
+  },
+  {
+    "text": "of that as some\nkind of trade-off between the knowledge\nthat's already stored in the pre-trained model\nversus some additional knowledge",
+    "start": "2819710",
+    "end": "2828560"
+  },
+  {
+    "text": "that you want to\nadd into the model. So if alpha is 0, then\nyou're not doing anything. If alpha is something\nreally, really small,",
+    "start": "2828560",
+    "end": "2835097"
+  },
+  {
+    "text": "then you don't really want to\nchange your model parameters all that much, and you want to add\nsome really small task specific",
+    "start": "2835097",
+    "end": "2841339"
+  },
+  {
+    "text": "knowledge. And then additionally, the\nonly trainable parameters",
+    "start": "2841340",
+    "end": "2847309"
+  },
+  {
+    "text": "here are going to be A and B.",
+    "start": "2847310",
+    "end": "2857440"
+  },
+  {
+    "text": "And then the other\nthing to note about this is since I'm representing\nupdates as this product B",
+    "start": "2857440",
+    "end": "2865870"
+  },
+  {
+    "text": "times A, as I increase R,\nthat's going to converge towards full fine tuning. So you kind of have\nthis slider that you",
+    "start": "2865870",
+    "end": "2872470"
+  },
+  {
+    "text": "can use to control\nhow much fine tuning you want to do essentially.",
+    "start": "2872470",
+    "end": "2879490"
+  },
+  {
+    "text": "And then the other important\nthing is inference latency. So what you can\ndo is you can just",
+    "start": "2879490",
+    "end": "2886059"
+  },
+  {
+    "text": "store these learned\nmatrices for every task. And whenever you switch\nto a different task,",
+    "start": "2886060",
+    "end": "2892589"
+  },
+  {
+    "text": "you can just remove\nthe extra term that you've added to\nevery matrix for that task",
+    "start": "2892590",
+    "end": "2897700"
+  },
+  {
+    "text": "and add in the task specific\nterms for the new task that you want to\nrun inference on.",
+    "start": "2897700",
+    "end": "2905121"
+  },
+  {
+    "text": "And the cost of storing\nthese much smaller matrices is also way lower than\nstoring the full delta.",
+    "start": "2905122",
+    "end": "2912135"
+  },
+  {
+    "text": " And we'll see where\nyou should apply LoRA.",
+    "start": "2912135",
+    "end": "2917819"
+  },
+  {
+    "text": "But generally, you want\nto apply it to the weight matrices in self-attention.",
+    "start": "2917820",
+    "end": "2923950"
+  },
+  {
+    "text": "So in code, it actually\nlooks fairly simple.",
+    "start": "2923950",
+    "end": "2929460"
+  },
+  {
+    "text": "So what you're\ngoing to do is when you're running the\nregular forward pass,",
+    "start": "2929460",
+    "end": "2935410"
+  },
+  {
+    "text": "then you sort of just\ncompute the hidden state as, let's say, the product of the\nmatrix and the incoming feature",
+    "start": "2935410",
+    "end": "2944280"
+  },
+  {
+    "text": "vector. Now, with LoRA, what\nyou're going to do is you're going to freeze\nyour model parameters.",
+    "start": "2944280",
+    "end": "2949390"
+  },
+  {
+    "text": "You're going to compute\nthe H as before. And then to that,\nyou're going to add this additional offset term.",
+    "start": "2949390",
+    "end": "2956079"
+  },
+  {
+    "text": "And that's the only thing\nthat's going to be trainable. And that's pretty much\nall you have to do.",
+    "start": "2956080",
+    "end": "2962050"
+  },
+  {
+    "text": "We have to do it for every\nsingle weight matrix, for every single layer.",
+    "start": "2962050",
+    "end": "2968130"
+  },
+  {
+    "text": "Yeah. So there's an alpha term in\nthe second to last slide. Where do you define\nalpha in the rest of it,",
+    "start": "2968130",
+    "end": "2973350"
+  },
+  {
+    "text": "or do you just put it somewhere? So yeah, so you\ndefine this somewhere.",
+    "start": "2973350",
+    "end": "2979420"
+  },
+  {
+    "text": "If you set it to 1, that's\nlike saying that I kind of want",
+    "start": "2979420",
+    "end": "2985832"
+  },
+  {
+    "text": "an equal trade-off between\npretrained knowledge and the new task\nspecific knowledge. Typically, people set it to 1.",
+    "start": "2985832",
+    "end": "2991373"
+  },
+  {
+    "text": "You could set it to something\nlarger than 1 if you believe your task is something that the\npre-trained model has no idea",
+    "start": "2991373",
+    "end": "2997300"
+  },
+  {
+    "text": "about, or something smaller\nthan 1 if you don't want to change the model too much. ",
+    "start": "2997300",
+    "end": "3008340"
+  },
+  {
+    "text": "So that's basically LoRA.  So I said, there's a bunch\nof different parameter",
+    "start": "3008340",
+    "end": "3014360"
+  },
+  {
+    "text": "efficient fine tuning methods. So I'm not even going\nto name all of these.",
+    "start": "3014360",
+    "end": "3020300"
+  },
+  {
+    "text": "There's adapters. Some of you might have\nheard about adapters. There is BitFit,\nwhich is not here.",
+    "start": "3020300",
+    "end": "3029720"
+  },
+  {
+    "text": "And so there's lots\nof different ptuning. But it turns out that\ncompared to a lot",
+    "start": "3029720",
+    "end": "3035329"
+  },
+  {
+    "text": "of these different methods,\nit's kind of pretty high",
+    "start": "3035330",
+    "end": "3040730"
+  },
+  {
+    "text": "performing on a bunch\nof different tasks for these relatively\nsmaller models.",
+    "start": "3040730",
+    "end": "3048916"
+  },
+  {
+    "text": "And then if we try and look\nat some of the bigger-- trying to fine tune some of\nthe bigger models like GPT 3",
+    "start": "3048916",
+    "end": "3056690"
+  },
+  {
+    "text": "and then compare it with other\nparameter efficient fine tuning methods-- so full fine tuning\nis at the very top.",
+    "start": "3056690",
+    "end": "3064530"
+  },
+  {
+    "text": "Then we have BitFit, which is\nonly fine tune the bias terms. And adapters, compared to that--",
+    "start": "3064530",
+    "end": "3072660"
+  },
+  {
+    "text": "firstly, LoRA requires a lot\nfewer additional parameters that you need to store\nand it kind of gives you",
+    "start": "3072660",
+    "end": "3079500"
+  },
+  {
+    "text": "a good trade off for accuracy\ncompared to full fine tuning. And sometimes there's a\nregularizing effect from fine",
+    "start": "3079500",
+    "end": "3086160"
+  },
+  {
+    "text": "tuning only a small subset\nof your model parameters. ",
+    "start": "3086160",
+    "end": "3095255"
+  },
+  {
+    "text": "So the question is for every\nmatrix, you can apply LoRA.",
+    "start": "3095255",
+    "end": "3103079"
+  },
+  {
+    "text": "And I said that you want to\napply it to the various learnt",
+    "start": "3103080",
+    "end": "3109410"
+  },
+  {
+    "text": "weight matrices\ninside self-attention. The question is what parameters\nyou want to apply LoRA to.",
+    "start": "3109410",
+    "end": "3116680"
+  },
+  {
+    "text": "And generally, the\nrule of the thumb is that if you apply\nit to the matrix that takes your hidden state and\nconverts that into queries",
+    "start": "3116680",
+    "end": "3124680"
+  },
+  {
+    "text": "and the matrix that converts\nyour hidden state into values, apply LoRA to those and that's\npretty much going to give you",
+    "start": "3124680",
+    "end": "3131490"
+  },
+  {
+    "text": "the best performance over all. The other parameter for\nLoRA is the optimal rank.",
+    "start": "3131490",
+    "end": "3138730"
+  },
+  {
+    "text": "So recall that these two\nmatrices B and A that are both like low rank\nand turns out that already",
+    "start": "3138730",
+    "end": "3146280"
+  },
+  {
+    "text": "with a really\nsmall rank, you can get a pretty high performance. And this is much, much\nsmaller than the hidden state",
+    "start": "3146280",
+    "end": "3155500"
+  },
+  {
+    "text": "dimensions of the matrices\nfor most models these days.",
+    "start": "3155500",
+    "end": "3160860"
+  },
+  {
+    "text": " So we covered a bunch of things.",
+    "start": "3160860",
+    "end": "3166170"
+  },
+  {
+    "text": "We talked about floating points\nand mixed precision training,",
+    "start": "3166170",
+    "end": "3171710"
+  },
+  {
+    "text": "multi-gpu training,\nDDP, FSDP, LoRA.",
+    "start": "3171710",
+    "end": "3177320"
+  },
+  {
+    "text": "Kind of boils down to\na very simple flowchart that you can just\nuse for your project.",
+    "start": "3177320",
+    "end": "3182609"
+  },
+  {
+    "text": "So if you were sleeping\nthrough the entire lecture, maybe now's the time to wake up\nand just look at this flowchart.",
+    "start": "3182610",
+    "end": "3191030"
+  },
+  {
+    "text": "So always use mixed\nprecision training. If you have the newer\narchitectures, use BFloat16.",
+    "start": "3191030",
+    "end": "3199310"
+  },
+  {
+    "text": "Try with the batch size 1. If batch size 1 fits,\ntry a larger batch size and then always just\nuse ZeRO stage 2.",
+    "start": "3199310",
+    "end": "3207650"
+  },
+  {
+    "text": "Batch size 1 doesn't\nfit, try ZeRO stage 3. Maybe try gradient\ncheckpointing,",
+    "start": "3207650",
+    "end": "3214160"
+  },
+  {
+    "text": "activation checkpointing. Sorry, there's a question. This is assuming we have more\nthan one GPU because otherwise,",
+    "start": "3214160",
+    "end": "3219860"
+  },
+  {
+    "text": "ZeRO stage 2 doesn't\nreally help us. Yeah. So all of this applies only\nif you have more than one GPU.",
+    "start": "3219860",
+    "end": "3227480"
+  },
+  {
+    "text": "If you have a single GPU, yeah,\nyou have to do other things. Maybe you have to heavily\nquantize the model.",
+    "start": "3227480",
+    "end": "3235940"
+  },
+  {
+    "text": "And even then, I don't\nthink you can fine tune some of the bigger models. Yeah.",
+    "start": "3235940",
+    "end": "3243010"
+  },
+  {
+    "text": "So assuming you\nhave multiple GPUs, you can try ZeRO stage 3 if\nyou have out of memory errors",
+    "start": "3243010",
+    "end": "3250900"
+  },
+  {
+    "text": "with a batch size of 1. If that doesn't work,\nyou can try LoRA. And the main\nhyperparameters in LoRA",
+    "start": "3250900",
+    "end": "3256600"
+  },
+  {
+    "text": "are the alpha, the rank,\nand what weight matrices to apply LoRA to.",
+    "start": "3256600",
+    "end": "3262390"
+  },
+  {
+    "text": "Apply that to the query matrix,\napply that to the value matrix, set rank to 8.",
+    "start": "3262390",
+    "end": "3267792"
+  },
+  {
+    "text": "That's a good starting point. Set alpha to 1. Just do that, and you\nshould be good to go.",
+    "start": "3267792",
+    "end": "3273350"
+  },
+  {
+    "text": "So you can fine tune\nyour models and things should be reasonably good.",
+    "start": "3273350",
+    "end": "3278809"
+  },
+  {
+    "text": "So I'm going to end now,\nunless there's questions.",
+    "start": "3278810",
+    "end": "3285715"
+  },
+  {
+    "text": "There's one question\nin the back. Yeah, there was this diagram on\none of these [INAUDIBLE] sites. I was wondering if you just go\nback to it and walk through it",
+    "start": "3285715",
+    "end": "3293260"
+  },
+  {
+    "text": "a little bit on step-- sorry, on slide 48. ",
+    "start": "3293260",
+    "end": "3303600"
+  },
+  {
+    "text": "Yeah, this diagram in the right. So let's go through\nthis diagram.",
+    "start": "3303600",
+    "end": "3310190"
+  },
+  {
+    "text": "So basically, what\nthis diagram shows is how the communication\noverhead is really not",
+    "start": "3310190",
+    "end": "3316920"
+  },
+  {
+    "text": "that bad if you have a fairly\nbig model such that the time it",
+    "start": "3316920",
+    "end": "3322410"
+  },
+  {
+    "text": "takes to do a forward\npass, you can already prefetch all of the\nparameters for the next layer.",
+    "start": "3322410",
+    "end": "3328148"
+  },
+  {
+    "text": "So that's pretty much the idea. So that's kind of\nlike a standard idea that I guess everyone\nshould already be using.",
+    "start": "3328148",
+    "end": "3333750"
+  },
+  {
+    "text": "You want to make sure-- and PyTorch does this\nby default, by the way. You want to make sure that you\nsort of fully saturate your GPU",
+    "start": "3333750",
+    "end": "3344490"
+  },
+  {
+    "text": "and then make sure\nthat you overlay that with any additional\ncompute you're doing.",
+    "start": "3344490",
+    "end": "3350200"
+  },
+  {
+    "text": "And that's pretty much\nwhat's going on here. But let's go through this\nkind of step by step.",
+    "start": "3350200",
+    "end": "3356150"
+  },
+  {
+    "text": "And so the starting\npoint here is FSDP units. So 0, 1, and 2 are\ndifferent FSDP units.",
+    "start": "3356150",
+    "end": "3365174"
+  },
+  {
+    "text": "So what you start\nby doing is you",
+    "start": "3365174",
+    "end": "3370720"
+  },
+  {
+    "text": "want to run a forward\npass on the first layer. You don't have the first layer. So let's say [INAUDIBLE] you\ndon't have the first layer.",
+    "start": "3370720",
+    "end": "3377150"
+  },
+  {
+    "text": "So you have to do\nan all gather to get all of the parameters\nfor the first layer. So that's AG0.",
+    "start": "3377150",
+    "end": "3384310"
+  },
+  {
+    "text": "At the end of AG0, every\nGPU has the full set of parameters for the layers\ncorresponding to FSDP unit.",
+    "start": "3384310",
+    "end": "3393769"
+  },
+  {
+    "text": "Let's just say that's\nlayer 1, or let's just say that's layer 0.",
+    "start": "3393770",
+    "end": "3398810"
+  },
+  {
+    "text": "So you have the full\nparameters for layer 0, you run a forward pass. So that's the stuff in blue.",
+    "start": "3398810",
+    "end": "3404260"
+  },
+  {
+    "text": "And while you're\nrunning a forward pass through the first\nlayer, you're going",
+    "start": "3404260",
+    "end": "3409630"
+  },
+  {
+    "text": "to be smart about\ncommunication overheads. And while you're\nrunning that, you're going to prefetch the parameters\nfor the next FSDP unit.",
+    "start": "3409630",
+    "end": "3418640"
+  },
+  {
+    "text": "So let's say layer 2 is\na different FSDP unit. So that's AG1. And so you can see that there\nis a little bit of overlap",
+    "start": "3418640",
+    "end": "3427120"
+  },
+  {
+    "text": "between forward 0 and AG1. At the end of getting all of\nthe parameters for layer 1,",
+    "start": "3427120",
+    "end": "3436660"
+  },
+  {
+    "text": "you're going to do a\nforward pass and so on. And then you're going to do AG2.",
+    "start": "3436660",
+    "end": "3443440"
+  },
+  {
+    "text": "And at the same time, now\nlet's say you just have way too many parameters on your GPU.",
+    "start": "3443440",
+    "end": "3449570"
+  },
+  {
+    "text": "So you're going to do a\nlittle bit of memory free-- you're going to\nfree up some memory.",
+    "start": "3449570",
+    "end": "3455210"
+  },
+  {
+    "text": "So that's the stuff in yellow. And so that's how that goes. So you basically overlay\nall gather operations",
+    "start": "3455210",
+    "end": "3463930"
+  },
+  {
+    "text": "with the forward pass. And that's how you\nrun the forward pass. So the communication overhead\nis really not that bad",
+    "start": "3463930",
+    "end": "3469730"
+  },
+  {
+    "text": "if you have a really\nbig deep neural network and assuming that you have\nsharded everything properly.",
+    "start": "3469730",
+    "end": "3481059"
+  },
+  {
+    "text": "And then you start\nthe backward pass. So in the backward pass, I\nguess it's a little bit tricky",
+    "start": "3481060",
+    "end": "3488430"
+  },
+  {
+    "text": "because you want to do\nthese all gather operations",
+    "start": "3488430",
+    "end": "3493829"
+  },
+  {
+    "text": "to get the full gradient. So let's say it's a 10\nlayer neural network. So you want to compute the\nfull gradient at layer 10.",
+    "start": "3493830",
+    "end": "3500200"
+  },
+  {
+    "text": "You need to do an\nall gather operation to get all of the\nparameters at layer 10,",
+    "start": "3500200",
+    "end": "3505660"
+  },
+  {
+    "text": "and then you have to\ndo a reduce scatter. So you have four GPUs,\neveryone has the full set",
+    "start": "3505660",
+    "end": "3511470"
+  },
+  {
+    "text": "of parameters at layer 10. They have different gradients. And so they have to\nmerge their gradients",
+    "start": "3511470",
+    "end": "3517050"
+  },
+  {
+    "text": "and then sort of split\nthem up to the right GPU. And so that's the\nreduce scatter. But that's not too bad\nbecause you can still",
+    "start": "3517050",
+    "end": "3523529"
+  },
+  {
+    "text": "like overlay, reduce\nscatter operations with the backward pass. And so that's what you see\nhappening on the backward pass",
+    "start": "3523530",
+    "end": "3529619"
+  },
+  {
+    "text": "there.  And then like along with these\nforward and backward passes,",
+    "start": "3529620",
+    "end": "3537089"
+  },
+  {
+    "text": "at regular intervals,\nyou have to make sure that you free up GPU memory.",
+    "start": "3537090",
+    "end": "3543580"
+  },
+  {
+    "text": "So for example, once you have\nrun a forward pass through layer 1, now you're on to layer 2. You don't need\nanything in layer 1.",
+    "start": "3543580",
+    "end": "3549840"
+  },
+  {
+    "text": "You just free up the\nmemory in layer 1. So that's pretty much the\nidea behind this diagram.",
+    "start": "3549840",
+    "end": "3556750"
+  },
+  {
+    "text": "So there are a few details here. One of the details is in\nFSDP, unit 0 sort of treated",
+    "start": "3556750",
+    "end": "3564310"
+  },
+  {
+    "text": "differently. So you'll see that unit\n0 is never freed up. That's just sort of an\nimplementation detail in FSDP.",
+    "start": "3564310",
+    "end": "3571450"
+  },
+  {
+    "text": "I'll just quickly say\none more thing about FSDP and take a question. So the presentation here makes\nit seem like it's so simple",
+    "start": "3571450",
+    "end": "3580690"
+  },
+  {
+    "text": "and that it can be applied\nto any neural network. But it turns out that\nthat's not the full picture.",
+    "start": "3580690",
+    "end": "3588260"
+  },
+  {
+    "text": "So you need to do this kind of-- you need to divide up your\nneural network into FSDP units.",
+    "start": "3588260",
+    "end": "3596322"
+  },
+  {
+    "text": "And depending on what policy\nyou use for dividing up",
+    "start": "3596322",
+    "end": "3601360"
+  },
+  {
+    "text": "your parameters into\nFSDP units, there is a different\ncommunication overheads. So for example, it\nmakes sense to have",
+    "start": "3601360",
+    "end": "3611060"
+  },
+  {
+    "text": "multiple consecutive layers in\nthe same FSDP unit and so on. And so this is very\narchitecture specific.",
+    "start": "3611060",
+    "end": "3618470"
+  },
+  {
+    "text": "So when you start to\nuse this in PyTorch, you will see that the\nFSDP wrapper requires",
+    "start": "3618470",
+    "end": "3626360"
+  },
+  {
+    "text": "sort of a sharding\npolicy and that is very architecture specific. So because everyone\nuses transformers now,",
+    "start": "3626360",
+    "end": "3633450"
+  },
+  {
+    "text": "there are very handcrafted\nfine tuned policies",
+    "start": "3633450",
+    "end": "3638540"
+  },
+  {
+    "text": "for creating FSDP\nunits and sharding strategies for transformers. But let's say for\nyour final project,",
+    "start": "3638540",
+    "end": "3645740"
+  },
+  {
+    "text": "you came up with\na new architecture subquadratic\nattention, whatever.",
+    "start": "3645740",
+    "end": "3650990"
+  },
+  {
+    "text": "Maybe it's not going to be as\nefficient just because you don't have the right sharding policy.",
+    "start": "3650990",
+    "end": "3657000"
+  },
+  {
+    "text": "So that's one detail\nabout FSDP that maybe you want to keep in mind. You have a question.",
+    "start": "3657000",
+    "end": "3663609"
+  },
+  {
+    "text": "Just to clarification,\nyou mentioned you can throw away the\nweights that you don't need after each layer forward pass.",
+    "start": "3663610",
+    "end": "3670373"
+  },
+  {
+    "text": "But then when you\ncompute backward pass, you stream them\nback in each time. Or do you sort of cache\nsome or cache recent",
+    "start": "3670373",
+    "end": "3677430"
+  },
+  {
+    "text": "or is there any caching going\non or do you throw them all away in stream and all that?",
+    "start": "3677430",
+    "end": "3682920"
+  },
+  {
+    "text": "So there might be some\ncaching in the system. But the idea is that you\njust sort of throw them away.",
+    "start": "3682920",
+    "end": "3691839"
+  },
+  {
+    "text": "Or at least to\nthe user, it seems like you've thrown it all away\nin terms of GPU RAM utilization.",
+    "start": "3691840",
+    "end": "3698610"
+  },
+  {
+    "text": "And then we stream\nthem each layer again. And so that's why it's\nimportant to shard it properly.",
+    "start": "3698610",
+    "end": "3706150"
+  },
+  {
+    "text": "So for example, if\nevery consecutive layer is sharded such that\nit's on multiple GPUs,",
+    "start": "3706150",
+    "end": "3712150"
+  },
+  {
+    "text": "then you kind of always are\ncommunicating, as opposed to you kind of did allgather and then\nall of the next three layers",
+    "start": "3712150",
+    "end": "3721950"
+  },
+  {
+    "text": "are loaded in. So that's why how you\nshard and this sharding policy becomes important.",
+    "start": "3721950",
+    "end": "3727570"
+  },
+  {
+    "start": "3727570",
+    "end": "3738190"
+  },
+  {
+    "text": "So if there's no more\nquestions, let's end early. Thank you so much.",
+    "start": "3738190",
+    "end": "3744130"
+  },
+  {
+    "text": "[APPLAUSE] ",
+    "start": "3744130",
+    "end": "3752000"
+  }
+]
