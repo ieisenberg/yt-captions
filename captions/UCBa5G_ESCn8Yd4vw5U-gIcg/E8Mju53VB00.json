@@ -1,0 +1,3872 @@
+[
+  {
+    "text": "today we're going to be going into details on um make writing high performance code for gpus so part of",
+    "start": "5040",
+    "end": "13360"
+  },
+  {
+    "text": "assignment two is going to be you're going to have to you know do a bunch of profiling you will have to write um your",
+    "start": "13360",
+    "end": "19920"
+  },
+  {
+    "text": "own triton kernel uh for flash attention too you will need to sort of make all of this stuff very high performance and so",
+    "start": "19920",
+    "end": "26400"
+  },
+  {
+    "text": "in this lecture we're going to kind of drill down a little bit and we're going to try to you know write some high",
+    "start": "26400",
+    "end": "31439"
+  },
+  {
+    "text": "performance code for um standard components in a language model um so the",
+    "start": "31439",
+    "end": "37280"
+  },
+  {
+    "text": "the plan for this lecture is we're going to just do a brief amount of review about gpu stuff um just to make sure you",
+    "start": "37280",
+    "end": "43840"
+  },
+  {
+    "text": "have once again the basic components of the gpus that we need to to understand in order to to follow the rest of the",
+    "start": "43840",
+    "end": "50559"
+  },
+  {
+    "text": "lecture um and then i'm going to show you a bunch of sort of really basic things about benchmarking and profiling",
+    "start": "50559",
+    "end": "56960"
+  },
+  {
+    "text": "which will be helpful for both the assignment and in general if you want to write high performance um pietorrch or",
+    "start": "56960",
+    "end": "62800"
+  },
+  {
+    "text": "deep learning code and then um we're going to basically write some kernels um we're going to write uh cuda kernels in",
+    "start": "62800",
+    "end": "69439"
+  },
+  {
+    "text": "sort of c++ we will then do uh the same thing in triton and then lastly we're going to you know do the easy but very",
+    "start": "69439",
+    "end": "76080"
+  },
+  {
+    "text": "good thing of using pytorch's existing uh jit compiler um to have it optimized",
+    "start": "76080",
+    "end": "81520"
+  },
+  {
+    "text": "for us and then we'll compare all of those and profile and benchmark things and throughout we're going to really dig",
+    "start": "81520",
+    "end": "87040"
+  },
+  {
+    "text": "in deep we're going to go down all the way to uh the ptx so so pretty close to the machine code um to understand what",
+    "start": "87040",
+    "end": "93680"
+  },
+  {
+    "text": "you know the gpu is actually doing under the hood when we write um all this code um and then um hopefully we'll have time",
+    "start": "93680",
+    "end": "99600"
+  },
+  {
+    "text": "and i think we will uh we'll finish by writing sort of a fast triton implementation of softmax at the very",
+    "start": "99600",
+    "end": "105840"
+  },
+  {
+    "text": "end okay so um assignment one uh has come to a close there's still a",
+    "start": "105840",
+    "end": "111920"
+  },
+  {
+    "text": "leaderboard you can still submit and update things there um some of you may be using late days so um please finish",
+    "start": "111920",
+    "end": "117600"
+  },
+  {
+    "text": "up assignment one um and then assignment two is now out and as i said before um",
+    "start": "117600",
+    "end": "122640"
+  },
+  {
+    "text": "there's going to be you know a bunch of systems uh stuff that you're going to need to do um there's fun parts uh that",
+    "start": "122640",
+    "end": "128239"
+  },
+  {
+    "text": "you can do now involving um gpu kernels and then next week we're going to talk about parallelism and that's going to be",
+    "start": "128239",
+    "end": "134319"
+  },
+  {
+    "text": "the other half of the assignment um writing fast parallel code like data parallelism um and so on so we will get",
+    "start": "134319",
+    "end": "142640"
+  },
+  {
+    "text": "to that next week all right so now remember how gpus work right so when we",
+    "start": "142640",
+    "end": "149680"
+  },
+  {
+    "text": "have something like an a100 or an h100 we're going to have a whole bunch of sm streaming multipprocessors within each",
+    "start": "149680",
+    "end": "155840"
+  },
+  {
+    "text": "sm is a large number of of units that can do uh computation um we have in32",
+    "start": "155840",
+    "end": "161599"
+  },
+  {
+    "text": "ones or fp32 ones um and then each sm is going to launch a large number of threads right um and we have the memory",
+    "start": "161599",
+    "end": "168160"
+  },
+  {
+    "text": "hierarchy um which is that we have dram or global memory which is big and slow and then we've got caches that are much",
+    "start": "168160",
+    "end": "174239"
+  },
+  {
+    "text": "faster um and in fact you know there you see here there's this thing called a register file this is very very fast",
+    "start": "174239",
+    "end": "179920"
+  },
+  {
+    "text": "memory that each each thread can access and we're going to be making heavy use of these registers as we write high",
+    "start": "179920",
+    "end": "185440"
+  },
+  {
+    "text": "performance code for gpus um today um so the basic structure for the execution",
+    "start": "185440",
+    "end": "191440"
+  },
+  {
+    "text": "model is going to be we're going to have a collection of thread blocks and a block is going to be scheduled on a",
+    "start": "191440",
+    "end": "197760"
+  },
+  {
+    "text": "single uh sm right so this is kind of the atomic unit that we're going to be thinking about especially when we write",
+    "start": "197760",
+    "end": "203040"
+  },
+  {
+    "text": "uh code in things like triton and then within each block there's going to be a whole bunch of threads and the threads",
+    "start": "203040",
+    "end": "208239"
+  },
+  {
+    "text": "are actually going to be the ones doing uh the computation and so if you have a vector and you're going to be operating over elements of that vector right",
+    "start": "208239",
+    "end": "214640"
+  },
+  {
+    "text": "you're going to write code where each thread is going to go in and maybe operate over a few elements of that vector um at once right and all the",
+    "start": "214640",
+    "end": "220640"
+  },
+  {
+    "text": "threads together will sort of process the vector um completely so um why do we",
+    "start": "220640",
+    "end": "226640"
+  },
+  {
+    "text": "have these things called thread blocks right why not just have threads and your your big global uh context well thread",
+    "start": "226640",
+    "end": "232480"
+  },
+  {
+    "text": "blocks can um communicate with each other there's shared memory kind of within the sm that's pretty fast right",
+    "start": "232480",
+    "end": "238159"
+  },
+  {
+    "text": "so when you need to do something like matrix multiplication you're going to need to pass information from thread to thread um and within a thread block",
+    "start": "238159",
+    "end": "244560"
+  },
+  {
+    "text": "that's very fast across thread blocks or across these groups it's going to be very expensive so you any data that you",
+    "start": "244560",
+    "end": "251200"
+  },
+  {
+    "text": "need you're going to want to keep within the same thread block or within the same sort of pile um and that's going to keep",
+    "start": "251200",
+    "end": "256400"
+  },
+  {
+    "text": "things very very fast um and that's going to be as fast as sort of a l1 cache and that's a great you know place",
+    "start": "256400",
+    "end": "261519"
+  },
+  {
+    "text": "to be and so you can use this to to synchronize across threads um but you can't you know for example synchronize",
+    "start": "261519",
+    "end": "267040"
+  },
+  {
+    "text": "across blocks you can't really control um what's going to happen right um and",
+    "start": "267040",
+    "end": "272080"
+  },
+  {
+    "text": "remember um the thing that i mentioned last week um there's this thing called waves right waves aren't sort of an",
+    "start": "272080",
+    "end": "277440"
+  },
+  {
+    "text": "inherent thing that you you normally think about but for performance it is an important component so um when we",
+    "start": "277440",
+    "end": "283440"
+  },
+  {
+    "text": "actually run these things the threads are grouped into into consecutive blocks of 32 threads um and that's a wave and",
+    "start": "283440",
+    "end": "290800"
+  },
+  {
+    "text": "that gets executed kind of all at once um in an sm um and so one thing that we",
+    "start": "290800",
+    "end": "295840"
+  },
+  {
+    "text": "would like to do is to make sure all the waves have an equal amount of of uh computation we can't always do that um",
+    "start": "295840",
+    "end": "301520"
+  },
+  {
+    "text": "but you know if we can we would like to do that right so we want to make the number of thread blocks ideally uh divide the number of sms and to make",
+    "start": "301520",
+    "end": "307600"
+  },
+  {
+    "text": "sure that each wave has an equal amount um of uh work so we're going to ideally have a lot more thread blocks than sms",
+    "start": "307600",
+    "end": "314479"
+  },
+  {
+    "text": "and we're going to try to make that happen as we write um high performance code okay and then the last concept and",
+    "start": "314479",
+    "end": "321199"
+  },
+  {
+    "text": "maybe maybe amongst the most important concepts here um is arithmetic intensity um we would like to keep arithmetic",
+    "start": "321199",
+    "end": "327199"
+  },
+  {
+    "text": "intensity high uh we would like to have more flops than we have bytes of memory movement um and this is because you know",
+    "start": "327199",
+    "end": "334320"
+  },
+  {
+    "text": "if you remember the scaling plot from from last lecture um our compute scaling is much much faster than memory scaling",
+    "start": "334320",
+    "end": "340800"
+  },
+  {
+    "text": "so a lot of the time um computations are going to end up um being memory bound and we're not actually getting all all",
+    "start": "340800",
+    "end": "346400"
+  },
+  {
+    "text": "of the work done right so um as a general rule you know matrix multiplication is computebound if we",
+    "start": "346400",
+    "end": "351520"
+  },
+  {
+    "text": "kind of do it cleverly everything else is going to be memory bound and we're going to try to cleverly reduce the amount of of things that are memory",
+    "start": "351520",
+    "end": "357759"
+  },
+  {
+    "text": "bound or how badly um things are memory bound okay so that's our our very very",
+    "start": "357759",
+    "end": "362960"
+  },
+  {
+    "text": "brief sort of review of gpus hopefully everyone remembers this you still have a fresh sort of memory of of the execution",
+    "start": "362960",
+    "end": "369199"
+  },
+  {
+    "text": "model um feel free to to stop me and ask questions if if any of you you know have sort of lingering doubts or questions",
+    "start": "369199",
+    "end": "376160"
+  },
+  {
+    "text": "about how this is all uh going to work yes what was the function of warp what was the function of sorry warp a warp um",
+    "start": "376160",
+    "end": "383759"
+  },
+  {
+    "text": "a warp is uh essentially a group of threads that get executed together and the reason why warps exist is that they",
+    "start": "383759",
+    "end": "390000"
+  },
+  {
+    "text": "reduce the amount of control machinery that's needed um because you're executing all these threads at the same",
+    "start": "390000",
+    "end": "395120"
+  },
+  {
+    "text": "time um you don't need a control thing for for each thread you need them for blocks of 32 right and so you see for",
+    "start": "395120",
+    "end": "401759"
+  },
+  {
+    "text": "example there's a lot more compute units than there are sort of warp schedulers",
+    "start": "401759",
+    "end": "406960"
+  },
+  {
+    "text": "um and so you're able to do a lot more parallel work without worrying about control and this is one of the trade-offs with cpus right cpus a lot",
+    "start": "406960",
+    "end": "413520"
+  },
+  {
+    "text": "more uh sort of uh silicon area dedicated to control and branch prediction and things like this whereas",
+    "start": "413520",
+    "end": "419360"
+  },
+  {
+    "text": "for gpus much more uh emphasis on computation with simpler controls",
+    "start": "419360",
+    "end": "424919"
+  },
+  {
+    "text": "okay so now we're going to get into sort of sort of newer content now um and i",
+    "start": "424919",
+    "end": "430160"
+  },
+  {
+    "text": "think if there's one highle thing to remember um it's if you want to write high performance code you should",
+    "start": "430160",
+    "end": "435680"
+  },
+  {
+    "text": "remember to benchmark and profile your code and that seems very obvious but you know i've seen a lot of things where you",
+    "start": "435680",
+    "end": "441599"
+  },
+  {
+    "text": "know students or or people go in and they're like well i think this is the bottleneck so i'm going to spend three hours optimizing it and it turns out it",
+    "start": "441599",
+    "end": "447919"
+  },
+  {
+    "text": "wasn't the bottleneck at all i'm sure it was fun but that you know there were it was kind of time that was uh misallocated and so if you actually use",
+    "start": "447919",
+    "end": "454160"
+  },
+  {
+    "text": "a high performance or very detailed profiler you can kind of see exactly where your you know bottlenecks are and",
+    "start": "454160",
+    "end": "460639"
+  },
+  {
+    "text": "exactly what the machine is doing and once you have that you can go and spend your efforts um in sort of the most",
+    "start": "460639",
+    "end": "465680"
+  },
+  {
+    "text": "important parts um of your code execution and so that's the high level thing i want to get across because some",
+    "start": "465680",
+    "end": "470800"
+  },
+  {
+    "text": "of the details about you know gpu execution and you know how you write a softmax kernel that's going to kind of",
+    "start": "470800",
+    "end": "476000"
+  },
+  {
+    "text": "change um and maybe you even want to just rely on the torch compile you know autojit thing um but the fact that you",
+    "start": "476000",
+    "end": "482160"
+  },
+  {
+    "text": "should profile isn't really going to change no matter what the tools are so um i want you to sort of internalize",
+    "start": "482160",
+    "end": "487280"
+  },
+  {
+    "text": "that idea that you should be always profiling if you want to be writing um high performance uh",
+    "start": "487280",
+    "end": "493080"
+  },
+  {
+    "text": "code and really you know there's a limit to the theory i think systems is part of this course that you can reason about",
+    "start": "493080",
+    "end": "499199"
+  },
+  {
+    "text": "pretty well architecture is somewhat hard to reason about and you can you know really think about sort of the roof line model and so on but you know how",
+    "start": "499199",
+    "end": "506240"
+  },
+  {
+    "text": "fast does your matrix multiply well maybe that depends on the library version or your hardware like which",
+    "start": "506240",
+    "end": "511360"
+  },
+  {
+    "text": "things are bottlenecking for what reason there's all sorts of you know microode things that you don't really fully know",
+    "start": "511360",
+    "end": "517200"
+  },
+  {
+    "text": "and so you have to in the end have to do endto-end benchmarking whenever you're developing these things okay so um i'm",
+    "start": "517200",
+    "end": "524560"
+  },
+  {
+    "text": "going to have an example computation this is the simplest thing you know that we can run compared to all the things that you all are doing in your",
+    "start": "524560",
+    "end": "530399"
+  },
+  {
+    "text": "assignment one um but i'm going to run a very simple mlp it's going to have 128 dimensions it's going to have 16 layers",
+    "start": "530399",
+    "end": "537040"
+  },
+  {
+    "text": "it's going to have some batch size and it's going to have five steps i'm going to just do forwards and backwards um for five different steps here um and just to",
+    "start": "537040",
+    "end": "544480"
+  },
+  {
+    "text": "to make the code clear it's it's something like this right i'm going to define a mlp model and we'll sort of i'll show you that in a moment here um",
+    "start": "544480",
+    "end": "550959"
+  },
+  {
+    "text": "and then i'll define you know a random gausian input and then i'll run it for uh five steps in that last case where i",
+    "start": "550959",
+    "end": "557200"
+  },
+  {
+    "text": "compute some forward and then i compute a backwards and then i return uh sort of uh the result which is just the mean of",
+    "start": "557200",
+    "end": "563440"
+  },
+  {
+    "text": "the output of my mlp right not there's not even losses it's so simple it's just you run the mlp forward and i just",
+    "start": "563440",
+    "end": "568720"
+  },
+  {
+    "text": "average pool at the end right um and then the mlp is just kind of the simplest thing you can also imagine here",
+    "start": "568720",
+    "end": "574880"
+  },
+  {
+    "text": "it's just a bunch of linear layers stacked on top of each other um which is this bit and then you know i've got a",
+    "start": "574880",
+    "end": "581120"
+  },
+  {
+    "text": "glu in between right so this is just glu linear linear glu so on and so forth everything is nice and square right so",
+    "start": "581120",
+    "end": "587600"
+  },
+  {
+    "text": "hopefully this is a very simple mlp that you all feel uh pretty comfortable with",
+    "start": "587600",
+    "end": "592640"
+  },
+  {
+    "text": "um and then uh let's go back yes oh sorry uh i want to go back up to here",
+    "start": "592640",
+    "end": "600399"
+  },
+  {
+    "text": "okay good um and so now i have this you know mlp code that i want to run and now i'm going to do two things i'm going to",
+    "start": "600399",
+    "end": "606000"
+  },
+  {
+    "text": "benchmark so i'm going to do some timings so i want to know how long does this function take to run and then i'll",
+    "start": "606000",
+    "end": "611519"
+  },
+  {
+    "text": "do profiling which is to go inside the function and ask you know where am i spending all of my time so let's start",
+    "start": "611519",
+    "end": "618720"
+  },
+  {
+    "text": "with benchmarking right so benchmarking um is just the measurement of wall clock time of performing these operations um",
+    "start": "618720",
+    "end": "625760"
+  },
+  {
+    "text": "and i'm only looking for the endto-end execution time of in this case my mlp function and you know there are some",
+    "start": "625760",
+    "end": "632480"
+  },
+  {
+    "text": "subtleties to this like you're sitting there and you're like why am i being told how to invoke i don't know uh the time it function um but you do have to",
+    "start": "632480",
+    "end": "639600"
+  },
+  {
+    "text": "be a little bit careful about how you measure times and i think you know if you're not paying attention you will run into these pitfalls um when you do",
+    "start": "639600",
+    "end": "646320"
+  },
+  {
+    "text": "assignment too um and so what are we doing this for we're going to compare implementations later we're going to",
+    "start": "646320",
+    "end": "651839"
+  },
+  {
+    "text": "compare our triton to our handwritten c++ to um pytorch's implementation and",
+    "start": "651839",
+    "end": "657200"
+  },
+  {
+    "text": "torch compile and we want to know was it worth it to write that cuda kernel um and we'd also like to understand when i",
+    "start": "657200",
+    "end": "662720"
+  },
+  {
+    "text": "make my matrix multiplies bigger how much slower does it get right so we'd like to do some empirical benchmarking of those so um throughout this lecture",
+    "start": "662720",
+    "end": "670880"
+  },
+  {
+    "text": "i'm going to be using this benchmark function um and that's going to be sort of a wrapper function i'll step through it um benchmark is going to do the",
+    "start": "670880",
+    "end": "678320"
+  },
+  {
+    "text": "following things right it's going to have a function that i want to benchmark which is run and then i'm going to do some number of warm-up iterations and",
+    "start": "678320",
+    "end": "684160"
+  },
+  {
+    "text": "then i'll do some number of trials right um and you might wonder okay so like what's this um warm-up thing that we're",
+    "start": "684160",
+    "end": "691279"
+  },
+  {
+    "text": "doing here well one thing that's really important is you know when you do when you first run your pytorch code and",
+    "start": "691279",
+    "end": "697600"
+  },
+  {
+    "text": "let's say it dispatches something to the gpu um it might look very fast and transparent to you but that very first",
+    "start": "697600",
+    "end": "704240"
+  },
+  {
+    "text": "time something is executed in the background machine code is being compiled you know that code instruction",
+    "start": "704240",
+    "end": "709360"
+  },
+  {
+    "text": "might be being sent to the gpu there's all sorts of things that happen to sort of initialize your code um and so you",
+    "start": "709360",
+    "end": "715519"
+  },
+  {
+    "text": "always want to do some warm-up iteration to make sure that you're not measuring sort of the startup speed instead you",
+    "start": "715519",
+    "end": "721760"
+  },
+  {
+    "text": "want to measure kind of the the steady state speed right if you're running thousands and thousands of iterations you know what you're interested in is",
+    "start": "721760",
+    "end": "727920"
+  },
+  {
+    "text": "that part not necessarily you know how fast can you you know do on the-fly compilation of your of your cuda code",
+    "start": "727920",
+    "end": "734320"
+  },
+  {
+    "text": "right so that's why we have warm-up and you should always have a bit of warm-up um and then um another thing that's",
+    "start": "734320",
+    "end": "741519"
+  },
+  {
+    "text": "really important and i'll get to this once we get to the profiler is you want to call this thing called torch cuda",
+    "start": "741519",
+    "end": "747279"
+  },
+  {
+    "text": "synchronized like what is that well the gpu and the cpu are basically two independent compute units in your in",
+    "start": "747279",
+    "end": "753920"
+  },
+  {
+    "text": "your computer right um and they can basically run kind of independently and so their execution model is going to be",
+    "start": "753920",
+    "end": "759360"
+  },
+  {
+    "text": "this python code that i have here this lives on the cpu right and when i run something it's going to dispatch a bunch",
+    "start": "759360",
+    "end": "765600"
+  },
+  {
+    "text": "of cuda kernels right to the gpu it says \"please run these things for me right?\" and the gpu will go off and execute",
+    "start": "765600",
+    "end": "771680"
+  },
+  {
+    "text": "those things and the cpu will actually go on and keep running right it doesn't wait for those cuda executions to stop",
+    "start": "771680",
+    "end": "777360"
+  },
+  {
+    "text": "and so that's great for for writing high performance code but you should hopefully see the the immediate problem",
+    "start": "777360",
+    "end": "783279"
+  },
+  {
+    "text": "if you want to do benchmarking right if you're benchmarking and you've got this model where the gpu runs off in the side and your cpu is doing something",
+    "start": "783279",
+    "end": "789519"
+  },
+  {
+    "text": "different you're actually not measuring the gpu execution time right um so torch cuda synchronize basically says all",
+    "start": "789519",
+    "end": "796240"
+  },
+  {
+    "text": "right let's make sure that the gpu and cpu are in the same state and there's sort of no cued uh things running and",
+    "start": "796240",
+    "end": "801600"
+  },
+  {
+    "text": "that we're we're kind of at the same point in terms of the code that's being executed and now so the gpu and cpu are",
+    "start": "801600",
+    "end": "807519"
+  },
+  {
+    "text": "kind of in the same state and i'm going to time it for real right and i'm going to time something for for some number of",
+    "start": "807519",
+    "end": "812560"
+  },
+  {
+    "text": "times and i'm going to run the computation which in this case is the is the sleep command i'm going to do it three times and since i'm trying to",
+    "start": "812560",
+    "end": "819040"
+  },
+  {
+    "text": "sleep for for 50 uh milliseconds um that's the time that i'm going to kind",
+    "start": "819040",
+    "end": "824160"
+  },
+  {
+    "text": "of get at the end right so i i do time three times and of course here right i'm",
+    "start": "824160",
+    "end": "829200"
+  },
+  {
+    "text": "also calling torch.cuda cuda.synchronize at the end of run to make sure that the gpu and cpu states are the same so right",
+    "start": "829200",
+    "end": "835680"
+  },
+  {
+    "text": "so the cpu is running ahead it's going to wait uh for the gpu execution to actually finish here uh and vice versa",
+    "start": "835680",
+    "end": "841279"
+  },
+  {
+    "text": "um and so now i sort of finished and then i'm going to average because you know each single measurement might be",
+    "start": "841279",
+    "end": "847519"
+  },
+  {
+    "text": "you know fluctuating because of things like thermal properties of the gpu and so you want to take multiple replicates",
+    "start": "847519",
+    "end": "852560"
+  },
+  {
+    "text": "take the mean and return that that's our our benchmarking code right very simple but remember kind of the two important",
+    "start": "852560",
+    "end": "859440"
+  },
+  {
+    "text": "pieces here right always do a warm-up make sure to call cuda synchronize um if you do those it's very simple if you get",
+    "start": "859440",
+    "end": "866000"
+  },
+  {
+    "text": "forget to do those you'll get pretty crazy numbers like you'll get that your big matrix multiply finished instantly",
+    "start": "866000",
+    "end": "871360"
+  },
+  {
+    "text": "which is definitely not true right okay so now we can do some benchmarking of matrix multiplies um i'm going to walk",
+    "start": "871360",
+    "end": "877839"
+  },
+  {
+    "text": "through some of these um they're just putting numbers to things that we already know but i want to you know just walk through it and and make sure we're",
+    "start": "877839",
+    "end": "884000"
+  },
+  {
+    "text": "on the same page here right so um i ran this on the on the class h100s i have",
+    "start": "884000",
+    "end": "890000"
+  },
+  {
+    "text": "gpus i'm going to do matrix multiplies over over these sizes um and then i'm",
+    "start": "890000",
+    "end": "895600"
+  },
+  {
+    "text": "going to go and collect a whole bunch of matrix multiply timings um for each of",
+    "start": "895600",
+    "end": "901040"
+  },
+  {
+    "text": "these dimensions stepping through kind of this uh benchmark result and so we",
+    "start": "901040",
+    "end": "906079"
+  },
+  {
+    "text": "kind of see you know as we expect right super linear scaling of our runtimes as we increase the matrix size of course at",
+    "start": "906079",
+    "end": "912480"
+  },
+  {
+    "text": "the smallest sizes like 1024 and 2048 we actually see that the times don't grow at all because there's constant factor",
+    "start": "912480",
+    "end": "919360"
+  },
+  {
+    "text": "overhead in just doing these matrix multiplies like uh these numbers have to get shipped from the cpu to the gpu you",
+    "start": "919360",
+    "end": "926240"
+  },
+  {
+    "text": "know there's uh overhead in like launching the kernel um and so it's not the case that you know it's super linear",
+    "start": "926240",
+    "end": "932240"
+  },
+  {
+    "text": "all the way to zero um but once the matrices get big enough we see exactly the kind of scaling that we expect to",
+    "start": "932240",
+    "end": "937440"
+  },
+  {
+    "text": "see um with our matrix multiplies right okay so um hopefully straightforward now",
+    "start": "937440",
+    "end": "943680"
+  },
+  {
+    "text": "let's try to benchmark um our mlp so what are we going to do we're going to make our mlp bigger we're going to have",
+    "start": "943680",
+    "end": "949600"
+  },
+  {
+    "text": "256 dimensions we're going to have four layers batch size of 256 take two steps",
+    "start": "949600",
+    "end": "954800"
+  },
+  {
+    "text": "um and so what's the time that it takes to do that well it's going to take 6.2 seconds um to do that and now i could do",
+    "start": "954800",
+    "end": "962399"
+  },
+  {
+    "text": "some basic things i can uh scale the number of steps from two to five and i can benchmark all of those and i'll get",
+    "start": "962399",
+    "end": "969360"
+  },
+  {
+    "text": "2 3 four and then five steps and unlike in the in the matrix multiply case right",
+    "start": "969360",
+    "end": "976240"
+  },
+  {
+    "text": "if i'm scaling the number of steps so the number of forward and backward passes on my mlp right what do i expect",
+    "start": "976240",
+    "end": "981759"
+  },
+  {
+    "text": "the runtime to to behave like well i expect sort of linear scaling right and that's kind of what we see um there's",
+    "start": "981759",
+    "end": "987600"
+  },
+  {
+    "text": "about five seconds uh per mlp execution and we see uh it's about n times five",
+    "start": "987600",
+    "end": "993920"
+  },
+  {
+    "text": "for the runtime of kind of the endtoend um object here right okay let me see if",
+    "start": "993920",
+    "end": "999199"
+  },
+  {
+    "text": "i can reset the uh thing that's being monitored here oh nope i can't okay i'm",
+    "start": "999199",
+    "end": "1004240"
+  },
+  {
+    "text": "going to zoom out a little bit sorry about that okay now we can also scale the number of layers from 2 three four",
+    "start": "1004240",
+    "end": "1010079"
+  },
+  {
+    "text": "to five um and what does that give us well it gives us you know increasing uh",
+    "start": "1010079",
+    "end": "1016240"
+  },
+  {
+    "text": "run times once again linear in the number of layers right this time once again one layer takes about 5 seconds um",
+    "start": "1016240",
+    "end": "1023600"
+  },
+  {
+    "text": "a little bit less than that and so we get about uh four times actually four times the number of layers um and linear",
+    "start": "1023600",
+    "end": "1029760"
+  },
+  {
+    "text": "scaling sort of shows up again unsurprising right so both steps and layers obviously have linear",
+    "start": "1029760",
+    "end": "1035038"
+  },
+  {
+    "text": "relationships uh with the runtime and that is exactly kind of what we end up seeing at the end here um i'm going to",
+    "start": "1035039",
+    "end": "1041360"
+  },
+  {
+    "text": "skip the batch size thing because this is getting a little bit unwieldy in terms of the amount of things uh that are being tracked here okay all right so",
+    "start": "1041360",
+    "end": "1049600"
+  },
+  {
+    "text": "um that's the end of this benchmarking bit we can kind of make this nice function that that does a little bit of",
+    "start": "1049600",
+    "end": "1055120"
+  },
+  {
+    "text": "warm-up does cuda synchronize and we can measure the runtime of anything that we want and this is good and you should do",
+    "start": "1055120",
+    "end": "1060320"
+  },
+  {
+    "text": "this all the time in your code right you can measure how long it takes for your new fancy architecture to run but then i",
+    "start": "1060320",
+    "end": "1066960"
+  },
+  {
+    "text": "think if you want to fix some problems uh benchmarking is a very coarse grain tool it tells you that your code is slow",
+    "start": "1066960",
+    "end": "1072640"
+  },
+  {
+    "text": "but it doesn't tell you where the time is being spent and so what we would like to do um is instead do um profiling um",
+    "start": "1072640",
+    "end": "1081360"
+  },
+  {
+    "text": "and so this is going to be a much more fine grained object that we're going to want to do um and so profiling is really",
+    "start": "1081360",
+    "end": "1088160"
+  },
+  {
+    "text": "nice because it not only helps you see what where the time is being spent which functions but you know when you look at",
+    "start": "1088160",
+    "end": "1094480"
+  },
+  {
+    "text": "what you're calling usually you you interact with the pytorch interface right like the the parts of pytorch that you call but beneath pytorch there's",
+    "start": "1094480",
+    "end": "1101120"
+  },
+  {
+    "text": "this whole universe of cuda stuff that's being called and when you run a profiler you can actually see all the way to the",
+    "start": "1101120",
+    "end": "1107679"
+  },
+  {
+    "text": "low-level calls um what is actually being called and so you can get a much nicer intuition for how the the program",
+    "start": "1107679",
+    "end": "1114720"
+  },
+  {
+    "text": "is actually being executed on the hardware and so we'll step through um profiling a few simple functions um and",
+    "start": "1114720",
+    "end": "1121440"
+  },
+  {
+    "text": "then get a little bit of intuition about what is um happening and so one of the things that is nice is that um if you",
+    "start": "1121440",
+    "end": "1128480"
+  },
+  {
+    "text": "want basic profiling um pytorch has a very nice kind of built-in profiler that you can use um and this will allow you",
+    "start": "1128480",
+    "end": "1134720"
+  },
+  {
+    "text": "to not leave the python pytorch world and get some fairly reasonable looking",
+    "start": "1134720",
+    "end": "1139840"
+  },
+  {
+    "text": "um outputs and so i've profiled some functions here and you can kind of see the output of this as well um and so you",
+    "start": "1139840",
+    "end": "1147520"
+  },
+  {
+    "text": "know i've taken the sleep example from before um and here is you know the sleep",
+    "start": "1147520",
+    "end": "1152640"
+  },
+  {
+    "text": "function and when we profile the sleep function the profile function looks something like this you know i have a",
+    "start": "1152640",
+    "end": "1157840"
+  },
+  {
+    "text": "warm-up again i have torch cuda synchronize um and then i call the profiler and i'm tracking both cpu and",
+    "start": "1157840",
+    "end": "1165120"
+  },
+  {
+    "text": "the gpu times um and then you know i run something and then i synchronize again",
+    "start": "1165120",
+    "end": "1170880"
+  },
+  {
+    "text": "and i print out the average table uh across all the time okay so i go back",
+    "start": "1170880",
+    "end": "1176440"
+  },
+  {
+    "text": "now so now i'm going to profile the sleep function um and if we look at you",
+    "start": "1176440",
+    "end": "1181679"
+  },
+  {
+    "text": "know what's happening uh what happens here well 100% of the time is being spent on something called cuda device",
+    "start": "1181679",
+    "end": "1187280"
+  },
+  {
+    "text": "synchronize uh because there's no gpu work being done this is just kind of a noop you know it's kind of a silly thing",
+    "start": "1187280",
+    "end": "1192559"
+  },
+  {
+    "text": "to be profiling and so now let's look at something kind of non-trivial right so let's look at um this basic operation",
+    "start": "1192559",
+    "end": "1199200"
+  },
+  {
+    "text": "here of adding two uh matrices right so i defined a add function that takes in",
+    "start": "1199200",
+    "end": "1204720"
+  },
+  {
+    "text": "an a and a b and adds them together um and this is a a helper function that",
+    "start": "1204720",
+    "end": "1210080"
+  },
+  {
+    "text": "instantiates two random gausian matrices and then invokes uh you know whatever is the in the operation argument so this is",
+    "start": "1210080",
+    "end": "1216240"
+  },
+  {
+    "text": "adding two uh 2048 size matrices together okay so now i'm going to profile this and i'm going to call the",
+    "start": "1216240",
+    "end": "1222520"
+  },
+  {
+    "text": "profiler and i'll get back something that looks like this block over here right so this is what i get back um and",
+    "start": "1222520",
+    "end": "1229200"
+  },
+  {
+    "text": "i'm going to have to zoom back out because this is not going to be all righty okay um is this visible from the",
+    "start": "1229200",
+    "end": "1235840"
+  },
+  {
+    "text": "back can someone give me a thumbs up if it's visible from the back and uh okay good good good or thumbs down if it's",
+    "start": "1235840",
+    "end": "1240880"
+  },
+  {
+    "text": "not all right so um when we when we uh call the add function in python right",
+    "start": "1240880",
+    "end": "1246799"
+  },
+  {
+    "text": "this is kind of all that we interact with this add function a plus b right that's all we think about but actually",
+    "start": "1246799",
+    "end": "1252000"
+  },
+  {
+    "text": "underneath here the underneath the iceberg so to speak um there's a lot more that happens so this gets",
+    "start": "1252000",
+    "end": "1257200"
+  },
+  {
+    "text": "dispatched to the gpu and first um there's this thing called a10 which is the uh c sort of interface for pytorch",
+    "start": "1257200",
+    "end": "1264240"
+  },
+  {
+    "text": "and so this wrapper gets called and it says okay i'm going to add some numbers right this is what's being called that's",
+    "start": "1264240",
+    "end": "1269280"
+  },
+  {
+    "text": "the outer wrapper and then that dispatches to a particular kernel um called vectorize elementwise kernel for",
+    "start": "1269280",
+    "end": "1276640"
+  },
+  {
+    "text": "comma native cuda funure add dot dot dot dot dot right and this is the thing that's actually doing the adding and",
+    "start": "1276640",
+    "end": "1282400"
+  },
+  {
+    "text": "then there's this um also other thing called cuda launch kernel that's taking some time and this is actually you know",
+    "start": "1282400",
+    "end": "1288159"
+  },
+  {
+    "text": "the cpu is taking the command and sending it over to the gpu that's the kernel launch and that takes some time",
+    "start": "1288159",
+    "end": "1294320"
+  },
+  {
+    "text": "and then finally you know the cuda device synchronizes we're waiting for the the gpu to finish and send things back to us and that also takes some time",
+    "start": "1294320",
+    "end": "1300799"
+  },
+  {
+    "text": "right the the mere act of having a synchronization barrier is going to cost us some time and so we basically have",
+    "start": "1300799",
+    "end": "1307440"
+  },
+  {
+    "text": "you know the time total in the end here 1.4 4 milliseconds on the cpu and uh 17",
+    "start": "1307440",
+    "end": "1313600"
+  },
+  {
+    "text": "microsconds uh on the cuda right so so they're really fast on the gpu slower on the cpu and if we're looking at the cpu",
+    "start": "1313600",
+    "end": "1320880"
+  },
+  {
+    "text": "time that's being spent um which is the self cpu time we see that kind of the",
+    "start": "1320880",
+    "end": "1326000"
+  },
+  {
+    "text": "the c++ interface or the c interface is actually the thing that's costing us a whole bunch of cpu time and there's sort",
+    "start": "1326000",
+    "end": "1331360"
+  },
+  {
+    "text": "of overhead to doing anything where we're sending stuff over um to the gpu so that's the ad function um and we see",
+    "start": "1331360",
+    "end": "1338240"
+  },
+  {
+    "text": "you know what's happening under the hood same story here if i want to do a matrix multiply so i'm doing you know a",
+    "start": "1338240",
+    "end": "1344640"
+  },
+  {
+    "text": "multiplied by b so this is a matrix multiply of a and b you know i'm doing 2048 matrices once again and then i do",
+    "start": "1344640",
+    "end": "1350960"
+  },
+  {
+    "text": "profiling um now this time i see you know a10 map mole so this is saying like",
+    "start": "1350960",
+    "end": "1356320"
+  },
+  {
+    "text": "this is the the lower level interface to do matrix multiplies um and this is going to dispatch the cutless which is",
+    "start": "1356320",
+    "end": "1362720"
+  },
+  {
+    "text": "nvidia's sort of high performance matrix multiply cuda library and then it's dispatching to a very particular cutless",
+    "start": "1362720",
+    "end": "1369679"
+  },
+  {
+    "text": "kernel which is going to have some tile size um the names are truncated here i'll show you a more detailed version in",
+    "start": "1369679",
+    "end": "1375600"
+  },
+  {
+    "text": "a minute um you know there this is basically pointing towards a very particular set of like tile sizes um and",
+    "start": "1375600",
+    "end": "1381600"
+  },
+  {
+    "text": "the number of of blocks and so on and so this thing is parameterized um and that's actually doing the matrix",
+    "start": "1381600",
+    "end": "1386720"
+  },
+  {
+    "text": "multiply and once again we see the same two things at the bottom here you know the kernel launch um and the",
+    "start": "1386720",
+    "end": "1392640"
+  },
+  {
+    "text": "synchronization uh of cuda devices um and you can sort of see once again um the the cpu time cuda time split and",
+    "start": "1392640",
+    "end": "1399679"
+  },
+  {
+    "text": "we're spending way more time in cuda because you know matrix multiplies do take more time than just adding two",
+    "start": "1399679",
+    "end": "1405120"
+  },
+  {
+    "text": "vectors okay um any questions uh so far i can i can pause for a moment here i think i've",
+    "start": "1405120",
+    "end": "1411200"
+  },
+  {
+    "text": "just been uh going sort of very quickly and on my own through the profiler so if anyone has questions i can i can stop",
+    "start": "1411200",
+    "end": "1417440"
+  },
+  {
+    "text": "for a moment if not i can keep going okay oh yes in this case our time",
+    "start": "1417440",
+    "end": "1424240"
+  },
+  {
+    "text": "is greater than our cpu time but we did have a barrier that like said to for the",
+    "start": "1424240",
+    "end": "1429440"
+  },
+  {
+    "text": "cpu to wait for it to synchronize and so by that shouldn't the cpu time always be",
+    "start": "1429440",
+    "end": "1434640"
+  },
+  {
+    "text": "at least the same time counting the time yeah i don't i don't think this counts",
+    "start": "1434640",
+    "end": "1440640"
+  },
+  {
+    "text": "the time cool oh yes sorry there's too much there",
+    "start": "1440640",
+    "end": "1446320"
+  },
+  {
+    "text": "uh is there any particular reason why like when we switch from adding to matt the cpu time went down um is there a",
+    "start": "1446320",
+    "end": "1453679"
+  },
+  {
+    "text": "reason why when we go from adding to matt mode the cpu time goes down that i am not sure um to be entirely honest yes",
+    "start": "1453679",
+    "end": "1461600"
+  },
+  {
+    "text": "is there time compared to like running it",
+    "start": "1461600",
+    "end": "1468080"
+  },
+  {
+    "text": "is there overhead in the profiler um that can distort things compared to running it in the real world um yes uh",
+    "start": "1468080",
+    "end": "1474320"
+  },
+  {
+    "text": "there is overhead in the profiler um like the barriers will do that i'll show you a more advanced profiler from nvidia",
+    "start": "1474320",
+    "end": "1480240"
+  },
+  {
+    "text": "and you can add things like annotations that will also slightly distort the timings but but not by much um the",
+    "start": "1480240",
+    "end": "1485760"
+  },
+  {
+    "text": "really large scale things that you see aren't going to be really distorted by the profiler um so if you're looking at",
+    "start": "1485760",
+    "end": "1491840"
+  },
+  {
+    "text": "like micro timings yes probably but a lot of the things that that we care about in the class no",
+    "start": "1491840",
+    "end": "1498320"
+  },
+  {
+    "text": "yes just to make sure i'm interpreting this correctly so is that like for the ad case um is the 98% cpu being utilized",
+    "start": "1498320",
+    "end": "1508640"
+  },
+  {
+    "text": "over the time period that it's like the millisecond time period that's right yeah so this is the percentage of time",
+    "start": "1508640",
+    "end": "1514799"
+  },
+  {
+    "text": "as you can see that the actual millisecond time that a10 ad was actually executing in some capacity on",
+    "start": "1514799",
+    "end": "1521600"
+  },
+  {
+    "text": "the cpu i don't think the cpu% of what the cpu is doing yeah",
+    "start": "1521600",
+    "end": "1530240"
+  },
+  {
+    "text": "that's right this is the time that the cpu is active not not percentage utilization if that's yeah so this is not like the total amount of cpu flops",
+    "start": "1530240",
+    "end": "1537120"
+  },
+  {
+    "text": "or something this is a total percentage of time that the cpu is doing",
+    "start": "1537120",
+    "end": "1542200"
+  },
+  {
+    "text": "something yes okay cool all right um here's another example of a maple um so",
+    "start": "1542200",
+    "end": "1548799"
+  },
+  {
+    "text": "this is a different dimensionality right so this is a i'm multiplying 128 uh",
+    "start": "1548799",
+    "end": "1554080"
+  },
+  {
+    "text": "dimensional matrix here um so 128 by 128 much smaller um and you'll actually see",
+    "start": "1554080",
+    "end": "1560559"
+  },
+  {
+    "text": "that now um it's actually directly executing sort of this different command",
+    "start": "1560559",
+    "end": "1566240"
+  },
+  {
+    "text": "it's executing um xmma gmm gmm is is the uh a matrix multiply uh type and this is",
+    "start": "1566240",
+    "end": "1573200"
+  },
+  {
+    "text": "float 32 float 32 you can kind of see from the the naming of this kernel um what's actually happening here which is",
+    "start": "1573200",
+    "end": "1579360"
+  },
+  {
+    "text": "that this is a tiled matrix multiply um of some kind and it's not sort of going through cut list it's executing this",
+    "start": "1579360",
+    "end": "1585840"
+  },
+  {
+    "text": "particular command directly and so for a small matrix multiply you know you see that it's dispatching to a different",
+    "start": "1585840",
+    "end": "1590880"
+  },
+  {
+    "text": "kernel now so you can kind of see um kind of the complexity of matrix multiply um when we're operating at this",
+    "start": "1590880",
+    "end": "1597360"
+  },
+  {
+    "text": "high level abstraction we just think of matrix multiply as a single thing right we call like a at b and we're done but",
+    "start": "1597360",
+    "end": "1603279"
+  },
+  {
+    "text": "underneath the hood depending on the dimensionality that you have depending on the hardware that you have it will",
+    "start": "1603279",
+    "end": "1608480"
+  },
+  {
+    "text": "actually dispatch to very different um matrix multiply sort of primitives under",
+    "start": "1608480",
+    "end": "1613679"
+  },
+  {
+    "text": "the hood and that will actually manifest in very very different um sort of performance characteristics and so one",
+    "start": "1613679",
+    "end": "1619919"
+  },
+  {
+    "text": "fun tip is um torch compile which i will talk about later actually has an option to sort of microbenchmark the matrix",
+    "start": "1619919",
+    "end": "1626559"
+  },
+  {
+    "text": "multiply performance on your hardware and then it will actually then pick the the highest performing uh matrix",
+    "start": "1626559",
+    "end": "1632400"
+  },
+  {
+    "text": "multiply subruines for your for your model which you know in the past i found you know gives you like 10% speed ups",
+    "start": "1632400",
+    "end": "1638320"
+  },
+  {
+    "text": "for free it's very cool that like optimizing for these things actually gives you uh free gains out in the real",
+    "start": "1638320",
+    "end": "1644360"
+  },
+  {
+    "text": "world okay um so that's another maple example um and so the cool thing about",
+    "start": "1644360",
+    "end": "1651120"
+  },
+  {
+    "text": "the profiler compared to the just the raw benchmarking is we can now kind of see which cuda kernels are being called",
+    "start": "1651120",
+    "end": "1657440"
+  },
+  {
+    "text": "um we can see that you know different sizes of matrices lead to different cuda kernels um and we see you know cutless",
+    "start": "1657440",
+    "end": "1665440"
+  },
+  {
+    "text": "80 simp right is a is a diff is this cutless linear algebra library and it",
+    "start": "1665440",
+    "end": "1671440"
+  },
+  {
+    "text": "tells us things um like the t tile size so so far um these operations are very",
+    "start": "1671440",
+    "end": "1677919"
+  },
+  {
+    "text": "boring in a way like matrix multiplies and adds um they're basically one to one you you have a you know operation on the",
+    "start": "1677919",
+    "end": "1684640"
+  },
+  {
+    "text": "cpu side it translates to a gpu operation and it just gets shipped over right so there's just a single operation",
+    "start": "1684640",
+    "end": "1691360"
+  },
+  {
+    "text": "in all of these that does anything on the gpu so i want to look at um some more complicated operations um two more",
+    "start": "1691360",
+    "end": "1697600"
+  },
+  {
+    "text": "of these um that have sort of more compound behavior so what i want to do",
+    "start": "1697600",
+    "end": "1702640"
+  },
+  {
+    "text": "now is i want to do um i want to look at this operation uh called torch.cis c dist and this is computing you know for",
+    "start": "1702640",
+    "end": "1708960"
+  },
+  {
+    "text": "for two sets of matrices the the pair-wise uklidian distance between two sets of vectors right so this is going",
+    "start": "1708960",
+    "end": "1714240"
+  },
+  {
+    "text": "to be a big distance matrix computation between a's and b's um that i want so that's c dist um and so this is",
+    "start": "1714240",
+    "end": "1721520"
+  },
+  {
+    "text": "obviously a much more complicated operation if you want to compute uklitian distances uh you're going to",
+    "start": "1721520",
+    "end": "1726799"
+  },
+  {
+    "text": "need to compute uh dotproducts you're going to need to compute square roots um and we're going to see that once we um",
+    "start": "1726799",
+    "end": "1733279"
+  },
+  {
+    "text": "compute cedist so now here is the is the profiled output of cedist um so we see",
+    "start": "1733279",
+    "end": "1740480"
+  },
+  {
+    "text": "that this torch you know python command does map in the in the c interface to",
+    "start": "1740480",
+    "end": "1746240"
+  },
+  {
+    "text": "some sort of lower level cedist so this is a10 cedist which then maps to a10 uklitian disc um and then this will",
+    "start": "1746240",
+    "end": "1753120"
+  },
+  {
+    "text": "decompose into a whole bunch of things like a10 mm mole at 10 pow um and then sum because these are all primitives",
+    "start": "1753120",
+    "end": "1759440"
+  },
+  {
+    "text": "that you're going to need in order to actually to compute uh the uklidian distances um between uh all of your",
+    "start": "1759440",
+    "end": "1766480"
+  },
+  {
+    "text": "vectors and when you for each one of these like matrix multiplies and concatenation um and taking the powers",
+    "start": "1766480",
+    "end": "1773600"
+  },
+  {
+    "text": "um you have a corresponding uh cuda command that is being called here you",
+    "start": "1773600",
+    "end": "1778960"
+  },
+  {
+    "text": "know we have gmm which become we've become familiar with so this is a matrix multiply it's taking 78% of our compute",
+    "start": "1778960",
+    "end": "1786159"
+  },
+  {
+    "text": "or our compute time on the gpu um we've got you know copies um and sort of",
+    "start": "1786159",
+    "end": "1791520"
+  },
+  {
+    "text": "concatenation of arrays this takes um 6% of the the execution time and then this",
+    "start": "1791520",
+    "end": "1798159"
+  },
+  {
+    "text": "sort of vectorzed elementwise kernel which is taking the power um takes 5% of",
+    "start": "1798159",
+    "end": "1804159"
+  },
+  {
+    "text": "the gpu time and and 3% goes to the sum so now we get this very nice low-level breakdown of where you know my gpu is",
+    "start": "1804159",
+    "end": "1811600"
+  },
+  {
+    "text": "spending all of its time um and from this you know i can get some sense of um where maybe i should should spend my",
+    "start": "1811600",
+    "end": "1817840"
+  },
+  {
+    "text": "time optimizing you know maybe i think i can optimize my matrix multiply that would be great because that's 70 plus%",
+    "start": "1817840",
+    "end": "1823440"
+  },
+  {
+    "text": "of the time spent um in the gpu the the final example um the final",
+    "start": "1823440",
+    "end": "1829440"
+  },
+  {
+    "text": "two examples sorry that i want to uh talk about is glu and softmax so these will be our running oh sorry there's a",
+    "start": "1829440",
+    "end": "1834480"
+  },
+  {
+    "text": "question what's the too wild um okay so i will maybe answer that",
+    "start": "1834480",
+    "end": "1841919"
+  },
+  {
+    "text": "question in a in a few minutes because there's a cooler profiler that shows you a much nicer picture and so i can justiculate here but i think it'll be",
+    "start": "1841919",
+    "end": "1848240"
+  },
+  {
+    "text": "better to show that with pictures um okay so i'm going to talk about uh now the glu um and the softmax um so the glu",
+    "start": "1848240",
+    "end": "1857679"
+  },
+  {
+    "text": "is going to be um our running example um throughout the class so this is a nonlinearity if you remember it's the",
+    "start": "1857679",
+    "end": "1863679"
+  },
+  {
+    "text": "gausian error unit gausian error linear unit um and that's going to be a product",
+    "start": "1863679",
+    "end": "1869520"
+  },
+  {
+    "text": "of a uh tanh and a uh exponential if i remember right um and so we're going to",
+    "start": "1869520",
+    "end": "1876320"
+  },
+  {
+    "text": "have you know um all sorts of operations so we're going to add a and b and then we're going to call gelu sort of",
+    "start": "1876320",
+    "end": "1882000"
+  },
+  {
+    "text": "simulating the the linear plus nonlinear uh structure that we might have um in",
+    "start": "1882000",
+    "end": "1887200"
+  },
+  {
+    "text": "our mlp and so we see once again uh basically the same sort of mapping we",
+    "start": "1887200",
+    "end": "1892240"
+  },
+  {
+    "text": "see a10 add corresponding to a plus b and then we have the cuda equivalent and then we have actually a gue function",
+    "start": "1892240",
+    "end": "1899039"
+  },
+  {
+    "text": "implemented in cuda which is all the way down here and that takes about 33% of the compute okay fairly reasonable and",
+    "start": "1899039",
+    "end": "1906880"
+  },
+  {
+    "text": "then we have once again the softmax i won't go through all of these in sort of gory detail um since you know they all",
+    "start": "1906880",
+    "end": "1912960"
+  },
+  {
+    "text": "start to look the same after a while but the thing to to really point out that i think is cool is that a lot of these",
+    "start": "1912960",
+    "end": "1918000"
+  },
+  {
+    "text": "really core primitives like softmax and gellu um there's kernels written for them right so it's not like the gpu is",
+    "start": "1918000",
+    "end": "1924640"
+  },
+  {
+    "text": "executing the the basic primitives there's sort of a fused operator that computes all of this so there's no back",
+    "start": "1924640",
+    "end": "1929840"
+  },
+  {
+    "text": "and forth between cpu and gpu for all of these so okay um i mentioned before that",
+    "start": "1929840",
+    "end": "1935679"
+  },
+  {
+    "text": "i was going to sort of answer this question of what the cpu was doing um and so let's think about something a little more sophisticated right i had",
+    "start": "1935679",
+    "end": "1941919"
+  },
+  {
+    "text": "the mlp example that i started with for benchmarking um and i would let's say like to optimize that mlp make it run",
+    "start": "1941919",
+    "end": "1948480"
+  },
+  {
+    "text": "really fast so how can we do that well ideally we would sort of profile this um",
+    "start": "1948480",
+    "end": "1955039"
+  },
+  {
+    "text": "in a nice sort of fine grained way so if we use the torch profiler this is kind of what we would get um if you remember",
+    "start": "1955039",
+    "end": "1961360"
+  },
+  {
+    "text": "the mlp there's you know stack linear layers there's a forward and a backward um and you see roughly you know uh",
+    "start": "1961360",
+    "end": "1967519"
+  },
+  {
+    "text": "there's this backward thing that's happening there's a matrix multiply there's linear um and then there's",
+    "start": "1967519",
+    "end": "1972880"
+  },
+  {
+    "text": "accumulate grad operation um for the backward um and here's the matrix multiply kernel and then there's only 10",
+    "start": "1972880",
+    "end": "1979440"
+  },
+  {
+    "text": "things that can fit here so i think this this gets cut off at a certain point but this this is nice it does tell you that",
+    "start": "1979440",
+    "end": "1984960"
+  },
+  {
+    "text": "most of the time is being spent in the map moles um but you do kind of wonder like where does all the rest of the time",
+    "start": "1984960",
+    "end": "1991200"
+  },
+  {
+    "text": "go and why does only 31% of my time stay here and where's the 60% here it's a a10",
+    "start": "1991200",
+    "end": "1998720"
+  },
+  {
+    "text": "mm but there's no corresponding kernel right this is a little bit mysterious and for something that's very complex um",
+    "start": "1998720",
+    "end": "2005120"
+  },
+  {
+    "text": "module this is not a very good visualization and so for that i think we",
+    "start": "2005120",
+    "end": "2010320"
+  },
+  {
+    "text": "have to actually uh get out a real sort of grown-up profiler um and you will",
+    "start": "2010320",
+    "end": "2015760"
+  },
+  {
+    "text": "have to you know or we will ask you to um look at uh this thing which is",
+    "start": "2015760",
+    "end": "2021120"
+  },
+  {
+    "text": "nvidia's endsite systems um and this is the kind of nvidia's sort of detailed",
+    "start": "2021120",
+    "end": "2026399"
+  },
+  {
+    "text": "way of looking at gpu behavior um and performance and so we will actually kind of see exactly what is happening as we",
+    "start": "2026399",
+    "end": "2033840"
+  },
+  {
+    "text": "run this mlp so actually in the back can you see i don't know this tiny text over",
+    "start": "2033840",
+    "end": "2039640"
+  },
+  {
+    "text": "here thumbs up okay all right if you can see it then i'm not going to zoom in but it does it does seem small even from",
+    "start": "2039640",
+    "end": "2045519"
+  },
+  {
+    "text": "here um all right so basically if we look here um we see several different",
+    "start": "2045519",
+    "end": "2051760"
+  },
+  {
+    "text": "things we see cuda hw over here and then we see threads um and so this top half",
+    "start": "2051760",
+    "end": "2057200"
+  },
+  {
+    "text": "this cuda part this is what the gpu is kind of doing and then in this threads",
+    "start": "2057200",
+    "end": "2062638"
+  },
+  {
+    "text": "part um we see kind of what the cpu is doing and i can also pull up the code i",
+    "start": "2062639",
+    "end": "2068720"
+  },
+  {
+    "text": "think yes um the code here um when i profiled it i've added a few annotations",
+    "start": "2068720",
+    "end": "2073919"
+  },
+  {
+    "text": "um okay this one i zoom in for sure uh okay let's um excellent all right um so i've",
+    "start": "2073919",
+    "end": "2082398"
+  },
+  {
+    "text": "annotated the code with this set of things that says let's see uh",
+    "start": "2082399",
+    "end": "2088839"
+  },
+  {
+    "text": "nvtx um which basically annotates uh my code with annotate uh with markers so",
+    "start": "2088839",
+    "end": "2096158"
+  },
+  {
+    "text": "when the profiler comes in here it will know that this piece of code belongs to a block called define model and for",
+    "start": "2096159",
+    "end": "2103040"
+  },
+  {
+    "text": "example the this part that says step range push and range pop this range here",
+    "start": "2103040",
+    "end": "2108640"
+  },
+  {
+    "text": "from line 77 to line 55 should be annotated with something that says step",
+    "start": "2108640",
+    "end": "2113680"
+  },
+  {
+    "text": "underscore step okay so i've added all these annotations in my code before calling um my profiler and so let's go",
+    "start": "2113680",
+    "end": "2120800"
+  },
+  {
+    "text": "back here so now if we go to this line that says nvtx we can kind of see define",
+    "start": "2120800",
+    "end": "2125920"
+  },
+  {
+    "text": "model um which is the thing that i wrapped my my model construction call and then i see step zero step one step",
+    "start": "2125920",
+    "end": "2132560"
+  },
+  {
+    "text": "two step three step four step five so each step is now nicely annotated in this profiler and we can kind of see all",
+    "start": "2132560",
+    "end": "2139040"
+  },
+  {
+    "text": "of the things that the model is doing um as we as it goes along and i'll start on this side one thing we see is that this",
+    "start": "2139040",
+    "end": "2147200"
+  },
+  {
+    "text": "um piece of code it doesn't do very much work it takes only 14 seconds so actually most of the time for the",
+    "start": "2147200",
+    "end": "2152640"
+  },
+  {
+    "text": "profiler is spent on overhead so the part up until roughly here is you know",
+    "start": "2152640",
+    "end": "2158640"
+  },
+  {
+    "text": "things like just loading the libraries and that takes a long time it takes apparently 7.5 seconds just initialize",
+    "start": "2158640",
+    "end": "2164480"
+  },
+  {
+    "text": "everything and then on at least on the gpu at 7.5 seconds or so into the program it",
+    "start": "2164480",
+    "end": "2171359"
+  },
+  {
+    "text": "starts actually building the model and you see here on the memory footprint you know this is the place where now memory",
+    "start": "2171359",
+    "end": "2177200"
+  },
+  {
+    "text": "is being sort of uh allocated and on the gpu memory the memory usage starts to grow right now the model is now",
+    "start": "2177200",
+    "end": "2184160"
+  },
+  {
+    "text": "constructed at this point and then step zero is where sort of the action starts to happen and so you were asking earlier",
+    "start": "2184160",
+    "end": "2191359"
+  },
+  {
+    "text": "what's happening um between the cpu and and sort of gpu and so how the execution",
+    "start": "2191359",
+    "end": "2197359"
+  },
+  {
+    "text": "model of this works is um here is sort of step zero on the cpu and i'm starting",
+    "start": "2197359",
+    "end": "2202880"
+  },
+  {
+    "text": "right here and here's the forward pass and this is layer zero so let's just kind of think through what's happening",
+    "start": "2202880",
+    "end": "2208320"
+  },
+  {
+    "text": "um as i said before when you first encounter or when you first call a piece of code in pytorch um it doesn't just",
+    "start": "2208320",
+    "end": "2215280"
+  },
+  {
+    "text": "directly execute it will actually do things like um you know on the fly compile things and so um so you know",
+    "start": "2215280",
+    "end": "2221440"
+  },
+  {
+    "text": "this thing like runtime triggered module loading um is sort of overhead work that's being done in order to just",
+    "start": "2221440",
+    "end": "2227920"
+  },
+  {
+    "text": "initialize the layer and the computation and move sort of various bits of code into the gpu so this takes a long time",
+    "start": "2227920",
+    "end": "2235599"
+  },
+  {
+    "text": "um and then after this layer zero is done now if i look at sort of any slice here let's sort of zoom in um to",
+    "start": "2235599",
+    "end": "2242800"
+  },
+  {
+    "text": "selection we'll see that each of these layers is really really really quick and what happens here is when i highlight",
+    "start": "2242800",
+    "end": "2249760"
+  },
+  {
+    "text": "this layer one over here on the cpu side notice that that's not where layer 1 is on the gpu side right so as i said",
+    "start": "2249760",
+    "end": "2257280"
+  },
+  {
+    "text": "before the cpu and gpu are kind of two different execution devices so i start",
+    "start": "2257280",
+    "end": "2262560"
+  },
+  {
+    "text": "at layer zero i'm done with layer zero i start layer one now the cpu is actually just sending all of the the sort of um",
+    "start": "2262560",
+    "end": "2269440"
+  },
+  {
+    "text": "cuda commands um the cuda kernels um it's launching all the cuda kernels already to the gpu at this point right",
+    "start": "2269440",
+    "end": "2276000"
+  },
+  {
+    "text": "so when the cpu is saying i'm doing layer one what it's actually doing is it's queuing commands into the gpu it",
+    "start": "2276000",
+    "end": "2281599"
+  },
+  {
+    "text": "says \"now run this thing next run this thing next run this thing next.\" right um and so the cpu is running way ahead",
+    "start": "2281599",
+    "end": "2287040"
+  },
+  {
+    "text": "of the gpu and by the time layer 1 starts executing um on the gpu actually",
+    "start": "2287040",
+    "end": "2292320"
+  },
+  {
+    "text": "we're already at layer 9 on the cpu right right the cpu is running way ahead and there's basically um a queue that",
+    "start": "2292320",
+    "end": "2298320"
+  },
+  {
+    "text": "the the cpu maintains where um it's sending a fixed number of uh kernel uh",
+    "start": "2298320",
+    "end": "2304320"
+  },
+  {
+    "text": "cuda kernels to the gpu and so once you hit that q depth it's going to sort of stop running ahead but until that point",
+    "start": "2304320",
+    "end": "2310000"
+  },
+  {
+    "text": "it's just going to keep going and going and going as far as it can right um and in this case this does become um i'm",
+    "start": "2310000",
+    "end": "2316720"
+  },
+  {
+    "text": "gonna zoom out again uh okay undo the zoom there we go um in this case this",
+    "start": "2316720",
+    "end": "2324640"
+  },
+  {
+    "text": "kind of gets uh a little extreme because if i zoom out once more um notice how you know in these",
+    "start": "2324640",
+    "end": "2330599"
+  },
+  {
+    "text": "steps i'm running way ahead like the step zero is here step two is here this",
+    "start": "2330599",
+    "end": "2335839"
+  },
+  {
+    "text": "was step one which basically took no time at all um step two is here so it's the cpu is basically running one entire",
+    "start": "2335839",
+    "end": "2342240"
+  },
+  {
+    "text": "step forward and backward ahead of the gpu um one interesting thing that you",
+    "start": "2342240",
+    "end": "2348320"
+  },
+  {
+    "text": "might do is if you're writing you know various code for for training a language model one normal thing that you might do",
+    "start": "2348320",
+    "end": "2354079"
+  },
+  {
+    "text": "is let's go back to the code um i might do something like print you know my losses in between iterations um this",
+    "start": "2354079",
+    "end": "2361280"
+  },
+  {
+    "text": "seems like it should have no effect on what the gpu is doing right you're like well it's a print statement how much could it could it do um if you think",
+    "start": "2361280",
+    "end": "2368400"
+  },
+  {
+    "text": "about it for a moment this will have big impacts on the execution layout uh on the gpu because in order to print this",
+    "start": "2368400",
+    "end": "2374560"
+  },
+  {
+    "text": "statement right this print statement happens on the cpu and the cpu needs to get the loss that means it needs to wait",
+    "start": "2374560",
+    "end": "2380480"
+  },
+  {
+    "text": "for the gpu to compute that loss and so let's look at what happens so here you know as i said you know step four on the",
+    "start": "2380480",
+    "end": "2387280"
+  },
+  {
+    "text": "cpu happens way before the gpu equivalent now let's switch back now this is the version that i profiled",
+    "start": "2387280",
+    "end": "2392880"
+  },
+  {
+    "text": "where it has the print statement right and then now i sort of zoom into",
+    "start": "2392880",
+    "end": "2398079"
+  },
+  {
+    "text": "selection here now see how step one and step two are basically kind of",
+    "start": "2398079",
+    "end": "2404079"
+  },
+  {
+    "text": "synchronized now right because i have to wait for the loss to get computed and",
+    "start": "2404079",
+    "end": "2409119"
+  },
+  {
+    "text": "and you look at this and you say \"oh but it's still a little offset right like step two step one isn't exactly aligned",
+    "start": "2409119",
+    "end": "2414560"
+  },
+  {
+    "text": "with each other.\" so now let's kind of zoom back in and see okay what happened to step one on the cpu well um basically",
+    "start": "2414560",
+    "end": "2422320"
+  },
+  {
+    "text": "the end point of step one on the cpu is also kind of where the optimizer step starts right so by the time that forward",
+    "start": "2422320",
+    "end": "2430160"
+  },
+  {
+    "text": "is done um sorry this cuda stream synchronizes the thing so this cuda stream synchronize command on the cpu",
+    "start": "2430160",
+    "end": "2436320"
+  },
+  {
+    "text": "this is basically saying i'm just waiting for the gpu because i can't run ahead i'm waiting for this loss to be computed and to be spent sent back to me",
+    "start": "2436320",
+    "end": "2443200"
+  },
+  {
+    "text": "right so this is kind of a dummy operation where it's saying cpu waits waits waits waits waits waits waits um",
+    "start": "2443200",
+    "end": "2448640"
+  },
+  {
+    "text": "well the backward step is done so now i can print the loss i've printed the loss okay now the cpu can start running ahead",
+    "start": "2448640",
+    "end": "2455440"
+  },
+  {
+    "text": "and it does run ahead and starts sending step two stuff now and then well once this hits here it's sort of run out of",
+    "start": "2455440",
+    "end": "2461839"
+  },
+  {
+    "text": "commands it's waiting for the loss again cuda synchronize wait wait wait wait wait backward step is done now i can",
+    "start": "2461839",
+    "end": "2467440"
+  },
+  {
+    "text": "print the loss now i run ahead again right so um in this case you know the gpu is still essentially full",
+    "start": "2467440",
+    "end": "2473680"
+  },
+  {
+    "text": "utilization in both cases but in extreme cases where let's say you're printing tons of stuff all the time actually",
+    "start": "2473680",
+    "end": "2478880"
+  },
+  {
+    "text": "you're going to introduce a cpu bottleneck right because the gpu has to the cpu has to keep waiting for the gpu and it can't launch the kernels um sort",
+    "start": "2478880",
+    "end": "2485920"
+  },
+  {
+    "text": "of ahead of time so um that's kind of a really cool thing that you can see uh",
+    "start": "2485920",
+    "end": "2491040"
+  },
+  {
+    "text": "with the profiler um sort of this cpu versus gpu and they're actually different devices that communicate to",
+    "start": "2491040",
+    "end": "2496720"
+  },
+  {
+    "text": "each other it's not at this single unified object and you wouldn't see that unless you you started to look at some of these like more advanced profilers um",
+    "start": "2496720",
+    "end": "2504400"
+  },
+  {
+    "text": "any any question about that sort of set of things cool okay um and the other thing",
+    "start": "2504400",
+    "end": "2513119"
+  },
+  {
+    "text": "that i want to kind of show you is you know the the profiler thing that i was",
+    "start": "2513119",
+    "end": "2518319"
+  },
+  {
+    "text": "playing with before you can also generate very similar views um in nsis",
+    "start": "2518319",
+    "end": "2523359"
+  },
+  {
+    "text": "as well where you sort of select some range of of things that you want to let's let's uh do a warm-up i said we",
+    "start": "2523359",
+    "end": "2529359"
+  },
+  {
+    "text": "should so we should exclude the first couple of steps so we'll start at step three and we'll we'll measure some steps",
+    "start": "2529359",
+    "end": "2534560"
+  },
+  {
+    "text": "um sort of in this range we could take the kernels this is what's doing the computation and you can see that there's",
+    "start": "2534560",
+    "end": "2540880"
+  },
+  {
+    "text": "actually many different kinds of matrix multiply this is one matrix multiply kernel this is a different matrix multiply kernel there's a different sort",
+    "start": "2540880",
+    "end": "2547520"
+  },
+  {
+    "text": "of like vectorzed element kernel um and all of these are taking different amounts of computation and we can take",
+    "start": "2547520",
+    "end": "2554640"
+  },
+  {
+    "text": "this and we can say oh show me um in the events view all the things that are happening um and i can also see sort of",
+    "start": "2554640",
+    "end": "2562319"
+  },
+  {
+    "text": "the stats view all of the um the time that it takes wait let's see we want",
+    "start": "2562319",
+    "end": "2568520"
+  },
+  {
+    "text": "um we want the average time no we want sorry the cuda",
+    "start": "2568520",
+    "end": "2573800"
+  },
+  {
+    "text": "kernel execution summary yeah we want the total",
+    "start": "2573800",
+    "end": "2579560"
+  },
+  {
+    "text": "duration of the kernels and so we can see which kernels are taking the most",
+    "start": "2579560",
+    "end": "2586160"
+  },
+  {
+    "text": "time um and aggregate across these views so this this is actually a very very powerful tool that can give you both",
+    "start": "2586160",
+    "end": "2591680"
+  },
+  {
+    "text": "like the the aggregate view of what's slow and what's fast as well as individual kernels that are being",
+    "start": "2591680",
+    "end": "2596720"
+  },
+  {
+    "text": "launched and when they're launched and where the cpu uh commands for that came from um and i guess one one final side",
+    "start": "2596720",
+    "end": "2603920"
+  },
+  {
+    "text": "note here is this is one of the reasons why um you know it doesn't matter that we're programming in python and python's",
+    "start": "2603920",
+    "end": "2609839"
+  },
+  {
+    "text": "not a very high performance language right because the cpu is never the bottleneck because the cpu can run ahead",
+    "start": "2609839",
+    "end": "2615119"
+  },
+  {
+    "text": "and sort of cue commands into the gpu um and so this sort of detaching or like",
+    "start": "2615119",
+    "end": "2621359"
+  },
+  {
+    "text": "this disconnecting uh aspect between the gpu and the cpu is one of the key reasons why we can use this nice highle",
+    "start": "2621359",
+    "end": "2628079"
+  },
+  {
+    "text": "programming language and yet still get sort of full utilization um out of sort of our",
+    "start": "2628079",
+    "end": "2633640"
+  },
+  {
+    "text": "gpus cool okay any questions before i sort of switch back to to this because",
+    "start": "2633640",
+    "end": "2639200"
+  },
+  {
+    "text": "i'm going to leave uh nsis sort of forever for this lecture at this point cool yeah but you'll get to play",
+    "start": "2639200",
+    "end": "2646160"
+  },
+  {
+    "text": "with it in assignment two and i think you'll appreciate it because it gives you like a a really interesting view uh",
+    "start": "2646160",
+    "end": "2651760"
+  },
+  {
+    "text": "into what your hardware is actually doing to make these like language models uh train so okay that was benchmarking",
+    "start": "2651760",
+    "end": "2658560"
+  },
+  {
+    "text": "and profiling now you have all the tools you need to be able to do sort of performance things um and now we're",
+    "start": "2658560",
+    "end": "2664560"
+  },
+  {
+    "text": "going to write some kernels in the remaining time so remember kernel fusion right so this was the the image that i",
+    "start": "2664560",
+    "end": "2671280"
+  },
+  {
+    "text": "showed you um in lecture right there's a little factory every time i need to do an operation i need to ship it from the",
+    "start": "2671280",
+    "end": "2676640"
+  },
+  {
+    "text": "warehouse to the factory and back and so if i you know naively do a bunch of",
+    "start": "2676640",
+    "end": "2682240"
+  },
+  {
+    "text": "operations in sequence without thinking about it i'm paying for a lot of sort of shipping cost back and forth from from",
+    "start": "2682240",
+    "end": "2687760"
+  },
+  {
+    "text": "the warehouse what i should do is have one factory that does all the operations at once so i do not pay for this cost",
+    "start": "2687760",
+    "end": "2694079"
+  },
+  {
+    "text": "multiple times right that's very important so now we're going to do glu and we're going to write a kernel for",
+    "start": "2694079",
+    "end": "2699920"
+  },
+  {
+    "text": "glu and i'm going to write that kernel in several different ways and we're going to look at the performance impact",
+    "start": "2699920",
+    "end": "2705119"
+  },
+  {
+    "text": "of doing that um and so we have the pytorch implementation of glu and that",
+    "start": "2705119",
+    "end": "2711599"
+  },
+  {
+    "text": "looks just like this um torchn functional glu um and i i invoke",
+    "start": "2711599",
+    "end": "2716640"
+  },
+  {
+    "text": "approximate equals tanh because um i want this to exactly match the naive",
+    "start": "2716640",
+    "end": "2721839"
+  },
+  {
+    "text": "thing that i'm going to do next so this is not going to be you know actually multiplying by um the the cdf of the",
+    "start": "2721839",
+    "end": "2728000"
+  },
+  {
+    "text": "gausian it's going to be some approximation to that that's easier to compute okay so that's the pytorch gal",
+    "start": "2728000",
+    "end": "2733200"
+  },
+  {
+    "text": "and now i'm going to do the dumb thing right i'm you're going to look at this code and say this is going to be low performance um i'm going to go in and in",
+    "start": "2733200",
+    "end": "2740400"
+  },
+  {
+    "text": "pytorch i'm going to write glu as 0.5 * x * 1 +",
+    "start": "2740400",
+    "end": "2745720"
+  },
+  {
+    "text": "tanh / 2 * x + 0.044715* x cub right um magic formula",
+    "start": "2745720",
+    "end": "2753760"
+  },
+  {
+    "text": "but this is a good approximation to the glu can you can look it up or or convince yourself this is true um but if",
+    "start": "2753760",
+    "end": "2760480"
+  },
+  {
+    "text": "you do this um you see that there's a lot of operations that happen right there's like a tanh there's a x cubed",
+    "start": "2760480",
+    "end": "2766880"
+  },
+  {
+    "text": "there's multiplication by a constant in addition um and multiplication by 0.5 and x um if this involves you know",
+    "start": "2766880",
+    "end": "2774400"
+  },
+  {
+    "text": "multiple different cuda kernels this is probably going to be slow right that should be our intuition at this point",
+    "start": "2774400",
+    "end": "2779520"
+  },
+  {
+    "text": "from fusion um so let's see if that's true okay so these two are are the same you can see at the top left they compute",
+    "start": "2779520",
+    "end": "2784640"
+  },
+  {
+    "text": "the exact same numbers um and you know we can systematically check this on random",
+    "start": "2784640",
+    "end": "2790440"
+  },
+  {
+    "text": "gausian and now let's sort of benchmark the two okay so the manual time is 8.1",
+    "start": "2790440",
+    "end": "2796319"
+  },
+  {
+    "text": "um seconds for a really really big gu um and pytorch time is is 1.1 right uh",
+    "start": "2796319",
+    "end": "2802160"
+  },
+  {
+    "text": "milliseconds sorry um and the fuse version is going to be uh significantly faster in fact eight times faster wow",
+    "start": "2802160",
+    "end": "2808880"
+  },
+  {
+    "text": "you know big difference from from writing a simple kernel um of course your your map moles are probably still going to be the bottleneck but it would",
+    "start": "2808880",
+    "end": "2816079"
+  },
+  {
+    "text": "be really cool if we could go from that 8 milliseconds to that 1 millisecond right that would feel very satisfying so we're going to try to get close to that",
+    "start": "2816079",
+    "end": "2822720"
+  },
+  {
+    "text": "1.1 millisecond um in the next few parts of the lecture so now um let's look at",
+    "start": "2822720",
+    "end": "2828400"
+  },
+  {
+    "text": "the the what's happening under the hood um i don't need to look at nsis because all i really want to know is some very high level stuff for the manual glu you",
+    "start": "2828400",
+    "end": "2835839"
+  },
+  {
+    "text": "know kind of just like i said it's going to do a whole bunch of operations it's going to do a bunch of multiplications",
+    "start": "2835839",
+    "end": "2841200"
+  },
+  {
+    "text": "it's vectorzed but it's a bunch of you know cuda kernels being launched here um and notice on the right this cuda kernel",
+    "start": "2841200",
+    "end": "2847280"
+  },
+  {
+    "text": "gets called three times because we have a whole bunch of multiplications floating around here um we've also got",
+    "start": "2847280",
+    "end": "2852720"
+  },
+  {
+    "text": "you know addition we've got a tanh um and each one of these is is probably kind of slow and in the end you know",
+    "start": "2852720",
+    "end": "2858319"
+  },
+  {
+    "text": "we're incurring fairly large overhead doing this um now let's do the same",
+    "start": "2858319",
+    "end": "2864000"
+  },
+  {
+    "text": "thing um sorry with the pietorchu and this is this is really great there's a",
+    "start": "2864000",
+    "end": "2869280"
+  },
+  {
+    "text": "single cuda kernel launch it happens once and it just processes the whole thing this is what we'd like to see um",
+    "start": "2869280",
+    "end": "2875599"
+  },
+  {
+    "text": "and of course this is very very fast because it's just a single uh cuda kernel right so um this is really nice",
+    "start": "2875599",
+    "end": "2883440"
+  },
+  {
+    "text": "and we would like to to you know somehow get to to the cuda kernel and so the first thing you might think of um",
+    "start": "2883440",
+    "end": "2888960"
+  },
+  {
+    "text": "depending on how much you know about writing gpu efficient code is all right",
+    "start": "2888960",
+    "end": "2894160"
+  },
+  {
+    "text": "the pytorch people must have written this in the lowest level language possible so we're going to do the same thing we're going to go to not the",
+    "start": "2894160",
+    "end": "2900319"
+  },
+  {
+    "text": "lowest level possible but we're going to go to the the c++ api and we're going to write the cuda kernel in c++ right so",
+    "start": "2900319",
+    "end": "2907920"
+  },
+  {
+    "text": "let's open it up and write our own um cuda kernel so how is that going to work",
+    "start": "2907920",
+    "end": "2913040"
+  },
+  {
+    "text": "okay so we have gone in and sort of created a c++ version of the whole thing",
+    "start": "2913040",
+    "end": "2918880"
+  },
+  {
+    "text": "so cuda you know when we say cuda is actually the the c++ api for interfacing with and programming gpus and just like",
+    "start": "2918880",
+    "end": "2927359"
+  },
+  {
+    "text": "sort of the the logical model of a gpu that we describe you know we're going to write some sort of function f um and",
+    "start": "2927359",
+    "end": "2933359"
+  },
+  {
+    "text": "then when we sort of invoke this cuda kernel it's going to automatically call f on all the elements of a vector or a",
+    "start": "2933359",
+    "end": "2940079"
+  },
+  {
+    "text": "matrix um and then we will get to parallel compute um everything that we want um as nomenclature we're going to",
+    "start": "2940079",
+    "end": "2946880"
+  },
+  {
+    "text": "have a grid um which is a collection of thread blocks so think of this as i have a task i'm going to cut it up into",
+    "start": "2946880",
+    "end": "2952400"
+  },
+  {
+    "text": "pieces um and there's going to be a number of blocks this is the you know in in a 2d grid for example um there's",
+    "start": "2952400",
+    "end": "2958559"
+  },
+  {
+    "text": "going to be sort of a row uh coordinate and then there's going to be a column coordinate and this will be very useful if you're working with matrices and then",
+    "start": "2958559",
+    "end": "2965680"
+  },
+  {
+    "text": "there will be um the size of each of these blocks like you know how how big are these in terms of the number uh of",
+    "start": "2965680",
+    "end": "2971760"
+  },
+  {
+    "text": "thread blocks so this is the dimension of the blocks um and then there's a collection of threads um within these",
+    "start": "2971760",
+    "end": "2977200"
+  },
+  {
+    "text": "blocks and this is the coordinate that for example one thread block lives in and then each thread is within each",
+    "start": "2977200",
+    "end": "2983359"
+  },
+  {
+    "text": "block right so there's sort of hierarchical structure here there's a grid and then there's a thread inside a grid right and then we're going to",
+    "start": "2983359",
+    "end": "2990400"
+  },
+  {
+    "text": "basically each function is going to take in uh three things it's going to take the block index like which thread block",
+    "start": "2990400",
+    "end": "2996000"
+  },
+  {
+    "text": "do i belong to um which uh what's kind of the block dimensions um and then what",
+    "start": "2996000",
+    "end": "3002000"
+  },
+  {
+    "text": "is the index that i am like my my thread index and with these i can kind of know",
+    "start": "3002000",
+    "end": "3007200"
+  },
+  {
+    "text": "which coordinate that i am in in the matrix or the vector and then i can sort of decide what logic that i want um one",
+    "start": "3007200",
+    "end": "3014640"
+  },
+  {
+    "text": "sort of last thing before we uh go through the actual c++ code is you know whenever you're you're trying to debug",
+    "start": "3014640",
+    "end": "3021440"
+  },
+  {
+    "text": "cuda um you want to launch with cuda launch blocking equals 1 this will allow you to actually debug um your cuda",
+    "start": "3021440",
+    "end": "3027839"
+  },
+  {
+    "text": "kernel it will give you sort of error messages back um at a at a cost in terms of the the runtime um if you don't do",
+    "start": "3027839",
+    "end": "3033760"
+  },
+  {
+    "text": "that you are going to have a bad time uh if you're writing cuda code and and needing to debug so okay um here is uh",
+    "start": "3033760",
+    "end": "3041599"
+  },
+  {
+    "text": "my my glu code and let's go through it kind of piece by piece and then i'll talk about what all the pieces are doing",
+    "start": "3041599",
+    "end": "3047760"
+  },
+  {
+    "text": "um this will probably take the longest out of the the things that we're going to walk through um other than the",
+    "start": "3047760",
+    "end": "3052800"
+  },
+  {
+    "text": "machine code um and once you understand this you should be able to understand all the other pieces so we'll go through",
+    "start": "3052800",
+    "end": "3058160"
+  },
+  {
+    "text": "this a little slowly um so there's two parts of this code so the first part",
+    "start": "3058160",
+    "end": "3063200"
+  },
+  {
+    "text": "this glu kernel piece up here this is the actual kernel this does the computation right this is going to get",
+    "start": "3063200",
+    "end": "3069599"
+  },
+  {
+    "text": "sent to the gpu it's going to do the computation and then it will return the results this piece the glu function here",
+    "start": "3069599",
+    "end": "3077040"
+  },
+  {
+    "text": "this is a wrapper right this is lives on the cpu it's going to orchestrate the launch of the kernel which is actually",
+    "start": "3077040",
+    "end": "3082880"
+  },
+  {
+    "text": "going to go out and live in the gpu right um so maybe we can start with kind of this uh sort of wrapper piece this",
+    "start": "3082880",
+    "end": "3089520"
+  },
+  {
+    "text": "glu function first right so we're always going to check two things um basically in in the the triton or the the cuda",
+    "start": "3089520",
+    "end": "3096960"
+  },
+  {
+    "text": "code we're always going to check oh sorry there's a question back there okay sorry that's my bad okay let me",
+    "start": "3096960",
+    "end": "3103200"
+  },
+  {
+    "text": "zoom in that is an easy fix um but i needed to know that that you can't see okay good um all right is this good okay",
+    "start": "3103200",
+    "end": "3110880"
+  },
+  {
+    "text": "excellent um okay so um we're going to start with the gallery function and",
+    "start": "3110880",
+    "end": "3116240"
+  },
+  {
+    "text": "there's two things that we're we're always going to need to do the first one is to um make sure that x lives in like",
+    "start": "3116240",
+    "end": "3123200"
+  },
+  {
+    "text": "the the gpu device like the cuda tensor of some kind right if it's not um well",
+    "start": "3123200",
+    "end": "3128640"
+  },
+  {
+    "text": "well that's going to be a problem um we're not going to be able to do anything on the gpu the second thing which is maybe less obvious is that we",
+    "start": "3128640",
+    "end": "3135760"
+  },
+  {
+    "text": "want to check to make sure x is contiguous what that means is it lives in a contiguous block of memory because",
+    "start": "3135760",
+    "end": "3141680"
+  },
+  {
+    "text": "when we index into x we're going to do a whole bunch of indexing arithmetic and we're going to assume that x lives in a",
+    "start": "3141680",
+    "end": "3147440"
+  },
+  {
+    "text": "block of memory right and if it doesn't it's just going to be you know basically impossible to do this with with any",
+    "start": "3147440",
+    "end": "3152960"
+  },
+  {
+    "text": "level of generality um and so when we compute the glu right we take in an",
+    "start": "3152960",
+    "end": "3158160"
+  },
+  {
+    "text": "input x and we're going to output a y right and so we need to allocate a output so torch tensor y equals torch",
+    "start": "3158160",
+    "end": "3166000"
+  },
+  {
+    "text": "empty like x this is just saying well give me sort of a output tensor space or",
+    "start": "3166000",
+    "end": "3171680"
+  },
+  {
+    "text": "a pointer to a output tensor um that is just like the dimension of x and notice",
+    "start": "3171680",
+    "end": "3177440"
+  },
+  {
+    "text": "that i'm not calling zeros this will save on extra operations i don't need to zero out these y's because i'm going to",
+    "start": "3177440",
+    "end": "3183359"
+  },
+  {
+    "text": "write into them anyway right so this is a a minor but you might as well do it optimization and then um basically in",
+    "start": "3183359",
+    "end": "3191040"
+  },
+  {
+    "text": "all the code that we write we're going to need to figure out the grid right so what's the total number of elements that",
+    "start": "3191040",
+    "end": "3196640"
+  },
+  {
+    "text": "i have what's the size of each block the number of threads that i have in each block and then how many blocks total do",
+    "start": "3196640",
+    "end": "3203680"
+  },
+  {
+    "text": "i have and when i need to figure out the number of blocks i'm going to you know call cd which is going to be essentially",
+    "start": "3203680",
+    "end": "3210720"
+  },
+  {
+    "text": "take the the ratio of num elements to block size and then take the ceiling right because i need to round up to make",
+    "start": "3210720",
+    "end": "3217200"
+  },
+  {
+    "text": "sure that very last set of elements that sort of isn't divisible by block size still gets computed right so i i take",
+    "start": "3217200",
+    "end": "3223040"
+  },
+  {
+    "text": "the ceiling uh rather than the floor and then this is all very simple bookkeeping stuff and then i say all right launch",
+    "start": "3223040",
+    "end": "3229520"
+  },
+  {
+    "text": "the kernel you know the gu kernel gets launched um and this sort of angle brackets is saying this is kind of the",
+    "start": "3229520",
+    "end": "3235599"
+  },
+  {
+    "text": "um with uh the given number of blocks and the and the size of each block and this is going to be passed into um sort",
+    "start": "3235599",
+    "end": "3241920"
+  },
+  {
+    "text": "of the the kernel command and then i'm going to pass in the pointers to x's and y's right i'm not actually going to pass",
+    "start": "3241920",
+    "end": "3247359"
+  },
+  {
+    "text": "the the the values of x's and y's um and the total number of elements and i need this to compute sort of um essentially",
+    "start": "3247359",
+    "end": "3254240"
+  },
+  {
+    "text": "the boundary conditions um of my kernel so now let's go to the actual kernel",
+    "start": "3254240",
+    "end": "3259760"
+  },
+  {
+    "text": "itself right so i have global void gel kernel and i get in pointers for in and",
+    "start": "3259760",
+    "end": "3264880"
+  },
+  {
+    "text": "out and i have number of elements items um and this keyword global um the the",
+    "start": "3264880",
+    "end": "3270480"
+  },
+  {
+    "text": "website sorry the the rendering here has mangled it a bit a little bit but you should think of this as underscore global and this is a keyword that",
+    "start": "3270480",
+    "end": "3277359"
+  },
+  {
+    "text": "distinguishes it as a as a cuda kernel uh function and so what am i doing well",
+    "start": "3277359",
+    "end": "3283359"
+  },
+  {
+    "text": "you know this thread is actually supposed to operate on a single element i right um but i don't get i as input",
+    "start": "3283359",
+    "end": "3291520"
+  },
+  {
+    "text": "like the code doesn't actually tell me you're in a vector in coordinate i so i need to compute where i am and how i'm",
+    "start": "3291520",
+    "end": "3297839"
+  },
+  {
+    "text": "how am i going to do that it's going to be i take my block index right i only have one dimension so it's block index.x",
+    "start": "3297839",
+    "end": "3304160"
+  },
+  {
+    "text": "so just the first coordinate um and then multiply it by the size of each block the the block dim.x x and this tells me",
+    "start": "3304160",
+    "end": "3311440"
+  },
+  {
+    "text": "you know basically the starting point within within my current block and then now i add in thread idx so you know i",
+    "start": "3311440",
+    "end": "3317760"
+  },
+  {
+    "text": "know where the start of my current block is and i add in the offset to where i am within the block and that gives me my",
+    "start": "3317760",
+    "end": "3323920"
+  },
+  {
+    "text": "global coordinate i right so some some bookkeeping computation just to get the coordinates here and then this is",
+    "start": "3323920",
+    "end": "3330800"
+  },
+  {
+    "text": "important too you see this pattern uh basically in all the cuda code that people write um there's no kind of out",
+    "start": "3330800",
+    "end": "3336800"
+  },
+  {
+    "text": "of bounds checking naturally and so what you do is i have my coordinate and i'm going to check to make sure that you",
+    "start": "3336800",
+    "end": "3343200"
+  },
+  {
+    "text": "know i am supposed to be processing something that's inbounds and some of the threads at the very end of your block they're going to be processing",
+    "start": "3343200",
+    "end": "3349680"
+  },
+  {
+    "text": "stuff that's out of bounds in memory and you do not want it to touch those and so you you basically condition it on i less",
+    "start": "3349680",
+    "end": "3355280"
+  },
+  {
+    "text": "than num elements and you do nothing if you're outside of that sorry yes",
+    "start": "3355280",
+    "end": "3361400"
+  },
+  {
+    "text": "sorry this is just the extension uh that you sort of write the the cuda code in it's",
+    "start": "3363280",
+    "end": "3368319"
+  },
+  {
+    "text": "to distinguish it from you know just your standard c code okay um so this is just a file name",
+    "start": "3368319",
+    "end": "3375760"
+  },
+  {
+    "text": "thing is this cu there's nothing particularly special about it um okay and then so now you know within here",
+    "start": "3375760",
+    "end": "3381760"
+  },
+  {
+    "text": "we're going to just do our computation right it's just going to be i'm going to write out um i have my input in i'm",
+    "start": "3381760",
+    "end": "3387920"
+  },
+  {
+    "text": "going to index into the e element and i compute my glu just like i did before and i assign it to out of i and then i'm",
+    "start": "3387920",
+    "end": "3395040"
+  },
+  {
+    "text": "done right that's all that's all that i need to do and since this is all pointer stuff um i don't really need to worry",
+    "start": "3395040",
+    "end": "3400240"
+  },
+  {
+    "text": "too much about what is um kind of actually happening here so um that's",
+    "start": "3400240",
+    "end": "3405680"
+  },
+  {
+    "text": "basically it i can then take my sort of cuda gelu uh code that i have um and",
+    "start": "3405680",
+    "end": "3411200"
+  },
+  {
+    "text": "then i can load this sort of c++ code in line and then i can just have it compile into a module all within python it's all",
+    "start": "3411200",
+    "end": "3418160"
+  },
+  {
+    "text": "very nice and convenient you don't really have to go out onto the command line um and do things and so now um we",
+    "start": "3418160",
+    "end": "3424319"
+  },
+  {
+    "text": "have cuda galu defined um so this is nice and basically it's a compilation of",
+    "start": "3424319",
+    "end": "3429359"
+  },
+  {
+    "text": "this um and i can call it from within python and we'll use the c bindings to",
+    "start": "3429359",
+    "end": "3435119"
+  },
+  {
+    "text": "call this guy okay we're done calling cuda glu um i have my you know i can",
+    "start": "3435119",
+    "end": "3442480"
+  },
+  {
+    "text": "check that the manual glu and the cuda glu are the same and now let's benchmark the two um so i have the time that it",
+    "start": "3442480",
+    "end": "3449119"
+  },
+  {
+    "text": "takes to run pytorch and you know just like last time it's about 1.1 milliseconds um and manual time remember",
+    "start": "3449119",
+    "end": "3455280"
+  },
+  {
+    "text": "is 8.1 milliseconds and so drum roll what is our cuda time well we've gotten it down to 1.8 right not quite as good",
+    "start": "3455280",
+    "end": "3462319"
+  },
+  {
+    "text": "as pytorch's implementation but you know we're we're uh getting pretty close to pytorch time right we've we've gone from",
+    "start": "3462319",
+    "end": "3468960"
+  },
+  {
+    "text": "8 milliseconds to 1.8 milliseconds which is which is not bad um because that c code wasn't that hard to write and so",
+    "start": "3468960",
+    "end": "3475119"
+  },
+  {
+    "text": "now we we also do some profiling um and we can kind of see what is happening here now um and you know it's called the",
+    "start": "3475119",
+    "end": "3482400"
+  },
+  {
+    "text": "glu kernel right this is the the code that got shipped off to the gpu um and",
+    "start": "3482400",
+    "end": "3487599"
+  },
+  {
+    "text": "then it's calling empty like this is the initialization um and then empty strided",
+    "start": "3487599",
+    "end": "3492960"
+  },
+  {
+    "text": "right um and then cuda launch kernel and cuda device synchronize um and that's",
+    "start": "3492960",
+    "end": "3498480"
+  },
+  {
+    "text": "basically all that's happening and notice how you know once again this is a single cuda kernel eats up 100% of the",
+    "start": "3498480",
+    "end": "3503760"
+  },
+  {
+    "text": "gpu time kind of like what we what we wanted right okay so there's some further optimization we can do but this",
+    "start": "3503760",
+    "end": "3509119"
+  },
+  {
+    "text": "is really already solved the problem of you know kernel fusion we fused all the operators together okay um so pretty",
+    "start": "3509119",
+    "end": "3517119"
+  },
+  {
+    "text": "good um these kinds of elementwise operations are easy to write in cuda like if you have a new kind of i don't",
+    "start": "3517119",
+    "end": "3522480"
+  },
+  {
+    "text": "know um uh nonlinearity you could easily write a cuda kernel for it yourself if",
+    "start": "3522480",
+    "end": "3527839"
+  },
+  {
+    "text": "you really wanted to um but more interesting operations are going to require reading multiple values like",
+    "start": "3527839",
+    "end": "3532960"
+  },
+  {
+    "text": "doing reductions those are going to get a little more complicated um flash attention will be a little bit more complicated but not too much so when you",
+    "start": "3532960",
+    "end": "3540480"
+  },
+  {
+    "text": "have to do it um in the assignment okay um any questions on the on the simple",
+    "start": "3540480",
+    "end": "3546040"
+  },
+  {
+    "text": "c++ uh cuda kernel yes",
+    "start": "3546040",
+    "end": "3551839"
+  },
+  {
+    "text": "check the beginning does that throw an error is it like caller kernel yeah so so the question",
+    "start": "3551839",
+    "end": "3558079"
+  },
+  {
+    "text": "was what happens if it's not contiguous at least in the code that we wrote it will just throw an error because it's an assert um you could potentially write",
+    "start": "3558079",
+    "end": "3565440"
+  },
+  {
+    "text": "code to handle it but there's almost no reason for memory to be fragmented because it will allocate contiguously um",
+    "start": "3565440",
+    "end": "3572720"
+  },
+  {
+    "text": "and you won't deallocate like the middle of a memory unless you're doing something like really tricky um and so",
+    "start": "3572720",
+    "end": "3577839"
+  },
+  {
+    "text": "you should you should really unless you're doing something pretty advanced expect to have continuous memory",
+    "start": "3577839",
+    "end": "3584319"
+  },
+  {
+    "text": "sometimes you do like a transpose or jump operation that makes memory not",
+    "start": "3584319",
+    "end": "3590240"
+  },
+  {
+    "text": "so like when you're encoding at a higher level should you be careful to conversely make like forced to be",
+    "start": "3590240",
+    "end": "3596079"
+  },
+  {
+    "text": "continuous before calling operation yeah so so the question was like if you're uh transposing then you're no",
+    "start": "3596079",
+    "end": "3603119"
+  },
+  {
+    "text": "longer going to be continuous you're going to have like a you know jump between all the elements in the index if you're sort of row traversing something",
+    "start": "3603119",
+    "end": "3608240"
+  },
+  {
+    "text": "that's sort of column stored um yeah so so i think transpose or like views or like essentially shuffling dimensions is",
+    "start": "3608240",
+    "end": "3614720"
+  },
+  {
+    "text": "like the one exception to this but that's handleable in like the outer like sort of the wrapper part right you can",
+    "start": "3614720",
+    "end": "3620480"
+  },
+  {
+    "text": "basically pass it something that is continuously indexed um and for a lot of the matrices you won't really care right",
+    "start": "3620480",
+    "end": "3627040"
+  },
+  {
+    "text": "so yes what would happen if you were to choose a different block size right so",
+    "start": "3627040",
+    "end": "3632799"
+  },
+  {
+    "text": "what would happen if you chose a different block size um the sort of uh",
+    "start": "3632799",
+    "end": "3638160"
+  },
+  {
+    "text": "gpu related sort of concerns would kick in sort of like do you have enough uh blocks for to saturate your sms um and",
+    "start": "3638160",
+    "end": "3645440"
+  },
+  {
+    "text": "do you have enough work within each uh block and those are like kind of the two things that could uh matter here but i",
+    "start": "3645440",
+    "end": "3651760"
+  },
+  {
+    "text": "think my guess is that for block sizes that are are relatively large like 1024",
+    "start": "3651760",
+    "end": "3657280"
+  },
+  {
+    "text": "it probably won't matter past a certain point because we're not doing anything advanced it's all entry- wise operations for this like very very simple example",
+    "start": "3657280",
+    "end": "3663520"
+  },
+  {
+    "text": "um yeah is the reason that our non gpu version was so slow because this ask to",
+    "start": "3663520",
+    "end": "3670480"
+  },
+  {
+    "text": "like do a small operation of gpu back",
+    "start": "3670480",
+    "end": "3675960"
+  },
+  {
+    "text": "so so the question was like why was our um non cuda kernel sort of like manual thing so slow um it's not that it's",
+    "start": "3676319",
+    "end": "3682720"
+  },
+  {
+    "text": "sending things back from gpu to cpu per se like x is going to live in the gpu we allocate it in gpu like we'll do like as",
+    "start": "3682720",
+    "end": "3690000"
+  },
+  {
+    "text": "the device like cuda um but it's going to basically not be in the sm uh the",
+    "start": "3690000",
+    "end": "3695760"
+  },
+  {
+    "text": "whole time right so once we do like x squar right that's a you know a cuda kernel and so that multiplication",
+    "start": "3695760",
+    "end": "3701760"
+  },
+  {
+    "text": "operation will read the the the sort of vector from the global memory into the sms do the computation it'll write it",
+    "start": "3701760",
+    "end": "3708160"
+  },
+  {
+    "text": "back and so this is all in the in the sort of dram to sm communication cost",
+    "start": "3708160",
+    "end": "3713680"
+  },
+  {
+    "text": "rather than the cpu to gpu communication cost um of of course if you write like as device cpu then you'll hit get the uh",
+    "start": "3713680",
+    "end": "3720319"
+  },
+  {
+    "text": "you know cpu transfer cost in addition to the to the dram transfer cost okay so now um you've seen that and",
+    "start": "3720319",
+    "end": "3728799"
+  },
+  {
+    "text": "like okay so that was not too painful but it would be really nice if we had nicer sort of python abstractions for",
+    "start": "3728799",
+    "end": "3735920"
+  },
+  {
+    "text": "writing cuda kernels and this is what triton is and triton is quite nice it like has this very nice middle ground",
+    "start": "3735920",
+    "end": "3742880"
+  },
+  {
+    "text": "where you don't have to manage literally everything about the gpu so um triton um",
+    "start": "3742880",
+    "end": "3748480"
+  },
+  {
+    "text": "is sort of a domain specific language uh developed by openai in 2021 um and it",
+    "start": "3748480",
+    "end": "3754400"
+  },
+  {
+    "text": "makes gpu programming um much more um accessible so like you you write everything kind of in in python um and",
+    "start": "3754400",
+    "end": "3761680"
+  },
+  {
+    "text": "you don't really think about the threads anymore you think about thread blocks um and triton manages a lot of stuff that",
+    "start": "3761680",
+    "end": "3768880"
+  },
+  {
+    "text": "is annoying but can be automatically optimized so it can manage uh coalesing",
+    "start": "3768880",
+    "end": "3775280"
+  },
+  {
+    "text": "of memory um so remember that you know from vram you get four uh sort of",
+    "start": "3775280",
+    "end": "3780480"
+  },
+  {
+    "text": "adjacent values at once with something called burst mode so you really want to make sure that you know your memory",
+    "start": "3780480",
+    "end": "3786400"
+  },
+  {
+    "text": "retrievalss are are sort of grouped into adjacent sort of four element or more um",
+    "start": "3786400",
+    "end": "3791920"
+  },
+  {
+    "text": "sort of calls at once so it will handle those automatically it will group those um it will do shared memory management",
+    "start": "3791920",
+    "end": "3799039"
+  },
+  {
+    "text": "um when you need to sort of manage um which sort of uh memory that you're",
+    "start": "3799039",
+    "end": "3804160"
+  },
+  {
+    "text": "writing to within the sm with multiple threads um from within each sm you know",
+    "start": "3804160",
+    "end": "3809599"
+  },
+  {
+    "text": "you might need to stop or start threads all managed automatically um but scheduling across sms or what different",
+    "start": "3809599",
+    "end": "3816000"
+  },
+  {
+    "text": "sm do that's manual so like the kind of the programming model is that you're going to think kind of at the smcententric level and the compiler will",
+    "start": "3816000",
+    "end": "3823119"
+  },
+  {
+    "text": "handle a lot more of the lower level details um and trion is quite nice",
+    "start": "3823119",
+    "end": "3828480"
+  },
+  {
+    "text": "because it can outperform by quite a bit a lot of pytorch implementations so it's kind of like going all the way to",
+    "start": "3828480",
+    "end": "3834559"
+  },
+  {
+    "text": "writing cuda but you're still in the very familiar python land and i think a very underappreciated um advantage is",
+    "start": "3834559",
+    "end": "3841599"
+  },
+  {
+    "text": "sort of as it's written here it's all in python you can step through it you can kind of debug it uh fairly nicely and so",
+    "start": "3841599",
+    "end": "3849119"
+  },
+  {
+    "text": "let's step through a triton kernel like once again we're going to write glu um and we're going to do it um in triton so",
+    "start": "3849119",
+    "end": "3856480"
+  },
+  {
+    "text": "this i i've you know put the code to be as similar structure as possible to our other code right so this is sort of the",
+    "start": "3856480",
+    "end": "3862640"
+  },
+  {
+    "text": "the cpu side code so to speak this is the the wrapper code it takes in x which",
+    "start": "3862640",
+    "end": "3868000"
+  },
+  {
+    "text": "is a torch tensor and i've got my two asserts at the top um and i'm going to allocate um an output tensor y using",
+    "start": "3868000",
+    "end": "3875520"
+  },
+  {
+    "text": "empty like once again and it has the same exact sort of coordinate computation uh sort of components and",
+    "start": "3875520",
+    "end": "3882319"
+  },
+  {
+    "text": "even the the kernel launch looks very similar i've got this num blocks annotation and then my block size is is",
+    "start": "3882319",
+    "end": "3888880"
+  },
+  {
+    "text": "you know at the end here not in part of this brackets but basically i'm passing the the same information to my kernel",
+    "start": "3888880",
+    "end": "3894960"
+  },
+  {
+    "text": "and now trying kernel um is this code over here um and this is going to do the",
+    "start": "3894960",
+    "end": "3901680"
+  },
+  {
+    "text": "same thing as what we were doing before but now it's nicely written in python um",
+    "start": "3901680",
+    "end": "3906799"
+  },
+  {
+    "text": "and you know the mental model here is the inputs are going to be at x pointer um yp pointer is the output uh vector",
+    "start": "3906799",
+    "end": "3914079"
+  },
+  {
+    "text": "sort sort of the starting coordinate and the block size is how big you know each of my blocks are and num elements is",
+    "start": "3914079",
+    "end": "3919760"
+  },
+  {
+    "text": "going to be sort of the very end of my array so now i need to to get this set",
+    "start": "3919760",
+    "end": "3926000"
+  },
+  {
+    "text": "of of lines 557 to 561 this is doing the the computation of my index right i did",
+    "start": "3926000",
+    "end": "3932319"
+  },
+  {
+    "text": "i equals you know some formula before this is doing the same calculation over here i'm calculating where is the start",
+    "start": "3932319",
+    "end": "3937760"
+  },
+  {
+    "text": "of my current block well that's my block id times the size of the block that gets me let's say i live in block one it'll",
+    "start": "3937760",
+    "end": "3944079"
+  },
+  {
+    "text": "get me this point right here at the middle um and then um afterwards i need",
+    "start": "3944079",
+    "end": "3949599"
+  },
+  {
+    "text": "to know where do i live within my block well that's going to be um kind of the offset but now notice one difference um",
+    "start": "3949599",
+    "end": "3956640"
+  },
+  {
+    "text": "i don't get in an offset because i'm not programming threads right i'm programming blocks and so what does that",
+    "start": "3956640",
+    "end": "3962559"
+  },
+  {
+    "text": "mean well my offsets are actually a vector not a single value because this",
+    "start": "3962559",
+    "end": "3967920"
+  },
+  {
+    "text": "this is basically going to be i'm going to do vectorized operation where the vectorzed operation is going to be",
+    "start": "3967920",
+    "end": "3973680"
+  },
+  {
+    "text": "handled by different threads so here my offsets are the start of the block plus",
+    "start": "3973680",
+    "end": "3979280"
+  },
+  {
+    "text": "a vector this range of block size sort of offsets so i'm my offsets are all of",
+    "start": "3979280",
+    "end": "3985760"
+  },
+  {
+    "text": "these coordinates within block one at once of course if i'm at the very end i might go off the edge and so i need a",
+    "start": "3985760",
+    "end": "3992000"
+  },
+  {
+    "text": "mask to handle anything that lives off the the boundary of my vector now i'm",
+    "start": "3992000",
+    "end": "3998480"
+  },
+  {
+    "text": "going to load in a sort of single vectorzed operation um everything um at",
+    "start": "3998480",
+    "end": "4004240"
+  },
+  {
+    "text": "once so xpointer plus offsets these are sort of the values that i'm responsible for masked up and it's loaded into x",
+    "start": "4004240",
+    "end": "4011440"
+  },
+  {
+    "text": "which is um uh my sort of internal values my internal sort of temporary",
+    "start": "4011440",
+    "end": "4017440"
+  },
+  {
+    "text": "vector that i need and with this temporary vector i'm going to do exactly the old glu computation um there's no",
+    "start": "4017440",
+    "end": "4024480"
+  },
+  {
+    "text": "tanh so i compute that manually but this formula you can convince yourself is the same as what we have here um and then y",
+    "start": "4024480",
+    "end": "4032160"
+  },
+  {
+    "text": "is going to be the formula computed up here now once i'm done i need to write it back into my output sort of buffer or",
+    "start": "4032160",
+    "end": "4040000"
+  },
+  {
+    "text": "my output vector and so i compute sort of my targets so this is y pointer plus offsets i take my values um my temporary",
+    "start": "4040000",
+    "end": "4047359"
+  },
+  {
+    "text": "values y and then i store it right so this is very very very similar to what came before but this one is the",
+    "start": "4047359",
+    "end": "4053920"
+  },
+  {
+    "text": "vectorzed version i get to operate on an entire block at once and so instead of kind of thinking at the perspective of",
+    "start": "4053920",
+    "end": "4059760"
+  },
+  {
+    "text": "um of a thread i'm thinking from the perspective of a block but not too different right this is all fairly",
+    "start": "4059760",
+    "end": "4066079"
+  },
+  {
+    "text": "similar um stuff so now i've written my triton gellu and all right i will i will",
+    "start": "4066079",
+    "end": "4071920"
+  },
+  {
+    "text": "do this fairly quickly all right so one last thing i will only point out a few things here because i don't want to get",
+    "start": "4071920",
+    "end": "4077440"
+  },
+  {
+    "text": "like so in the weeds that you all like get up and leave um but the one last",
+    "start": "4077440",
+    "end": "4082799"
+  },
+  {
+    "text": "cool thing that we can do is triton of course compiles into low-level sort of almost machine code for the gpu and we",
+    "start": "4082799",
+    "end": "4090720"
+  },
+  {
+    "text": "can look at you know this very low-level called ptx code um after the triton",
+    "start": "4090720",
+    "end": "4095760"
+  },
+  {
+    "text": "compiler sort of goes over it and it's actually kind of cool you can kind of see how the gpu like actually works at",
+    "start": "4095760",
+    "end": "4102560"
+  },
+  {
+    "text": "the threat uh thread level so this is the the triton gelu kernel it was generated by the compiler and at first",
+    "start": "4102560",
+    "end": "4110000"
+  },
+  {
+    "text": "it's going to do some of the really basic stuff so what's it doing here it's saying well i'm going to need to store",
+    "start": "4110000",
+    "end": "4116080"
+  },
+  {
+    "text": "some values right i'm going to need to store intermediate computations b means actually um sort of untyped sort of",
+    "start": "4116080",
+    "end": "4122080"
+  },
+  {
+    "text": "basically like bytes so i need bytes um that are sort of 32bit size i need",
+    "start": "4122080",
+    "end": "4127359"
+  },
+  {
+    "text": "floats for doing computations called f and i need another set of registers uh",
+    "start": "4127359",
+    "end": "4132560"
+  },
+  {
+    "text": "that are 64 uh bits and you know that's another set of registers um and so i",
+    "start": "4132560",
+    "end": "4137679"
+  },
+  {
+    "text": "have all these sort of registers that i need for temporary computations and then starting here i'm going to start",
+    "start": "4137679",
+    "end": "4143359"
+  },
+  {
+    "text": "computing um basically my coordinates so sorry this part is is loading um the the",
+    "start": "4143359",
+    "end": "4149838"
+  },
+  {
+    "text": "various arguments to the function so things like um the x pointer and the y pointer get loaded here i starting here",
+    "start": "4149839",
+    "end": "4156400"
+  },
+  {
+    "text": "i start computing um the coordinate offsets of my triton sort of kernel and",
+    "start": "4156400",
+    "end": "4162640"
+  },
+  {
+    "text": "then once i get down here this ld global this is the code that's used to load um",
+    "start": "4162640",
+    "end": "4169520"
+  },
+  {
+    "text": "the values from xpointer back into my temporary registers so it's basically",
+    "start": "4169520",
+    "end": "4174719"
+  },
+  {
+    "text": "saying load r2 r3 r4 r5 using um the uh",
+    "start": "4174719",
+    "end": "4180560"
+  },
+  {
+    "text": "the the memory position in rd1 and notice how it's loading four things at once because it's cleverly handling",
+    "start": "4180560",
+    "end": "4186880"
+  },
+  {
+    "text": "coalesing right we know we can get four values for free we should you know operate on all four of these values at",
+    "start": "4186880",
+    "end": "4192080"
+  },
+  {
+    "text": "once because we get them and then you do the same thing um uh again uh for um you",
+    "start": "4192080",
+    "end": "4199120"
+  },
+  {
+    "text": "do the same thing again here and then you start to get uh basically the floating point operations mole f32 which",
+    "start": "4199120",
+    "end": "4205440"
+  },
+  {
+    "text": "basically goes through and does the tanh computations um i'm not going to explain all the different pieces but you know",
+    "start": "4205440",
+    "end": "4211280"
+  },
+  {
+    "text": "here it's doing it's multiplying by a constant it does a x to the cube like multiplying the same numbers multiple",
+    "start": "4211280",
+    "end": "4218000"
+  },
+  {
+    "text": "times um and then it's going to compute here you know 2 to the x but we want e",
+    "start": "4218000",
+    "end": "4224400"
+  },
+  {
+    "text": "to the x and so it multiplies by log two to get the the exponentiated base you can really see all of the different like",
+    "start": "4224400",
+    "end": "4232239"
+  },
+  {
+    "text": "literal step-by-step operations that the gpu does in order to get you uh the final result and so i'll skip all over",
+    "start": "4232239",
+    "end": "4238320"
+  },
+  {
+    "text": "to the end this is all floatingoint computations that it needs to do and then at the very end it stores the",
+    "start": "4238320",
+    "end": "4243920"
+  },
+  {
+    "text": "values that it has r38 through r41 um into rd4 which is the memory position of",
+    "start": "4243920",
+    "end": "4249840"
+  },
+  {
+    "text": "our output right so this is kind of like what's actually happening at the low level um and we see that each thread is",
+    "start": "4249840",
+    "end": "4256159"
+  },
+  {
+    "text": "operating on four values at a time and its temporary storage is the registers which is the really really high-speed uh",
+    "start": "4256159",
+    "end": "4262800"
+  },
+  {
+    "text": "storage that it has very locally so we can see you know this is going to you know just looking at it be probably pretty fast code right okay so that was",
+    "start": "4262800",
+    "end": "4270880"
+  },
+  {
+    "text": "the ptx and we can you know go through and see what it's doing for all sorts of um things but now let's go back um and",
+    "start": "4270880",
+    "end": "4278800"
+  },
+  {
+    "text": "actually benchmark things so we got manual gu 8.1 seconds pytorch time 1.1 seconds cuda time 1.84 seconds triton",
+    "start": "4278800",
+    "end": "4286000"
+  },
+  {
+    "text": "time 1.848 seconds so we didn't get any faster but it was much easier to write",
+    "start": "4286000",
+    "end": "4291840"
+  },
+  {
+    "text": "triton code right we wrote it in python we thought about blocks we could do vectorzed additions um if you're doing",
+    "start": "4291840",
+    "end": "4297440"
+  },
+  {
+    "text": "more sophisticated stuff you know it basically triton will handle a lot of the the memory stuff for you um and so",
+    "start": "4297440",
+    "end": "4304800"
+  },
+  {
+    "text": "it's actually pretty good and then profiling once again we see single kernel launch that consumes um all of",
+    "start": "4304800",
+    "end": "4310880"
+  },
+  {
+    "text": "the gpu time right so that's great um and that gets you know triton kernels",
+    "start": "4310880",
+    "end": "4317360"
+  },
+  {
+    "text": "the last thing um at least in this sort of uh",
+    "start": "4317360",
+    "end": "4322440"
+  },
+  {
+    "text": "whoops one second here okay um that i want to talk about is torch compile um",
+    "start": "4322440",
+    "end": "4328560"
+  },
+  {
+    "text": "of course writing cuda kernels is cool and it makes you feel really good um but maybe we don't need to do that right",
+    "start": "4328560",
+    "end": "4335120"
+  },
+  {
+    "text": "like the things that we were doing here were very simple we were just taking these like you know x cubed and like",
+    "start": "4335120",
+    "end": "4340560"
+  },
+  {
+    "text": "exponentiation operations and we were just shoving them all into a single um cuda kernel and so maybe we can just do",
+    "start": "4340560",
+    "end": "4347360"
+  },
+  {
+    "text": "that without you know doing much and so you know we've had the several different ways that we've showed you but the last",
+    "start": "4347360",
+    "end": "4354239"
+  },
+  {
+    "text": "one i want to talk about is this thing called torch compile which will take um you know uh nonoptimized pytorch code",
+    "start": "4354239",
+    "end": "4362080"
+  },
+  {
+    "text": "and it will write um more optimized code and so here it's going to attempt to",
+    "start": "4362080",
+    "end": "4367280"
+  },
+  {
+    "text": "automatically do optimizations like um kernel fusion um and this compiled glu",
+    "start": "4367280",
+    "end": "4373040"
+  },
+  {
+    "text": "is going to be you know equivalent in the actual uh outputs that it generates but now let's let's look at the run",
+    "start": "4373040",
+    "end": "4379280"
+  },
+  {
+    "text": "times right um so we've got some runtime variation but basically the same kind of",
+    "start": "4379280",
+    "end": "4384960"
+  },
+  {
+    "text": "numbers right 8.1 seconds manual 1.1 seconds pietorch um 1.8 seconds and then",
+    "start": "4384960",
+    "end": "4390400"
+  },
+  {
+    "text": "1.47 seconds um on torch compile right so um the punch line here is modern jit",
+    "start": "4390400",
+    "end": "4398400"
+  },
+  {
+    "text": "compilers are pretty good it can do optimizations like operation fusion um without you having to do very much at",
+    "start": "4398400",
+    "end": "4405600"
+  },
+  {
+    "text": "all and if you look under the hood um you can kind of see that there's um",
+    "start": "4405600",
+    "end": "4411600"
+  },
+  {
+    "text": "basically once again one thing that happens this is a a sort of fused add multiply tanh triton code so it's",
+    "start": "4411600",
+    "end": "4419600"
+  },
+  {
+    "text": "generating triton under the hood um that basically is doing similar kinds of things as our triton code but it's",
+    "start": "4419600",
+    "end": "4425360"
+  },
+  {
+    "text": "actually slightly more optimized um than what we did and so it's getting slightly better performance than even our our",
+    "start": "4425360",
+    "end": "4431560"
+  },
+  {
+    "text": "code so um torch compile is quite nice yes how do you feel like",
+    "start": "4431560",
+    "end": "4438920"
+  },
+  {
+    "text": "compiled like you're going to like try to implement your price version like it can't do flash in right",
+    "start": "4438920",
+    "end": "4447520"
+  },
+  {
+    "text": "yeah so so the the question was like um when do you know that i guess maybe the better way to phrase that question is",
+    "start": "4447520",
+    "end": "4453440"
+  },
+  {
+    "text": "when do you know you can do better than torch compile right is is sort of the the relevant question um and i think for",
+    "start": "4453440",
+    "end": "4459280"
+  },
+  {
+    "text": "for simple stuff like simple operator fusion or um the other thing that it's very good at is um optimizing matrix",
+    "start": "4459280",
+    "end": "4466840"
+  },
+  {
+    "text": "multiplies um so torch compile as i said before can do things like if it knows the shape of the matrices can figure out",
+    "start": "4466840",
+    "end": "4472960"
+  },
+  {
+    "text": "which kernels to dispatch it is very good at those things i doubt that you can get much better than that but there",
+    "start": "4472960",
+    "end": "4479520"
+  },
+  {
+    "text": "are things like um if you've seen flash attention one two and three um those are pretty non-trivial optimizations like",
+    "start": "4479520",
+    "end": "4486080"
+  },
+  {
+    "text": "these days torch compile and like um jax's like xla compiler can do those but",
+    "start": "4486080",
+    "end": "4491520"
+  },
+  {
+    "text": "that's because we know in hindsight that those are the right optimizations to do um i think some of those things are a",
+    "start": "4491520",
+    "end": "4496880"
+  },
+  {
+    "text": "little bit non-trivial to figure out like flash attention 3 has additional sort of hardware level optimizations",
+    "start": "4496880",
+    "end": "4502080"
+  },
+  {
+    "text": "that leverage you know the h100 hardware that's not obvious to do with a jit compiler um and so there are some things",
+    "start": "4502080",
+    "end": "4509520"
+  },
+  {
+    "text": "that i think are quite hard with with uh torch compile that i think you could do better but in general like i think the",
+    "start": "4509520",
+    "end": "4515520"
+  },
+  {
+    "text": "point here is you know you shouldn't go home and say um i'm going to cuda kernel like i'm going to write cuda kernels for",
+    "start": "4515520",
+    "end": "4521679"
+  },
+  {
+    "text": "every single part of my language model you know that's probably not a good use of your time but if you're writing a new",
+    "start": "4521679",
+    "end": "4526880"
+  },
+  {
+    "text": "architecture with some complicated piece and you're not getting utilization but you think you can that's maybe the time",
+    "start": "4526880",
+    "end": "4532719"
+  },
+  {
+    "text": "to really bust out the triton okay so we're we're basically at time um",
+    "start": "4532719",
+    "end": "4539679"
+  },
+  {
+    "text": "but we can quickly go through one last example of uh triton maybe this will be",
+    "start": "4539679",
+    "end": "4544800"
+  },
+  {
+    "text": "useful for you um in assignment two um of doing softmax so one difference is",
+    "start": "4544800",
+    "end": "4550080"
+  },
+  {
+    "text": "until now we were doing just basic element wise operations and that's really easy because you just operate on",
+    "start": "4550080",
+    "end": "4555280"
+  },
+  {
+    "text": "each element and there's sort of no sort of complexity to those kinds of things so now let's do soft max which is it has",
+    "start": "4555280",
+    "end": "4562719"
+  },
+  {
+    "text": "a reduction operation where you have to add across all the elements so how do we do that well um what we want to do is we",
+    "start": "4562719",
+    "end": "4569920"
+  },
+  {
+    "text": "want to normalize across each row of the matrix and you know what we would like to do is we'd like to to make this fast",
+    "start": "4569920",
+    "end": "4576719"
+  },
+  {
+    "text": "so a naive version of this is uh going to be pretty slow and now we're going to",
+    "start": "4576719",
+    "end": "4581760"
+  },
+  {
+    "text": "write the the triton kernel so if i wanted to be lazy the the easiest way to",
+    "start": "4581760",
+    "end": "4587440"
+  },
+  {
+    "text": "do this is okay actually you can think for a moment about what the easiest way to do this now let's say you want to write a softmax so you're going to",
+    "start": "4587440",
+    "end": "4593360"
+  },
+  {
+    "text": "normalize each row of a matrix and imagine these matrices are pretty small so you're just writing a kernel for",
+    "start": "4593360",
+    "end": "4599520"
+  },
+  {
+    "text": "small matrices right so if you're doing this what's the right kind of block design well maybe what we should do is",
+    "start": "4599520",
+    "end": "4607600"
+  },
+  {
+    "text": "our grid should actually just be rows so each sm is going to handle a single row",
+    "start": "4607600",
+    "end": "4612960"
+  },
+  {
+    "text": "that's kind of the optimal thing to do because if we can fit a whole row into an sm then we just sum across that row",
+    "start": "4612960",
+    "end": "4618719"
+  },
+  {
+    "text": "in the sm and then we divide right that's that's great and so that's going to be the simple design for for our very",
+    "start": "4618719",
+    "end": "4624960"
+  },
+  {
+    "text": "you know naive softmax kernel here so all we're going to do is that we're going to make the block size um",
+    "start": "4624960",
+    "end": "4631440"
+  },
+  {
+    "text": "basically uh sorry we're going to make each block a row and so the block size should be number of columns plus you",
+    "start": "4631440",
+    "end": "4638320"
+  },
+  {
+    "text": "know a little bit of buffer to sort of be able to fit all the columns so this is triton next power of two of n and",
+    "start": "4638320",
+    "end": "4643600"
+  },
+  {
+    "text": "that's a nice way of padding out um your columns and then i'm going to make each",
+    "start": "4643600",
+    "end": "4649440"
+  },
+  {
+    "text": "block a row so the number of blocks is exactly the number of rows and then i have um my triton softmax kernel which",
+    "start": "4649440",
+    "end": "4656880"
+  },
+  {
+    "text": "is written in kind of the way that you expect so now we have a matrix rather than um a vector so we have x pointers",
+    "start": "4656880",
+    "end": "4663440"
+  },
+  {
+    "text": "we have y pointers we need the strides of the matrices um and then we can",
+    "start": "4663440",
+    "end": "4668640"
+  },
+  {
+    "text": "basically figure out what row index i'm in i can get the column offsets this is going to be the same kind of code as",
+    "start": "4668640",
+    "end": "4674480"
+  },
+  {
+    "text": "before in fact getting the row offsets simpler because each row is a block and",
+    "start": "4674480",
+    "end": "4680080"
+  },
+  {
+    "text": "then now i'm going to do basically the same kind of stuff i'm going to load in each row into my sort of sm's sort of",
+    "start": "4680080",
+    "end": "4686400"
+  },
+  {
+    "text": "local memory and then i'm going to do computation exactly in a way that looks like a softmax i have have my row i",
+    "start": "4686400",
+    "end": "4692000"
+  },
+  {
+    "text": "subtract my max i take the exponent i sum it and then i divide which is going to give me my softmax normalized row and",
+    "start": "4692000",
+    "end": "4698960"
+  },
+  {
+    "text": "i write it back to global memory right no complexity at all um whenever your your computations fit nicely in sm",
+    "start": "4698960",
+    "end": "4706159"
+  },
+  {
+    "text": "writing triton code looks very similar to writing just normal python code just with a little bit of load and store and",
+    "start": "4706159",
+    "end": "4713040"
+  },
+  {
+    "text": "keeping track of where the blocks are right so life is pretty simple let's go back um oh wait where were we to the",
+    "start": "4713040",
+    "end": "4720159"
+  },
+  {
+    "text": "triton here we go and then we can kind of see how fast all of our um different pieces of code are so i'll zoom out",
+    "start": "4720159",
+    "end": "4726719"
+  },
+  {
+    "text": "again just make sure okay so manual time takes 3.7 seconds um our compile time is",
+    "start": "4726719",
+    "end": "4732480"
+  },
+  {
+    "text": "1.3 seconds for for torch compile um the pytorch time is is 1.5 seconds um and",
+    "start": "4732480",
+    "end": "4738640"
+  },
+  {
+    "text": "the triton time is 1.9 seconds it's a still a little bit slow um torch compile",
+    "start": "4738640",
+    "end": "4745280"
+  },
+  {
+    "text": "can actually do better than sort of the native pytorch implementation um especially when it knows about the",
+    "start": "4745280",
+    "end": "4750560"
+  },
+  {
+    "text": "shapes and sizes uh of certain operations um so finally we can look in",
+    "start": "4750560",
+    "end": "4755600"
+  },
+  {
+    "text": "the profiler the the manual softmax is kind of a disaster here you see all sorts of crazy operations happening um",
+    "start": "4755600",
+    "end": "4762080"
+  },
+  {
+    "text": "all over the place let me let me clear this uh if we go back up here okay yep um we see all sorts of operations",
+    "start": "4762080",
+    "end": "4768159"
+  },
+  {
+    "text": "happening you know we have x we have max we have sum because we've implemented things naively and we've got memory",
+    "start": "4768159",
+    "end": "4773280"
+  },
+  {
+    "text": "reads and writes everywhere um the compiled softmax is just going to be sort of one fused softmax operation that",
+    "start": "4773280",
+    "end": "4779760"
+  },
+  {
+    "text": "goes quite fast um and then we've got pytorch softmax which is also one",
+    "start": "4779760",
+    "end": "4785480"
+  },
+  {
+    "text": "cuda cuda kernel call and same thing with our triton softmax we have our nice",
+    "start": "4785480",
+    "end": "4791440"
+  },
+  {
+    "text": "triton softmax kernel um that is a single fused kernel um for everything",
+    "start": "4791440",
+    "end": "4796560"
+  },
+  {
+    "text": "okay i won't go through the ptx code for this i think you know we're we're kind of at time and i don't want to drag you",
+    "start": "4796560",
+    "end": "4802800"
+  },
+  {
+    "text": "through that low level again um but hopefully this has given you a flavor of uh lower level gpu programming for uh",
+    "start": "4802800",
+    "end": "4809760"
+  },
+  {
+    "text": "the purpose of making language models go fast and hopefully you'll have fun doing assignment two thanks",
+    "start": "4809760",
+    "end": "4818840"
+  }
+]
