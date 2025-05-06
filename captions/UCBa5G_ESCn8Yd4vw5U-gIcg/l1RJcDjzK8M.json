@@ -1,0 +1,4092 @@
+[
+  {
+    "text": "all right so today's going to be the the second of the basic systems lectures um",
+    "start": "5120",
+    "end": "10639"
+  },
+  {
+    "text": "and now we're going to move on to sort of multi-achine optimization and so the",
+    "start": "10639",
+    "end": "16000"
+  },
+  {
+    "text": "focus today is going to be all about parallelism across uh machines and so",
+    "start": "16000",
+    "end": "22160"
+  },
+  {
+    "text": "the goal today is going to move from you know optimizing a single GPU's throughput to being able to understand",
+    "start": "22160",
+    "end": "29279"
+  },
+  {
+    "text": "the complexities and the details that are required to train really large models right and model when models get",
+    "start": "29279",
+    "end": "35120"
+  },
+  {
+    "text": "large they no longer fit on a single GPU so you've got to split up your your models across different machines um but",
+    "start": "35120",
+    "end": "41840"
+  },
+  {
+    "text": "also you've got to be able to leverage all the different you know uh servers that you have in order to train these",
+    "start": "41840",
+    "end": "47760"
+  },
+  {
+    "text": "models quickly so we've got both compute and memory concerns that we're going to have to deal with and communication",
+    "start": "47760",
+    "end": "54239"
+  },
+  {
+    "text": "across different machines it's going to be quite heterogeneous we have different kinds of communication across GPUs at",
+    "start": "54239",
+    "end": "60079"
+  },
+  {
+    "text": "different levels of hierarchy and so this is going to lead to different parallelization paradigms um people use",
+    "start": "60079",
+    "end": "66320"
+  },
+  {
+    "text": "many different parallelization strategies all together at once and we're going to talk through each one of the the very popular ones um and then",
+    "start": "66320",
+    "end": "73600"
+  },
+  {
+    "text": "we'll talk about how you combine them together in order to efficiently train a very large model um and then I'm going",
+    "start": "73600",
+    "end": "79119"
+  },
+  {
+    "text": "to end the lecture with sort of looking at some examples um of how people are actually using these parallelization",
+    "start": "79119",
+    "end": "85600"
+  },
+  {
+    "text": "strategies um to run their large scale distributed training runs okay and so",
+    "start": "85600",
+    "end": "92799"
+  },
+  {
+    "text": "that's going to roughly map to the different parts of this lecture we're just going to talk about the basics of networking first and then we're going to",
+    "start": "92799",
+    "end": "99439"
+  },
+  {
+    "text": "talk about you know how do each of these sort of networking hardware concepts map to different parallelization strategies",
+    "start": "99439",
+    "end": "106560"
+  },
+  {
+    "text": "and then finally some case studies to close off with to show you how it all comes together right so I told you about",
+    "start": "106560",
+    "end": "114079"
+  },
+  {
+    "text": "GPU scaling um last week and you know it's quite impressive seeing this you know super exponential curve of flops",
+    "start": "114079",
+    "end": "121280"
+  },
+  {
+    "text": "per GPU going way way up but if we want to you know rapidly scale out um you",
+    "start": "121280",
+    "end": "126960"
+  },
+  {
+    "text": "know both our compute and memory a single GPU isn't enough right we're going to have to wait for you know",
+    "start": "126960",
+    "end": "132400"
+  },
+  {
+    "text": "another couple years for for this curve to continue going upwards and upwards and upwards so if we want to train a",
+    "start": "132400",
+    "end": "138720"
+  },
+  {
+    "text": "really powerful language model here and now today well we have to rely on",
+    "start": "138720",
+    "end": "143760"
+  },
+  {
+    "text": "multi-achine parallelism so if we look at you know the world's fastest supercomputers that's what's being shown",
+    "start": "143760",
+    "end": "149200"
+  },
+  {
+    "text": "on the right here you know the the fastest supercomputers have you know exoflops and exoflops of compute um",
+    "start": "149200",
+    "end": "154959"
+  },
+  {
+    "text": "those are kind of the green um lines that you see over there that's what you're really going to have to rely on if you're going to try to train you know",
+    "start": "154959",
+    "end": "161519"
+  },
+  {
+    "text": "the biggest baddest language models today um and so that's the compute side",
+    "start": "161519",
+    "end": "167200"
+  },
+  {
+    "text": "of why you want to think about multi-achine parallelism but we've also got a memory angle for thinking about",
+    "start": "167200",
+    "end": "173040"
+  },
+  {
+    "text": "the same thing right so these two are really the core resources and the core concerns that you're going to have to think about so in terms of memory right",
+    "start": "173040",
+    "end": "180319"
+  },
+  {
+    "text": "many of the models are getting quite big and of course you know memory on GPU is also growing but not not quite as",
+    "start": "180319",
+    "end": "185760"
+  },
+  {
+    "text": "quickly and a single GPU is not going to be able to fit these models right maybe eventually in the distant future we",
+    "start": "185760",
+    "end": "191920"
+  },
+  {
+    "text": "won't have to worry about a lot of these um but we've got you know billions and billions of parameters they're not going",
+    "start": "191920",
+    "end": "197920"
+  },
+  {
+    "text": "to fit very nicely into a single GPU so we have to be very respectful of the memory constraints that we have so those",
+    "start": "197920",
+    "end": "205360"
+  },
+  {
+    "text": "are kind of the realities that we have to deal with and what are kind of the tools that we have to have to be able to",
+    "start": "205360",
+    "end": "210640"
+  },
+  {
+    "text": "handle these well you know GPUs I'm sure you've noticed in the class uh cluster don't come in sort of singleton right a",
+    "start": "210640",
+    "end": "217440"
+  },
+  {
+    "text": "single machine will have multiple GPUs within the same sort of physical uh rack",
+    "start": "217440",
+    "end": "223200"
+  },
+  {
+    "text": "and so here's an example I I took this I think from the GPT Neo X uh paper um but",
+    "start": "223200",
+    "end": "228959"
+  },
+  {
+    "text": "this is a old example but the same lesson applies to to uh the H100 machines that you have in class so here",
+    "start": "228959",
+    "end": "235680"
+  },
+  {
+    "text": "there's eight different GPUs right they're connected to the various CPUs through you know fast uh interconnects",
+    "start": "235680",
+    "end": "242080"
+  },
+  {
+    "text": "um within each GPUs you see this NV switch thing at the bottom this is very very fast connections across these eight",
+    "start": "242080",
+    "end": "248239"
+  },
+  {
+    "text": "GPUs but if these eight GPUs want to talk to GPUs on a different machine they're going to have to go through a",
+    "start": "248239",
+    "end": "254879"
+  },
+  {
+    "text": "networking switch and you see this you know purple line that says HDR Infiniband you know that's a much slower connection um uh compared to the NVLink",
+    "start": "254879",
+    "end": "262400"
+  },
+  {
+    "text": "connection right you can sort of see the difference in the throughput that's like about eight times um slower per lane um",
+    "start": "262400",
+    "end": "268400"
+  },
+  {
+    "text": "and so this kind of hardware hierarchy that we have is going to have big implications for how we're going to end",
+    "start": "268400",
+    "end": "274080"
+  },
+  {
+    "text": "up paralyzing our models in practice right and so you can kind of keep this mental model with you as I talk through",
+    "start": "274080",
+    "end": "280080"
+  },
+  {
+    "text": "these things you know we have very very fast connections within a single machine and then when we go across machines it's",
+    "start": "280080",
+    "end": "286560"
+  },
+  {
+    "text": "going to get slower and then depending on the the kind of hardware we're using there might even be another level of",
+    "start": "286560",
+    "end": "292800"
+  },
+  {
+    "text": "slowness once we go beyond let's say 256 uh GPUs network together um many of you",
+    "start": "292800",
+    "end": "300160"
+  },
+  {
+    "text": "may already know this having taken systems or networking classes but here's a very very brief refresher on",
+    "start": "300160",
+    "end": "306240"
+  },
+  {
+    "text": "collective communication operations um and the reason why I'm going to bring this up is there's one particular",
+    "start": "306240",
+    "end": "312240"
+  },
+  {
+    "text": "important sort of identity or equivalence that you will kind of need to know to really understand some of the",
+    "start": "312240",
+    "end": "317600"
+  },
+  {
+    "text": "the finer points of the performance characteristics uh of the parallelization algorithms right so I'll",
+    "start": "317600",
+    "end": "322639"
+  },
+  {
+    "text": "I'll talk through these um and then I'll talk through uh one important sort of performance implication so the first one",
+    "start": "322639",
+    "end": "329360"
+  },
+  {
+    "text": "which all of you probably have heard of is all reduced right so you have you know four machines four ranks in this",
+    "start": "329360",
+    "end": "334800"
+  },
+  {
+    "text": "case each one having its own sort of piece of data and what you'd like to do is perform some sort of reduction operation let's say I want to sum all",
+    "start": "334800",
+    "end": "341120"
+  },
+  {
+    "text": "these these inputs and then I want the output to be sort of copied over to every single machine right um and this",
+    "start": "341120",
+    "end": "348479"
+  },
+  {
+    "text": "is going to you know have roughly the cost of like two times the total number of things that you're you're all",
+    "start": "348479",
+    "end": "353680"
+  },
+  {
+    "text": "reducing um you have a broadcast operation and here I'm taking a single sort of input from rank two and I'd like",
+    "start": "353680",
+    "end": "360479"
+  },
+  {
+    "text": "to copy it out to all the remaining ranks right and this is going to have roughly on the order of one times the",
+    "start": "360479",
+    "end": "366560"
+  },
+  {
+    "text": "total number of sort of outputs um in terms of the communication cost and then we've got reduction where we got",
+    "start": "366560",
+    "end": "372240"
+  },
+  {
+    "text": "different inputs and that's going to be summed up and then sent only to one machine and then the two that are quite important um even though these may not",
+    "start": "372240",
+    "end": "379280"
+  },
+  {
+    "text": "be quite as common is going to be the all gather and scatter right so all gather is an operation where I'm taking",
+    "start": "379280",
+    "end": "385520"
+  },
+  {
+    "text": "you know a single sort of subcomponent of let's say my parameters from rank zero and I'm copying it over to all the",
+    "start": "385520",
+    "end": "391680"
+  },
+  {
+    "text": "ranks um same thing with rank 1 2 3 so each of these are handling different parts of let's say the parameters and",
+    "start": "391680",
+    "end": "397360"
+  },
+  {
+    "text": "they're copied over to the rest of the machines so that's sort of you know copying what I have to everyone else and",
+    "start": "397360",
+    "end": "402639"
+  },
+  {
+    "text": "then reduce scatter which is you know I'm taking um uh each of the rows let's",
+    "start": "402639",
+    "end": "408000"
+  },
+  {
+    "text": "say I'm summing them up and then I'm sending the result only to rank zero right so this is a partial version of an",
+    "start": "408000",
+    "end": "414400"
+  },
+  {
+    "text": "all reduce and hopefully this diagram makes it clear um how sort of reduce scatter works and so all gather and",
+    "start": "414400",
+    "end": "420880"
+  },
+  {
+    "text": "reduce scatter are quite important because in some sense they are the primitive by which uh many of the",
+    "start": "420880",
+    "end": "427280"
+  },
+  {
+    "text": "parallelization algorithm are going to be built and so uh this is this is kind of an important sort of equivalence or",
+    "start": "427280",
+    "end": "433280"
+  },
+  {
+    "text": "an identity I will refer to it um one or two times as sort of key points in this lecture if you want to do an all reduce",
+    "start": "433280",
+    "end": "439759"
+  },
+  {
+    "text": "right let's say I've got um different GP GPUs right ab B C D um and each of the",
+    "start": "439759",
+    "end": "445120"
+  },
+  {
+    "text": "GPUs are handling a different data point right and so I've got different gradients for each of these data points",
+    "start": "445120",
+    "end": "450160"
+  },
+  {
+    "text": "and I'm going to need to sum those gradients and then I need to pass all those gradients back to the GPUs right this is a classic data parallel",
+    "start": "450160",
+    "end": "456560"
+  },
+  {
+    "text": "operation that I might need to do across my four GPUs so that would be an all reduce um one important thing though is",
+    "start": "456560",
+    "end": "462639"
+  },
+  {
+    "text": "this could be uh replaced with two operations a reduce scatter and all gather where a reduce scatter is going",
+    "start": "462639",
+    "end": "469280"
+  },
+  {
+    "text": "to you know sum sort of each of the rows um and then leave the result of the rows in let's say GPU 0 1 2 3 respectively",
+    "start": "469280",
+    "end": "477039"
+  },
+  {
+    "text": "right and then I'm going to do a all gather to sort of copy those back out to the remaining GPUs right so each GPU now",
+    "start": "477039",
+    "end": "484479"
+  },
+  {
+    "text": "is getting uh a full sum of uh a part of the parameters and then it's going to copy it back to the remaining ing",
+    "start": "484479",
+    "end": "491319"
+  },
+  {
+    "text": "workers um and in the bandwidth limited regime this is basically the best that",
+    "start": "491319",
+    "end": "496400"
+  },
+  {
+    "text": "you can do right all reduce the best that you can do is roughly matching you know the the bandwidth that you can get",
+    "start": "496400",
+    "end": "502000"
+  },
+  {
+    "text": "out of a reduce scatter and all gather and you can convince yourself this by writing out how many sort of communication operations happen in both",
+    "start": "502000",
+    "end": "508319"
+  },
+  {
+    "text": "all reduce um and the right hand side um the final thing um that I want",
+    "start": "508319",
+    "end": "514800"
+  },
+  {
+    "text": "to sort of briefly touch on before I sort of move on to talking about the parallelization algorithms and this is",
+    "start": "514800",
+    "end": "520080"
+  },
+  {
+    "text": "like the one place I'll talk about GPU versus TPU um most of the the discussion today can actually abstract out the",
+    "start": "520080",
+    "end": "525760"
+  },
+  {
+    "text": "underlying hardware um but there is actually sort of one important thing that I'll I'll mention up front so that",
+    "start": "525760",
+    "end": "531120"
+  },
+  {
+    "text": "I can refer to it later as I talk through this um how do we network together different machines or different",
+    "start": "531120",
+    "end": "537600"
+  },
+  {
+    "text": "sort of accelerators in sort of GPUs well you know as I showed you in uh the GPT Neo X slide here how in the GPU",
+    "start": "537600",
+    "end": "545360"
+  },
+  {
+    "text": "world this generally works is you've got nodes single machines that contain let's say eight GPUs and then you've got these",
+    "start": "545360",
+    "end": "551680"
+  },
+  {
+    "text": "switches that connect fairly quickly to each other and these machines are",
+    "start": "551680",
+    "end": "556800"
+  },
+  {
+    "text": "connected all to all up to about 256 GPUs so that's a a important threshold",
+    "start": "556800",
+    "end": "562560"
+  },
+  {
+    "text": "up until which you have very fast arbitrary communication between machines and then above that you're actually",
+    "start": "562560",
+    "end": "569200"
+  },
+  {
+    "text": "going to need sort of much more um slow communication these sort of leaf switches and spine switches once you go",
+    "start": "569200",
+    "end": "575519"
+  },
+  {
+    "text": "beyond sort of roughly a single rack's worth of GPU on the other hand you know if you look at sort of TPU design from",
+    "start": "575519",
+    "end": "582160"
+  },
+  {
+    "text": "Google they actually take a very different approach to networking sort of their their machines um you've got a",
+    "start": "582160",
+    "end": "588080"
+  },
+  {
+    "text": "single sort of TPU chip and they all talk to their neighbors very very quickly and so this is a very sort of",
+    "start": "588080",
+    "end": "594880"
+  },
+  {
+    "text": "easily expandable what they call toidal mesh but you can only talk to your neighbors um and the reason why I'm",
+    "start": "594880",
+    "end": "601440"
+  },
+  {
+    "text": "talking about this right after the all reduce slide is if you think about you know doing these kinds of collective communications like all reduce or reduce",
+    "start": "601440",
+    "end": "608160"
+  },
+  {
+    "text": "scatter um you can implement them just as efficiently on a toridal mesh than you can on a alltoall connection um and",
+    "start": "608160",
+    "end": "614800"
+  },
+  {
+    "text": "so if you're optimizing purely for collective communications it makes sense to think about things like TPU",
+    "start": "614800",
+    "end": "619839"
+  },
+  {
+    "text": "networking um rather than GPU networking and I'll talk a little bit about pros and cons of this later as I go through",
+    "start": "619839",
+    "end": "625040"
+  },
+  {
+    "text": "different um parallelization um operations so okay so just to put this",
+    "start": "625040",
+    "end": "630959"
+  },
+  {
+    "text": "together right now we're going to start talking about a new unit of sort of compute right instead of the GPU the new",
+    "start": "630959",
+    "end": "636240"
+  },
+  {
+    "text": "unit is the data center the whole data center is going to be the thing that we're going to be doing um and now we're",
+    "start": "636240",
+    "end": "641680"
+  },
+  {
+    "text": "going to try to come up with algorithms and sort of sharding strategies that get us two different things the first one is",
+    "start": "641680",
+    "end": "647839"
+  },
+  {
+    "text": "linear memory scaling so as I scale up the number of GPUs the sort of biggest",
+    "start": "647839",
+    "end": "653040"
+  },
+  {
+    "text": "model that I can train is going to scale linearly with that right so I can train bigger and bigger models if I really want to right um I also want linear",
+    "start": "653040",
+    "end": "660160"
+  },
+  {
+    "text": "compute scaling right as I get more and more GPUs the the useful computation that I'm doing to train the model um",
+    "start": "660160",
+    "end": "666560"
+  },
+  {
+    "text": "scales linearly right and then finally a lot of this these algorithms are going to be implemented by just calling these",
+    "start": "666560",
+    "end": "673519"
+  },
+  {
+    "text": "very simple collective communications primitives in various ways and so when we think about the performance characteristics of these uh parallel",
+    "start": "673519",
+    "end": "681040"
+  },
+  {
+    "text": "algorithms it suffices to reason about you know basically counting the collective communications primitives so",
+    "start": "681040",
+    "end": "686800"
+  },
+  {
+    "text": "so that's kind of an important way to think about these we don't we don't go all the way down to the low-level implementation um of these algorithms",
+    "start": "686800",
+    "end": "692800"
+  },
+  {
+    "text": "here okay um any questions on part one yes sorry but from the previous slide",
+    "start": "692800",
+    "end": "699680"
+  },
+  {
+    "text": "does it mean that it's better to do reduce scatter gathering rather than all right so so this slide right yeah so the",
+    "start": "699680",
+    "end": "706320"
+  },
+  {
+    "text": "conclusion of this slide is that they're equivalent right and I think if you think about something like um parallel",
+    "start": "706320",
+    "end": "712079"
+  },
+  {
+    "text": "uh doing doing um gradient descent in parallel all reduce is a very natural operation to do because you'll scatter",
+    "start": "712079",
+    "end": "718720"
+  },
+  {
+    "text": "your sorry you'll you'll distribute your data to different machines and then you'll have to all reduce your gradients",
+    "start": "718720",
+    "end": "724160"
+  },
+  {
+    "text": "together right um but what I'm saying is this very natural thing to do of all reduce can actually be written as a sum",
+    "start": "724160",
+    "end": "730320"
+  },
+  {
+    "text": "of two different operations um and they're equivalent so there's no performance sort of charact by going",
+    "start": "730320",
+    "end": "735920"
+  },
+  {
+    "text": "from this left representation to this right one at least in bandwidth and that's going to have you know important",
+    "start": "735920",
+    "end": "741120"
+  },
+  {
+    "text": "implications in maybe like five slides so you can wait a little bit to see you know why I mentioned",
+    "start": "741120",
+    "end": "746279"
+  },
+  {
+    "text": "this okay any other questions good",
+    "start": "746279",
+    "end": "752839"
+  },
+  {
+    "text": "okay so now we're going to get started um in some sense this is kind of the the exciting uh algorithmic meat uh of the",
+    "start": "752839",
+    "end": "760000"
+  },
+  {
+    "text": "lecture and there's three kinds of um parallelism you know strategies",
+    "start": "760000",
+    "end": "765440"
+  },
+  {
+    "text": "parallelism things that we should really be thinking about so the first one is data parallelism so data parallelism at",
+    "start": "765440",
+    "end": "771680"
+  },
+  {
+    "text": "a high level is the idea of I'm going to roughly copy the parameters across my",
+    "start": "771680",
+    "end": "777040"
+  },
+  {
+    "text": "different GPUs i'm not going to worry about splitting my parameters up but I will take my batch and I will split my",
+    "start": "777040",
+    "end": "782880"
+  },
+  {
+    "text": "batch up and different GPUs or different machines will get different slices of my",
+    "start": "782880",
+    "end": "788079"
+  },
+  {
+    "text": "batch right so that's data parallelism there's lots of subtleties in how we execute that um model parallelism now is",
+    "start": "788079",
+    "end": "795200"
+  },
+  {
+    "text": "starting to say okay I don't want all my GPUs to have all the different parts of my model right as my models get bigger",
+    "start": "795200",
+    "end": "801440"
+  },
+  {
+    "text": "that's going to be a very big problem so I need to cut up my model in very clever ways and I need my GPU to handle",
+    "start": "801440",
+    "end": "806959"
+  },
+  {
+    "text": "different parts of my model right so that's going to be model parallelism um and then the final piece is kind of",
+    "start": "806959",
+    "end": "813040"
+  },
+  {
+    "text": "activation parallelism um we don't really think too much about activations in our day-to-day lives because you know",
+    "start": "813040",
+    "end": "818880"
+  },
+  {
+    "text": "the PyTorch handles it very transparently right but as the models get bigger and the sequence lengths get",
+    "start": "818880",
+    "end": "825360"
+  },
+  {
+    "text": "longer um the activation memory starts to be a really big problem so if you want to train these really big models",
+    "start": "825360",
+    "end": "831680"
+  },
+  {
+    "text": "with big big batch sizes you have to somehow manage the memory footprint of your activations and so we have to split",
+    "start": "831680",
+    "end": "837920"
+  },
+  {
+    "text": "those up too so there's some ways to handle that right and when we put all these together we will have all the",
+    "start": "837920",
+    "end": "843519"
+  },
+  {
+    "text": "tools we need in order to scale up both compute and memory gracefully as we have lots and lots of machines right so so",
+    "start": "843519",
+    "end": "850320"
+  },
+  {
+    "text": "these are kind of the core conceptual objects and now we're going to talk about implementing each of these ideas",
+    "start": "850320",
+    "end": "857839"
+  },
+  {
+    "text": "efficiently so the starting point of data parallelism is just sort of SGD",
+    "start": "857880",
+    "end": "863120"
+  },
+  {
+    "text": "right if we're doing very naive batch stocastic gradient descent the formula",
+    "start": "863120",
+    "end": "868240"
+  },
+  {
+    "text": "for doing this looks like this equation um that I have you know right here on the slide right here um I'm taking a",
+    "start": "868240",
+    "end": "874560"
+  },
+  {
+    "text": "batch size capital B and I'm going to sum up all those gradients and I'm going to update my parameters right so naive",
+    "start": "874560",
+    "end": "881279"
+  },
+  {
+    "text": "data parallelism is just saying all right take your batch size B split that up and send that to different machines",
+    "start": "881279",
+    "end": "887760"
+  },
+  {
+    "text": "each machine will compute some part of this sum and then I will exchange all of",
+    "start": "887760",
+    "end": "892800"
+  },
+  {
+    "text": "my gradients together to synchronize you know after each sort of before each gradient step I will synchronize my",
+    "start": "892800",
+    "end": "898079"
+  },
+  {
+    "text": "gradients and then I will take a parameter update right so now I've been talking to you about compute and memory",
+    "start": "898079",
+    "end": "904480"
+  },
+  {
+    "text": "scaling and all these things so let's just talk through you know what it looks like for each of these right so for",
+    "start": "904480",
+    "end": "910160"
+  },
+  {
+    "text": "compute scaling uh data parallelism is pretty great um each machine each GPU is",
+    "start": "910160",
+    "end": "915680"
+  },
+  {
+    "text": "going to get B over M examples and if my batch size is big enough you know each GPU is going to get a pretty decent",
+    "start": "915680",
+    "end": "922160"
+  },
+  {
+    "text": "batch size micro batch size um and it's able to hopefully saturate its compute",
+    "start": "922160",
+    "end": "927199"
+  },
+  {
+    "text": "okay so that's good what's the communication overhead well I'm going to have to transmit twice the number uh of",
+    "start": "927199",
+    "end": "934320"
+  },
+  {
+    "text": "my parameters every batch remember an all reduce is going to roughly be twice the amount of stuff that you're all",
+    "start": "934320",
+    "end": "940240"
+  },
+  {
+    "text": "reducing in terms of communication cost um and so this is okay if the batch size is big right if my batch sizes are",
+    "start": "940240",
+    "end": "946320"
+  },
+  {
+    "text": "really big I can mask the communication overhead of having to synchronize uh my gradients every now and then memory",
+    "start": "946320",
+    "end": "953680"
+  },
+  {
+    "text": "scaling I'm not touching this at all right every GPU needs to replicate the number of parameters it needs to",
+    "start": "953680",
+    "end": "959440"
+  },
+  {
+    "text": "replicate the optimizer state it's it's pretty bad for memory scaling right so",
+    "start": "959440",
+    "end": "964639"
+  },
+  {
+    "text": "if we didn't have to worry about you know memory at all this is a this is okay strategy um but I think in practice",
+    "start": "964639",
+    "end": "973600"
+  },
+  {
+    "text": "memory is a problem right like I think everyone of you sitting here has experienced you know trying to put a big",
+    "start": "973600",
+    "end": "978720"
+  },
+  {
+    "text": "model onto a GPU and PyTorch telling you oh you're out of memory um and this is you know really a problem with your",
+    "start": "978720",
+    "end": "984880"
+  },
+  {
+    "text": "training as well because if you can fit you know more and more batch sizes that's going to make um the the data",
+    "start": "984880",
+    "end": "991040"
+  },
+  {
+    "text": "parallel more efficient and so ideally you'd like to save on memory so let's take a closer look at the memory usage",
+    "start": "991040",
+    "end": "998079"
+  },
+  {
+    "text": "of naive data parallel right um and the memory situation is actually worse than",
+    "start": "998079",
+    "end": "1003759"
+  },
+  {
+    "text": "it looks it's actually quite terrible um because you know you've you've done this in assignment one but we can sort of",
+    "start": "1003759",
+    "end": "1011440"
+  },
+  {
+    "text": "think about how many copies of our model we we need to sort of store and it's very large right depending on the",
+    "start": "1011440",
+    "end": "1017120"
+  },
+  {
+    "text": "precision by which we're doing some of our training um you're going to need to store something like 16 bytes of data",
+    "start": "1017120",
+    "end": "1023839"
+  },
+  {
+    "text": "per parameter um and in fact you need to store something like five copies of your weights um and this is really quite bad",
+    "start": "1023839",
+    "end": "1031199"
+  },
+  {
+    "text": "because if you just want to think about your model parameters technically you only need two bytes right so where did that factor of eight come from well at",
+    "start": "1031199",
+    "end": "1038480"
+  },
+  {
+    "text": "least you need gradients and if you're computing your gradients in BF-16 that's another two bytes but then your",
+    "start": "1038480",
+    "end": "1044160"
+  },
+  {
+    "text": "optimizer state kind of shows up and that's a that's a really big problem because you've got four bytes of sort of",
+    "start": "1044160",
+    "end": "1050000"
+  },
+  {
+    "text": "master weights the things that you're kind of accumulating into SGD like these intermediate sort of sums that you're doing um you need you know four or two",
+    "start": "1050000",
+    "end": "1057360"
+  },
+  {
+    "text": "bytes for for Adam's first moment estimates because remember Adam keeps track of historical gradients and then",
+    "start": "1057360",
+    "end": "1063120"
+  },
+  {
+    "text": "Adam also needs second moment estimates kind of like the variance uh of the the gradients that you've gotten in the past",
+    "start": "1063120",
+    "end": "1068559"
+  },
+  {
+    "text": "and like that's going to need another four or two bytes and so what originally looked fine is actually now looking",
+    "start": "1068559",
+    "end": "1075360"
+  },
+  {
+    "text": "quite grim and so you know this 16x if I just",
+    "start": "1075360",
+    "end": "1080720"
+  },
+  {
+    "text": "sort of draw it as a picture you know you realize that most of your memory usage at least in terms of kind of",
+    "start": "1080720",
+    "end": "1086240"
+  },
+  {
+    "text": "parameter memory is really being dominated by the optimizer states of",
+    "start": "1086240",
+    "end": "1091520"
+  },
+  {
+    "text": "your atom optimizer right so your memory consumed is going to be you know a a",
+    "start": "1091520",
+    "end": "1096720"
+  },
+  {
+    "text": "function of you know how many bytes are being used for your um optimizer state and that's generally going to be even",
+    "start": "1096720",
+    "end": "1103679"
+  },
+  {
+    "text": "more than the core uh parameter and gradient memory usage and so for a simple example of like a 7.5b model",
+    "start": "1103679",
+    "end": "1111600"
+  },
+  {
+    "text": "distributed over you know 64 accelerators you're using a ton of memory right and this memory scales",
+    "start": "1111600",
+    "end": "1117360"
+  },
+  {
+    "text": "linearly upwards total memory at least scales linearly upwards with the number of GPUs so that's that's no good at all",
+    "start": "1117360",
+    "end": "1124960"
+  },
+  {
+    "text": "um but if once we sort of look at this picture we get some very simple ideas you you might wonder clearly or or maybe",
+    "start": "1124960",
+    "end": "1132880"
+  },
+  {
+    "text": "not clearly you know I need the parameters and gradients to be copied across devices that seems you know",
+    "start": "1132880",
+    "end": "1138400"
+  },
+  {
+    "text": "necessary to do data parallel but do I really need all the optimizer states to be on every single machine right and",
+    "start": "1138400",
+    "end": "1145520"
+  },
+  {
+    "text": "once you ask that question you know you can maybe get to this second row here and this is going to be this going to be",
+    "start": "1145520",
+    "end": "1150880"
+  },
+  {
+    "text": "called um optimizer state sharding and if we could do that then at least in this case we can go from 120 GB of total",
+    "start": "1150880",
+    "end": "1157919"
+  },
+  {
+    "text": "memory usage down to 31.4 um and then maybe we can start sharding the gradients and then now we",
+    "start": "1157919",
+    "end": "1164559"
+  },
+  {
+    "text": "can get to 16.6 GB of memory usage and then if we also shard the parameters we can go all the way down to 1.9 GB of",
+    "start": "1164559",
+    "end": "1172080"
+  },
+  {
+    "text": "memory usage and that would be a pretty good place to be because now we've sort of fully sharded out you know all of",
+    "start": "1172080",
+    "end": "1177600"
+  },
+  {
+    "text": "sort of the optimizer state and parameter and gradient memory that we need yes sorry why could we sh optimizer",
+    "start": "1177600",
+    "end": "1184480"
+  },
+  {
+    "text": "state if like if we're doing um I guess the gradient computation on each of them",
+    "start": "1184480",
+    "end": "1191280"
+  },
+  {
+    "text": "like reducing how can we have that is a very good question and the",
+    "start": "1191280",
+    "end": "1197120"
+  },
+  {
+    "text": "question is how can we shard the optimizer state you know when we're doing data parallel right GPU0 has to be",
+    "start": "1197120",
+    "end": "1203280"
+  },
+  {
+    "text": "responsible for data point one so clearly it needs to know about all the parameters and update it so how can it",
+    "start": "1203280",
+    "end": "1208799"
+  },
+  {
+    "text": "possibly shard the optimizer state um And in a way I think zero which is what this is this is the the zero overhead",
+    "start": "1208799",
+    "end": "1215919"
+  },
+  {
+    "text": "data parallel sort of optimizer um this is a very in some ways clever idea because it shows you that even when",
+    "start": "1215919",
+    "end": "1222240"
+  },
+  {
+    "text": "you're doing data parallel you don't actually need to copy everything onto every machine right you can be really",
+    "start": "1222240",
+    "end": "1227440"
+  },
+  {
+    "text": "clever about how you do sort of communications to avoid all of this so so I will I will talk through exactly",
+    "start": "1227440",
+    "end": "1233039"
+  },
+  {
+    "text": "this this is a great question um so what we're going to do is we're going to split up the optimizer states as I said",
+    "start": "1233039",
+    "end": "1239200"
+  },
+  {
+    "text": "so the first and second moments are now split up across all the GPUs um but everyone has the parameters and the",
+    "start": "1239200",
+    "end": "1245360"
+  },
+  {
+    "text": "gradients right so so why is this important right if I have the parameters and gradients let's say I'm GPU0 I have",
+    "start": "1245360",
+    "end": "1251120"
+  },
+  {
+    "text": "the parameters and gradients for everything that's enough information for me to compute the full gradient right",
+    "start": "1251120",
+    "end": "1257200"
+  },
+  {
+    "text": "like the full gradient update for this example can be computed the only thing I can't do is I can't take that gradient",
+    "start": "1257200",
+    "end": "1263840"
+  },
+  {
+    "text": "and take an atom step right i can't update my parameters unless I see all of the optimizer states right so that's",
+    "start": "1263840",
+    "end": "1269600"
+  },
+  {
+    "text": "kind of the key idea and so now what going to happen is GPU0 is going to",
+    "start": "1269600",
+    "end": "1275600"
+  },
+  {
+    "text": "compute the gradients for everything but GPU0 is now only responsible for updating the parameters for the shard",
+    "start": "1275600",
+    "end": "1282480"
+  },
+  {
+    "text": "that they own right and that's kind of the key idea right we're going to distribute the work of updating the",
+    "start": "1282480",
+    "end": "1287679"
+  },
+  {
+    "text": "parameters and then we're going to synchronize the parameters back so let me show you in in sort of much more gory",
+    "start": "1287679",
+    "end": "1293760"
+  },
+  {
+    "text": "detail how this works and sort of the reason why it's called zero overhead",
+    "start": "1293760",
+    "end": "1298880"
+  },
+  {
+    "text": "so step one right every GPU uh gets a different data point let's say right I'm",
+    "start": "1298880",
+    "end": "1304640"
+  },
+  {
+    "text": "just going to simplify all this batch computation I have GPU 0 through let's say four and every GPU gets a single",
+    "start": "1304640",
+    "end": "1310240"
+  },
+  {
+    "text": "example and they compute a full gradient on the example that they own now what I'm going to do next is I'm going to",
+    "start": "1310240",
+    "end": "1317280"
+  },
+  {
+    "text": "reduce scatter the gradients right so I'm going to send the gradients that you know um I'm going to collect in some",
+    "start": "1317280",
+    "end": "1323919"
+  },
+  {
+    "text": "sense the gradients that each GPU owns so GPU0 let's say is respon responsible",
+    "start": "1323919",
+    "end": "1328960"
+  },
+  {
+    "text": "for this first quarter of the parameters right so the parameters are are the y-axis here and the x-axis here is GPUs",
+    "start": "1328960",
+    "end": "1336080"
+  },
+  {
+    "text": "and so what we're going to do is we're going to reduce scatter to make sure that GPU zero has all of the gradient",
+    "start": "1336080",
+    "end": "1342480"
+  },
+  {
+    "text": "information from all the other GPUs for the subset of parameters that it is responsible for right so now it gets",
+    "start": "1342480",
+    "end": "1348400"
+  },
+  {
+    "text": "this G uh gradient information from GPU 1 and GPU 2 and GPU 3 and that's all reduced into GPU 0 hopefully that's",
+    "start": "1348400",
+    "end": "1356000"
+  },
+  {
+    "text": "clear now now GPU0 has all the information it needs to update its own",
+    "start": "1356000",
+    "end": "1362080"
+  },
+  {
+    "text": "parameters because it has the optimizer state corresponding to this first part it has a full summed gradient for this",
+    "start": "1362080",
+    "end": "1368799"
+  },
+  {
+    "text": "first part and now so it's going to take a gradient update on their part of the parameters using gradient and state",
+    "start": "1368799",
+    "end": "1375600"
+  },
+  {
+    "text": "right and so that now I have the full updated parameters for this subset in my",
+    "start": "1375600",
+    "end": "1380799"
+  },
+  {
+    "text": "GPU zero and all I need to do is all gather all of the parameter updated parameters back in to all the ranks okay",
+    "start": "1380799",
+    "end": "1388720"
+  },
+  {
+    "text": "so there's many questions here i'll start here yes when you say the communication cost is the number of frameworks that's per machine right or",
+    "start": "1388720",
+    "end": "1395679"
+  },
+  {
+    "text": "is that sorry say say that again the communication cost being the number of",
+    "start": "1395679",
+    "end": "1400799"
+  },
+  {
+    "text": "frameworks that's per machine right or is that total um so the question was uh whether the number of crimes",
+    "start": "1400799",
+    "end": "1406080"
+  },
+  {
+    "text": "communication cost was per machine or it's total um here it's going to be total because um so so this is going to",
+    "start": "1406080",
+    "end": "1412880"
+  },
+  {
+    "text": "be like 1/4 of the parameter is going to be sent three times to this machine and then you repeat that four times",
+    "start": "1412880",
+    "end": "1421158"
+  },
+  {
+    "text": "was that machine that that was also total yeah two times number of parameters is total because each block",
+    "start": "1422480",
+    "end": "1429200"
+  },
+  {
+    "text": "is going to have to be sent to every other kind of machine",
+    "start": "1429200",
+    "end": "1434480"
+  },
+  {
+    "text": "okay yes so this question is not unique to what you're showing here but it made me think of it so the outlines that we",
+    "start": "1434480",
+    "end": "1442159"
+  },
+  {
+    "text": "showed seems to assume like large largely assume independence of parameters but we've drawn all these",
+    "start": "1442159",
+    "end": "1449280"
+  },
+  {
+    "text": "like diagrams that show the opposite you know like we have connected nodes and all",
+    "start": "1449280",
+    "end": "1455520"
+  },
+  {
+    "text": "that and it seems especially interesting when we have when we're trying to split these and update them separately uh is",
+    "start": "1455520",
+    "end": "1461679"
+  },
+  {
+    "text": "does that create any issues okay so the question was Adam W seems to assume parameters operate independently i'm",
+    "start": "1461679",
+    "end": "1467200"
+  },
+  {
+    "text": "assuming because you're saying like we track like gradient sums like and then we diagonally sort of update the",
+    "start": "1467200",
+    "end": "1472480"
+  },
+  {
+    "text": "parameters right um but we know that that's not fully diagonal and so is there a problem um there have been you",
+    "start": "1472480",
+    "end": "1479279"
+  },
+  {
+    "text": "know better attempts um at improving sort of Atom W to not just be diagonal",
+    "start": "1479279",
+    "end": "1484960"
+  },
+  {
+    "text": "there's things like KFAC and all these other like second order style optimizers that people have come up with um they",
+    "start": "1484960",
+    "end": "1490880"
+  },
+  {
+    "text": "haven't dethroned Adam even though they do have their advantages and there's some really interesting things that you can do with these kinds of improved",
+    "start": "1490880",
+    "end": "1497840"
+  },
+  {
+    "text": "second order preconditioning uh methods yes what is the reducing what is the",
+    "start": "1497840",
+    "end": "1505600"
+  },
+  {
+    "text": "rows that we're reducing over um so you're asking like what is the rows of this picture yeah so imagine this is",
+    "start": "1505600",
+    "end": "1512400"
+  },
+  {
+    "text": "like parameters here uh in the rows so like GPU0 is responsible for some number",
+    "start": "1512400",
+    "end": "1517679"
+  },
+  {
+    "text": "of parameters so this is a block of parameters up top um and so when we do reduce scatter we're saying take the",
+    "start": "1517679",
+    "end": "1524200"
+  },
+  {
+    "text": "gradients for example zero for this block of parameters take the gradients for example one for this same block of",
+    "start": "1524200",
+    "end": "1530320"
+  },
+  {
+    "text": "parameters and then sum them all and put them in rank zero that's kind of what we're saying",
+    "start": "1530320",
+    "end": "1535880"
+  },
+  {
+    "text": "here cool okay um and kind of the key thing here is we're doing a reduced",
+    "start": "1535880",
+    "end": "1542080"
+  },
+  {
+    "text": "scatter and an all gather right and if you kind of remember what I was saying before well a reduce scatter and a all",
+    "start": "1542080",
+    "end": "1549520"
+  },
+  {
+    "text": "gather has the same cost as an all reduce right and so there is a little bit of a surprising magic thing that",
+    "start": "1549520",
+    "end": "1555679"
+  },
+  {
+    "text": "happened here which is that well you know we were doing an all reduce before on all the gradients to make sure",
+    "start": "1555679",
+    "end": "1561120"
+  },
+  {
+    "text": "everyone's gradients were synchronized and that cost us two times the number of parameters but if we're kind of clever",
+    "start": "1561120",
+    "end": "1566799"
+  },
+  {
+    "text": "about how we're doing the updates well we can do a reduce scatter and all gather and in between the two steps we",
+    "start": "1566799",
+    "end": "1573120"
+  },
+  {
+    "text": "can do some computation um and that gives us the same amount of of compute communication cost but now at least for",
+    "start": "1573120",
+    "end": "1579039"
+  },
+  {
+    "text": "the optimizer state we fully sharted the optimizer state across the model so zero stage one is in some sense free in the",
+    "start": "1579039",
+    "end": "1586159"
+  },
+  {
+    "text": "bandwidth limited regime um and gives you memory wins um yes",
+    "start": "1586159",
+    "end": "1593120"
+  },
+  {
+    "text": "suppress the memory contribution of the higher moments do people modify atom to",
+    "start": "1593120",
+    "end": "1599600"
+  },
+  {
+    "text": "higher moments because seems like it's um when what do you mean by uh you can suppress the higher order",
+    "start": "1599600",
+    "end": "1606880"
+  },
+  {
+    "text": "contributions right so uh for the first and second moments the amount of memory",
+    "start": "1606880",
+    "end": "1612720"
+  },
+  {
+    "text": "you uh per per GPU is divided by yes so it",
+    "start": "1612720",
+    "end": "1620799"
+  },
+  {
+    "text": "seems like you might as well show more I see so so you're you're roughly saying like you could track way more optimizer",
+    "start": "1620799",
+    "end": "1627840"
+  },
+  {
+    "text": "state to rephrase what you're saying you could have even more complicated optimizer state because you can divide that by the number of GPUs um while this",
+    "start": "1627840",
+    "end": "1635120"
+  },
+  {
+    "text": "is true um what's what we're going to do next is we're actually going to make the other components scale with NGPUs so",
+    "start": "1635120",
+    "end": "1640960"
+  },
+  {
+    "text": "that's going to make things in some sense not free anymore right like optimizer state will continue to be the bottleneck if we can divide everything",
+    "start": "1640960",
+    "end": "1646720"
+  },
+  {
+    "text": "by the number of GPUs so hopefully that's a reasonable uh convincing answer okay so we're going to build up",
+    "start": "1646720",
+    "end": "1653200"
+  },
+  {
+    "text": "stage by stage to zero stage three which is which is more complicated um zero stage two is still relatively simple so",
+    "start": "1653200",
+    "end": "1660400"
+  },
+  {
+    "text": "now hopefully that optimizer state sharding trick made sense i I think that's very cool um so now we want to",
+    "start": "1660400",
+    "end": "1667360"
+  },
+  {
+    "text": "shard even more stuff so I want to shard the gradients across the machines um so",
+    "start": "1667360",
+    "end": "1672559"
+  },
+  {
+    "text": "roughly we can do the same kinds of trick as stage one but there is one additional complexity um and so what",
+    "start": "1672559",
+    "end": "1679919"
+  },
+  {
+    "text": "what's the additional complexity well you know we can never instantiate a full gradient vector right if I ever do the",
+    "start": "1679919",
+    "end": "1686159"
+  },
+  {
+    "text": "full backwards pass and I try to compute a full gradient vector um I might go out",
+    "start": "1686159",
+    "end": "1691200"
+  },
+  {
+    "text": "of memory right so I want my maximum memory usage to basically be bounded by this which is like full parameters",
+    "start": "1691200",
+    "end": "1697840"
+  },
+  {
+    "text": "sharded gradient sharded optimizer state and so what we're going to have to do is when we do the backwards pass as we're",
+    "start": "1697840",
+    "end": "1704960"
+  },
+  {
+    "text": "computing the gradient vector we can't instantiate the full gradient first and then do communication what we have to do",
+    "start": "1704960",
+    "end": "1710399"
+  },
+  {
+    "text": "is as we compute the gradients backwards as soon as we compute like a layer's worth of gradient we're going to have to",
+    "start": "1710399",
+    "end": "1715440"
+  },
+  {
+    "text": "send that over to the corresponding sort of GPU that that it belongs to right um",
+    "start": "1715440",
+    "end": "1721399"
+  },
+  {
+    "text": "so this is kind of how it works it's roughly the same idea right so now um",
+    "start": "1721399",
+    "end": "1726559"
+  },
+  {
+    "text": "everyone has their own batch component everyone incrementally goes backwards on the computation graph and let's say",
+    "start": "1726559",
+    "end": "1731840"
+  },
+  {
+    "text": "we're going to operate layer by layer right so layers are sharted you know atomically to different GPUs um so",
+    "start": "1731840",
+    "end": "1737919"
+  },
+  {
+    "text": "what's what we're going to do then is as we go backwards on the computation graph after we compute a layer's gradients um",
+    "start": "1737919",
+    "end": "1744159"
+  },
+  {
+    "text": "immediately call a reduction operation to send this to the right worker right so a layer belongs to some worker maybe",
+    "start": "1744159",
+    "end": "1749279"
+  },
+  {
+    "text": "it's like GPU number two in this case so we're just going to immediately reduce that send that to the to the worker um",
+    "start": "1749279",
+    "end": "1755520"
+  },
+  {
+    "text": "at that point and gradients are now no longer needed um you know I don't need to store the gradients on ranks 0 1 and",
+    "start": "1755520",
+    "end": "1762240"
+  },
+  {
+    "text": "three so I can immediately free that um and then now we continue this process and So all the machines have their fully",
+    "start": "1762240",
+    "end": "1768399"
+  },
+  {
+    "text": "updated gradients and now they have a full gradient for their share of the parameters they have a full optimizer",
+    "start": "1768399",
+    "end": "1774159"
+  },
+  {
+    "text": "state for their share of the parameters each machine can update their parameters and all gather the parameters back",
+    "start": "1774159",
+    "end": "1779760"
+  },
+  {
+    "text": "together right um this looks like it's maybe more communication because you're doing this kind of like um uh reduction",
+    "start": "1779760",
+    "end": "1786640"
+  },
+  {
+    "text": "operation um every layer but this is only for a small amount of parameters right it's sharded and so the full",
+    "start": "1786640",
+    "end": "1792640"
+  },
+  {
+    "text": "communication remains the same so zero stage 2 has some more overhead because we have to synchronize layer by layer",
+    "start": "1792640",
+    "end": "1799600"
+  },
+  {
+    "text": "and make sure that the gradients are properly sent to the right workers um but the overhead is pretty minimal right",
+    "start": "1799600",
+    "end": "1805600"
+  },
+  {
+    "text": "it's still very simple fairly straightforward now the last one of these zero stage 3 is more complicated",
+    "start": "1805600",
+    "end": "1812960"
+  },
+  {
+    "text": "for sure um but it allows you the greatest win of all which is now essentially everything is divided by the",
+    "start": "1812960",
+    "end": "1819840"
+  },
+  {
+    "text": "number of GPUs that you have and you can get the maximum savings uh possible and if you've heard of um you know FSDP",
+    "start": "1819840",
+    "end": "1826880"
+  },
+  {
+    "text": "right you've probably used that in in some aspect of your life in the past um FSDP is exactly zero stage three so now",
+    "start": "1826880",
+    "end": "1833760"
+  },
+  {
+    "text": "you'll kind of hopefully today know how FSDP um works so the same idea applies",
+    "start": "1833760",
+    "end": "1840799"
+  },
+  {
+    "text": "we're going to shard everything including the parameters we're going to do the same thing as zero stage 2 which is we're going to incrementally",
+    "start": "1840799",
+    "end": "1846960"
+  },
+  {
+    "text": "communicate and compute things so that we don't keep these big vectors of gradients lying around um and we're",
+    "start": "1846960",
+    "end": "1853279"
+  },
+  {
+    "text": "going to send and request parameters on demand while we're going stepping through the compute graph both for the",
+    "start": "1853279",
+    "end": "1858399"
+  },
+  {
+    "text": "forward and backward passes you know as we go through we're going to send things around on demand um and of course the",
+    "start": "1858399",
+    "end": "1864240"
+  },
+  {
+    "text": "key is to do this with as low overhead as possible i think the thing that's really surprising about FSDP is not that",
+    "start": "1864240",
+    "end": "1871520"
+  },
+  {
+    "text": "this is possible but that this is possible with relatively low overhead um you'll see kind of why it's low overhead",
+    "start": "1871520",
+    "end": "1877840"
+  },
+  {
+    "text": "in the in the next um slide um I I admit that this is maybe not the the most uh",
+    "start": "1877840",
+    "end": "1884720"
+  },
+  {
+    "text": "friendly graphic to start with but this is I promise the baby version um of SSDP",
+    "start": "1884720",
+    "end": "1889919"
+  },
+  {
+    "text": "uh the the next slide is a little bit more more involved um but conceptually this actually explains everything so",
+    "start": "1889919",
+    "end": "1895520"
+  },
+  {
+    "text": "what we're doing is you know we're going to have model weights and we're going to be all gathering the model weights as we",
+    "start": "1895520",
+    "end": "1902399"
+  },
+  {
+    "text": "go so for each layer you know no single uh GPU is going to have all the parameters right so I can't do the",
+    "start": "1902399",
+    "end": "1908559"
+  },
+  {
+    "text": "normal thing of saying oh GPU zero go ahead and run the forward pass that's not possible so GPU0 let's say is let's",
+    "start": "1908559",
+    "end": "1915679"
+  },
+  {
+    "text": "say it only owns you know the bottommost layer so it does that computation and then it stops and says it requests all",
+    "start": "1915679",
+    "end": "1921519"
+  },
+  {
+    "text": "of the the parameters from all the other workers so it stops and it does a all gather which is right here um you see there's a all gather step it gathers all",
+    "start": "1921519",
+    "end": "1928480"
+  },
+  {
+    "text": "the parameters now it has the parameters that it needs to um do a forward so it",
+    "start": "1928480",
+    "end": "1934080"
+  },
+  {
+    "text": "can step forward and and sort of compute the layer that it didn't have before and then now it can free the weights it",
+    "start": "1934080",
+    "end": "1940000"
+  },
+  {
+    "text": "doesn't need the weights anymore get rid of it now I can all gather the next layer i can do another forward free the",
+    "start": "1940000",
+    "end": "1945440"
+  },
+  {
+    "text": "weights and I can repeat this right the activations have to be stored so the activation memory here is is growing",
+    "start": "1945440",
+    "end": "1950720"
+  },
+  {
+    "text": "right so that's going to be a eventual problem but if we ignore activations for the moment this is great because I load",
+    "start": "1950720",
+    "end": "1956399"
+  },
+  {
+    "text": "a layer I do a forward I free it you know the memory overhead is very low here once I get kind of to the end now I",
+    "start": "1956399",
+    "end": "1963039"
+  },
+  {
+    "text": "can do the same thing with a backward pass right i can call backwards and every time I move backwards through uh the neural network you know I all gather",
+    "start": "1963039",
+    "end": "1970240"
+  },
+  {
+    "text": "for the parameters that I need you know I can do a reduce scatter to update you know after the gradients that have been",
+    "start": "1970240",
+    "end": "1976480"
+  },
+  {
+    "text": "computed and now I can free the weights or I can free both the gradients that I don't need and the parameters and at the",
+    "start": "1976480",
+    "end": "1981840"
+  },
+  {
+    "text": "very end you know I've got a fully updated uh model and so we've got three different operations that we've got to",
+    "start": "1981840",
+    "end": "1987360"
+  },
+  {
+    "text": "worry about here we've got an all gather we got another all gather and then we got another reduce scatter basically to",
+    "start": "1987360",
+    "end": "1992559"
+  },
+  {
+    "text": "update um the model after we take the uh gradient update step so conceptually",
+    "start": "1992559",
+    "end": "1998960"
+  },
+  {
+    "text": "this is just a a single step beyond um zero stage two but you do kind of see",
+    "start": "1998960",
+    "end": "2005279"
+  },
+  {
+    "text": "that there is um sort of more overhead so the total communication cost is now higher right we were kind of before we",
+    "start": "2005279",
+    "end": "2011840"
+  },
+  {
+    "text": "had two times the number of parameters everything was kind of free in some sense now it's not right there's total",
+    "start": "2011840",
+    "end": "2016960"
+  },
+  {
+    "text": "of three times number of parameter communication cost and there's going to be you know cost associated with waiting",
+    "start": "2016960",
+    "end": "2023039"
+  },
+  {
+    "text": "for these communication things to finish um but I think the really cool thing",
+    "start": "2023039",
+    "end": "2029360"
+  },
+  {
+    "text": "about FSDP is it's actually surprisingly low overhead um you might imagine that",
+    "start": "2029360",
+    "end": "2035919"
+  },
+  {
+    "text": "because we're doing this crazy thing of asking for and sending parameters back and forth all the time that you know",
+    "start": "2035919",
+    "end": "2042240"
+  },
+  {
+    "text": "things will be really slow right like we have to be communicating all the time but you can do this this core idea of",
+    "start": "2042240",
+    "end": "2048079"
+  },
+  {
+    "text": "overlapping communication and computation so you want both your sort of uh you want your GPU to be working",
+    "start": "2048079",
+    "end": "2054560"
+  },
+  {
+    "text": "while sort of the communication is happening in the background almost like pre-fetching so that by the time you",
+    "start": "2054560",
+    "end": "2059760"
+  },
+  {
+    "text": "need some piece of information it's already loaded up it's already been communicated to you and you're good to go um and so I'll talk through this",
+    "start": "2059760",
+    "end": "2066480"
+  },
+  {
+    "text": "example at the bottom here um but this is kind of the key to making FSTP actually uh somewhat efficient so let's",
+    "start": "2066480",
+    "end": "2074320"
+  },
+  {
+    "text": "imagine we have a computation graph that looks something like this w1 w plus w2 w0 times x some input let's say is y",
+    "start": "2074320",
+    "end": "2081919"
+  },
+  {
+    "text": "right so some some very simple computation graph like this and then um you might run fsdp and you will get",
+    "start": "2081919",
+    "end": "2088560"
+  },
+  {
+    "text": "actually uh computation and communication that looks like this block diagram at the very end here um so the",
+    "start": "2088560",
+    "end": "2095599"
+  },
+  {
+    "text": "CPU you know it's nice that we did the that uh insight systems example last week because hopefully this diagram will",
+    "start": "2095599",
+    "end": "2101520"
+  },
+  {
+    "text": "now be clear right the CPU is going to basically dispatch a bunch of commands",
+    "start": "2101520",
+    "end": "2106640"
+  },
+  {
+    "text": "um asking you know the the communication part of the GPU to basically go and fetch some some uh parameters it's going",
+    "start": "2106640",
+    "end": "2113920"
+  },
+  {
+    "text": "to dispatch things to the GPU to say okay all right do some matrix multiplies and it's going to run you know far ahead",
+    "start": "2113920",
+    "end": "2119440"
+  },
+  {
+    "text": "in some sense of the GPU right we've seen this when we were looking at the profiler uh last week now let's look at",
+    "start": "2119440",
+    "end": "2126320"
+  },
+  {
+    "text": "the sequence of both communication and computation that happens on device now um remember that I need to sort of",
+    "start": "2126320",
+    "end": "2133040"
+  },
+  {
+    "text": "gather things on demand so at the very beginning I have to make sure that everyone has the weights for uh layer",
+    "start": "2133040",
+    "end": "2138880"
+  },
+  {
+    "text": "zero or w0 here so I do all gather zero and I'm going to wait for that to complete and once that's completed I can",
+    "start": "2138880",
+    "end": "2145760"
+  },
+  {
+    "text": "do a forward step on w0 I can sort of compute x * w0 let's say right um at",
+    "start": "2145760",
+    "end": "2151839"
+  },
+  {
+    "text": "this point you know all gather one starts at the same time that all gather 0 ends so as I'm doing this matrix",
+    "start": "2151839",
+    "end": "2158480"
+  },
+  {
+    "text": "multiply I'm basically already starting to load the next parameters that I need of course my communication slower and so",
+    "start": "2158480",
+    "end": "2165040"
+  },
+  {
+    "text": "there is some gap but I end sort of much quicker than sort of the initial load so now forward one can happen and in the",
+    "start": "2165040",
+    "end": "2171680"
+  },
+  {
+    "text": "background once again I've started to to load you know parameter number two and this yellow slice here I'm now freeing",
+    "start": "2171680",
+    "end": "2178160"
+  },
+  {
+    "text": "you know the parameters associated with forward one and then now the other thing here is I'm repeating computation w net0",
+    "start": "2178160",
+    "end": "2184000"
+  },
+  {
+    "text": "is used twice and so I don't need to communicate this again this happens very quickly and I can sort of uh do this",
+    "start": "2184000",
+    "end": "2190400"
+  },
+  {
+    "text": "very quickly right I have forward two now already loaded before sort of I needed it and so there's no bubble here",
+    "start": "2190400",
+    "end": "2197119"
+  },
+  {
+    "text": "and then I can free number two that's the entirety of the forward pass and you see that the gaps are relatively small here and we able to do a lot of loads",
+    "start": "2197119",
+    "end": "2204320"
+  },
+  {
+    "text": "before the compute needed to happen and so by doing this very clever thing of kind of queuing the requests for weights",
+    "start": "2204320",
+    "end": "2211359"
+  },
+  {
+    "text": "um before you actually need them you can avoid a lot of the overhead associated with communication and then now at this",
+    "start": "2211359",
+    "end": "2218960"
+  },
+  {
+    "text": "point you know um of forward two um I'm done with the forward pass i can free",
+    "start": "2218960",
+    "end": "2224400"
+  },
+  {
+    "text": "weight number two and I start on the backward pass and you see that you know all gather two for the backward pass is",
+    "start": "2224400",
+    "end": "2229440"
+  },
+  {
+    "text": "already done and so I can start on backward two backward zero weight zero is already stored so that's done and",
+    "start": "2229440",
+    "end": "2235040"
+  },
+  {
+    "text": "then the high overhead here happens in the backward pass because I need to do reduce scatters and then all gathers and",
+    "start": "2235040",
+    "end": "2240320"
+  },
+  {
+    "text": "so on and so forth right hopefully you see this picture and you say \"Wow it's kind of surprising that even though we're doing this crazy sharding right",
+    "start": "2240320",
+    "end": "2246720"
+  },
+  {
+    "text": "like if you go back to this picture you know we've fully sharted the parameters gradients and optimizer states um but",
+    "start": "2246720",
+    "end": "2252640"
+  },
+  {
+    "text": "the total bandwidth that we need is only three times rather than two times so that doesn't seem too bad and sort of",
+    "start": "2252640",
+    "end": "2258079"
+  },
+  {
+    "text": "the actual you know bubbles that we see are not horrendous right the communication is is almost being fully",
+    "start": "2258079",
+    "end": "2264079"
+  },
+  {
+    "text": "being utilized and the computation isn't stalling for very long so we're actually making pretty efficient use of the",
+    "start": "2264079",
+    "end": "2270000"
+  },
+  {
+    "text": "resources that we do have which is cool okay yes where do the get",
+    "start": "2270000",
+    "end": "2276480"
+  },
+  {
+    "text": "prefetched to it's like to my understanding that like let's say the GPU memory is like full where does the",
+    "start": "2276480",
+    "end": "2282800"
+  },
+  {
+    "text": "weights get prefetched to yeah yeah so so you need a buffer in which you can store these weights and so you know the",
+    "start": "2282800",
+    "end": "2288480"
+  },
+  {
+    "text": "this picture is is not quite right like you will have some overhead that you need associated with reading these",
+    "start": "2288480",
+    "end": "2294079"
+  },
+  {
+    "text": "weights for the current layer and also the other big elephant in the room is I haven't talked at all about activation",
+    "start": "2294079",
+    "end": "2299200"
+  },
+  {
+    "text": "that's going to be like a big chunk because you've got a big set of activations for a full model uh that is sort of living here in some sense yeah",
+    "start": "2299200",
+    "end": "2305920"
+  },
+  {
+    "text": "cool um right okay so this is kind of distributed data parallel like zero is",
+    "start": "2305920",
+    "end": "2312960"
+  },
+  {
+    "text": "in some ways the the way that people do distributed data parallel efficiently um",
+    "start": "2312960",
+    "end": "2318079"
+  },
+  {
+    "text": "and so there's different stages and you know stage one is is basically free",
+    "start": "2318079",
+    "end": "2323760"
+  },
+  {
+    "text": "right it's uh doing the same communication pattern as uh naive data",
+    "start": "2323760",
+    "end": "2329280"
+  },
+  {
+    "text": "parallel but you get to shard your optimizer state that's great you might as well always do it right zero stage 2",
+    "start": "2329280",
+    "end": "2335040"
+  },
+  {
+    "text": "is twice the number of parameters so the total bandwidth consumption is the same but there is additional overhead in",
+    "start": "2335040",
+    "end": "2340800"
+  },
+  {
+    "text": "having to do this like incremental freeing of the gradients as you go backwards zero stage three is more",
+    "start": "2340800",
+    "end": "2346880"
+  },
+  {
+    "text": "involved you do three times number of pram communication cost but it's not so bad right like we did have some overhead",
+    "start": "2346880",
+    "end": "2352880"
+  },
+  {
+    "text": "in the in the diagram that we saw before but if you really cleverly mask your communication patterns it's actually",
+    "start": "2352880",
+    "end": "2359040"
+  },
+  {
+    "text": "pretty good and so people use data parallel even for for fairly slow um sort of links in your in your networking",
+    "start": "2359040",
+    "end": "2365800"
+  },
+  {
+    "text": "pattern okay and this is also conceptually very simple one of the the advantages here is you know especially",
+    "start": "2365800",
+    "end": "2372480"
+  },
+  {
+    "text": "data parallel doesn't care too much about the architecture right I didn't talk at all about how we actually implement a transformer in any of this",
+    "start": "2372480",
+    "end": "2378880"
+  },
+  {
+    "text": "it's all very abstracted and so this is one of the reasons why for example FSDP is so popular it's very easy to write a",
+    "start": "2378880",
+    "end": "2385599"
+  },
+  {
+    "text": "wrapper that parallelizes sort of arbitrary neural networks um without having deep knowledge or deep uh",
+    "start": "2385599",
+    "end": "2391760"
+  },
+  {
+    "text": "introspection of what the architecture um is actually doing and so you know",
+    "start": "2391760",
+    "end": "2396800"
+  },
+  {
+    "text": "here's some examples i I worked out some examples because I'm always sort of running out of memory on my GPUs um and",
+    "start": "2396800",
+    "end": "2402320"
+  },
+  {
+    "text": "you can kind of see what's the maximum size of the model that I can fit on a eight eight times a 100 80 gig you know",
+    "start": "2402320",
+    "end": "2409280"
+  },
+  {
+    "text": "node um and so for baseline you know you might end up with like oh I can fit barely six billion parameter model um",
+    "start": "2409280",
+    "end": "2416160"
+  },
+  {
+    "text": "whereas I think if I use zero stage three you know I'm able to fit something like a 50 billion parameter model there's big savings um in my ability to",
+    "start": "2416160",
+    "end": "2424720"
+  },
+  {
+    "text": "fit larger and larger models by doing things like FSDP to to cleverly save uh",
+    "start": "2424720",
+    "end": "2430079"
+  },
+  {
+    "text": "on memory so okay oh sorry there's a question yes",
+    "start": "2430079",
+    "end": "2435440"
+  },
+  {
+    "text": "i guess I'm a little unclear as to like what are the difference then once you shard the parameters what's the difference between that model yeah so",
+    "start": "2435440",
+    "end": "2442800"
+  },
+  {
+    "text": "model parallelism is really fundamentally about making sure that the parameters just like live in separate",
+    "start": "2442800",
+    "end": "2451119"
+  },
+  {
+    "text": "let me see if I can find so they never be communicated across yeah yeah yeah like so in in some ways it's true that",
+    "start": "2451119",
+    "end": "2457760"
+  },
+  {
+    "text": "we have sharted the parameters so you could call this a kind of parallelism um but the whole point of model parallelism",
+    "start": "2457760",
+    "end": "2463680"
+  },
+  {
+    "text": "is to make sure that the parameters just live entirely in one machine we're not going to like try to ship them across in",
+    "start": "2463680",
+    "end": "2468880"
+  },
+  {
+    "text": "various ways only the activations are going to get shipped across um and so you'll see very different discussions in",
+    "start": "2468880",
+    "end": "2474400"
+  },
+  {
+    "text": "the model parallelism section like the focus there will be on communicating activations rather than uh communicating",
+    "start": "2474400",
+    "end": "2479839"
+  },
+  {
+    "text": "parameters and that'll be a big difference yes let me see if the parameters are only on why are why are",
+    "start": "2479839",
+    "end": "2487760"
+  },
+  {
+    "text": "you performing an all gather so so you're asking about",
+    "start": "2487760",
+    "end": "2495000"
+  },
+  {
+    "text": "um this step like why are we doing all gather to gather weights onto all the machines is that when they're only on",
+    "start": "2495000",
+    "end": "2501359"
+  },
+  {
+    "text": "one machine is that right yeah so we need to basically put we need to take",
+    "start": "2501359",
+    "end": "2506400"
+  },
+  {
+    "text": "the weights that live on one machine and scatter or is it gather or scatter sorry I want to make sure I get this right",
+    "start": "2506400",
+    "end": "2514400"
+  },
+  {
+    "text": "um the terminology is a little bit sketchy for me so I want to make sure I",
+    "start": "2514440",
+    "end": "2520480"
+  },
+  {
+    "text": "get um sorry yeah so what we want to do is the",
+    "start": "2520480",
+    "end": "2527040"
+  },
+  {
+    "text": "same as this right so each machine is going to have um some parameter that I want to sc gather across all the",
+    "start": "2527040",
+    "end": "2534079"
+  },
+  {
+    "text": "machines um in order to make sure that each layer is sort of properly uh sort",
+    "start": "2534079",
+    "end": "2539760"
+  },
+  {
+    "text": "of replicated across all the GPUs is that the right question that you're asking or are you saying like is there a",
+    "start": "2539760",
+    "end": "2546160"
+  },
+  {
+    "text": "simpler primitive that we could have invoked like are you saying broadcast is the right object rather than all gather",
+    "start": "2546160",
+    "end": "2553119"
+  },
+  {
+    "text": "i think maybe it's written that way because of some exceptions about layers not living on individual GPUs but I'm",
+    "start": "2553119",
+    "end": "2558640"
+  },
+  {
+    "text": "not 100% sure i agree with you that like broadcast should be able to do uh the same thing if the the parameters live on",
+    "start": "2558640",
+    "end": "2564640"
+  },
+  {
+    "text": "only one machine okay cool alrighty okay let me",
+    "start": "2564640",
+    "end": "2572079"
+  },
+  {
+    "text": "make sure where okay got it okay right so um there",
+    "start": "2572079",
+    "end": "2579680"
+  },
+  {
+    "text": "is a key resource in data parallel um and this is actually a important idea that I want you to remember um with data",
+    "start": "2579680",
+    "end": "2587119"
+  },
+  {
+    "text": "parallel batch size is actually a really critical resource um in the sense that you can't parallelize greater than your",
+    "start": "2587119",
+    "end": "2593920"
+  },
+  {
+    "text": "number uh sorry than your batch size right because you can have at most one example uh on each machine you can't go",
+    "start": "2593920",
+    "end": "2599920"
+  },
+  {
+    "text": "to fractional examples per machine um and so this means that you know there are if there's limits to your batch size",
+    "start": "2599920",
+    "end": "2607280"
+  },
+  {
+    "text": "right you stop being able to use data parallel um and there's diminishing returns to batch sizes so you know in",
+    "start": "2607280",
+    "end": "2613839"
+  },
+  {
+    "text": "your assignment one you may have played with varying batch sizes but you kind of know that as you crank up the batch size",
+    "start": "2613839",
+    "end": "2619280"
+  },
+  {
+    "text": "past a certain point you start to see sort of fairly rapid diminishing returns",
+    "start": "2619280",
+    "end": "2624800"
+  },
+  {
+    "text": "to you know your optimization rates um and there's lots of papers written on this openai has a really nice one um on",
+    "start": "2624800",
+    "end": "2632000"
+  },
+  {
+    "text": "something called critical batch sizes um where they basically argue that you know past a certain point you have very rapid",
+    "start": "2632000",
+    "end": "2637839"
+  },
+  {
+    "text": "diminishing returns in how much each example is contributing to your ability to optimize like basically the the",
+    "start": "2637839",
+    "end": "2644079"
+  },
+  {
+    "text": "intuition is that below a certain point you have a lot of gradient noise and reducing that is very valuable but at a",
+    "start": "2644079",
+    "end": "2649599"
+  },
+  {
+    "text": "certain point you're really fundamentally limited by the number of gradient steps you're taking rather than",
+    "start": "2649599",
+    "end": "2654640"
+  },
+  {
+    "text": "variance reduction um and so that basically means data parallel alone isn't going to get you to arbitrarily",
+    "start": "2654640",
+    "end": "2660720"
+  },
+  {
+    "text": "large parallelism and this batch size thing is a really important resource right you want to essentially you have a",
+    "start": "2660720",
+    "end": "2666160"
+  },
+  {
+    "text": "fixed maximum batch size and you can spend it in different ways um and I'll talk about that later because other",
+    "start": "2666160",
+    "end": "2672240"
+  },
+  {
+    "text": "kinds of parallelism also benefit from having uh sort of bigger batches and so you use your batch size in certain uh",
+    "start": "2672240",
+    "end": "2678560"
+  },
+  {
+    "text": "parts okay um and issues are going to remain with data parallel um you know",
+    "start": "2678560",
+    "end": "2683760"
+  },
+  {
+    "text": "zero stages one and two don't let you scale memory zero stage 3 is nice in in principle but it can be slow and maybe",
+    "start": "2683760",
+    "end": "2690560"
+  },
+  {
+    "text": "more importantly and this you know relates to the the earlier question it does not reduce activation memory right",
+    "start": "2690560",
+    "end": "2696240"
+  },
+  {
+    "text": "um I ideally want to like cut up my model entirely and make them live totally separately because then the",
+    "start": "2696240",
+    "end": "2701760"
+  },
+  {
+    "text": "activation memory would also sort of be reduced and so now I I want better ways",
+    "start": "2701760",
+    "end": "2707200"
+  },
+  {
+    "text": "to split up the model so I can fit these really big models um in these",
+    "start": "2707200",
+    "end": "2713160"
+  },
+  {
+    "text": "GPUs and so that's going to bring us to uh model parallelism um we want to scale",
+    "start": "2713160",
+    "end": "2719200"
+  },
+  {
+    "text": "up in memory um you know without changing the batch size and we want an alternative axis where we don't need to",
+    "start": "2719200",
+    "end": "2725280"
+  },
+  {
+    "text": "spend or basically have big batch sizes in order to parallelize um and so what",
+    "start": "2725280",
+    "end": "2730720"
+  },
+  {
+    "text": "what we're going to do is it's going to split up the parameters across GPUs and in some ways that's like 03 um but we're",
+    "start": "2730720",
+    "end": "2737359"
+  },
+  {
+    "text": "not going to communicate parameters anymore we're going to pass activations around and that's going to be different um and sometimes activations are going",
+    "start": "2737359",
+    "end": "2743760"
+  },
+  {
+    "text": "to be much smaller than parameters and that'll be you know very good for us so we'll cover two different types of",
+    "start": "2743760",
+    "end": "2749440"
+  },
+  {
+    "text": "parallelism um I'm going to talk about pipeline parallel which is conceptually simpler um but much more horrible",
+    "start": "2749440",
+    "end": "2755359"
+  },
+  {
+    "text": "implementation wise and tensor parallel which is conceptually maybe less obvious um but honestly much nicer to implement",
+    "start": "2755359",
+    "end": "2763040"
+  },
+  {
+    "text": "and more commonly used um and they're going to correspond to two different ways of cutting up the model so I think",
+    "start": "2763040",
+    "end": "2770640"
+  },
+  {
+    "text": "pipeline parallel is maybe the most obvious way to cut up a neural network right you know that a deep neural",
+    "start": "2770640",
+    "end": "2776880"
+  },
+  {
+    "text": "network comes in layers right so if I have layers a very natural place to cut a network is to cut it up at the layer",
+    "start": "2776880",
+    "end": "2782960"
+  },
+  {
+    "text": "boundaries and so each GPU is going to handle some subset of the layers and I'm",
+    "start": "2782960",
+    "end": "2788000"
+  },
+  {
+    "text": "going to pass activations around like in this case each layer belongs to a GPU and GPUs are going to pass activations",
+    "start": "2788000",
+    "end": "2794560"
+  },
+  {
+    "text": "from from one to the other when in the backwards case it's going to pass you know the backwards gradients backwards",
+    "start": "2794560",
+    "end": "2800400"
+  },
+  {
+    "text": "from GPU 3 to zero right okay so that's cool that's great um what's wrong with",
+    "start": "2800400",
+    "end": "2807520"
+  },
+  {
+    "text": "this picture well I think you should see that most of your GPUs are idle most of the time this This is actually quite",
+    "start": "2807520",
+    "end": "2813920"
+  },
+  {
+    "text": "terrible utilization um and so if I do this naive kind of parallelism that I described before right so if I have you",
+    "start": "2813920",
+    "end": "2820960"
+  },
+  {
+    "text": "know each layer um having a forward and let's say I have a single example that's going to result in a in a diagram that",
+    "start": "2820960",
+    "end": "2826640"
+  },
+  {
+    "text": "looks like this so different rows in this picture um are different um GPU uh",
+    "start": "2826640",
+    "end": "2832079"
+  },
+  {
+    "text": "different layers and also different GPUs and the x-axis here is time where I'm going from left to right so what do you",
+    "start": "2832079",
+    "end": "2838480"
+  },
+  {
+    "text": "see well you know I first compute my first layer at the very left here and then the activations get past the second",
+    "start": "2838480",
+    "end": "2843920"
+  },
+  {
+    "text": "layer gpu 2 wakes up and it's like \"All right it's my turn it does its job passes it to GPU 3 and then GPU 4 and",
+    "start": "2843920",
+    "end": "2850000"
+  },
+  {
+    "text": "now the backwards passes can begin.\" Um and so on and so forth and you see kind of this gigantic what people call bubble",
+    "start": "2850000",
+    "end": "2856000"
+  },
+  {
+    "text": "this is a big overhead where you're doing absolutely nothing um and you see that the GPUs are active one overn um so",
+    "start": "2856000",
+    "end": "2863440"
+  },
+  {
+    "text": "in some sense this is the worst possible parallelism of I've added four GPUs but I get the throughput of a single GPU",
+    "start": "2863440",
+    "end": "2869440"
+  },
+  {
+    "text": "right um and so one thing you can do is you know you can be a little bit more",
+    "start": "2869440",
+    "end": "2876720"
+  },
+  {
+    "text": "clever about what you do and you can say all right I'm going to have a pipeline right I'm not just going to cut things up in layers I'm going to have a",
+    "start": "2876720",
+    "end": "2883200"
+  },
+  {
+    "text": "sequence of things that need to be processed by each GPU so now let's say I have a micro batch right so each machine",
+    "start": "2883200",
+    "end": "2890319"
+  },
+  {
+    "text": "is going to handle sort of four examples Um and what I'm going to do is you know",
+    "start": "2890319",
+    "end": "2895760"
+  },
+  {
+    "text": "I can finish my first example my first uh data point and I can send off the",
+    "start": "2895760",
+    "end": "2900800"
+  },
+  {
+    "text": "activations for that to my second GPU as soon as I finish and then I can then get started working on my second data point",
+    "start": "2900800",
+    "end": "2907920"
+  },
+  {
+    "text": "right and so now I've over overlapped sort of you know communication and computation the second GPU can start",
+    "start": "2907920",
+    "end": "2913680"
+  },
+  {
+    "text": "working while the first GPU continues to work and now the size of the bubble can potentially be reduced by having bigger",
+    "start": "2913680",
+    "end": "2920319"
+  },
+  {
+    "text": "batch sizes right right and you can hopefully see why I said before that batch sizes are a resource if you have a",
+    "start": "2920319",
+    "end": "2926079"
+  },
+  {
+    "text": "finite batch size and you have pipeline parallel you can use that same batch size to make your pipeline bubble size",
+    "start": "2926079",
+    "end": "2931680"
+  },
+  {
+    "text": "smaller for example or you could use it to do data parallel right so there's many different ways that you can take",
+    "start": "2931680",
+    "end": "2937119"
+  },
+  {
+    "text": "your single batch size and then split it up into different ways okay so now um",
+    "start": "2937119",
+    "end": "2943200"
+  },
+  {
+    "text": "your micro batch size can control the bubble time and in fact you know the amount of uh the ratio of your your",
+    "start": "2943200",
+    "end": "2949920"
+  },
+  {
+    "text": "overhead to the useful compute that you have is the number of stages minus one over the number of micro batches so if",
+    "start": "2949920",
+    "end": "2956720"
+  },
+  {
+    "text": "you have big big batch sizes pipeline parallel could potentially be efficient but as we said before you know batch",
+    "start": "2956720",
+    "end": "2963359"
+  },
+  {
+    "text": "sizes are finite we can't just crank that up to whatever value that we want so you know in general pipelines seem",
+    "start": "2963359",
+    "end": "2970960"
+  },
+  {
+    "text": "really horrible um you know why do we do it why do we incur this cost of a bubble",
+    "start": "2970960",
+    "end": "2976720"
+  },
+  {
+    "text": "um in order to you know parallelize well there's a couple reasons pipelines help save memory um compared to to data",
+    "start": "2976720",
+    "end": "2983920"
+  },
+  {
+    "text": "parallel i mean 03 will will also shard the parameters but this also shards of the activations which is nice um",
+    "start": "2983920",
+    "end": "2990720"
+  },
+  {
+    "text": "pipelines can also have good communication properties right it only depends on activations it's also pointto-point so it's possible that",
+    "start": "2990720",
+    "end": "2997599"
+  },
+  {
+    "text": "depending on your topology and depending on what you have pipelines might actually be very favorable for the",
+    "start": "2997599",
+    "end": "3002800"
+  },
+  {
+    "text": "slower parts of your network um and so you know pipeline parallel is often",
+    "start": "3002800",
+    "end": "3008079"
+  },
+  {
+    "text": "going to be used on your slower network links so inter node or um even sometimes",
+    "start": "3008079",
+    "end": "3013359"
+  },
+  {
+    "text": "um across different sort of uh racks or across different data centers you might do actually not data centers across",
+    "start": "3013359",
+    "end": "3019119"
+  },
+  {
+    "text": "different racks you might do pipeline parallel right um one of the the examples of a thing that I was recently",
+    "start": "3019119",
+    "end": "3025119"
+  },
+  {
+    "text": "told by by some Google folks is you know they were saying actually one of the big advantages of TPUs is that we don't have",
+    "start": "3025119",
+    "end": "3030880"
+  },
+  {
+    "text": "to do pipeline parallel very much because you know all of our connections are are much bigger right like they have",
+    "start": "3030880",
+    "end": "3035920"
+  },
+  {
+    "text": "this big tooidal mesh they don't have this limit at 256 GPUs where they're suddenly going towards a slower network",
+    "start": "3035920",
+    "end": "3041359"
+  },
+  {
+    "text": "link where you might want to switch to pipeline parallel right so that's a real world kind of example of when you would",
+    "start": "3041359",
+    "end": "3046400"
+  },
+  {
+    "text": "start to think about pipeline parallel and so this is an example from an NVIDIA paper or I'll talk about this paper in",
+    "start": "3046400",
+    "end": "3052960"
+  },
+  {
+    "text": "uh much greater detail later um they've done some some really nice work showing sort of performance characteristics of",
+    "start": "3052960",
+    "end": "3058319"
+  },
+  {
+    "text": "different kinds of parallelism but you kind of see with batch size 8 as you increase the pipeline parallel size the",
+    "start": "3058319",
+    "end": "3063680"
+  },
+  {
+    "text": "number of devices um your you know utilization per GPU sort of starts to really drop off whereas if you have a",
+    "start": "3063680",
+    "end": "3070079"
+  },
+  {
+    "text": "big big batch size of 128 you can get away with you know pretty good utilization um for reasonably sized",
+    "start": "3070079",
+    "end": "3076640"
+  },
+  {
+    "text": "pipeline parallel right so batch sizes are really key to hiding the size of the bubble um otherwise you have",
+    "start": "3076640",
+    "end": "3083960"
+  },
+  {
+    "text": "issues um of course you can do you know different kinds of pipeline sort of uh",
+    "start": "3083960",
+    "end": "3090480"
+  },
+  {
+    "text": "pipeline strategies so instead of you know having um these sort of like uh",
+    "start": "3090480",
+    "end": "3096720"
+  },
+  {
+    "text": "standard uh patterns for scheduling the bubble you can sort of cut things up into into finer pieces um where you're",
+    "start": "3096720",
+    "end": "3104160"
+  },
+  {
+    "text": "sort of assigning different stages assigning different sub layers to different device and you're doing different computations at different",
+    "start": "3104160",
+    "end": "3110000"
+  },
+  {
+    "text": "parts you can then sort of interle the pipeline better and sort of an advanced",
+    "start": "3110000",
+    "end": "3115359"
+  },
+  {
+    "text": "version of this that I want to spend a moment talking about and this is very very clever um is zero bubble pipelining",
+    "start": "3115359",
+    "end": "3121599"
+  },
+  {
+    "text": "or I think in in uh DeepSeeks lingo I think they call it dualpipe but the core single trick um is the same um so here",
+    "start": "3121599",
+    "end": "3131359"
+  },
+  {
+    "text": "if you think about it let's say we're doing you know the backwards pass to compute gradients you can split this up",
+    "start": "3131359",
+    "end": "3136960"
+  },
+  {
+    "text": "into two different components um the first part is about you know back propagating the activations um so this",
+    "start": "3136960",
+    "end": "3144480"
+  },
+  {
+    "text": "is you know as I go down sort of the residual connections I need to compute essentially the the derivative with",
+    "start": "3144480",
+    "end": "3150000"
+  },
+  {
+    "text": "respect to the activations and then you know as I sort of you know get to a parameter I also want to compute the",
+    "start": "3150000",
+    "end": "3155680"
+  },
+  {
+    "text": "gradient itself like how am I going to update the parameters not just how do the activation change with respect to",
+    "start": "3155680",
+    "end": "3160800"
+  },
+  {
+    "text": "sort of the previous layers and so to to give you a concrete example let's look at this bottom left diagram over here",
+    "start": "3160800",
+    "end": "3166160"
+  },
+  {
+    "text": "right so in this diagram um you see the forward pass this is a single MLP so we've got um multiply by a I do a",
+    "start": "3166160",
+    "end": "3173920"
+  },
+  {
+    "text": "nonlinearity and then I'm just going to output the nonlinearity right so this is a kind of a naive you know single part of MLP now let's look at the backwards",
+    "start": "3173920",
+    "end": "3181920"
+  },
+  {
+    "text": "you know I have sort of the the derivative with respect to the loss it comes in and then I can compute you know",
+    "start": "3181920",
+    "end": "3187280"
+  },
+  {
+    "text": "how that's going to change um the the x's the inputs to my MLP so this is in some sense the the derivatives with",
+    "start": "3187280",
+    "end": "3193440"
+  },
+  {
+    "text": "respect to the activations here and then as I compute these of course I can use them to compute the gradients that I",
+    "start": "3193440",
+    "end": "3199839"
+  },
+  {
+    "text": "need to update my weights right um but the important thing is this part this part of computing the gradients for the",
+    "start": "3199839",
+    "end": "3206559"
+  },
+  {
+    "text": "weights this can be done whenever right there's no sort of dependence of this um and so I can rearrange the scheduling",
+    "start": "3206559",
+    "end": "3213119"
+  },
+  {
+    "text": "for this computation to any part of the computation graph and so what you can do is you can sort of do your standard",
+    "start": "3213119",
+    "end": "3220079"
+  },
+  {
+    "text": "pipeline parallel for the parts that are serially dependent but anytime you have to do these computations just for",
+    "start": "3220079",
+    "end": "3226160"
+  },
+  {
+    "text": "updating the parameters you can sort of reschedu them wherever and so the key idea is you start with sort of a nice um",
+    "start": "3226160",
+    "end": "3232640"
+  },
+  {
+    "text": "what it's called 1F1B pipeline this is a nice optimized reducing the bubble size schedule um and then you can take this",
+    "start": "3232640",
+    "end": "3239920"
+  },
+  {
+    "text": "and what you can do is you can separate you know this B which is this computation of the the backwards part um",
+    "start": "3239920",
+    "end": "3246400"
+  },
+  {
+    "text": "and then W which is the computation necessary to compute the gradient of the weights and now I can do the computation",
+    "start": "3246400",
+    "end": "3252960"
+  },
+  {
+    "text": "of the weights the W's where I would have originally had a bubble right so the parts where you know I originally",
+    "start": "3252960",
+    "end": "3258079"
+  },
+  {
+    "text": "had these white um white sort of idle utilization components I can now fill",
+    "start": "3258079",
+    "end": "3263119"
+  },
+  {
+    "text": "them in with these W's right and so by thinking carefully about what the serial dependencies actually are you know I can",
+    "start": "3263119",
+    "end": "3270400"
+  },
+  {
+    "text": "now have something really nice where I'm getting actually good utilization out of my GPUs um to To be clear um this is",
+    "start": "3270400",
+    "end": "3277520"
+  },
+  {
+    "text": "horrendously complicated right like if you actually want to implement pipeline parallel in this way you're going to",
+    "start": "3277520",
+    "end": "3283839"
+  },
+  {
+    "text": "have to like intervene in how you know your your uh autodiff is actually calculating these things you have to",
+    "start": "3283839",
+    "end": "3290640"
+  },
+  {
+    "text": "have a cue that can track where things go um I heard a a funny anecdote in a",
+    "start": "3290640",
+    "end": "3296319"
+  },
+  {
+    "text": "conversation recently um from someone in a in a frontier lab sort of training LMS and they said you know actually there's",
+    "start": "3296319",
+    "end": "3302000"
+  },
+  {
+    "text": "two people in the group that understand how the pipeline parallel in our infra works one person left and so there's a",
+    "start": "3302000",
+    "end": "3308000"
+  },
+  {
+    "text": "single loadbearing person in our training infra you know like there are stories like this um pipeline parallel",
+    "start": "3308000",
+    "end": "3314079"
+  },
+  {
+    "text": "is infrastructurally very very complicated right it looks simple here um if you if you're interested you I",
+    "start": "3314079",
+    "end": "3320400"
+  },
+  {
+    "text": "encourage you to try and implement it um it does get pretty hairy pretty fast and",
+    "start": "3320400",
+    "end": "3326000"
+  },
+  {
+    "text": "I think that's a good note on which to switch to the other kind of model parallelism um because this is much",
+    "start": "3326000",
+    "end": "3332319"
+  },
+  {
+    "text": "simpler and this is often you know very cleanly utilized by a lot of frameworks and a lot of sort of even people",
+    "start": "3332319",
+    "end": "3338160"
+  },
+  {
+    "text": "training really big models rely very very heavily or primarily on this kind of model parallelism so what other way",
+    "start": "3338160",
+    "end": "3345119"
+  },
+  {
+    "text": "can we split up a model right so if we think about it um most of what we do is",
+    "start": "3345119",
+    "end": "3350400"
+  },
+  {
+    "text": "matrix multiplies right in a big model most of the computation is matrix multiplies most of the parameters are matrix multiplies or matrices um and so",
+    "start": "3350400",
+    "end": "3357680"
+  },
+  {
+    "text": "what can we do well if we can parallelize just the the map moles that would be pretty good and so tensor",
+    "start": "3357680",
+    "end": "3364640"
+  },
+  {
+    "text": "parallel is this idea that we can take a big matrix multiply and split it up into",
+    "start": "3364640",
+    "end": "3369680"
+  },
+  {
+    "text": "a set of submatrices that can be multiplied right so if I have you know this matrix multiply at the top right we",
+    "start": "3369680",
+    "end": "3375839"
+  },
+  {
+    "text": "have X um and sort of uh X * A= Y you know what I can do instead is I can cut",
+    "start": "3375839",
+    "end": "3382160"
+  },
+  {
+    "text": "up A into half right and then I can also cut up X into half and I can compute the",
+    "start": "3382160",
+    "end": "3388319"
+  },
+  {
+    "text": "submatrices i can sum them up and then I will get my answer at the end right so conceptually pipeline parallel is",
+    "start": "3388319",
+    "end": "3394960"
+  },
+  {
+    "text": "cutting along the depth dimension like the layers um tensor parallel which is what this is is cutting up along the",
+    "start": "3394960",
+    "end": "3401359"
+  },
+  {
+    "text": "width dimension of your matrix multiplies and so we're going to decompose into submatrices and then do",
+    "start": "3401359",
+    "end": "3406480"
+  },
+  {
+    "text": "partial sums um so here's an example of what it might look like in MLP right we",
+    "start": "3406480",
+    "end": "3412880"
+  },
+  {
+    "text": "we have each GPU handling a different submatrix um of uh let's say a big MLP matrix",
+    "start": "3412880",
+    "end": "3419920"
+  },
+  {
+    "text": "multiply and then we're going to have collective communications to synchronize um the activations as we kind of need",
+    "start": "3419920",
+    "end": "3426400"
+  },
+  {
+    "text": "them right so what are we going to do so this is a MLP um and sort of the the top",
+    "start": "3426400",
+    "end": "3431599"
+  },
+  {
+    "text": "half and the bottom half there's two different paths these are you know splitting up the matrices so I I want to",
+    "start": "3431599",
+    "end": "3437359"
+  },
+  {
+    "text": "do uh this operation yals gel x * a um I'm going to split up my matrix A into",
+    "start": "3437359",
+    "end": "3443520"
+  },
+  {
+    "text": "A1 and A2 and then on the right hand side I want to compute drop out YB right",
+    "start": "3443520",
+    "end": "3448880"
+  },
+  {
+    "text": "and then I want to return the result as Z so I'm going to also cut up B right so I've cut up both of my dig parameter",
+    "start": "3448880",
+    "end": "3455200"
+  },
+  {
+    "text": "matrices into two parts A and B um and in the forward pass what I'm going to do",
+    "start": "3455200",
+    "end": "3460559"
+  },
+  {
+    "text": "is I'm going to take my inputs X and I'm just going to copy them twice right so each GPU is going to get the same inputs",
+    "start": "3460559",
+    "end": "3466319"
+  },
+  {
+    "text": "and they're going to operate on it with A1 and A2 right they have the same kind of Oh sorry they're the same uh row",
+    "start": "3466319",
+    "end": "3473200"
+  },
+  {
+    "text": "dimensions so it's going to be fine operating on them so X A1 and X A2 um is",
+    "start": "3473200",
+    "end": "3478319"
+  },
+  {
+    "text": "going to give you some activations Y1 and Y2 those are going to go into B1 and B2 and then I'm going to do an all reduce to sum them up that's exactly the",
+    "start": "3478319",
+    "end": "3485359"
+  },
+  {
+    "text": "figure I showed you before right so you copy and then you all reduce and you get the answer Z in the backwards pass now",
+    "start": "3485359",
+    "end": "3492640"
+  },
+  {
+    "text": "it's actually the reverse as sort of the gradients come backwards in the backwards steps this G is going to be um",
+    "start": "3492640",
+    "end": "3499680"
+  },
+  {
+    "text": "the identity so I'm going to copy sort of the derivatives on both sides and I'm going to do sort of the backwards operation all the way through and once I",
+    "start": "3499680",
+    "end": "3506079"
+  },
+  {
+    "text": "get to f um this is on all reduce right because I've got sort of two derivatives um sort of coming in from both paths and",
+    "start": "3506079",
+    "end": "3512400"
+  },
+  {
+    "text": "then I sum them back up right so this f and g are synchronization barriers in the forward pass I do a single all",
+    "start": "3512400",
+    "end": "3518640"
+  },
+  {
+    "text": "reduce on the backwards pass I do a single all reduce just at two different places um in the computation graph right",
+    "start": "3518640",
+    "end": "3524799"
+  },
+  {
+    "text": "so now you can hopefully see how this is a very nice way of wherever you have a matrix multiply you can just cut up the",
+    "start": "3524799",
+    "end": "3530559"
+  },
+  {
+    "text": "matrix multiply and sort of parallelize them across different um devices okay um and as you might imagine",
+    "start": "3530559",
+    "end": "3538799"
+  },
+  {
+    "text": "this is actually somewhat expensive we have a synchronization barrier that lives kind of per layer it needs to",
+    "start": "3538799",
+    "end": "3544880"
+  },
+  {
+    "text": "communicate um an activation sort of like the the the residual activation worth of stuff twice in a forward",
+    "start": "3544880",
+    "end": "3551359"
+  },
+  {
+    "text": "backward pass and so tensor parallel this very simple idea um is going to",
+    "start": "3551359",
+    "end": "3556400"
+  },
+  {
+    "text": "require very high-speed interconnects and so there's a rule of thumb it's a very simple rule of thumb to remember",
+    "start": "3556400",
+    "end": "3562160"
+  },
+  {
+    "text": "which is that tensor parallel is applied within device or within a single node right so a single box um of let's say",
+    "start": "3562160",
+    "end": "3569119"
+  },
+  {
+    "text": "Nvidia GPUs is going to ship with eight different GPUs that live in that same box right and as I showed you at the",
+    "start": "3569119",
+    "end": "3575040"
+  },
+  {
+    "text": "sort of beginning of lecture today they're very very high-speed connected right so those eight GPUs can talk to",
+    "start": "3575040",
+    "end": "3580160"
+  },
+  {
+    "text": "each other very quickly um and so it makes sense to use something like Tensor Parallel that's very bandwidth hungry um",
+    "start": "3580160",
+    "end": "3587760"
+  },
+  {
+    "text": "on between those eight devices so what we you will typically see is that tensor parallel is applied up to eight GPUs",
+    "start": "3587760",
+    "end": "3594079"
+  },
+  {
+    "text": "where the eight GPUs live in the same machine um because that gives you the least sort of drop in performance and so",
+    "start": "3594079",
+    "end": "3600000"
+  },
+  {
+    "text": "this is an example um from hugging faces sort of parallelization tutorial um showing you sort of the throughput",
+    "start": "3600000",
+    "end": "3606000"
+  },
+  {
+    "text": "decreases of different levels of tensor parallelism you see that there are hits",
+    "start": "3606000",
+    "end": "3611119"
+  },
+  {
+    "text": "right 10 and 12% hits to to uh throughput as you do tensor parallelism um but up until eight well maybe this is",
+    "start": "3611119",
+    "end": "3618079"
+  },
+  {
+    "text": "manageable this is kind of the price you pay for just being able to paralyze more nicely but then you go to 16 devices and",
+    "start": "3618079",
+    "end": "3624240"
+  },
+  {
+    "text": "you get this like kind of astounding 42% drop in performance you go to 32 and you",
+    "start": "3624240",
+    "end": "3629520"
+  },
+  {
+    "text": "see another sort of 65% drop in throughput right and so you see hopefully visually here that you really",
+    "start": "3629520",
+    "end": "3635359"
+  },
+  {
+    "text": "want to stop at 8 for tensor parallelism that's really the sweet spot because of the the kinds of hardware interconnects",
+    "start": "3635359",
+    "end": "3641200"
+  },
+  {
+    "text": "uh you can get your hands on okay so how do things now compare to",
+    "start": "3641200",
+    "end": "3646559"
+  },
+  {
+    "text": "pipeline parallel right um well compared to pipeline parallel we don't really have to deal with this bubble thing that",
+    "start": "3646559",
+    "end": "3652880"
+  },
+  {
+    "text": "we had before we don't need to consume sort of larger batch sizes in order to reduce the bubble um which is nice and",
+    "start": "3652880",
+    "end": "3660079"
+  },
+  {
+    "text": "there's very relatively I wouldn't say very there's relatively low complexity in applying tensor parallel right all",
+    "start": "3660079",
+    "end": "3665839"
+  },
+  {
+    "text": "you really need to know about are where are the big matrix multiplies can I split them up and make them live on different devices right the forwards and",
+    "start": "3665839",
+    "end": "3672160"
+  },
+  {
+    "text": "backwards operations still remain the same right compared to implementing something like zero overhead or dualpipe",
+    "start": "3672160",
+    "end": "3678799"
+  },
+  {
+    "text": "pipeline parallel you're going to be in much much better shape um doing this so",
+    "start": "3678799",
+    "end": "3684000"
+  },
+  {
+    "text": "the con is that it's much larger communication overhead um you've got you know in pipeline parallel batch size",
+    "start": "3684000",
+    "end": "3690880"
+  },
+  {
+    "text": "time sequence length time sort of residual dimension pointto-point communications per microbatch um in",
+    "start": "3690880",
+    "end": "3696079"
+  },
+  {
+    "text": "tensor parallel you've got you know eight times that per layer and you've got all reduced communication um it's",
+    "start": "3696079",
+    "end": "3702240"
+  },
+  {
+    "text": "potentially a very large amount of communication that needs to be done so you know the rule of thumb as I said",
+    "start": "3702240",
+    "end": "3707920"
+  },
+  {
+    "text": "before is tensor parallel is used whenever you have low latency high bandwidth interconnects you're going to",
+    "start": "3707920",
+    "end": "3713520"
+  },
+  {
+    "text": "see you know two to like 16 depending on you know what kinds of machines you have",
+    "start": "3713520",
+    "end": "3718640"
+  },
+  {
+    "text": "um of tensor parallel out in the wild and I'll show you examples um as I talk through at the very end here uh of",
+    "start": "3718640",
+    "end": "3724640"
+  },
+  {
+    "text": "examples of tensor parallel okay um any questions of on uh pipeline or tensor",
+    "start": "3724640",
+    "end": "3730079"
+  },
+  {
+    "text": "parallel before we move on to the kind of third kind like sequence parallel and activation uh sharding yes are these",
+    "start": "3730079",
+    "end": "3737960"
+  },
+  {
+    "text": "uh can they both be used simultaneously or are they yeah so the question was can",
+    "start": "3737960",
+    "end": "3743280"
+  },
+  {
+    "text": "they be used simultaneously um the answer is that yeah you do use them uh both so I think we'll we'll get to",
+    "start": "3743280",
+    "end": "3749839"
+  },
+  {
+    "text": "examples later but I think the typical thing that you see is you for large scale runs you very often see tensor",
+    "start": "3749839",
+    "end": "3756799"
+  },
+  {
+    "text": "parallel um pipeline parallel is often used on top of that i think the only",
+    "start": "3756799",
+    "end": "3762240"
+  },
+  {
+    "text": "example I know of that does pipeline but not tensor parallel would be deepseeek v3 um as far as I know so within a",
+    "start": "3762240",
+    "end": "3769680"
+  },
+  {
+    "text": "single machine I guess you have like say like you have like five different machines you have like maybe the first 20% of the parameters are across the",
+    "start": "3769680",
+    "end": "3777680"
+  },
+  {
+    "text": "each first machine tensor parallel one and then that pipeline parallels into",
+    "start": "3777680",
+    "end": "3782799"
+  },
+  {
+    "text": "the second machine would be the next step yeah so the the question was there uh do you do tensor parallel within",
+    "start": "3782799",
+    "end": "3788160"
+  },
+  {
+    "text": "machine and like pipeline parallel across machine for example yeah so so you would do something like tensor parallel within machine and a",
+    "start": "3788160",
+    "end": "3793920"
+  },
+  {
+    "text": "combination of data and pipeline parallel across machines for example right um and I'll show you the rule of thumb later but basically you do",
+    "start": "3793920",
+    "end": "3800559"
+  },
+  {
+    "text": "pipeline parallel because your models won't fit like if you if you could fit your entire model you just do data",
+    "start": "3800559",
+    "end": "3806160"
+  },
+  {
+    "text": "parallel plus tensor parallel or you know just maybe even data parallel great",
+    "start": "3806160",
+    "end": "3812200"
+  },
+  {
+    "text": "okay excellent so then you know we've been talking about memory and memory is you know in some sense a very important",
+    "start": "3812200",
+    "end": "3818480"
+  },
+  {
+    "text": "part of parallelization because we're going to be training big models um and so you know when you look at your memory",
+    "start": "3818480",
+    "end": "3825359"
+  },
+  {
+    "text": "you realize that actually activations are a really big part of your memory usage so if you look at you know uh",
+    "start": "3825359",
+    "end": "3832079"
+  },
+  {
+    "text": "standard kind of forward backward pass I think this was one from one of the pietorrch tutorials um you see that",
+    "start": "3832079",
+    "end": "3837920"
+  },
+  {
+    "text": "memory usage is very dynamic right so I I'll just talk through this because I think it's an interesting plot in",
+    "start": "3837920",
+    "end": "3843440"
+  },
+  {
+    "text": "general right um you always have your parameters as you're training right because that's static but you know in",
+    "start": "3843440",
+    "end": "3849359"
+  },
+  {
+    "text": "iteration zero you don't still have optimizer state at all so actually you don't have that part of your memory use",
+    "start": "3849359",
+    "end": "3855039"
+  },
+  {
+    "text": "but as you do you know your forward and backwards you see activation grows grows grows grows grows as you you know",
+    "start": "3855039",
+    "end": "3860559"
+  },
+  {
+    "text": "accumulate all the activations and as you start your backwards pass right your activation goes down because you're",
+    "start": "3860559",
+    "end": "3865920"
+  },
+  {
+    "text": "freeing it as you use up your activations and then you're accumulating your gradient so your gradient memory usage goes up and the peak is actually",
+    "start": "3865920",
+    "end": "3872880"
+  },
+  {
+    "text": "somewhere you know partially through your backwards pass where you haven't freed all your activations yet um and",
+    "start": "3872880",
+    "end": "3878480"
+  },
+  {
+    "text": "you're still building up your gradients and so in iteration two you kind of see the same thing here right and so you",
+    "start": "3878480",
+    "end": "3883839"
+  },
+  {
+    "text": "know the point of this diagram is to say well we've thought about all the other pieces we thought about the parameters",
+    "start": "3883839",
+    "end": "3889280"
+  },
+  {
+    "text": "we've thought about optimizer state we've thought about you know the gradients um but we have not thought",
+    "start": "3889280",
+    "end": "3894559"
+  },
+  {
+    "text": "about very deeply at least the activations and so let's do that right so the final complexity that I want to",
+    "start": "3894559",
+    "end": "3900720"
+  },
+  {
+    "text": "talk you through is the activation memory so tensor and pipeline parallel",
+    "start": "3900720",
+    "end": "3905839"
+  },
+  {
+    "text": "can linearly reduce you know basically most things but it can't actually reduce all of the activation uh memory usage",
+    "start": "3905839",
+    "end": "3912720"
+  },
+  {
+    "text": "and so this is an example um from one of the NVIDIA papers that's talking about you know how do you reduce um activation",
+    "start": "3912720",
+    "end": "3919520"
+  },
+  {
+    "text": "memory and I think one thing that's really interesting to see is as you make your models bigger and bigger so going from left to right you see that you know",
+    "start": "3919520",
+    "end": "3925920"
+  },
+  {
+    "text": "a parameter and optimizer state memory can can remain the same if we if we parallelize aggressively but activation",
+    "start": "3925920",
+    "end": "3931920"
+  },
+  {
+    "text": "memory just kind of continues to grow because some parts of it don't parallelize very cleanly so no matter",
+    "start": "3931920",
+    "end": "3936960"
+  },
+  {
+    "text": "the number of devices you have um actually you can't really get rid of the growth of activation memory per device",
+    "start": "3936960",
+    "end": "3942880"
+  },
+  {
+    "text": "and I'll and I'll show you why in a moment here whereas I think if you do some slightly more clever things like recomputation um you can keep the",
+    "start": "3942880",
+    "end": "3950079"
+  },
+  {
+    "text": "activation memory low and that's really key to to paralyzing some of the biggest models",
+    "start": "3950079",
+    "end": "3955319"
+  },
+  {
+    "text": "okay okay so what's the activation memory per layer you've kind of done",
+    "start": "3955319",
+    "end": "3961280"
+  },
+  {
+    "text": "some of this you know transformer math and and calculus before so hopefully you're you're now familiar um with all",
+    "start": "3961280",
+    "end": "3967680"
+  },
+  {
+    "text": "of this but we can compute what's the amount of activation memory we need per layer and there's a handy formula here",
+    "start": "3967680",
+    "end": "3973200"
+  },
+  {
+    "text": "and this is the amount of memory you need it's SBH * 34 + 5 A S overH um and",
+    "start": "3973200",
+    "end": "3979680"
+  },
+  {
+    "text": "some of these numbers are mystifying but actually they're not so mystifying um you know you can very very much see that",
+    "start": "3979680",
+    "end": "3985920"
+  },
+  {
+    "text": "there's a left term and then there's a right term the left term comes from you know the MLP and like other pointwise",
+    "start": "3985920",
+    "end": "3992799"
+  },
+  {
+    "text": "operations that's where SBH * 34 comes from these depend on the size of of your",
+    "start": "3992799",
+    "end": "3997920"
+  },
+  {
+    "text": "residual stream right the H um on the right side you have a term that's actually if you multiply this out A S^",
+    "start": "3997920",
+    "end": "4003839"
+  },
+  {
+    "text": "squ B right because the H's cancel um that's the memory that you need for the softmax term and and other sort of you",
+    "start": "4003839",
+    "end": "4010960"
+  },
+  {
+    "text": "know quadratic terms in your attention right um of course if you use flash attention you can drastically reduce uh",
+    "start": "4010960",
+    "end": "4017599"
+  },
+  {
+    "text": "and and use recomputation you we know that we can drastically reduce that second term right um so then let's say",
+    "start": "4017599",
+    "end": "4024960"
+  },
+  {
+    "text": "we do tensor parallel right we do tensor parallel everywhere we can so we do it in the MLPS we do it in the uh KQ",
+    "start": "4024960",
+    "end": "4031599"
+  },
+  {
+    "text": "computations in um the uh in the attention computation um we will end up",
+    "start": "4031599",
+    "end": "4037280"
+  },
+  {
+    "text": "with something that looks like this and this is looking pretty good but not quite there so activation memory per",
+    "start": "4037280",
+    "end": "4042960"
+  },
+  {
+    "text": "layer divided by t which is the number of sort of devices that we're tensor",
+    "start": "4042960",
+    "end": "4048720"
+  },
+  {
+    "text": "paralleling over right so if we're dividing by 8 right ideally we would divide all the activation memory by 8",
+    "start": "4048720",
+    "end": "4055280"
+  },
+  {
+    "text": "but you see there's this straggler term SBH * 10 that has not been sort of",
+    "start": "4055280",
+    "end": "4060480"
+  },
+  {
+    "text": "reduced down um and you know if you think about what these are these are the non-mapatmo components so the layer norm",
+    "start": "4060480",
+    "end": "4067599"
+  },
+  {
+    "text": "the dropouts the inputs to the attention and the MLP right all of these terms will unfortunately continue to grow with",
+    "start": "4067599",
+    "end": "4074480"
+  },
+  {
+    "text": "size and they will not be paralyzed very nicely right and so the very last thing that we need",
+    "start": "4074480",
+    "end": "4081359"
+  },
+  {
+    "text": "to think about is to take those simple point-wise operations which thus far we have not parallelized um and we just",
+    "start": "4081359",
+    "end": "4087920"
+  },
+  {
+    "text": "need to split them up right um and there's a very simple way to split them up which is to say well if we're doing",
+    "start": "4087920",
+    "end": "4093440"
+  },
+  {
+    "text": "like a layer norm right these layer norms across different positions in the sequence do not interact at all with",
+    "start": "4093440",
+    "end": "4099520"
+  },
+  {
+    "text": "each other right like they just don't care about um anything else um and so what we're going to do is let's say we",
+    "start": "4099520",
+    "end": "4105520"
+  },
+  {
+    "text": "have a 1024 long sequence we're going to cut that up and then each device will handle a different part of that layer",
+    "start": "4105520",
+    "end": "4112238"
+  },
+  {
+    "text": "norm or a different part of that dropout right those point-wise operations can now be completely split up across the",
+    "start": "4112239",
+    "end": "4117520"
+  },
+  {
+    "text": "sequence dimension um and because you know now we're cutting things up across the sequence dimension we're going to",
+    "start": "4117520",
+    "end": "4123120"
+  },
+  {
+    "text": "have to do some synchronization to make sure you know the the parallel computations that we did will can get",
+    "start": "4123120",
+    "end": "4128880"
+  },
+  {
+    "text": "aggregated back again um and so in the forward pass these G's they're going to be all gathers and G bars are going to",
+    "start": "4128880",
+    "end": "4134960"
+  },
+  {
+    "text": "be reduced scatters and in the backwards pass the two are reversed in some sense there's sort of a duality here uh",
+    "start": "4134960",
+    "end": "4140400"
+  },
+  {
+    "text": "between the two and what we're doing here is you know for the layer norm we've kind of scattered things uh around",
+    "start": "4140400",
+    "end": "4146719"
+  },
+  {
+    "text": "and so we're going to have to gather them back together um so that we can do sort of our standard computation and",
+    "start": "4146719",
+    "end": "4152000"
+  },
+  {
+    "text": "then now whenever we get to the dropout we want to scatter them back out into the sort of parallel components that we",
+    "start": "4152000",
+    "end": "4157040"
+  },
+  {
+    "text": "have and in the backwards pass we're kind of doing that in the reverse right okay so hopefully that is clear um",
+    "start": "4157040",
+    "end": "4164560"
+  },
+  {
+    "text": "this is a very simple idea right we're just parallelizing sort of the very last components that we failed to parallelize",
+    "start": "4164560",
+    "end": "4170080"
+  },
+  {
+    "text": "before um and so now we can sort of put all these different pieces together and sort of get to sort of the end which is",
+    "start": "4170080",
+    "end": "4176719"
+  },
+  {
+    "text": "we started up here which is no parallelism at all we did tensor parallel which allows us to divide",
+    "start": "4176719",
+    "end": "4182000"
+  },
+  {
+    "text": "everything that's not a pointwise op by t and then if we apply you know the sequence parallelism idea we can divide",
+    "start": "4182000",
+    "end": "4189278"
+  },
+  {
+    "text": "this component by t once more um and then you know we can do things like activation recomputation which is you",
+    "start": "4189279",
+    "end": "4195199"
+  },
+  {
+    "text": "know the flash attention trick to remove the second term and the minimal memory that you can kind of easily get away",
+    "start": "4195199",
+    "end": "4201199"
+  },
+  {
+    "text": "with is going to be this thing on the bottom which is SB8 H34 overt um and this is often used um if you're looking",
+    "start": "4201199",
+    "end": "4208320"
+  },
+  {
+    "text": "at different formulas for transformer arithmetic on like how much activation memory do I use you know you often see",
+    "start": "4208320",
+    "end": "4213600"
+  },
+  {
+    "text": "something like PH34 and then if you have tensor parallel divide by T um because",
+    "start": "4213600",
+    "end": "4218640"
+  },
+  {
+    "text": "this is the sort of easy minimum that you can get for that kind of a memory okay any questions on on uh sequence",
+    "start": "4218640",
+    "end": "4226640"
+  },
+  {
+    "text": "parallel and activations yes I was wondering like the transformers like stack on top of each other i suppose a",
+    "start": "4226640",
+    "end": "4233280"
+  },
+  {
+    "text": "combinational graph will grow more and more like imaginative pip combinational",
+    "start": "4233280",
+    "end": "4238320"
+  },
+  {
+    "text": "graph as like a dag would that ever become the communication between the engineers",
+    "start": "4238320",
+    "end": "4245280"
+  },
+  {
+    "text": "you're saying if we have something that's a more complicated computation graph than like a single linear chain",
+    "start": "4245280",
+    "end": "4250640"
+  },
+  {
+    "text": "will that become a problem it's a good question i haven't thought about that i I would guess not like at",
+    "start": "4250640",
+    "end": "4257520"
+  },
+  {
+    "text": "least for tensor parallel this operates purely layer wise it doesn't really care about the dependencies maybe for pipeline parallel there's opportunities",
+    "start": "4257520",
+    "end": "4264080"
+  },
+  {
+    "text": "for increased parallelization if there's more than one branch but I'm not too sure this general",
+    "start": "4264080",
+    "end": "4272600"
+  },
+  {
+    "text": "right yes right okay cool all right so um there's",
+    "start": "4275600",
+    "end": "4283760"
+  },
+  {
+    "text": "a few other parallelism strategies that I'm not going to talk about um just because in the interest of sort of time",
+    "start": "4283760",
+    "end": "4290480"
+  },
+  {
+    "text": "and uh sort of fatiguing you because I think I've already dragged you through a whole bunch of low-level details about",
+    "start": "4290480",
+    "end": "4296640"
+  },
+  {
+    "text": "how to do parallelization um so the first one I want to talk about is uh context parallel or ring attention you",
+    "start": "4296640",
+    "end": "4303520"
+  },
+  {
+    "text": "may have heard the term ring attention before um this is a way of essentially splitting up both the computation and",
+    "start": "4303520",
+    "end": "4310080"
+  },
+  {
+    "text": "the activation cost of computing really large attention um where essentially",
+    "start": "4310080",
+    "end": "4315760"
+  },
+  {
+    "text": "you're just going to pass keys and values around different machines so each machine is responsible for a different",
+    "start": "4315760",
+    "end": "4321600"
+  },
+  {
+    "text": "query and then keys and values are going to sort of travel from machine to machine in a sort of ring-like fashion",
+    "start": "4321600",
+    "end": "4327280"
+  },
+  {
+    "text": "um in order to compute your KQV uh inner products and the cool thing here is you",
+    "start": "4327280",
+    "end": "4332320"
+  },
+  {
+    "text": "already kind of know how to do this because you've done the tiling for flash attention so you know that the um so you",
+    "start": "4332320",
+    "end": "4338159"
+  },
+  {
+    "text": "know that attention can be computed in this kind of online tile by tile way and that's kind of what's happening um in",
+    "start": "4338159",
+    "end": "4344000"
+  },
+  {
+    "text": "ring attention the other thing um which now that you know tensor parallel is pretty straightforward is expert",
+    "start": "4344000",
+    "end": "4350239"
+  },
+  {
+    "text": "parallelism right expert parallelism you can kind of think of as almost like tensor parallel in the sense that you're",
+    "start": "4350239",
+    "end": "4355920"
+  },
+  {
+    "text": "splitting up you know one big MLP into smaller uh expert MLPS let's say um and",
+    "start": "4355920",
+    "end": "4361360"
+  },
+  {
+    "text": "then scattering them across different machines the key difference with expert parallelism is that the experts are",
+    "start": "4361360",
+    "end": "4366640"
+  },
+  {
+    "text": "sparssely activated and so you have to think a little bit about routing and the routing is not going to be um sort of as",
+    "start": "4366640",
+    "end": "4373520"
+  },
+  {
+    "text": "predictable let's say as the alltoall communication that we had um before in tensor parallel because now you know",
+    "start": "4373520",
+    "end": "4379760"
+  },
+  {
+    "text": "maybe one expert is overloaded your networking is going to be a little bit more complicated but otherwise conceptually you're living in kind of",
+    "start": "4379760",
+    "end": "4385920"
+  },
+  {
+    "text": "the same world as tensor parallel um for expert parallelism",
+    "start": "4385920",
+    "end": "4392239"
+  },
+  {
+    "text": "okay so just to recap all the things we talked about um I've made a little small",
+    "start": "4392440",
+    "end": "4398080"
+  },
+  {
+    "text": "table of the different kinds of strategies that we have you know we have DDP and 01 um this is kind of the naive",
+    "start": "4398080",
+    "end": "4404800"
+  },
+  {
+    "text": "data parallelism thing that you do um here you have some overhead per batch",
+    "start": "4404800",
+    "end": "4409840"
+  },
+  {
+    "text": "you have no memory scaling reasonable bandwidth properties um but you consume batch size in order to be able to do",
+    "start": "4409840",
+    "end": "4416239"
+  },
+  {
+    "text": "this right you need big batch sizes to have big data parallelism you have FSTP which is kind of like a nicer version of",
+    "start": "4416239",
+    "end": "4423120"
+  },
+  {
+    "text": "01 in the sense that you can get uh memory scaling but you're going to pay uh overhead across sort of different",
+    "start": "4423120",
+    "end": "4430080"
+  },
+  {
+    "text": "layers right and so now you've got higher uh communication cost and you've got potentially synchronization barriers",
+    "start": "4430080",
+    "end": "4436000"
+  },
+  {
+    "text": "that lead to poor utilization pipeline parallel you know is nice in that you",
+    "start": "4436000",
+    "end": "4441360"
+  },
+  {
+    "text": "know we no longer uh have this dependence on um on this per batch",
+    "start": "4441360",
+    "end": "4446400"
+  },
+  {
+    "text": "aspects but and we can get linear memory scaling But we have sort of another issue which is this also consumes batch",
+    "start": "4446400",
+    "end": "4452480"
+  },
+  {
+    "text": "size and it's horrendous to sort of set up and use and so a lot of people like to avoid pipeline parallelism if it's",
+    "start": "4452480",
+    "end": "4458400"
+  },
+  {
+    "text": "possible then finally tensor parallelism is very high cost in terms of bandwidth and the amount of synchronization you",
+    "start": "4458400",
+    "end": "4464800"
+  },
+  {
+    "text": "need to do um but um this has this really nice property that has no impact",
+    "start": "4464800",
+    "end": "4470000"
+  },
+  {
+    "text": "on batch sizes so it's like kind of the one parallelism strategy you can use that has no cost in terms of your global",
+    "start": "4470000",
+    "end": "4476080"
+  },
+  {
+    "text": "batch size which is nice right so we have to balance a number of limited resources right we have memory which is",
+    "start": "4476080",
+    "end": "4482239"
+  },
+  {
+    "text": "one resource we have uh bandwidth and compute which is another resource and then we have batch size which is kind of",
+    "start": "4482239",
+    "end": "4488560"
+  },
+  {
+    "text": "an unconventional resource but one that you should really think of as a limited thing that you can spend on different",
+    "start": "4488560",
+    "end": "4493760"
+  },
+  {
+    "text": "aspects of these to improve your efficiency um and there's a very nice uh TPU",
+    "start": "4493760",
+    "end": "4500320"
+  },
+  {
+    "text": "parallelism or TPU book let's call it um from Google that I referred to um last",
+    "start": "4500320",
+    "end": "4505360"
+  },
+  {
+    "text": "week but also actually they have a really nice parallelism section and they have this great figure that I wanted to",
+    "start": "4505360",
+    "end": "4510480"
+  },
+  {
+    "text": "show you uh before I moved on to some of the examples um so the key quantity as I",
+    "start": "4510480",
+    "end": "4515840"
+  },
+  {
+    "text": "was saying before is the batch size and depending on you know the ratio of batch size to the number of GPUs you have",
+    "start": "4515840",
+    "end": "4522960"
+  },
+  {
+    "text": "different kinds of parallelism become optimal and so they use sort of certain formula on how much communication and",
+    "start": "4522960",
+    "end": "4529840"
+  },
+  {
+    "text": "computation you end up doing um sort of uh for each of these models also this a simplified formula um to sort of",
+    "start": "4529840",
+    "end": "4536239"
+  },
+  {
+    "text": "generate this plot and you can kind of see if your batch size is too small you have lots of GPUs and really you know",
+    "start": "4536239",
+    "end": "4543199"
+  },
+  {
+    "text": "tiny batch sizes then there is no way for you to be efficient right you're always communication bound which is this",
+    "start": "4543199",
+    "end": "4549440"
+  },
+  {
+    "text": "bottom half here and in fact you're you're spending most of your time on communication um as you sort of get more",
+    "start": "4549440",
+    "end": "4555120"
+  },
+  {
+    "text": "and more batch size eventually you can get to a point where uh if you mix both",
+    "start": "4555120",
+    "end": "4560159"
+  },
+  {
+    "text": "FSDP so zero stage three and MP which in this case is tensor parallel you can",
+    "start": "4560159",
+    "end": "4565280"
+  },
+  {
+    "text": "actually get basically to a place where you're compute bound so now you're not you know spending um sort of wasting",
+    "start": "4565280",
+    "end": "4571840"
+  },
+  {
+    "text": "your flops waiting for communication and then finally you know if you get to a point where your batch sizes are big",
+    "start": "4571840",
+    "end": "4578159"
+  },
+  {
+    "text": "then you can just get away with pure data parallel like pure FSDP is going to",
+    "start": "4578159",
+    "end": "4583840"
+  },
+  {
+    "text": "get you into a regime where you know your the time you spend doing computation is higher than the time you",
+    "start": "4583840",
+    "end": "4590000"
+  },
+  {
+    "text": "spend doing communication right right so if your batch size is big enough you can just get away with FSTP right so this is kind of a cool illustration of this idea",
+    "start": "4590000",
+    "end": "4596880"
+  },
+  {
+    "text": "of you know why would you mix these when would you mix these why is batch size a resource hopefully this kind of shows",
+    "start": "4596880",
+    "end": "4602239"
+  },
+  {
+    "text": "you in a very visual way uh what this is okay um and so when you put these all",
+    "start": "4602239",
+    "end": "4608000"
+  },
+  {
+    "text": "together you end up with what people call 3D or 4D parallelism um I think I've heard the term 5D parallelism",
+    "start": "4608000",
+    "end": "4614000"
+  },
+  {
+    "text": "recently um I wasn't quite sure what the what the fifth dimension was yet i'll have to to read up on that um but now",
+    "start": "4614000",
+    "end": "4620400"
+  },
+  {
+    "text": "you can put it all together right the different dimensions of parallelism and this is a really simple rule of thumb um",
+    "start": "4620400",
+    "end": "4626480"
+  },
+  {
+    "text": "I originally sort of looked it up and put this together last year but turns out it's still the same this year so you",
+    "start": "4626480",
+    "end": "4632239"
+  },
+  {
+    "text": "can sort of follow this uh now so the first thing you have to do is you have to fit your model and your activations",
+    "start": "4632239",
+    "end": "4638560"
+  },
+  {
+    "text": "in memory right if you don't do that you just cannot train so this is a requirement right so until your model fits in memory we have to split up our",
+    "start": "4638560",
+    "end": "4645280"
+  },
+  {
+    "text": "model so we're going to do tensor parallelism and we know that up to the number of GPUs per machine that's very",
+    "start": "4645280",
+    "end": "4650800"
+  },
+  {
+    "text": "efficient that's very fast so we're going to do tensor parallel up to that point now after that depending on things",
+    "start": "4650800",
+    "end": "4656480"
+  },
+  {
+    "text": "like your desire to deal with pipeline parallel and or your bandwidth uh",
+    "start": "4656480",
+    "end": "4661679"
+  },
+  {
+    "text": "constraints you're either going to use 03 or pipeline parallel across the machines right until you can fit your",
+    "start": "4661679",
+    "end": "4667840"
+  },
+  {
+    "text": "model in memory now after that point well until you sort of run out of GPUs",
+    "start": "4667840",
+    "end": "4673280"
+  },
+  {
+    "text": "you can now run the whole thing and your only goal is to increase the amount of total flops that you have on hand so",
+    "start": "4673280",
+    "end": "4679120"
+  },
+  {
+    "text": "you're going to scale the rest of the way with data parallel because data parallel is it works well on um low",
+    "start": "4679120",
+    "end": "4685360"
+  },
+  {
+    "text": "bandwidth communication channels and it is very simple right and so that's going",
+    "start": "4685360",
+    "end": "4690560"
+  },
+  {
+    "text": "to give you a way of sort of using all of your GPUs now if your batch size is",
+    "start": "4690560",
+    "end": "4695920"
+  },
+  {
+    "text": "really small then there is a way of uh trading um batch sizes for better",
+    "start": "4695920",
+    "end": "4701840"
+  },
+  {
+    "text": "communication efficiency like if you haven't consumed all of your batch sizes of resource what you can do is you can",
+    "start": "4701840",
+    "end": "4707520"
+  },
+  {
+    "text": "use gradient accumulation um on your devices right and that'll let you basically have effectively larger um uh",
+    "start": "4707520",
+    "end": "4714400"
+  },
+  {
+    "text": "batch sizes even if you're memory constraint and that will let you trade your batch size for better communication",
+    "start": "4714400",
+    "end": "4719440"
+  },
+  {
+    "text": "efficiency since you're synchronizing less often um across machines okay simple rule of thumb this will let you",
+    "start": "4719440",
+    "end": "4725840"
+  },
+  {
+    "text": "train models with reasonable efficiency um no matter what you're doing um and so",
+    "start": "4725840",
+    "end": "4731040"
+  },
+  {
+    "text": "to sort of make this concrete I'll talk through a few examples at the very end here um I'll flash through both this",
+    "start": "4731040",
+    "end": "4736560"
+  },
+  {
+    "text": "really lovely paper um back in 2021 um from Megatron LM basically showing you",
+    "start": "4736560",
+    "end": "4742239"
+  },
+  {
+    "text": "exactly these things um in pictures and also a lot of ablations as well as um uh",
+    "start": "4742239",
+    "end": "4747360"
+  },
+  {
+    "text": "some of the models from last year so this is a big table of how they trained models uh going from 1.7 billion",
+    "start": "4747360",
+    "end": "4754320"
+  },
+  {
+    "text": "parameters to 1 trillion parameters um and they get great utilization on all of these right you see percentage of",
+    "start": "4754320",
+    "end": "4761120"
+  },
+  {
+    "text": "theoretical peak flops that they get and it ranges from 40 to 52% it's pretty good right and so you can see tensor",
+    "start": "4761120",
+    "end": "4769120"
+  },
+  {
+    "text": "parallel starts at one and then they eventually go up to 8 and then it caps out at 8 right and they so they're using",
+    "start": "4769120",
+    "end": "4775199"
+  },
+  {
+    "text": "tensor parallelism first and then pipeline parallel stays at one but once the models get big enough you know they",
+    "start": "4775199",
+    "end": "4780800"
+  },
+  {
+    "text": "can't fit these big models so t pipeline parallel has to increase in order to kind of comp in order to compensate and",
+    "start": "4780800",
+    "end": "4787679"
+  },
+  {
+    "text": "then the data parallel size basically starts out as big as possible and then slowly kind of goes down right because",
+    "start": "4787679",
+    "end": "4794640"
+  },
+  {
+    "text": "you know as we increase the amount of pipeline parallel this is now consuming in some sense the batch sizes um and so",
+    "start": "4794640",
+    "end": "4800960"
+  },
+  {
+    "text": "you can't have effectively as big of a batch size um if they're being used in some sense for pipeline",
+    "start": "4800960",
+    "end": "4808440"
+  },
+  {
+    "text": "parallel okay so um careful 3D paralle ISM is going to give you sort of linear",
+    "start": "4808440",
+    "end": "4813520"
+  },
+  {
+    "text": "gains um in uh aggregate flops so you see um if you do uh careful 3D",
+    "start": "4813520",
+    "end": "4820159"
+  },
+  {
+    "text": "parallelism you see sort of very flat uh overall achieved flops per GPU which is",
+    "start": "4820159",
+    "end": "4825600"
+  },
+  {
+    "text": "giving you you know if you add more GPUs linear scaling in the total aggregate throughput that's great um tensor",
+    "start": "4825600",
+    "end": "4832320"
+  },
+  {
+    "text": "parallel 8 is often optimal um you see this is the pipeline parallel size and the tensor parallel size you see going",
+    "start": "4832320",
+    "end": "4838719"
+  },
+  {
+    "text": "to 88 with a batch size of 30 or sorry batch size of 128 is optimal even if you have a smaller batch size you know",
+    "start": "4838719",
+    "end": "4845199"
+  },
+  {
+    "text": "tensor parallel size of eight remains uh optimal and activation recomputation um",
+    "start": "4845199",
+    "end": "4852000"
+  },
+  {
+    "text": "enables larger batch sizes and remember that you know larger batches can in turn help you sort of mask overhead for",
+    "start": "4852000",
+    "end": "4858480"
+  },
+  {
+    "text": "pipeline parallel so activation recomputation even though it's more flops can pay for itself right we've",
+    "start": "4858480",
+    "end": "4864159"
+  },
+  {
+    "text": "seen that story play out already um in uh flash attention all right so the last",
+    "start": "4864159",
+    "end": "4870800"
+  },
+  {
+    "text": "part of this is recent language models like what do they do so you know I've gone through a few papers to look at",
+    "start": "4870800",
+    "end": "4876800"
+  },
+  {
+    "text": "examples of what people's parallelization strategy is um uh OMO uh in the DOMA paper they do FSDP for 7",
+    "start": "4876800",
+    "end": "4884320"
+  },
+  {
+    "text": "billion parameter model um deepseeek uh the the first paper does zero stage one",
+    "start": "4884320",
+    "end": "4889840"
+  },
+  {
+    "text": "with tensor sequence and pipeline parallel this is you know the the vanilla thing that I that I told you um",
+    "start": "4889840",
+    "end": "4895360"
+  },
+  {
+    "text": "V3 actually does something slightly different they do 16 way pipeline parallel um 64-way expert parallel which",
+    "start": "4895360",
+    "end": "4902640"
+  },
+  {
+    "text": "is kind of like tensor parallel um and then zero stage one for their data parallelism",
+    "start": "4902640",
+    "end": "4908520"
+  },
+  {
+    "text": "strategy e which is another Chinese model does once again zero stage one tensor and pipeline parallel um and e-",
+    "start": "4908520",
+    "end": "4915520"
+  },
+  {
+    "text": "lightning because they're doing replaces tensor parallelism with expert uh parallelism the final thing if you're",
+    "start": "4915520",
+    "end": "4922239"
+  },
+  {
+    "text": "interested in kind of state-of-the-art you know distributed training with lots of details um Llama 3's report is",
+    "start": "4922239",
+    "end": "4929360"
+  },
+  {
+    "text": "actually really interesting to read they have a lot of detail about how they do their networking what sort of things",
+    "start": "4929360",
+    "end": "4934400"
+  },
+  {
+    "text": "happen um and you see sort of once again the kinds of things I said before you see a tensor parallel of eight um you",
+    "start": "4934400",
+    "end": "4941520"
+  },
+  {
+    "text": "see um CP or this is context parallel this is only relevant for long context",
+    "start": "4941520",
+    "end": "4946880"
+  },
+  {
+    "text": "training which is this very last step so you can ignore that um you got pipeline parallel and data parallel happening um",
+    "start": "4946880",
+    "end": "4952800"
+  },
+  {
+    "text": "in these sort of first two uh phases you can also even ignore the first stage here because that's kind of the small batch size training that they did in",
+    "start": "4952800",
+    "end": "4959600"
+  },
+  {
+    "text": "order to be stable and if you look at kind of their their rationale for how they do their parallelism strategy you",
+    "start": "4959600",
+    "end": "4966000"
+  },
+  {
+    "text": "see exactly what I had said before of basically all right you want to do TP CP",
+    "start": "4966000",
+    "end": "4971760"
+  },
+  {
+    "text": "pipeline parallel and DP in that order in terms of the amount of bandwidth that you need where data parallel can",
+    "start": "4971760",
+    "end": "4977360"
+  },
+  {
+    "text": "tolerate these like long network latencies because you can do the sort of asynchronous fetching of sharded model",
+    "start": "4977360",
+    "end": "4983199"
+  },
+  {
+    "text": "weights right and so they're using kind of the strategy that I told you in order to train some of the biggest models um",
+    "start": "4983199",
+    "end": "4989440"
+  },
+  {
+    "text": "the funny side note about llama 3 um and you may have heard this sort of in sort of not rumors but sort of casual",
+    "start": "4989440",
+    "end": "4995440"
+  },
+  {
+    "text": "conversation with your friends um is you know there's lots of GPU failures when you train models at a huge scale right",
+    "start": "4995440",
+    "end": "5002560"
+  },
+  {
+    "text": "um they had 148 interruptions from faulty GPUs um totaling about 30% of the",
+    "start": "5002560",
+    "end": "5008800"
+  },
+  {
+    "text": "total interruptions that they had they had things like you know unplanned maintenance of machines and that was 32",
+    "start": "5008800",
+    "end": "5014320"
+  },
+  {
+    "text": "uh different things you know 32 instances of interruptions for their training and so when you're training a model this big you know I've talked",
+    "start": "5014320",
+    "end": "5021040"
+  },
+  {
+    "text": "about the algorithms but you also need kind of fault tolerant architectures to be able to deal with these kinds of",
+    "start": "5021040",
+    "end": "5026239"
+  },
+  {
+    "text": "things um and I've also heard you know various stories of people saying the even scarier thing is not actually",
+    "start": "5026239",
+    "end": "5032480"
+  },
+  {
+    "text": "explicit model failures but actually data corruption like GPUs can silently fail on you and give you garbage data",
+    "start": "5032480",
+    "end": "5037840"
+  },
+  {
+    "text": "completely ruining your run okay um and then the last one example is for GMA 2",
+    "start": "5037840",
+    "end": "5043280"
+  },
+  {
+    "text": "and I wanted to end on this because this is a TPU example um you know they do 03 which is roughly FSTP and then they do",
+    "start": "5043280",
+    "end": "5050000"
+  },
+  {
+    "text": "model parallelism and data parallelism right and so here you know as I said before the sort of TPUs allows them to",
+    "start": "5050000",
+    "end": "5056400"
+  },
+  {
+    "text": "sort of stretch model parallelism a little bit further okay so putting it all together um scaling beyond a certain",
+    "start": "5056400",
+    "end": "5063280"
+  },
+  {
+    "text": "point is going to require sort of multiGPU multi-node parallelism there's no single solution right so you want to",
+    "start": "5063280",
+    "end": "5068480"
+  },
+  {
+    "text": "combine all three approaches to sort of leverage strength and then there's simple and interpretable rules of thumb",
+    "start": "5068480",
+    "end": "5073520"
+  },
+  {
+    "text": "for how you might execute this parallelism in practice Right thank you",
+    "start": "5073520",
+    "end": "5079880"
+  }
+]
